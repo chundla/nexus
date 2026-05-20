@@ -533,6 +533,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
         var lines: [[Character]] = [[]]
         var cursorLine = 0
         var cursorColumn = 0
+        var savedCursorLine = 0
+        var savedCursorColumn = 0
         var iterator = transcript.makeIterator()
 
         func ensureCurrentLine() {
@@ -556,6 +558,18 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                 }
         }
 
+        func skipOperatingSystemCommand() {
+            while let scalar = iterator.next() {
+                if scalar == "\u{0007}" {
+                    return
+                }
+
+                if scalar == "\u{001B}", let terminator = iterator.next(), terminator == "\\" {
+                    return
+                }
+            }
+        }
+
         func parseCSI(finalCharacter: Character, parameters: String) {
             let values = csiParameters(parameters)
             let value = values.first.flatMap { $0 }
@@ -572,6 +586,14 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                 cursorColumn += defaultValue
             case "D":
                 cursorColumn = max(0, cursorColumn - defaultValue)
+            case "E":
+                cursorLine += defaultValue
+                cursorColumn = 0
+                ensureCurrentLine()
+            case "F":
+                cursorLine = max(0, cursorLine - defaultValue)
+                cursorColumn = 0
+                ensureCurrentLine()
             case "G":
                 cursorColumn = max(0, defaultValue - 1)
             case "H", "f":
@@ -615,7 +637,6 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                     cursorColumn = 0
                 case 2:
                     lines[cursorLine].removeAll()
-                    cursorColumn = 0
                 default:
                     if cursorColumn < lines[cursorLine].count {
                         lines[cursorLine].removeSubrange(cursorColumn...)
@@ -673,6 +694,13 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                         lines[cursorLine][index] = " "
                     }
                 }
+            case "s":
+                savedCursorLine = cursorLine
+                savedCursorColumn = cursorColumn
+            case "u":
+                cursorLine = savedCursorLine
+                cursorColumn = savedCursorColumn
+                ensureCurrentLine()
             default:
                 break
             }
@@ -694,6 +722,15 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                         }
                         parameters.append(scalar)
                     }
+                } else if next == "]" {
+                    skipOperatingSystemCommand()
+                } else if next == "7" {
+                    savedCursorLine = cursorLine
+                    savedCursorColumn = cursorColumn
+                } else if next == "8" {
+                    cursorLine = savedCursorLine
+                    cursorColumn = savedCursorColumn
+                    ensureCurrentLine()
                 }
             case "\r":
                 cursorColumn = 0
@@ -710,6 +747,14 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                 cursorLine += 1
                 cursorColumn = 0
                 ensureCurrentLine()
+            case "\t":
+                ensureCurrentLine()
+                let tabWidth = 8
+                let nextTabStop = ((cursorColumn / tabWidth) + 1) * tabWidth
+                while lines[cursorLine].count < nextTabStop {
+                    lines[cursorLine].append(" ")
+                }
+                cursorColumn = nextTabStop
             default:
                 ensureCurrentLine()
                 if cursorColumn < lines[cursorLine].count {
