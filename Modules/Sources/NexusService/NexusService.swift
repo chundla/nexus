@@ -621,6 +621,17 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                         lines[cursorLine].removeSubrange(cursorColumn...)
                     }
                 }
+            case "@":
+                ensureCurrentLine()
+                let insertCount = max(0, defaultValue)
+                guard insertCount > 0 else {
+                    break
+                }
+                while lines[cursorLine].count < cursorColumn {
+                    lines[cursorLine].append(" ")
+                }
+                let blanks = Array(repeating: Character(" "), count: insertCount)
+                lines[cursorLine].insert(contentsOf: blanks, at: cursorColumn)
             case "P":
                 ensureCurrentLine()
                 guard cursorColumn < lines[cursorLine].count else {
