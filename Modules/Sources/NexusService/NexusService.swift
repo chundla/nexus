@@ -698,9 +698,6 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
         var originMode = false
         var savedCursorLine = 0
         var savedCursorColumn = 0
-        var primaryBufferLines = lines
-        var primaryBufferCursorLine = cursorLine
-        var primaryBufferCursorColumn = cursorColumn
         enum TerminalCharacterSet {
             case ascii
             case lineDrawing
@@ -713,6 +710,20 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
         var g0CharacterSet: TerminalCharacterSet = .ascii
         var g1CharacterSet: TerminalCharacterSet = .ascii
         var usingG1CharacterSet = false
+        var primaryBufferLines = lines
+        var primaryBufferCursorLine = cursorLine
+        var primaryBufferCursorColumn = cursorColumn
+        var primaryBufferCursorVisible = cursorVisible
+        var primaryBufferApplicationCursorMode = applicationCursorMode
+        var primaryBufferOriginMode = originMode
+        var primaryBufferSavedCursorLine = savedCursorLine
+        var primaryBufferSavedCursorColumn = savedCursorColumn
+        var primaryBufferScrollRegionTop = scrollRegionTop
+        var primaryBufferScrollRegionBottom = scrollRegionBottom
+        var primaryBufferHasExplicitScrollRegion = hasExplicitScrollRegion
+        var primaryBufferG0CharacterSet = g0CharacterSet
+        var primaryBufferG1CharacterSet = g1CharacterSet
+        var primaryBufferUsingG1CharacterSet = usingG1CharacterSet
         var iterator = transcript.unicodeScalars.makeIterator()
 
         func ensureLine(_ lineIndex: Int) {
@@ -901,6 +912,17 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                         primaryBufferLines = lines
                         primaryBufferCursorLine = cursorLine
                         primaryBufferCursorColumn = cursorColumn
+                        primaryBufferCursorVisible = cursorVisible
+                        primaryBufferApplicationCursorMode = applicationCursorMode
+                        primaryBufferOriginMode = originMode
+                        primaryBufferSavedCursorLine = savedCursorLine
+                        primaryBufferSavedCursorColumn = savedCursorColumn
+                        primaryBufferScrollRegionTop = scrollRegionTop
+                        primaryBufferScrollRegionBottom = scrollRegionBottom
+                        primaryBufferHasExplicitScrollRegion = hasExplicitScrollRegion
+                        primaryBufferG0CharacterSet = g0CharacterSet
+                        primaryBufferG1CharacterSet = g1CharacterSet
+                        primaryBufferUsingG1CharacterSet = usingG1CharacterSet
                         lines = [[]]
                         cursorLine = 0
                         cursorColumn = 0
@@ -928,6 +950,17 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                         lines = primaryBufferLines
                         cursorLine = primaryBufferCursorLine
                         cursorColumn = primaryBufferCursorColumn
+                        cursorVisible = primaryBufferCursorVisible
+                        applicationCursorMode = primaryBufferApplicationCursorMode
+                        originMode = primaryBufferOriginMode
+                        savedCursorLine = primaryBufferSavedCursorLine
+                        savedCursorColumn = primaryBufferSavedCursorColumn
+                        scrollRegionTop = primaryBufferScrollRegionTop
+                        scrollRegionBottom = primaryBufferScrollRegionBottom
+                        hasExplicitScrollRegion = primaryBufferHasExplicitScrollRegion
+                        g0CharacterSet = primaryBufferG0CharacterSet
+                        g1CharacterSet = primaryBufferG1CharacterSet
+                        usingG1CharacterSet = primaryBufferUsingG1CharacterSet
                         usingAlternateBuffer = false
                     case 1048:
                         cursorLine = savedCursorLine
@@ -971,7 +1004,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                 cursorLine = max(0, cursorLine - defaultValue)
                 cursorColumn = 0
                 ensureCurrentLine()
-            case "G":
+            case "G", "`":
                 cursorColumn = max(0, defaultValue - 1)
             case "H", "f":
                 let row = values.first.flatMap { $0 } ?? 1
@@ -1259,13 +1292,24 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                     primaryBufferLines = lines
                     primaryBufferCursorLine = cursorLine
                     primaryBufferCursorColumn = cursorColumn
+                    primaryBufferCursorVisible = cursorVisible
+                    primaryBufferApplicationCursorMode = applicationCursorMode
+                    primaryBufferOriginMode = originMode
+                    primaryBufferSavedCursorLine = savedCursorLine
+                    primaryBufferSavedCursorColumn = savedCursorColumn
                     usingAlternateBuffer = false
                     scrollRegionTop = 0
                     scrollRegionBottom = max(0, terminalRows - 1)
                     hasExplicitScrollRegion = false
+                    primaryBufferScrollRegionTop = scrollRegionTop
+                    primaryBufferScrollRegionBottom = scrollRegionBottom
+                    primaryBufferHasExplicitScrollRegion = hasExplicitScrollRegion
                     g0CharacterSet = .ascii
                     g1CharacterSet = .ascii
                     usingG1CharacterSet = false
+                    primaryBufferG0CharacterSet = g0CharacterSet
+                    primaryBufferG1CharacterSet = g1CharacterSet
+                    primaryBufferUsingG1CharacterSet = usingG1CharacterSet
                 }
             case "\u{000E}":
                 usingG1CharacterSet = true
