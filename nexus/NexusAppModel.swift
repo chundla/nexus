@@ -118,6 +118,16 @@ final class NexusAppModel {
         try await refreshWorkspaceOverview(for: screen.session.workspaceID)
     }
 
+    func sendInputKeyToFocusedSession(_ key: SessionInputKey) async throws {
+        guard let sessionID = focusedSessionScreen?.session.id else {
+            return
+        }
+
+        let screen = try await client.sendSessionInputKey(sessionID: sessionID, key: key)
+        focusedSessionScreen = screen
+        try await refreshWorkspaceOverview(for: screen.session.workspaceID)
+    }
+
     func resizeFocusedSession(columns: Int, rows: Int) async throws {
         guard let sessionID = focusedSessionScreen?.session.id else {
             return

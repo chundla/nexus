@@ -249,6 +249,22 @@ struct ContentView: View {
                     }
                 }
 
+                HStack(spacing: 8) {
+                    ForEach(SessionInputKey.allCases, id: \.self) { key in
+                        Button(sessionInputKeyTitle(key)) {
+                            Task {
+                                do {
+                                    try await appModel.sendInputKeyToFocusedSession(key)
+                                } catch {
+                                    presentedError = PresentedError(message: error.localizedDescription)
+                                }
+                            }
+                        }
+                        .disabled(isReady == false)
+                    }
+                }
+                .buttonStyle(.bordered)
+
                 HStack(alignment: .bottom, spacing: 12) {
                     TextField("Send input to session", text: $sessionInput, axis: .vertical)
                         .textFieldStyle(.roundedBorder)
@@ -462,6 +478,25 @@ struct ContentView: View {
         pendingWorkspaceGroupID = appModel.workspaceGroups.first?.id
         isShowingWorkspaceGroupPicker = true
     }
+    private func sessionInputKeyTitle(_ key: SessionInputKey) -> String {
+        switch key {
+        case .enter:
+            "Enter"
+        case .tab:
+            "Tab"
+        case .escape:
+            "Esc"
+        case .upArrow:
+            "↑"
+        case .downArrow:
+            "↓"
+        case .leftArrow:
+            "←"
+        case .rightArrow:
+            "→"
+        }
+    }
+
     private func renderedTerminalLine(_ line: String, row: Int, screen: SessionScreen) -> String {
         guard row == screen.cursorRow else {
             return line.isEmpty ? " " : line

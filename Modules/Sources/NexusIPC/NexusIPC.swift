@@ -11,6 +11,7 @@ import NexusDomain
     func launchOrResumeDefaultSession(workspaceID: String, providerID: String, reply: @escaping (Data?, NSString?) -> Void)
     func getSessionScreen(sessionID: String, reply: @escaping (Data?, NSString?) -> Void)
     func sendSessionInput(sessionID: String, text: String, reply: @escaping (Data?, NSString?) -> Void)
+    func sendSessionInputKey(sessionID: String, key: String, reply: @escaping (Data?, NSString?) -> Void)
     func resizeSession(sessionID: String, columns: Int, rows: Int, reply: @escaping (Data?, NSString?) -> Void)
 }
 
@@ -24,6 +25,7 @@ public protocol NexusServiceClient {
     func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) async throws -> Session
     func getSessionScreen(sessionID: UUID) async throws -> SessionScreen
     func sendSessionInput(sessionID: UUID, text: String) async throws -> SessionScreen
+    func sendSessionInputKey(sessionID: UUID, key: SessionInputKey) async throws -> SessionScreen
     func resizeSession(sessionID: UUID, columns: Int, rows: Int) async throws -> SessionScreen
 }
 
@@ -102,6 +104,12 @@ public final class NexusIPCClient: NexusServiceClient {
     nonisolated public func sendSessionInput(sessionID: UUID, text: String) async throws -> SessionScreen {
         try await requestDecodable { proxy, reply in
             proxy.sendSessionInput(sessionID: sessionID.uuidString, text: text, reply: reply)
+        }
+    }
+
+    nonisolated public func sendSessionInputKey(sessionID: UUID, key: SessionInputKey) async throws -> SessionScreen {
+        try await requestDecodable { proxy, reply in
+            proxy.sendSessionInputKey(sessionID: sessionID.uuidString, key: key.rawValue, reply: reply)
         }
     }
 

@@ -1,5 +1,15 @@
 import Foundation
 
+public enum SessionInputKey: String, Codable, CaseIterable, Sendable {
+    case enter
+    case tab
+    case escape
+    case upArrow
+    case downArrow
+    case leftArrow
+    case rightArrow
+}
+
 public struct Session: Codable, Equatable, Identifiable, Sendable {
     public let id: UUID
     public let workspaceID: UUID
