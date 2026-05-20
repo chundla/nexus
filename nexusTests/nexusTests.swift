@@ -1226,6 +1226,42 @@ struct nexusTests {
         #expect(screen.cursorColumn == 11)
     }
 
+    @Test func sessionScreenStripsBellControlOverIPC() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let runtimeManager = StubSessionRuntimeManager(initialTranscript: "hello\u{0007}world")
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            ),
+            sessionRuntimeManager: runtimeManager
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+
+        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let screen = try await client.resizeSession(sessionID: session.id, columns: 20, rows: 3)
+
+        #expect(screen.transcript == "helloworld")
+        #expect(screen.visibleLines == ["helloworld"])
+        #expect(screen.cursorRow == 0)
+        #expect(screen.cursorColumn == 10)
+    }
+
     @Test func sessionScreenRendersVt100LineDrawingCharactersOverIPC() async throws {
         let workspaceFolderURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1296,6 +1332,42 @@ struct nexusTests {
         #expect(screen.visibleLines == ["beta", "gamma", ""])
         #expect(screen.cursorRow == 2)
         #expect(screen.cursorColumn == 5)
+    }
+
+    @Test func sessionScreenMovesCursorToScrollingRegionOriginOverIPC() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let runtimeManager = StubSessionRuntimeManager(initialTranscript: "top\nalpha\nbeta\nbottom\u{001B}[2;3r\u{001B}[?6h\u{001B}[HXY")
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            ),
+            sessionRuntimeManager: runtimeManager
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+
+        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let screen = try await client.resizeSession(sessionID: session.id, columns: 20, rows: 4)
+
+        #expect(screen.transcript == "top\nXYpha\nbeta\nbottom")
+        #expect(screen.visibleLines == ["top", "XYpha", "beta", "bottom"])
+        #expect(screen.cursorRow == 1)
+        #expect(screen.cursorColumn == 2)
     }
 
     @Test func sessionScreenScrollsDisplayUpWithinScrollingRegionOverIPC() async throws {

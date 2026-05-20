@@ -695,6 +695,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
         var cursorColumn = 0
         var cursorVisible = true
         var applicationCursorMode = false
+        var originMode = false
         var savedCursorLine = 0
         var savedCursorColumn = 0
         var primaryBufferLines = lines
@@ -887,6 +888,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                     switch value {
                     case 1:
                         applicationCursorMode = true
+                    case 6:
+                        originMode = true
                     case 47, 1047, 1049:
                         guard usingAlternateBuffer == false else {
                             break
@@ -910,6 +913,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                     switch value {
                     case 1:
                         applicationCursorMode = false
+                    case 6:
+                        originMode = false
                     case 25:
                         cursorVisible = false
                     case 47, 1047, 1049:
@@ -967,7 +972,11 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
             case "H", "f":
                 let row = values.first.flatMap { $0 } ?? 1
                 let column = values.dropFirst().first.flatMap { $0 } ?? 1
-                cursorLine = max(0, row - 1)
+                if originMode, let region = activeScrollRegion() {
+                    cursorLine = min(region.upperBound, region.lowerBound + max(0, row - 1))
+                } else {
+                    cursorLine = max(0, row - 1)
+                }
                 cursorColumn = max(0, column - 1)
                 ensureCurrentLine()
             case "J":
@@ -1230,6 +1239,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                     cursorColumn = 0
                     cursorVisible = true
                     applicationCursorMode = false
+                    originMode = false
                     savedCursorLine = 0
                     savedCursorColumn = 0
                     primaryBufferLines = lines
@@ -1247,6 +1257,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                 usingG1CharacterSet = true
             case "\u{000F}":
                 usingG1CharacterSet = false
+            case "\u{0007}":
+                continue
             case "\r":
                 cursorColumn = 0
             case "\u{8}":
