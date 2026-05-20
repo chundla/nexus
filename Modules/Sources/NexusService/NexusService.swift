@@ -185,12 +185,16 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
     private let lock = NSLock()
     private var runtimeState: Session.State
     private var storage: String
+    private var terminalOutputStorage: String
+    private var pendingTerminalOutput: String
     private var columns: Int
     private var rows: Int
 
     init(executable: String, workspace: Workspace) throws {
         self.runtimeState = .ready
         self.storage = "Launching \(workspace.name) with Claude…\n"
+        self.terminalOutputStorage = ""
+        self.pendingTerminalOutput = ""
         self.columns = 80
         self.rows = 24
 
@@ -231,7 +235,10 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
 
             let data = Data(buffer.prefix(bytesRead))
             let text = String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
+            let queryResponses = self.cursorPositionReportResponses(for: text)
             self.append(text)
+            self.appendTerminalOutput(text)
+            self.sendTerminalResponses(queryResponses)
         }
         readSource.activate()
 
@@ -267,6 +274,12 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return storage
+    }
+
+    private var terminalTranscript: String {
+        lock.lock()
+        defer { lock.unlock() }
+        return terminalOutputStorage
     }
 
     var terminalColumns: Int {
@@ -358,9 +371,65 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
         lock.unlock()
     }
 
+    private func cursorPositionReportResponses(for incomingText: String) -> [String] {
+        let cprQueries = ["\u{001B}[6n", "\u{009B}6n"]
+        let baseTranscript = terminalTranscript
+        let columns = terminalColumns
+        let rows = terminalRows
+
+        lock.lock()
+        let priorTail = pendingTerminalOutput
+        lock.unlock()
+
+        let combinedText = priorTail + incomingText
+        let pendingBoundary = combinedText.index(combinedText.startIndex, offsetBy: priorTail.count)
+        var responses: [String] = []
+
+        for query in cprQueries {
+            var searchStart = combinedText.startIndex
+            while let range = combinedText.range(of: query, range: searchStart..<combinedText.endIndex) {
+                defer { searchStart = range.upperBound }
+                guard range.upperBound > pendingBoundary else {
+                    continue
+                }
+
+                let incomingCount = combinedText.distance(from: pendingBoundary, to: range.upperBound)
+                let incomingEndIndex = incomingText.index(incomingText.startIndex, offsetBy: incomingCount)
+                let transcriptPrefix = baseTranscript + String(incomingText[..<incomingEndIndex])
+                let renderState = NexusService.renderTerminalState(
+                    from: transcriptPrefix,
+                    terminalColumns: columns,
+                    terminalRows: rows
+                )
+                responses.append("\u{001B}[\(renderState.cursorRow + 1);\(renderState.cursorColumn + 1)R")
+            }
+        }
+
+        lock.lock()
+        pendingTerminalOutput = String(combinedText.suffix(3))
+        lock.unlock()
+
+        return responses
+    }
+
+    private func sendTerminalResponses(_ responses: [String]) {
+        for response in responses {
+            guard let data = response.data(using: .utf8) else {
+                continue
+            }
+            terminalHandle.write(data)
+        }
+    }
+
     private func append(_ text: String) {
         lock.lock()
         storage.append(text)
+        lock.unlock()
+    }
+
+    private func appendTerminalOutput(_ text: String) {
+        lock.lock()
+        terminalOutputStorage.append(text)
         lock.unlock()
     }
 }
@@ -620,7 +689,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
         }
 
         let currentScreen = try sessionRuntimeManager.sessionScreen(for: resolvedSession)
-        let renderState = renderTerminalState(
+        let renderState = Self.renderTerminalState(
             from: currentScreen.transcript,
             terminalColumns: currentScreen.terminalColumns,
             terminalRows: currentScreen.terminalRows
@@ -667,7 +736,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
     }
 
     private func normalizedSessionScreen(_ screen: SessionScreen) -> SessionScreen {
-        let renderState = renderTerminalState(
+        let renderState = Self.renderTerminalState(
             from: screen.transcript,
             terminalColumns: screen.terminalColumns,
             terminalRows: screen.terminalRows
@@ -685,7 +754,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
         )
     }
 
-    private func renderTerminalState(
+    fileprivate static func renderTerminalState(
         from transcript: String,
         terminalColumns: Int,
         terminalRows: Int
@@ -980,10 +1049,10 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
             case "A":
                 cursorLine = max(0, cursorLine - defaultValue)
                 ensureCurrentLine()
-            case "B":
+            case "B", "e":
                 cursorLine += defaultValue
                 ensureCurrentLine()
-            case "C":
+            case "C", "a":
                 cursorColumn += defaultValue
             case "D":
                 cursorColumn = max(0, cursorColumn - defaultValue)
@@ -1393,7 +1462,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
 
         let renderedLines = lines.map { String($0) }
         let normalizedTranscript = renderedLines.joined(separator: "\n")
-        let viewport = makeViewport(
+        let viewport = Self.makeViewport(
             lines: renderedLines,
             cursorLine: cursorLine,
             cursorColumn: cursorColumn,
@@ -1412,7 +1481,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
         )
     }
 
-    private func makeViewport(
+    private static func makeViewport(
         lines: [String],
         cursorLine: Int,
         cursorColumn: Int,
