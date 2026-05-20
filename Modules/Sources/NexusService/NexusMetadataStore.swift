@@ -40,6 +40,15 @@ final class NexusMetadataStore {
                 folder_path TEXT NOT NULL,
                 primary_group_id TEXT NOT NULL REFERENCES workspace_groups(id)
             );
+
+            CREATE TABLE IF NOT EXISTS sessions (
+                id TEXT PRIMARY KEY NOT NULL,
+                workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+                provider_id TEXT NOT NULL,
+                is_default INTEGER NOT NULL,
+                state TEXT NOT NULL,
+                failure_message TEXT
+            );
             """
         )
     }
@@ -144,6 +153,64 @@ final class NexusMetadataStore {
         }
     }
 
+    func defaultSession(workspaceID: UUID, providerID: ProviderID) throws -> Session? {
+        try withLock {
+            try defaultSessionWithoutLock(workspaceID: workspaceID, providerID: providerID)
+        }
+    }
+
+    func createDefaultSession(
+        workspaceID: UUID,
+        providerID: ProviderID,
+        state: Session.State,
+        failureMessage: String?
+    ) throws -> Session {
+        try withLock {
+            let session = Session(
+                id: UUID(),
+                workspaceID: workspaceID,
+                providerID: providerID,
+                isDefault: true,
+                state: state,
+                failureMessage: failureMessage
+            )
+
+            let statement = try prepare(
+                "INSERT INTO sessions (id, workspace_id, provider_id, is_default, state, failure_message) VALUES (?, ?, ?, ?, ?, ?);"
+            )
+            defer { sqlite3_finalize(statement) }
+
+            try bind(session.id.uuidString, at: 1, in: statement)
+            try bind(session.workspaceID.uuidString, at: 2, in: statement)
+            try bind(session.providerID.rawValue, at: 3, in: statement)
+            try bind(session.isDefault ? 1 : 0, at: 4, in: statement)
+            try bind(session.state.rawValue, at: 5, in: statement)
+            try bind(failureMessage, at: 6, in: statement)
+            try stepDone(statement)
+            return session
+        }
+    }
+
+    func updateSession(id: UUID, state: Session.State, failureMessage: String?) throws -> Session {
+        try withLock {
+            let statement = try prepare(
+                "UPDATE sessions SET state = ?, failure_message = ? WHERE id = ?;"
+            )
+            defer { sqlite3_finalize(statement) }
+
+            try bind(state.rawValue, at: 1, in: statement)
+            try bind(failureMessage, at: 2, in: statement)
+            try bind(id.uuidString, at: 3, in: statement)
+            try stepDone(statement)
+
+            guard let session = try sessionWithoutLock(id: id) else {
+                throw NexusMetadataStoreError.sessionNotFound
+            }
+
+            return session
+        }
+    }
+
     private func resolvePrimaryGroupID(_ primaryGroupID: UUID?, groups: [WorkspaceGroup]) throws -> UUID {
         if let primaryGroupID {
             guard groups.contains(where: { $0.id == primaryGroupID }) else {
@@ -170,6 +237,33 @@ final class NexusMetadataStore {
 
         let candidate = URL(fileURLWithPath: folderPath).lastPathComponent
         return candidate.isEmpty ? folderPath : candidate
+    }
+
+    private func defaultSessionWithoutLock(workspaceID: UUID, providerID: ProviderID) throws -> Session? {
+        let statement = try prepare(
+            "SELECT id, workspace_id, provider_id, is_default, state, failure_message FROM sessions WHERE workspace_id = ? AND provider_id = ? AND is_default = 1 LIMIT 1;"
+        )
+        defer { sqlite3_finalize(statement) }
+
+        try bind(workspaceID.uuidString, at: 1, in: statement)
+        try bind(providerID.rawValue, at: 2, in: statement)
+        guard sqlite3_step(statement) == SQLITE_ROW else {
+            return nil
+        }
+        return try readSession(from: statement)
+    }
+
+    private func sessionWithoutLock(id: UUID) throws -> Session? {
+        let statement = try prepare(
+            "SELECT id, workspace_id, provider_id, is_default, state, failure_message FROM sessions WHERE id = ? LIMIT 1;"
+        )
+        defer { sqlite3_finalize(statement) }
+
+        try bind(id.uuidString, at: 1, in: statement)
+        guard sqlite3_step(statement) == SQLITE_ROW else {
+            return nil
+        }
+        return try readSession(from: statement)
     }
 
     private func listWorkspaceGroupsWithoutLock() throws -> [WorkspaceGroup] {
@@ -211,6 +305,23 @@ final class NexusMetadataStore {
         }
     }
 
+    private func bind(_ value: Int32, at index: Int32, in statement: OpaquePointer?) throws {
+        guard sqlite3_bind_int(statement, index, value) == SQLITE_OK else {
+            throw currentSQLiteError()
+        }
+    }
+
+    private func bind(_ value: String?, at index: Int32, in statement: OpaquePointer?) throws {
+        guard let value else {
+            guard sqlite3_bind_null(statement, index) == SQLITE_OK else {
+                throw currentSQLiteError()
+            }
+            return
+        }
+
+        try bind(value, at: index, in: statement)
+    }
+
     private func stepDone(_ statement: OpaquePointer?) throws {
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw currentSQLiteError()
@@ -232,6 +343,14 @@ final class NexusMetadataStore {
         return value
     }
 
+    private func readOptionalString(column: Int32, from statement: OpaquePointer?) -> String? {
+        guard sqlite3_column_type(statement, column) != SQLITE_NULL,
+              let pointer = sqlite3_column_text(statement, column) else {
+            return nil
+        }
+        return String(cString: pointer)
+    }
+
     private func readWorkspace(from statement: OpaquePointer?) throws -> Workspace {
         let id = try readUUID(column: 0, from: statement)
         let name = try readString(column: 1, from: statement)
@@ -250,6 +369,29 @@ final class NexusMetadataStore {
         )
     }
 
+    private func readSession(from statement: OpaquePointer?) throws -> Session {
+        let id = try readUUID(column: 0, from: statement)
+        let workspaceID = try readUUID(column: 1, from: statement)
+        let providerRawValue = try readString(column: 2, from: statement)
+        guard let providerID = ProviderID(rawValue: providerRawValue) else {
+            throw NexusMetadataStoreError.sqlite("Unknown provider id: \(providerRawValue)")
+        }
+        let isDefault = sqlite3_column_int(statement, 3) != 0
+        let stateRawValue = try readString(column: 4, from: statement)
+        guard let state = Session.State(rawValue: stateRawValue) else {
+            throw NexusMetadataStoreError.sqlite("Unknown session state: \(stateRawValue)")
+        }
+        let failureMessage = readOptionalString(column: 5, from: statement)
+        return Session(
+            id: id,
+            workspaceID: workspaceID,
+            providerID: providerID,
+            isDefault: isDefault,
+            state: state,
+            failureMessage: failureMessage
+        )
+    }
+
     private func currentSQLiteError() -> Error {
         NexusMetadataStoreError.sqlite(
             database.map { String(cString: sqlite3_errmsg($0)) } ?? "Unknown SQLite error"
@@ -265,6 +407,8 @@ enum NexusMetadataStoreError: LocalizedError {
     case primaryWorkspaceGroupSelectionRequired
     case workspaceGroupNotFound
     case workspaceNotFound
+    case sessionNotFound
+    case providerNotSupported
 
     var errorDescription: String? {
         switch self {
@@ -282,6 +426,10 @@ enum NexusMetadataStoreError: LocalizedError {
             "The selected Workspace Group no longer exists"
         case .workspaceNotFound:
             "Workspace not found"
+        case .sessionNotFound:
+            "Session not found"
+        case .providerNotSupported:
+            "Provider launch is not implemented yet"
         }
     }
 }

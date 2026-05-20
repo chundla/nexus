@@ -163,7 +163,7 @@ struct ContentView: View {
                     if let overview {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 16)], spacing: 16) {
                             ForEach(overview.providerCards) { card in
-                                providerCard(card)
+                                providerCard(workspaceID: workspace.id, card: card)
                             }
                         }
                     } else {
@@ -180,7 +180,7 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    private func providerCard(_ card: WorkspaceProviderCard) -> some View {
+    private func providerCard(workspaceID: UUID, card: WorkspaceProviderCard) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(card.provider.displayName)
                 .font(.headline)
@@ -227,8 +227,15 @@ struct ContentView: View {
             }
 
             Button(card.defaultSession.actionTitle) {
+                Task {
+                    do {
+                        _ = try await appModel.launchOrResumeDefaultSession(workspaceID: workspaceID, providerID: card.provider.id)
+                    } catch {
+                        presentedError = PresentedError(message: error.localizedDescription)
+                    }
+                }
             }
-            .disabled(true)
+            .disabled(card.provider.id != .claude)
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .topLeading)

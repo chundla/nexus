@@ -74,6 +74,12 @@ final class NexusAppModel {
         return workspace
     }
 
+    func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) async throws -> Session {
+        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspaceID, providerID: providerID)
+        workspaceOverviews[workspaceID] = try await client.getWorkspaceOverview(workspaceID: workspaceID)
+        return session
+    }
+
     func workspaceGroupName(for groupID: UUID) -> String? {
         workspaceGroups.first(where: { $0.id == groupID })?.name
     }

@@ -120,15 +120,19 @@ public struct ProviderDefaultSessionSummary: Codable, Equatable, Sendable {
     public let state: State
     public let summary: String
     public let actionTitle: String
+    public let sessionID: UUID?
 
-    public init(state: State, summary: String, actionTitle: String) {
+    public init(state: State, summary: String, actionTitle: String, sessionID: UUID? = nil) {
         self.state = state
         self.summary = summary
         self.actionTitle = actionTitle
+        self.sessionID = sessionID
     }
 
     public enum State: String, Codable, Sendable {
         case notCreated
+        case ready
+        case failed
     }
 }
 

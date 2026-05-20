@@ -1,4 +1,4 @@
-import Foundation
+wrimport Foundation
 import NexusDomain
 import NexusIPC
 @testable import NexusService
@@ -170,6 +170,80 @@ struct nexusTests {
         }))
     }
 
+    @Test func launchOrResumeDefaultSessionCreatesAndReusesClaudeSessionOverIPC() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            )
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+
+        let firstSession = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let secondSession = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let overview = try await client.getWorkspaceOverview(workspaceID: workspace.id)
+        let claudeCard = try #require(overview.providerCards.first(where: { $0.provider.id == .claude }))
+
+        #expect(firstSession.state == .ready)
+        #expect(firstSession.providerID == .claude)
+        #expect(firstSession.workspaceID == workspace.id)
+        #expect(firstSession.isDefault)
+        #expect(secondSession == firstSession)
+        #expect(claudeCard.defaultSession.state == .ready)
+        #expect(claudeCard.defaultSession.actionTitle == "Resume")
+        #expect(claudeCard.defaultSession.sessionID == firstSession.id)
+    }
+
+    @Test func launchOrResumeDefaultSessionPersistsFailedClaudeSessionWhenLaunchabilityFails() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: [:]),
+                commandRunner: StubCommandRunner(results: [:])
+            )
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+
+        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let overview = try await client.getWorkspaceOverview(workspaceID: workspace.id)
+        let claudeCard = try #require(overview.providerCards.first(where: { $0.provider.id == .claude }))
+
+        #expect(session.state == .failed)
+        #expect(session.failureMessage == "Claude executable was not found in the service search paths.")
+        #expect(claudeCard.defaultSession.state == .failed)
+        #expect(claudeCard.defaultSession.actionTitle == "Relaunch")
+        #expect(claudeCard.defaultSession.summary == "Claude executable was not found in the service search paths.")
+        #expect(claudeCard.defaultSession.sessionID == session.id)
+    }
+
     @MainActor
     @Test func appModelLoadsWorkspaceCatalogFromIPCClient() async throws {
         let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests()
@@ -184,6 +258,41 @@ struct nexusTests {
         #expect(model.workspaceGroups.map(\.name) == ["Solo Group"])
         #expect(model.workspaces.map(\.name) == ["app-model-workspace"])
         #expect(model.workspaceOverview(for: try #require(model.workspaces.first).id)?.providerCards.map(\.provider.displayName) == ["Codex", "Claude", "IBM Bob", "Pi"])
+    }
+
+    @MainActor
+    @Test func appModelLaunchOrResumeDefaultSessionRefreshesWorkspaceOverview() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            )
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+        _ = try await model.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+
+        let claudeCard = try #require(model.workspaceOverview(for: workspace.id)?.providerCards.first(where: { $0.provider.id == .claude }))
+        #expect(claudeCard.defaultSession.state == .ready)
+        #expect(claudeCard.defaultSession.actionTitle == "Resume")
     }
 
     @MainActor
@@ -277,6 +386,10 @@ private struct FailingServiceClient: NexusServiceClient {
     }
 
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: UUID?) async throws -> Workspace {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) async throws -> Session {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 }

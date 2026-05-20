@@ -8,6 +8,7 @@ import NexusDomain
     func listWorkspaces(_ reply: @escaping (Data?, NSString?) -> Void)
     func getWorkspaceOverview(workspaceID: String, reply: @escaping (Data?, NSString?) -> Void)
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: String?, reply: @escaping (Data?, NSString?) -> Void)
+    func launchOrResumeDefaultSession(workspaceID: String, providerID: String, reply: @escaping (Data?, NSString?) -> Void)
 }
 
 public protocol NexusServiceClient {
@@ -17,6 +18,7 @@ public protocol NexusServiceClient {
     func listWorkspaces() async throws -> [Workspace]
     func getWorkspaceOverview(workspaceID: UUID) async throws -> WorkspaceOverview
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: UUID?) async throws -> Workspace
+    func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) async throws -> Session
 }
 
 public typealias NexusServiceStatusClient = NexusServiceClient
@@ -70,6 +72,16 @@ public final class NexusIPCClient: NexusServiceClient {
                 name: name,
                 folderPath: folderPath,
                 primaryGroupID: primaryGroupID?.uuidString,
+                reply: reply
+            )
+        }
+    }
+
+    nonisolated public func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) async throws -> Session {
+        try await requestDecodable { proxy, reply in
+            proxy.launchOrResumeDefaultSession(
+                workspaceID: workspaceID.uuidString,
+                providerID: providerID.rawValue,
                 reply: reply
             )
         }

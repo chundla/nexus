@@ -122,14 +122,94 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
             throw NexusMetadataStoreError.workspaceNotFound
         }
 
-        return WorkspaceOverview(
-            workspace: workspace,
-            providerCards: providerHealthEvaluator.providerCards(for: workspace)
-        )
+        let providerCards = try ProviderID.allCases.map { providerID in
+            WorkspaceProviderCard(
+                provider: Provider(id: providerID),
+                health: providerHealthEvaluator.healthSummary(for: providerID, workspace: workspace),
+                defaultSession: try defaultSessionSummary(for: workspace, providerID: providerID)
+            )
+        }
+
+        return WorkspaceOverview(workspace: workspace, providerCards: providerCards)
     }
 
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: UUID?) throws -> Workspace {
         try metadataStore.createLocalWorkspace(name: name, folderPath: folderPath, primaryGroupID: primaryGroupID)
+    }
+
+    func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) throws -> Session {
+        guard let workspace = try metadataStore.workspace(id: workspaceID) else {
+            throw NexusMetadataStoreError.workspaceNotFound
+        }
+
+        guard providerID == .claude else {
+            throw NexusMetadataStoreError.providerNotSupported
+        }
+
+        let health = providerHealthEvaluator.healthSummary(for: providerID, workspace: workspace)
+        if health.launchability == .launchable {
+            if let session = try metadataStore.defaultSession(workspaceID: workspaceID, providerID: providerID) {
+                if session.state == .ready, session.failureMessage == nil {
+                    return session
+                }
+
+                return try metadataStore.updateSession(
+                    id: session.id,
+                    state: .ready,
+                    failureMessage: nil
+                )
+            }
+
+            return try metadataStore.createDefaultSession(
+                workspaceID: workspaceID,
+                providerID: providerID,
+                state: .ready,
+                failureMessage: nil
+            )
+        }
+
+        let failureMessage = health.diagnostics.first(where: { $0.severity == .error })?.message ?? health.summary
+        if let session = try metadataStore.defaultSession(workspaceID: workspaceID, providerID: providerID) {
+            return try metadataStore.updateSession(
+                id: session.id,
+                state: .failed,
+                failureMessage: failureMessage
+            )
+        }
+
+        return try metadataStore.createDefaultSession(
+            workspaceID: workspaceID,
+            providerID: providerID,
+            state: .failed,
+            failureMessage: failureMessage
+        )
+    }
+
+    private func defaultSessionSummary(for workspace: Workspace, providerID: ProviderID) throws -> ProviderDefaultSessionSummary {
+        guard let session = try metadataStore.defaultSession(workspaceID: workspace.id, providerID: providerID) else {
+            return ProviderDefaultSessionSummary(
+                state: .notCreated,
+                summary: "No default session yet",
+                actionTitle: "Launch"
+            )
+        }
+
+        switch session.state {
+        case .ready:
+            return ProviderDefaultSessionSummary(
+                state: .ready,
+                summary: "Default session ready",
+                actionTitle: "Resume",
+                sessionID: session.id
+            )
+        case .failed:
+            return ProviderDefaultSessionSummary(
+                state: .failed,
+                summary: session.failureMessage ?? "Last launch failed",
+                actionTitle: "Relaunch",
+                sessionID: session.id
+            )
+        }
     }
 }
 
@@ -176,6 +256,22 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
                     name: name,
                     folderPath: folderPath,
                     primaryGroupID: try primaryGroupID.map(resolveUUID)
+                )
+            },
+            reply: reply
+        )
+    }
+
+    func launchOrResumeDefaultSession(workspaceID: String, providerID: String, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(
+            with: {
+                guard let resolvedProviderID = ProviderID(rawValue: providerID) else {
+                    throw CocoaError(.coderInvalidValue)
+                }
+
+                return try service.launchOrResumeDefaultSession(
+                    workspaceID: resolveUUID(workspaceID),
+                    providerID: resolvedProviderID
                 )
             },
             reply: reply

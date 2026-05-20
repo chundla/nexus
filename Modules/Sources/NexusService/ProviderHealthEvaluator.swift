@@ -25,6 +25,7 @@ struct ProviderCommandResult: Equatable {
 
 protocol ProviderHealthEvaluating {
     func providerCards(for workspace: Workspace) -> [WorkspaceProviderCard]
+    func healthSummary(for providerID: ProviderID, workspace: Workspace) -> ProviderHealthSummary
 }
 
 struct ProviderHealthEvaluator: ProviderHealthEvaluating {
@@ -53,7 +54,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
         }
     }
 
-    private func healthSummary(for providerID: ProviderID, workspace: Workspace) -> ProviderHealthSummary {
+    func healthSummary(for providerID: ProviderID, workspace: Workspace) -> ProviderHealthSummary {
         switch providerID {
         case .claude:
             claudeHealthSummary(for: workspace)
