@@ -828,9 +828,9 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                 }
         }
 
-        func skipOperatingSystemCommand() {
+        func skipStringCommand(allowBellTerminator: Bool) {
             while let scalar = iterator.next() {
-                if scalar == "\u{0007}" {
+                if allowBellTerminator, scalar == "\u{0007}" {
                     return
                 }
 
@@ -838,6 +838,10 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                     return
                 }
             }
+        }
+
+        func skipOperatingSystemCommand() {
+            skipStringCommand(allowBellTerminator: true)
         }
 
         func characterSet(for designator: UnicodeScalar) -> TerminalCharacterSet? {
@@ -1164,6 +1168,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                     }
                 } else if next == "]" {
                     skipOperatingSystemCommand()
+                } else if next == "P" || next == "X" || next == "^" || next == "_" {
+                    skipStringCommand(allowBellTerminator: false)
                 } else if next == "(" {
                     if let designator = iterator.next(), let characterSet = characterSet(for: designator) {
                         g0CharacterSet = characterSet
@@ -1259,6 +1265,10 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                 usingG1CharacterSet = false
             case "\u{0007}":
                 continue
+            case "\u{0090}", "\u{0098}", "\u{009E}", "\u{009F}":
+                skipStringCommand(allowBellTerminator: false)
+            case "\u{009D}":
+                skipStringCommand(allowBellTerminator: true)
             case "\r":
                 cursorColumn = 0
             case "\u{8}":
