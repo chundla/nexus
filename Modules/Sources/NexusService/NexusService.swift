@@ -468,16 +468,16 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
 
         switch resolvedSession.state {
         case .failed:
-            return SessionScreen(session: resolvedSession, transcript: resolvedSession.failureMessage ?? "Session launch failed")
+            return normalizedSessionScreen(SessionScreen(session: resolvedSession, transcript: resolvedSession.failureMessage ?? "Session launch failed"))
         case .interrupted:
-            return SessionScreen(session: resolvedSession, transcript: resolvedSession.failureMessage ?? "Session interrupted")
+            return normalizedSessionScreen(SessionScreen(session: resolvedSession, transcript: resolvedSession.failureMessage ?? "Session interrupted"))
         case .exited:
             if sessionRuntimeManager.hasRuntime(for: resolvedSession) {
-                return try sessionRuntimeManager.sessionScreen(for: resolvedSession)
+                return normalizedSessionScreen(try sessionRuntimeManager.sessionScreen(for: resolvedSession))
             }
-            return SessionScreen(session: resolvedSession, transcript: resolvedSession.failureMessage ?? "Session exited")
+            return normalizedSessionScreen(SessionScreen(session: resolvedSession, transcript: resolvedSession.failureMessage ?? "Session exited"))
         case .ready:
-            return try sessionRuntimeManager.sessionScreen(for: resolvedSession)
+            return normalizedSessionScreen(try sessionRuntimeManager.sessionScreen(for: resolvedSession))
         }
     }
 
@@ -491,7 +491,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
             throw NexusMetadataStoreError.sessionNotReady
         }
 
-        return try sessionRuntimeManager.sendInput(text, to: resolvedSession)
+        return normalizedSessionScreen(try sessionRuntimeManager.sendInput(text, to: resolvedSession))
     }
 
     func resizeSession(sessionID: UUID, columns: Int, rows: Int) throws -> SessionScreen {
@@ -504,7 +504,54 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
             throw NexusMetadataStoreError.sessionNotReady
         }
 
-        return try sessionRuntimeManager.resize(session: resolvedSession, columns: columns, rows: rows)
+        return normalizedSessionScreen(try sessionRuntimeManager.resize(session: resolvedSession, columns: columns, rows: rows))
+    }
+
+    private func normalizedSessionScreen(_ screen: SessionScreen) -> SessionScreen {
+        SessionScreen(
+            session: screen.session,
+            transcript: normalizeTerminalTranscript(screen.transcript),
+            terminalColumns: screen.terminalColumns,
+            terminalRows: screen.terminalRows
+        )
+    }
+
+    private func normalizeTerminalTranscript(_ transcript: String) -> String {
+        var normalized = ""
+        var currentLine = ""
+        var iterator = transcript.makeIterator()
+
+        while let character = iterator.next() {
+            switch character {
+            case "\u{001B}":
+                guard let next = iterator.next() else {
+                    continue
+                }
+
+                if next == "[" {
+                    while let scalar = iterator.next() {
+                        if ("@"..."~").contains(scalar) {
+                            break
+                        }
+                    }
+                }
+            case "\r":
+                currentLine = ""
+            case "\u{8}", "\u{7F}":
+                if currentLine.isEmpty == false {
+                    currentLine.removeLast()
+                }
+            case "\n":
+                normalized += currentLine
+                normalized += "\n"
+                currentLine = ""
+            default:
+                currentLine.append(character)
+            }
+        }
+
+        normalized += currentLine
+        return normalized
     }
 
     private func defaultSessionSummary(for workspace: Workspace, providerID: ProviderID) throws -> ProviderDefaultSessionSummary {
