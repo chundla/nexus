@@ -37,11 +37,55 @@ public struct SessionScreen: Codable, Equatable, Sendable {
     public let transcript: String
     public let terminalColumns: Int
     public let terminalRows: Int
+    public let visibleLines: [String]
 
-    public init(session: Session, transcript: String, terminalColumns: Int = 80, terminalRows: Int = 24) {
+    public init(
+        session: Session,
+        transcript: String,
+        terminalColumns: Int = 80,
+        terminalRows: Int = 24,
+        visibleLines: [String]? = nil
+    ) {
         self.session = session
         self.transcript = transcript
         self.terminalColumns = terminalColumns
         self.terminalRows = terminalRows
+        self.visibleLines = visibleLines ?? Self.makeVisibleLines(
+            transcript: transcript,
+            terminalColumns: terminalColumns,
+            terminalRows: terminalRows
+        )
+    }
+
+    private static func makeVisibleLines(
+        transcript: String,
+        terminalColumns: Int,
+        terminalRows: Int
+    ) -> [String] {
+        let columns = max(1, terminalColumns)
+        let rows = max(1, terminalRows)
+        var wrappedLines: [String] = []
+
+        for rawLine in transcript.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = String(rawLine)
+
+            if line.isEmpty {
+                wrappedLines.append("")
+                continue
+            }
+
+            var startIndex = line.startIndex
+            while startIndex < line.endIndex {
+                let endIndex = line.index(startIndex, offsetBy: columns, limitedBy: line.endIndex) ?? line.endIndex
+                wrappedLines.append(String(line[startIndex..<endIndex]))
+                startIndex = endIndex
+            }
+        }
+
+        if wrappedLines.isEmpty {
+            return [""]
+        }
+
+        return Array(wrappedLines.suffix(rows))
     }
 }

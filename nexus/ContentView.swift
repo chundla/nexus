@@ -203,23 +203,37 @@ struct ContentView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                TextEditor(text: .constant(screen.transcript))
-                    .font(.system(.body, design: .monospaced))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .border(.quaternary)
-                    .background {
-                        GeometryReader { proxy in
-                            Color.clear
-                                .onAppear {
-                                    terminalViewportSize = proxy.size
-                                    reportTerminalSize(proxy.size)
-                                }
-                                .onChange(of: proxy.size) { _, newSize in
-                                    terminalViewportSize = newSize
-                                    reportTerminalSize(newSize)
-                                }
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 2) {
+                        ForEach(Array(screen.visibleLines.enumerated()), id: \.offset) { _, line in
+                            Text(line.isEmpty ? " " : line)
+                                .font(.system(.body, design: .monospaced))
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.black.opacity(0.92))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(.quaternary)
+                }
+                .background {
+                    GeometryReader { proxy in
+                        Color.clear
+                            .onAppear {
+                                terminalViewportSize = proxy.size
+                                reportTerminalSize(proxy.size)
+                            }
+                            .onChange(of: proxy.size) { _, newSize in
+                                terminalViewportSize = newSize
+                                reportTerminalSize(newSize)
+                            }
+                    }
+                }
 
                 if isReady == false {
                     Button("Relaunch Session") {
