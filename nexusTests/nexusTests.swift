@@ -287,6 +287,101 @@ struct nexusTests {
         #expect(resizedScreen.terminalRows == 40)
     }
 
+    @Test func persistedReadySessionBecomesRelaunchableAfterServiceRestart() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let healthEvaluator = ProviderHealthEvaluator(
+            executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+            commandRunner: StubCommandRunner(results: [
+                StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+            ])
+        )
+
+        let firstService = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: healthEvaluator,
+            sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
+        )
+        let firstClient = try NexusIPCClient.connect(to: firstService.listenerEndpoint)
+        _ = try await firstClient.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await firstClient.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+        let launchedSession = try await firstClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+
+        let restartedService = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: healthEvaluator,
+            sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
+        )
+        let restartedClient = try NexusIPCClient.connect(to: restartedService.listenerEndpoint)
+        let overviewAfterRestart = try await restartedClient.getWorkspaceOverview(workspaceID: workspace.id)
+        let claudeCard = try #require(overviewAfterRestart.providerCards.first(where: { $0.provider.id == .claude }))
+        let interruptedScreen = try await restartedClient.getSessionScreen(sessionID: launchedSession.id)
+
+        #expect(claudeCard.defaultSession.state == .interrupted)
+        #expect(claudeCard.defaultSession.actionTitle == "Relaunch")
+        #expect(claudeCard.defaultSession.sessionID == launchedSession.id)
+        #expect(interruptedScreen.session.id == launchedSession.id)
+        #expect(interruptedScreen.session.state == .interrupted)
+        #expect(interruptedScreen.transcript.contains("service restarted"))
+    }
+
+    @Test func interruptedDefaultSessionCanBeRelaunchedAfterServiceRestart() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let healthEvaluator = ProviderHealthEvaluator(
+            executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+            commandRunner: StubCommandRunner(results: [
+                StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+            ])
+        )
+
+        let firstService = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: healthEvaluator,
+            sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
+        )
+        let firstClient = try NexusIPCClient.connect(to: firstService.listenerEndpoint)
+        _ = try await firstClient.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await firstClient.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+        let launchedSession = try await firstClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+
+        let restartedService = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: healthEvaluator,
+            sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
+        )
+        let restartedClient = try NexusIPCClient.connect(to: restartedService.listenerEndpoint)
+        _ = try await restartedClient.getWorkspaceOverview(workspaceID: workspace.id)
+
+        let relaunchedSession = try await restartedClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let relaunchedScreen = try await restartedClient.getSessionScreen(sessionID: launchedSession.id)
+
+        #expect(relaunchedSession.id == launchedSession.id)
+        #expect(relaunchedSession.state == .ready)
+        #expect(relaunchedScreen.session.state == .ready)
+        #expect(relaunchedScreen.transcript == "Claude ready")
+    }
+
     @Test func launchOrResumeDefaultSessionPersistsFailedClaudeSessionWhenLaunchabilityFails() async throws {
         let workspaceFolderURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -533,6 +628,10 @@ private final class StubSessionRuntimeManager: SessionRuntimeManaging {
         if sizes[session.id] == nil {
             sizes[session.id] = (80, 24)
         }
+    }
+
+    func hasRuntime(for session: Session) -> Bool {
+        transcripts[session.id] != nil
     }
 
     func sessionScreen(for session: Session) throws -> SessionScreen {

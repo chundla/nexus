@@ -132,6 +132,7 @@ public struct ProviderDefaultSessionSummary: Codable, Equatable, Sendable {
     public enum State: String, Codable, Sendable {
         case notCreated
         case ready
+        case interrupted
         case failed
     }
 }

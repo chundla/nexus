@@ -23,6 +23,7 @@ public enum NexusEmbeddedServiceBootstrap {
 
 protocol SessionRuntimeManaging: AnyObject {
     func launchOrResume(session: Session, workspace: Workspace, executable: String) throws
+    func hasRuntime(for session: Session) -> Bool
     func sessionScreen(for session: Session) throws -> SessionScreen
     func sendInput(_ text: String, to session: Session) throws -> SessionScreen
     func resize(session: Session, columns: Int, rows: Int) throws -> SessionScreen
@@ -55,6 +56,12 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging {
                 runtimes[session.id] = try launcher.makeRuntime(session: session, workspace: workspace, executable: executable)
             }
         }
+    }
+
+    func hasRuntime(for session: Session) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return runtimes[session.id] != nil
     }
 
     func sessionScreen(for session: Session) throws -> SessionScreen {
@@ -397,11 +404,16 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
             throw NexusMetadataStoreError.sessionNotFound
         }
 
-        if session.state == .failed {
-            return SessionScreen(session: session, transcript: session.failureMessage ?? "Session launch failed")
-        }
+        let resolvedSession = try reconcileSessionRuntimeState(session)
 
-        return try sessionRuntimeManager.sessionScreen(for: session)
+        switch resolvedSession.state {
+        case .failed:
+            return SessionScreen(session: resolvedSession, transcript: resolvedSession.failureMessage ?? "Session launch failed")
+        case .interrupted:
+            return SessionScreen(session: resolvedSession, transcript: resolvedSession.failureMessage ?? "Session interrupted")
+        case .ready:
+            return try sessionRuntimeManager.sessionScreen(for: resolvedSession)
+        }
     }
 
     func sendSessionInput(sessionID: UUID, text: String) throws -> SessionScreen {
@@ -437,22 +449,43 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
             )
         }
 
-        switch session.state {
+        let resolvedSession = try reconcileSessionRuntimeState(session)
+
+        switch resolvedSession.state {
         case .ready:
             return ProviderDefaultSessionSummary(
                 state: .ready,
                 summary: "Default session ready",
                 actionTitle: "Resume",
-                sessionID: session.id
+                sessionID: resolvedSession.id
+            )
+        case .interrupted:
+            return ProviderDefaultSessionSummary(
+                state: .interrupted,
+                summary: resolvedSession.failureMessage ?? "Session interrupted after the service restarted",
+                actionTitle: "Relaunch",
+                sessionID: resolvedSession.id
             )
         case .failed:
             return ProviderDefaultSessionSummary(
                 state: .failed,
-                summary: session.failureMessage ?? "Last launch failed",
+                summary: resolvedSession.failureMessage ?? "Last launch failed",
                 actionTitle: "Relaunch",
-                sessionID: session.id
+                sessionID: resolvedSession.id
             )
         }
+    }
+
+    private func reconcileSessionRuntimeState(_ session: Session) throws -> Session {
+        guard session.state == .ready, sessionRuntimeManager.hasRuntime(for: session) == false else {
+            return session
+        }
+
+        return try metadataStore.updateSession(
+            id: session.id,
+            state: .interrupted,
+            failureMessage: "Session interrupted because the background service restarted. Relaunch to create a new live runtime."
+        )
     }
 }
 

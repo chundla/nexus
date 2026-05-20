@@ -26,6 +26,7 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
 
     public enum State: String, Codable, Sendable {
         case ready
+        case interrupted
         case failed
     }
 }
