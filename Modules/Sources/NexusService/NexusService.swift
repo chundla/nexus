@@ -580,6 +580,32 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                 cursorLine = max(0, row - 1)
                 cursorColumn = max(0, column - 1)
                 ensureCurrentLine()
+            case "J":
+                ensureCurrentLine()
+                switch eraseMode {
+                case 1:
+                    if cursorLine > 0 {
+                        for lineIndex in 0..<cursorLine {
+                            lines[lineIndex].removeAll()
+                        }
+                    }
+                    let endIndex = min(cursorColumn, lines[cursorLine].count)
+                    if endIndex > 0 {
+                        lines[cursorLine].removeFirst(endIndex)
+                    }
+                    cursorColumn = 0
+                case 2:
+                    lines = [[]]
+                    cursorLine = 0
+                    cursorColumn = 0
+                default:
+                    if cursorColumn < lines[cursorLine].count {
+                        lines[cursorLine].removeSubrange(cursorColumn...)
+                    }
+                    if cursorLine + 1 < lines.count {
+                        lines.removeSubrange((cursorLine + 1)..<lines.count)
+                    }
+                }
             case "K":
                 ensureCurrentLine()
                 switch eraseMode {
