@@ -1024,12 +1024,16 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                 guard scrollCount > 0 else {
                     break
                 }
-                let visibleLineCount = max(lines.count, cursorLine + 1)
-                if scrollCount >= visibleLineCount {
-                    lines = Array(repeating: [], count: visibleLineCount)
+                if activeScrollRegion() != nil {
+                    scrollUpWithinRegion(scrollCount)
                 } else {
-                    lines.removeFirst(scrollCount)
-                    lines.append(contentsOf: Array(repeating: [], count: scrollCount))
+                    let visibleLineCount = max(lines.count, cursorLine + 1)
+                    if scrollCount >= visibleLineCount {
+                        lines = Array(repeating: [], count: visibleLineCount)
+                    } else {
+                        lines.removeFirst(scrollCount)
+                        lines.append(contentsOf: Array(repeating: [], count: scrollCount))
+                    }
                 }
                 ensureCurrentLine()
             case "T":
@@ -1038,12 +1042,16 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                 guard scrollCount > 0 else {
                     break
                 }
-                let visibleLineCount = max(lines.count, cursorLine + 1)
-                if scrollCount >= visibleLineCount {
-                    lines = Array(repeating: [], count: visibleLineCount)
+                if activeScrollRegion() != nil {
+                    scrollDownWithinRegion(scrollCount)
                 } else {
-                    lines.insert(contentsOf: Array(repeating: [], count: scrollCount), at: 0)
-                    lines.removeLast(min(scrollCount, lines.count))
+                    let visibleLineCount = max(lines.count, cursorLine + 1)
+                    if scrollCount >= visibleLineCount {
+                        lines = Array(repeating: [], count: visibleLineCount)
+                    } else {
+                        lines.insert(contentsOf: Array(repeating: [], count: scrollCount), at: 0)
+                        lines.removeLast(min(scrollCount, lines.count))
+                    }
                 }
                 ensureCurrentLine()
             case "r":
