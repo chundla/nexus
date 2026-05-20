@@ -310,7 +310,7 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
         let escapeSequence: String
         switch key {
         case .enter:
-            escapeSequence = "\n"
+            escapeSequence = "\r"
         case .tab:
             escapeSequence = "\t"
         case .escape:

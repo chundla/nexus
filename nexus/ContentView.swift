@@ -605,6 +605,79 @@ private struct PresentedError: Identifiable {
     let message: String
 }
 
+enum SessionTerminalCapturedInput: Equatable {
+    case text(String)
+    case key(SessionInputKey)
+}
+
+func mapSessionTerminalInput(
+    modifierFlags: NSEvent.ModifierFlags,
+    keyCode: UInt16,
+    characters: String?,
+    charactersIgnoringModifiers: String?
+) -> SessionTerminalCapturedInput? {
+    let nonShiftModifiers = modifierFlags.intersection([.command, .control, .option])
+
+    if nonShiftModifiers == .control,
+       let controlCharacter = charactersIgnoringModifiers?.lowercased(),
+       controlCharacter.count == 1,
+       let scalar = controlCharacter.unicodeScalars.first,
+       scalar.value >= 0x61,
+       scalar.value <= 0x7A {
+        switch controlCharacter {
+        case "c":
+            return .key(.interrupt)
+        case "d":
+            return .key(.endOfTransmission)
+        default:
+            guard let controlScalar = UnicodeScalar(scalar.value - 0x60) else {
+                return nil
+            }
+            return .text(String(controlScalar))
+        }
+    }
+
+    if nonShiftModifiers.isEmpty == false {
+        return nil
+    }
+
+    switch keyCode {
+    case 51:
+        return .key(.backspace)
+    case 53:
+        return .key(.escape)
+    case 123:
+        return .key(.leftArrow)
+    case 124:
+        return .key(.rightArrow)
+    case 125:
+        return .key(.downArrow)
+    case 126:
+        return .key(.upArrow)
+    default:
+        break
+    }
+
+    guard let characters else {
+        return nil
+    }
+
+    switch characters {
+    case "\r", "\n":
+        return .key(.enter)
+    case "\t":
+        return .key(.tab)
+    case "\u{001B}":
+        return .key(.escape)
+    default:
+        let printableScalars = characters.unicodeScalars.filter { $0.value >= 0x20 && $0.value != 0x7F }
+        guard printableScalars.isEmpty == false else {
+            return nil
+        }
+        return .text(String(String.UnicodeScalarView(printableScalars)))
+    }
+}
+
 private struct SessionTerminalKeyCaptureView: NSViewRepresentable {
     let isEnabled: Bool
     let focusToken: UUID
@@ -648,66 +721,21 @@ private final class SessionTerminalKeyCaptureNSView: NSView {
             return
         }
 
-        if event.modifierFlags.contains(.control), let controlCharacter = event.charactersIgnoringModifiers?.lowercased() {
-            switch controlCharacter {
-            case "c":
-                onKey?(.interrupt)
-                return
-            case "d":
-                onKey?(.endOfTransmission)
-                return
-            default:
-                break
-            }
-        }
-
-        if event.modifierFlags.intersection([.command, .control, .option]).isEmpty == false {
+        guard let input = mapSessionTerminalInput(
+            modifierFlags: event.modifierFlags,
+            keyCode: event.keyCode,
+            characters: event.characters,
+            charactersIgnoringModifiers: event.charactersIgnoringModifiers
+        ) else {
             super.keyDown(with: event)
             return
         }
 
-        switch event.keyCode {
-        case 51:
-            onKey?(.backspace)
-            return
-        case 53:
-            onKey?(.escape)
-            return
-        case 123:
-            onKey?(.leftArrow)
-            return
-        case 124:
-            onKey?(.rightArrow)
-            return
-        case 125:
-            onKey?(.downArrow)
-            return
-        case 126:
-            onKey?(.upArrow)
-            return
-        default:
-            break
-        }
-
-        guard let characters = event.characters else {
-            super.keyDown(with: event)
-            return
-        }
-
-        switch characters {
-        case "\r", "\n":
-            onKey?(.enter)
-        case "\t":
-            onKey?(.tab)
-        case "\u{001B}":
-            onKey?(.escape)
-        default:
-            let printableScalars = characters.unicodeScalars.filter { $0.value >= 0x20 && $0.value != 0x7F }
-            if printableScalars.isEmpty == false {
-                onText?(String(String.UnicodeScalarView(printableScalars)))
-            } else {
-                super.keyDown(with: event)
-            }
+        switch input {
+        case .text(let text):
+            onText?(text)
+        case .key(let key):
+            onKey?(key)
         }
     }
 
