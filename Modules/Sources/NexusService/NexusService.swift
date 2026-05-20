@@ -29,7 +29,7 @@ protocol SessionRuntimeManaging: AnyObject {
     func sessionScreen(for session: Session) throws -> SessionScreen
     func sendInput(_ text: String, to session: Session) throws -> SessionScreen
     func sendText(_ text: String, to session: Session) throws -> SessionScreen
-    func sendInputKey(_ key: SessionInputKey, to session: Session) throws -> SessionScreen
+    func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool, to session: Session) throws -> SessionScreen
     func resize(session: Session, columns: Int, rows: Int) throws -> SessionScreen
 }
 
@@ -44,7 +44,7 @@ protocol SessionRuntime: AnyObject {
     var terminalRows: Int { get }
     func sendInput(_ text: String) throws
     func sendText(_ text: String) throws
-    func sendInputKey(_ key: SessionInputKey) throws
+    func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool) throws
     func resize(columns: Int, rows: Int) throws
 }
 
@@ -129,7 +129,7 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging {
         )
     }
 
-    func sendInputKey(_ key: SessionInputKey, to session: Session) throws -> SessionScreen {
+    func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool, to session: Session) throws -> SessionScreen {
         let runtime = try withLock {
             guard let runtime = runtimes[session.id] else {
                 throw NexusMetadataStoreError.sessionNotFound
@@ -137,7 +137,7 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging {
             return runtime
         }
 
-        try runtime.sendInputKey(key)
+        try runtime.sendInputKey(key, applicationCursorMode: applicationCursorMode)
         return SessionScreen(
             session: session,
             transcript: runtime.transcript,
@@ -283,7 +283,7 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
 
     func sendInput(_ text: String) throws {
         if text.isEmpty {
-            try sendInputKey(.enter)
+            try sendInputKey(.enter, applicationCursorMode: false)
             return
         }
 
@@ -306,7 +306,7 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
         terminalHandle.write(data)
     }
 
-    func sendInputKey(_ key: SessionInputKey) throws {
+    func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool) throws {
         let escapeSequence: String
         switch key {
         case .enter:
@@ -317,16 +317,18 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
             escapeSequence = "\u{001B}"
         case .backspace:
             escapeSequence = "\u{007F}"
+        case .endOfTransmission:
+            escapeSequence = "\u{0004}"
         case .interrupt:
             escapeSequence = "\u{0003}"
         case .upArrow:
-            escapeSequence = "\u{001B}[A"
+            escapeSequence = applicationCursorMode ? "\u{001B}OA" : "\u{001B}[A"
         case .downArrow:
-            escapeSequence = "\u{001B}[B"
+            escapeSequence = applicationCursorMode ? "\u{001B}OB" : "\u{001B}[B"
         case .leftArrow:
-            escapeSequence = "\u{001B}[D"
+            escapeSequence = applicationCursorMode ? "\u{001B}OD" : "\u{001B}[D"
         case .rightArrow:
-            escapeSequence = "\u{001B}[C"
+            escapeSequence = applicationCursorMode ? "\u{001B}OC" : "\u{001B}[C"
         }
 
         guard let data = escapeSequence.data(using: .utf8) else {
@@ -611,7 +613,20 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
             throw NexusMetadataStoreError.sessionNotReady
         }
 
-        return normalizedSessionScreen(try sessionRuntimeManager.sendInputKey(key, to: resolvedSession))
+        let currentScreen = try sessionRuntimeManager.sessionScreen(for: resolvedSession)
+        let renderState = renderTerminalState(
+            from: currentScreen.transcript,
+            terminalColumns: currentScreen.terminalColumns,
+            terminalRows: currentScreen.terminalRows
+        )
+
+        return normalizedSessionScreen(
+            try sessionRuntimeManager.sendInputKey(
+                key,
+                applicationCursorMode: renderState.applicationCursorMode,
+                to: resolvedSession
+            )
+        )
     }
 
     func resizeSession(sessionID: UUID, columns: Int, rows: Int) throws -> SessionScreen {
@@ -668,11 +683,12 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
         from transcript: String,
         terminalColumns: Int,
         terminalRows: Int
-    ) -> (transcript: String, visibleLines: [String], cursorRow: Int, cursorColumn: Int, cursorVisible: Bool) {
+    ) -> (transcript: String, visibleLines: [String], cursorRow: Int, cursorColumn: Int, cursorVisible: Bool, applicationCursorMode: Bool) {
         var lines: [[Character]] = [[]]
         var cursorLine = 0
         var cursorColumn = 0
         var cursorVisible = true
+        var applicationCursorMode = false
         var savedCursorLine = 0
         var savedCursorColumn = 0
         var primaryBufferLines = lines
@@ -726,6 +742,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                 switch finalCharacter {
                 case "h":
                     switch value {
+                    case 1:
+                        applicationCursorMode = true
                     case 47, 1047, 1049:
                         guard usingAlternateBuffer == false else {
                             break
@@ -747,6 +765,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                     }
                 case "l":
                     switch value {
+                    case 1:
+                        applicationCursorMode = false
                     case 25:
                         cursorVisible = false
                     case 47, 1047, 1049:
@@ -980,7 +1000,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
             visibleLines: viewport.visibleLines,
             cursorRow: viewport.cursorRow,
             cursorColumn: viewport.cursorColumn,
-            cursorVisible: cursorVisible
+            cursorVisible: cursorVisible,
+            applicationCursorMode: applicationCursorMode
         )
     }
 

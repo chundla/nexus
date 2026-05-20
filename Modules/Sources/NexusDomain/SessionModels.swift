@@ -5,6 +5,7 @@ public enum SessionInputKey: String, Codable, CaseIterable, Sendable {
     case tab
     case escape
     case backspace
+    case endOfTransmission
     case interrupt
     case upArrow
     case downArrow

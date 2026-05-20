@@ -504,6 +504,8 @@ struct ContentView: View {
             "Esc"
         case .backspace:
             "⌫"
+        case .endOfTransmission:
+            "⌃D"
         case .interrupt:
             "⌃C"
         case .upArrow:
@@ -646,9 +648,17 @@ private final class SessionTerminalKeyCaptureNSView: NSView {
             return
         }
 
-        if event.modifierFlags.contains(.control), event.charactersIgnoringModifiers?.lowercased() == "c" {
-            onKey?(.interrupt)
-            return
+        if event.modifierFlags.contains(.control), let controlCharacter = event.charactersIgnoringModifiers?.lowercased() {
+            switch controlCharacter {
+            case "c":
+                onKey?(.interrupt)
+                return
+            case "d":
+                onKey?(.endOfTransmission)
+                return
+            default:
+                break
+            }
         }
 
         if event.modifierFlags.intersection([.command, .control, .option]).isEmpty == false {

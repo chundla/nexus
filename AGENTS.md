@@ -11,3 +11,8 @@ Use the default triage label vocabulary: `needs-triage`, `needs-info`, `ready-fo
 ### Domain docs
 
 This repo uses a single-context domain-docs layout. See `docs/agents/domain.md`.
+
+### Testing
+
+- Do not run test commands with `bash` `usePTY=true`.
+- Run `xcodebuild test` and other test commands without PTY to avoid interrupted/invalid runs.

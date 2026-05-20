@@ -1298,6 +1298,61 @@ struct nexusTests {
         #expect(screen.transcript.contains("UP"))
     }
 
+    @Test func liveClaudeRuntimeAcceptsEndOfTransmissionKeyInputOverIPC() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let executableURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: false)
+        try #"""
+        #!/usr/bin/env python3
+        import os
+        import sys
+        import tty
+
+        tty.setraw(sys.stdin.fileno())
+        print("READY", flush=True)
+        data = os.read(sys.stdin.fileno(), 1)
+        if data == b'\x04':
+            print("EOT", flush=True)
+        else:
+            print(repr(data), flush=True)
+        """#.write(to: executableURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            )
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+
+        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        _ = try await waitForSessionScreen(client: client, sessionID: session.id) { currentScreen in
+            currentScreen.transcript.contains("READY")
+        }
+        _ = try await client.sendSessionInputKey(sessionID: session.id, key: .endOfTransmission)
+        let screen = try await waitForSessionScreen(client: client, sessionID: session.id) { currentScreen in
+            currentScreen.transcript.contains("EOT")
+        }
+
+        #expect(screen.transcript.contains("EOT"))
+    }
+
     @Test func liveClaudeRuntimeAcceptsInterruptKeyInputOverIPC() async throws {
         let workspaceFolderURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1351,6 +1406,62 @@ struct nexusTests {
         }
 
         #expect(screen.transcript.contains("INTERRUPT"))
+    }
+
+    @Test func liveClaudeRuntimeUsesApplicationCursorKeysWhenTerminalRequestsThemOverIPC() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let executableURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: false)
+        try #"""
+        #!/usr/bin/env python3
+        import os
+        import sys
+        import tty
+
+        tty.setraw(sys.stdin.fileno())
+        sys.stdout.write("\x1b[?1h")
+        print("READY", flush=True)
+        data = os.read(sys.stdin.fileno(), 3)
+        if data == b'\x1bOA':
+            print("APPLICATION-UP", flush=True)
+        else:
+            print(repr(data), flush=True)
+        """#.write(to: executableURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            )
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+
+        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        _ = try await waitForSessionScreen(client: client, sessionID: session.id) { currentScreen in
+            currentScreen.transcript.contains("READY")
+        }
+        _ = try await client.sendSessionInputKey(sessionID: session.id, key: .upArrow)
+        let screen = try await waitForSessionScreen(client: client, sessionID: session.id) { currentScreen in
+            currentScreen.transcript.contains("APPLICATION-UP") || currentScreen.transcript.contains("\\x1b[A")
+        }
+
+        #expect(screen.transcript.contains("APPLICATION-UP"))
     }
 
     @Test func liveClaudeRuntimeReceivesTypedTextAndBackspaceOverIPC() async throws {
@@ -2132,10 +2243,11 @@ private final class StubSessionRuntimeManager: SessionRuntimeManaging {
         )
     }
 
-    func sendInputKey(_ key: SessionInputKey, to session: Session) throws -> SessionScreen {
+    func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool, to session: Session) throws -> SessionScreen {
         let prefix = transcripts[session.id, default: initialTranscript]
         let separator = prefix.isEmpty ? "" : "\n"
-        transcripts[session.id] = prefix + separator + "[key: \(key.rawValue)]"
+        let modeSuffix = applicationCursorMode ? ":application" : ""
+        transcripts[session.id] = prefix + separator + "[key: \(key.rawValue)\(modeSuffix)]"
         let size = sizes[session.id] ?? (80, 24)
         return SessionScreen(
             session: session,
