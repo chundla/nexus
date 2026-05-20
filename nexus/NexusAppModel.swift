@@ -79,12 +79,22 @@ final class NexusAppModel {
     func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) async throws -> Session {
         let session = try await client.launchOrResumeDefaultSession(workspaceID: workspaceID, providerID: providerID)
         focusedSessionScreen = try await client.getSessionScreen(sessionID: session.id)
-        workspaceOverviews[workspaceID] = try await client.getWorkspaceOverview(workspaceID: workspaceID)
+        try await refreshWorkspaceOverview(for: workspaceID)
         return session
     }
 
     func loadSessionScreen(sessionID: UUID) async throws {
-        focusedSessionScreen = try await client.getSessionScreen(sessionID: sessionID)
+        let screen = try await client.getSessionScreen(sessionID: sessionID)
+        focusedSessionScreen = screen
+        try await refreshWorkspaceOverview(for: screen.session.workspaceID)
+    }
+
+    func refreshFocusedSession() async throws {
+        guard let sessionID = focusedSessionScreen?.session.id else {
+            return
+        }
+
+        try await loadSessionScreen(sessionID: sessionID)
     }
 
     func sendInputToFocusedSession(_ text: String) async throws {
@@ -92,7 +102,9 @@ final class NexusAppModel {
             return
         }
 
-        focusedSessionScreen = try await client.sendSessionInput(sessionID: sessionID, text: text)
+        let screen = try await client.sendSessionInput(sessionID: sessionID, text: text)
+        focusedSessionScreen = screen
+        try await refreshWorkspaceOverview(for: screen.session.workspaceID)
     }
 
     func resizeFocusedSession(columns: Int, rows: Int) async throws {
@@ -100,7 +112,9 @@ final class NexusAppModel {
             return
         }
 
-        focusedSessionScreen = try await client.resizeSession(sessionID: sessionID, columns: columns, rows: rows)
+        let screen = try await client.resizeSession(sessionID: sessionID, columns: columns, rows: rows)
+        focusedSessionScreen = screen
+        try await refreshWorkspaceOverview(for: screen.session.workspaceID)
     }
 
     func workspaceGroupName(for groupID: UUID) -> String? {
@@ -109,5 +123,9 @@ final class NexusAppModel {
 
     func workspaceOverview(for workspaceID: UUID) -> WorkspaceOverview? {
         workspaceOverviews[workspaceID]
+    }
+
+    private func refreshWorkspaceOverview(for workspaceID: UUID) async throws {
+        workspaceOverviews[workspaceID] = try await client.getWorkspaceOverview(workspaceID: workspaceID)
     }
 }

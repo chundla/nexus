@@ -189,9 +189,15 @@ struct ContentView: View {
 
         return VStack(alignment: .leading, spacing: 16) {
             if let screen {
+                let isReady = screen.session.state == .ready
+
                 Text("\(screen.session.providerID.displayName) Session")
                     .font(.title2)
                     .fontWeight(.semibold)
+
+                Label(screen.session.state.rawValue.capitalized, systemImage: isReady ? "checkmark.circle" : "exclamationmark.triangle")
+                    .font(.subheadline)
+                    .foregroundStyle(isReady ? Color.secondary : Color.orange)
 
                 Text("Terminal: \(screen.terminalColumns) × \(screen.terminalRows)")
                     .font(.caption)
@@ -215,9 +221,26 @@ struct ContentView: View {
                         }
                     }
 
+                if isReady == false {
+                    Button("Relaunch Session") {
+                        Task {
+                            do {
+                                let session = try await appModel.launchOrResumeDefaultSession(
+                                    workspaceID: screen.session.workspaceID,
+                                    providerID: screen.session.providerID
+                                )
+                                selection = .session(session.id)
+                            } catch {
+                                presentedError = PresentedError(message: error.localizedDescription)
+                            }
+                        }
+                    }
+                }
+
                 HStack(alignment: .bottom, spacing: 12) {
                     TextField("Send input to session", text: $sessionInput, axis: .vertical)
                         .textFieldStyle(.roundedBorder)
+                        .disabled(isReady == false)
 
                     Button("Send") {
                         let text = sessionInput
@@ -231,7 +254,7 @@ struct ContentView: View {
                         }
                     }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(sessionInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(isReady == false || sessionInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             } else {
                 ContentUnavailableView(
@@ -242,6 +265,9 @@ struct ContentView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .task(id: sessionID) {
+            await pollSessionScreen(sessionID: sessionID)
+        }
     }
 
     private func providerCard(workspaceID: UUID, card: WorkspaceProviderCard) -> some View {
@@ -425,7 +451,7 @@ struct ContentView: View {
         isShowingWorkspaceGroupPicker = true
     }
     private func reportTerminalSize(_ size: CGSize) {
-        guard appModel.focusedSessionScreen != nil else {
+        guard appModel.focusedSessionScreen?.session.state == .ready else {
             return
         }
 
@@ -447,6 +473,23 @@ struct ContentView: View {
             } catch {
                 presentedError = PresentedError(message: error.localizedDescription)
             }
+        }
+    }
+
+    private func pollSessionScreen(sessionID: UUID) async {
+        while Task.isCancelled == false,
+              case .session(sessionID) = selection {
+            do {
+                try await appModel.loadSessionScreen(sessionID: sessionID)
+            } catch {
+                if Task.isCancelled {
+                    return
+                }
+                presentedError = PresentedError(message: error.localizedDescription)
+                return
+            }
+
+            try? await Task.sleep(for: .milliseconds(500))
         }
     }
 }

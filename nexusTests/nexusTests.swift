@@ -580,6 +580,60 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelRefreshesExitedFocusedSessionAndWorkspaceOverview() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let executableURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: false)
+        try """
+        #!/usr/bin/env python3
+        import time
+        time.sleep(0.2)
+        print("Claude finished work", flush=True)
+        """.write(to: executableURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            )
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+        let session = try await model.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let readyCard = try #require(model.workspaceOverview(for: workspace.id)?.providerCards.first(where: { $0.provider.id == .claude }))
+        #expect(readyCard.defaultSession.state == .ready)
+
+        let exitedScreen = try await waitForFocusedSessionScreen(model: model, sessionID: session.id) { screen in
+            screen.session.state == .exited
+        }
+
+        let claudeCard = try #require(model.workspaceOverview(for: workspace.id)?.providerCards.first(where: { $0.provider.id == .claude }))
+        #expect(exitedScreen.session.id == session.id)
+        #expect(exitedScreen.session.state == .exited)
+        #expect(exitedScreen.transcript.contains("Claude finished work"))
+        #expect(claudeCard.defaultSession.state == .exited)
+        #expect(claudeCard.defaultSession.actionTitle == "Relaunch")
+    }
+
+    @MainActor
     @Test func appModelSendInputUpdatesFocusedSessionTranscript() async throws {
         let workspaceFolderURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -698,6 +752,31 @@ private func waitForSessionScreen(
 
         try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
         latestScreen = try await client.getSessionScreen(sessionID: sessionID)
+    }
+
+    return latestScreen
+}
+
+@MainActor
+private func waitForFocusedSessionScreen(
+    model: NexusAppModel,
+    sessionID: UUID,
+    timeoutNanoseconds: UInt64 = 5_000_000_000,
+    pollIntervalNanoseconds: UInt64 = 50_000_000,
+    until predicate: @escaping (SessionScreen) -> Bool
+) async throws -> SessionScreen {
+    let deadline = ContinuousClock.now.advanced(by: .nanoseconds(Int64(timeoutNanoseconds)))
+    try await model.loadSessionScreen(sessionID: sessionID)
+    var latestScreen = try #require(model.focusedSessionScreen)
+
+    while predicate(latestScreen) == false {
+        guard ContinuousClock.now < deadline else {
+            throw NSError(domain: "nexusTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for focused session screen update: \(latestScreen.transcript)"])
+        }
+
+        try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
+        try await model.loadSessionScreen(sessionID: sessionID)
+        latestScreen = try #require(model.focusedSessionScreen)
     }
 
     return latestScreen
