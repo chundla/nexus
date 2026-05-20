@@ -287,6 +287,66 @@ struct nexusTests {
         #expect(resizedScreen.terminalRows == 40)
     }
 
+    @Test func liveClaudeRuntimeStartsOnPseudoTerminalOverIPC() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let executableURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: false)
+        try """
+        #!/usr/bin/env python3
+        import fcntl
+        import struct
+        import sys
+        import termios
+        
+        try:
+            rows, cols, _, _ = struct.unpack(
+                "HHHH",
+                fcntl.ioctl(sys.stdin.fileno(), termios.TIOCGWINSZ, struct.pack("HHHH", 0, 0, 0, 0))
+            )
+            print(f"TTY {rows} {cols}", flush=True)
+        except OSError:
+            print("TTY no-tty", flush=True)
+
+        while True:
+            line = sys.stdin.readline()
+            if not line:
+                break
+        """.write(to: executableURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            )
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+
+        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let screen = try await waitForSessionScreen(client: client, sessionID: session.id) { currentScreen in
+            currentScreen.transcript.contains("TTY 24 80") || currentScreen.transcript.contains("TTY no-tty")
+        }
+
+        #expect(screen.terminalColumns == 80)
+        #expect(screen.terminalRows == 24)
+        #expect(screen.transcript.contains("TTY 24 80"))
+    }
+
     @Test func persistedReadySessionBecomesRelaunchableAfterServiceRestart() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)
@@ -570,6 +630,28 @@ struct nexusTests {
         #expect(status.store.location.lastPathComponent == "Nexus.sqlite")
         #expect(model.serviceErrorMessage == nil)
     }
+}
+
+private func waitForSessionScreen(
+    client: any NexusServiceClient,
+    sessionID: UUID,
+    timeoutNanoseconds: UInt64 = 5_000_000_000,
+    pollIntervalNanoseconds: UInt64 = 50_000_000,
+    until predicate: @escaping (SessionScreen) -> Bool
+) async throws -> SessionScreen {
+    let deadline = ContinuousClock.now.advanced(by: .nanoseconds(Int64(timeoutNanoseconds)))
+    var latestScreen = try await client.getSessionScreen(sessionID: sessionID)
+
+    while predicate(latestScreen) == false {
+        guard ContinuousClock.now < deadline else {
+            throw NSError(domain: "nexusTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for session screen update: \(latestScreen.transcript)"])
+        }
+
+        try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
+        latestScreen = try await client.getSessionScreen(sessionID: sessionID)
+    }
+
+    return latestScreen
 }
 
 private struct StubExecutableResolver: ProviderExecutableResolving {

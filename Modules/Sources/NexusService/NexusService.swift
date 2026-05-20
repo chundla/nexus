@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import NexusDomain
 import NexusIPC
@@ -128,49 +129,79 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
 }
 
 final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
-    private let process: Process
-    private let inputHandle: FileHandle
-    private let outputHandle: FileHandle
+    private let pid: pid_t
+    private let terminalHandle: FileHandle
+    private let masterFileDescriptor: Int32
+    private let readSource: DispatchSourceRead
+    private let terminationSource: DispatchSourceProcess
     private let lock = NSLock()
     private var storage: String
     private var columns: Int
     private var rows: Int
 
     init(executable: String, workspace: Workspace) throws {
-        self.process = Process()
         self.storage = "Launching \(workspace.name) with Claude…\n"
         self.columns = 80
         self.rows = 24
 
-        let inputPipe = Pipe()
-        let outputPipe = Pipe()
+        var masterFileDescriptor: Int32 = -1
+        var initialWindowSize = winsize(ws_row: 24, ws_col: 80, ws_xpixel: 0, ws_ypixel: 0)
+        let pid = forkpty(&masterFileDescriptor, nil, nil, &initialWindowSize)
+        guard pid >= 0 else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno), userInfo: [NSLocalizedDescriptionKey: String(cString: strerror(errno))])
+        }
 
-        process.executableURL = URL(fileURLWithPath: executable, isDirectory: false)
-        process.currentDirectoryURL = URL(fileURLWithPath: workspace.folderPath, isDirectory: true)
-        process.standardInput = inputPipe
-        process.standardOutput = outputPipe
-        process.standardError = outputPipe
-        process.environment = ProcessInfo.processInfo.environment.merging(["TERM": "xterm-256color"]) { _, newValue in newValue }
+        if pid == 0 {
+            chdir(workspace.folderPath)
+            setenv("TERM", "xterm-256color", 1)
+            executable.withCString { executablePath in
+                var arguments: [UnsafeMutablePointer<CChar>?] = [UnsafeMutablePointer(mutating: executablePath), nil]
+                execv(executablePath, &arguments)
+            }
+            _exit(127)
+        }
 
-        inputHandle = inputPipe.fileHandleForWriting
-        outputHandle = outputPipe.fileHandleForReading
+        self.pid = pid
+        self.masterFileDescriptor = masterFileDescriptor
+        self.terminalHandle = FileHandle(fileDescriptor: masterFileDescriptor, closeOnDealloc: true)
+        self.readSource = DispatchSource.makeReadSource(fileDescriptor: masterFileDescriptor, queue: .global())
+        self.terminationSource = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: .global())
 
-        outputHandle.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            guard data.isEmpty == false, let self else {
+        readSource.setEventHandler { [weak self] in
+            guard let self else {
                 return
             }
 
+            let estimatedBytes = max(Int(self.readSource.data), 1)
+            var buffer = [UInt8](repeating: 0, count: estimatedBytes)
+            let bytesRead = Darwin.read(self.masterFileDescriptor, &buffer, buffer.count)
+            guard bytesRead > 0 else {
+                return
+            }
+
+            let data = Data(buffer.prefix(bytesRead))
             let text = String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
             self.append(text)
         }
+        readSource.activate()
 
-        process.terminationHandler = { [weak self] process in
-            self?.append("\n[Claude exited with status \(process.terminationStatus)]\n")
-            self?.outputHandle.readabilityHandler = nil
+        terminationSource.setEventHandler { [weak self] in
+            guard let self else {
+                return
+            }
+
+            var status: Int32 = 0
+            _ = waitpid(self.pid, &status, 0)
+            self.append("\n[Claude exited with status \(status)]\n")
+            self.readSource.cancel()
+            self.terminationSource.cancel()
         }
+        terminationSource.activate()
+    }
 
-        try process.run()
+    deinit {
+        readSource.cancel()
+        terminationSource.cancel()
     }
 
     var transcript: String {
@@ -201,13 +232,21 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
         guard let data = "\(trimmed)\n".data(using: .utf8) else {
             return
         }
-        inputHandle.write(data)
+        terminalHandle.write(data)
     }
 
     func resize(columns: Int, rows: Int) throws {
+        let clampedColumns = max(1, columns)
+        let clampedRows = max(1, rows)
+
+        var windowSize = winsize(ws_row: UInt16(clampedRows), ws_col: UInt16(clampedColumns), ws_xpixel: 0, ws_ypixel: 0)
+        guard ioctl(masterFileDescriptor, TIOCSWINSZ, &windowSize) == 0 else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno), userInfo: [NSLocalizedDescriptionKey: String(cString: strerror(errno))])
+        }
+
         lock.lock()
-        self.columns = max(1, columns)
-        self.rows = max(1, rows)
+        self.columns = clampedColumns
+        self.rows = clampedRows
         lock.unlock()
     }
 
