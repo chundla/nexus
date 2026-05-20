@@ -987,6 +987,17 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                     cursorLine = savedCursorLine
                     cursorColumn = savedCursorColumn
                     ensureCurrentLine()
+                } else if next == "M" {
+                    if cursorLine > 0 {
+                        cursorLine -= 1
+                    } else {
+                        let visibleLineCount = max(lines.count, 1)
+                        lines.insert([], at: 0)
+                        if lines.count > visibleLineCount {
+                            lines.removeLast(lines.count - visibleLineCount)
+                        }
+                    }
+                    ensureCurrentLine()
                 }
             case "\r":
                 cursorColumn = 0
