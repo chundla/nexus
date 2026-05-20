@@ -632,6 +632,14 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                 }
                 let blanks = Array(repeating: Character(" "), count: insertCount)
                 lines[cursorLine].insert(contentsOf: blanks, at: cursorColumn)
+            case "L":
+                ensureCurrentLine()
+                let insertCount = max(0, defaultValue)
+                guard insertCount > 0 else {
+                    break
+                }
+                let blanks = Array(repeating: [Character](), count: insertCount)
+                lines.insert(contentsOf: blanks, at: cursorLine)
             case "M":
                 ensureCurrentLine()
                 let deleteCount = max(0, defaultValue)
