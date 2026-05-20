@@ -710,6 +710,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
         var g0CharacterSet: TerminalCharacterSet = .ascii
         var g1CharacterSet: TerminalCharacterSet = .ascii
         var usingG1CharacterSet = false
+        var lastRenderedCharacter: Character?
         var primaryBufferLines = lines
         var primaryBufferCursorLine = cursorLine
         var primaryBufferCursorColumn = cursorColumn
@@ -1173,6 +1174,22 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                         lines[cursorLine][index] = " "
                     }
                 }
+            case "b":
+                guard let repeatedCharacter = lastRenderedCharacter else {
+                    break
+                }
+                for _ in 0..<defaultValue {
+                    ensureCurrentLine()
+                    if cursorColumn < lines[cursorLine].count {
+                        lines[cursorLine][cursorColumn] = repeatedCharacter
+                    } else {
+                        while lines[cursorLine].count < cursorColumn {
+                            lines[cursorLine].append(" ")
+                        }
+                        lines[cursorLine].append(repeatedCharacter)
+                    }
+                    cursorColumn += 1
+                }
             case "s":
                 guard parameters.isEmpty else {
                     break
@@ -1307,6 +1324,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                     g0CharacterSet = .ascii
                     g1CharacterSet = .ascii
                     usingG1CharacterSet = false
+                    lastRenderedCharacter = nil
                     primaryBufferG0CharacterSet = g0CharacterSet
                     primaryBufferG1CharacterSet = g1CharacterSet
                     primaryBufferUsingG1CharacterSet = usingG1CharacterSet
@@ -1369,6 +1387,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                     lines[cursorLine].append(character)
                 }
                 cursorColumn += 1
+                lastRenderedCharacter = character
             }
         }
 
