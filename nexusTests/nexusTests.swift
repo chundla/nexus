@@ -1,11 +1,7 @@
-//
-//  nexusTests.swift
-//  nexusTests
-//
-//  Created by Chandler on 5/18/26.
-//
-
 import Foundation
+import NexusDomain
+import NexusIPC
+import NexusService
 import Testing
 @testable import nexus
 
@@ -23,37 +19,84 @@ struct nexusTests {
         #expect(status.store.location.path(percentEncoded: false).hasSuffix("Nexus.sqlite"))
     }
 
-    @MainActor
-    @Test func appModelLoadsServiceStatusFromIPCClient() async throws {
+    @Test func backgroundServiceCreatesAndListsWorkspaceGroupsOverIPC() async throws {
         let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests()
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
-        let model = NexusAppModel(client: client)
 
-        await model.refreshServiceStatus()
+        let createdGroup = try await client.createWorkspaceGroup(name: "Client Work")
+        let groups = try await client.listWorkspaceGroups()
 
-        #expect(model.serviceStatus?.state == .running)
-        #expect(model.serviceStatus?.store.owner == .backgroundService)
+        #expect(createdGroup.name == "Client Work")
+        #expect(groups == [createdGroup])
     }
 
-    @Test func embeddedServiceBootstrapCreatesAndOwnsMetadataStoreFile() async throws {
+    @Test func localWorkspaceInheritsOnlyWorkspaceGroupAndPersistsAcrossServiceBootstrap() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let firstService = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let firstClient = try NexusIPCClient.connect(to: firstService.listenerEndpoint)
+
+        let group = try await firstClient.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await firstClient.createLocalWorkspace(
+            name: nil,
+            folderPath: "/tmp/example-workspace",
+            primaryGroupID: nil
+        )
+
+        let secondService = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let secondClient = try NexusIPCClient.connect(to: secondService.listenerEndpoint)
+        let persistedGroups = try await secondClient.listWorkspaceGroups()
+        let persistedWorkspaces = try await secondClient.listWorkspaces()
+
+        #expect(workspace.name == "example-workspace")
+        #expect(workspace.primaryGroupID == group.id)
+        #expect(persistedGroups == [group])
+        #expect(persistedWorkspaces == [workspace])
+    }
+
+    @Test func localWorkspaceRequiresExplicitPrimaryWorkspaceGroupWhenMultipleGroupsExist() async throws {
         let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests()
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
 
-        let status = try await client.getServiceStatus()
+        _ = try await client.createWorkspaceGroup(name: "Alpha")
+        _ = try await client.createWorkspaceGroup(name: "Beta")
 
-        #expect(FileManager.default.fileExists(atPath: service.storeURL.path(percentEncoded: false)))
-        #expect(status.store.location == service.storeURL)
-        #expect(status.store.owner == .backgroundService)
+        await #expect(throws: (any Error).self) {
+            _ = try await client.createLocalWorkspace(
+                name: nil,
+                folderPath: "/tmp/multi-group-workspace",
+                primaryGroupID: nil
+            )
+        }
+    }
+
+    @MainActor
+    @Test func appModelLoadsWorkspaceCatalogFromIPCClient() async throws {
+        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests()
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        _ = try await client.createLocalWorkspace(name: nil, folderPath: "/tmp/app-model-workspace", primaryGroupID: nil)
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+
+        #expect(model.serviceStatus?.state == .running)
+        #expect(model.workspaceGroups.map(\.name) == ["Solo Group"])
+        #expect(model.workspaces.map(\.name) == ["app-model-workspace"])
     }
 
     @MainActor
     @Test func appModelReportsUnavailableServiceWhenStatusRefreshFails() async {
-        let model = NexusAppModel(client: FailingServiceStatusClient())
+        let model = NexusAppModel(client: FailingServiceClient())
 
         await model.refreshServiceStatus()
 
         #expect(model.serviceStatus == nil)
         #expect(model.serviceErrorMessage == "Background Service unavailable")
+        #expect(model.workspaceGroups.isEmpty)
+        #expect(model.workspaces.isEmpty)
     }
 
     @MainActor
@@ -70,11 +113,26 @@ struct nexusTests {
         #expect(status.store.location.lastPathComponent == "Nexus.sqlite")
         #expect(model.serviceErrorMessage == nil)
     }
-
 }
 
-private struct FailingServiceStatusClient: NexusServiceStatusClient {
+private struct FailingServiceClient: NexusServiceClient {
     func getServiceStatus() async throws -> NexusServiceStatus {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func listWorkspaceGroups() async throws -> [WorkspaceGroup] {
+        []
+    }
+
+    func createWorkspaceGroup(name: String) async throws -> WorkspaceGroup {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func listWorkspaces() async throws -> [Workspace] {
+        []
+    }
+
+    func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: UUID?) async throws -> Workspace {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 }

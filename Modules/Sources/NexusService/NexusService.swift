@@ -15,6 +15,10 @@ public enum NexusEmbeddedServiceBootstrap {
     public static func bootstrapForTests() throws -> any NexusEmbeddedServiceSession {
         try NexusService.bootstrapForTests()
     }
+
+    public static func bootstrapForTests(rootURL: URL) throws -> any NexusEmbeddedServiceSession {
+        try NexusService.bootstrapForTests(rootURL: rootURL)
+    }
 }
 
 public final class NexusService: NSObject, NexusEmbeddedServiceSession {
@@ -25,9 +29,12 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
         listener.endpoint
     }
 
-    private init(listener: NSXPCListener, storeURL: URL) {
+    private let metadataStore: NexusMetadataStore
+
+    private init(listener: NSXPCListener, storeURL: URL, metadataStore: NexusMetadataStore) {
         self.listener = listener
         self.storeURL = storeURL
+        self.metadataStore = metadataStore
         super.init()
         self.listener.delegate = self
         self.listener.resume()
@@ -38,12 +45,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
             .url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
             .appendingPathComponent("Nexus", isDirectory: true)
 
-        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
-
-        let storeURL = rootURL.appendingPathComponent("Nexus.sqlite", isDirectory: false)
-        FileManager.default.createFile(atPath: storeURL.path, contents: Data())
-
-        return NexusService(listener: NSXPCListener.anonymous(), storeURL: storeURL)
+        return try bootstrap(rootURL: rootURL)
     }
 
     nonisolated public static func bootstrapForTests() throws -> NexusService {
@@ -51,12 +53,23 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
             .appendingPathComponent("NexusTests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
 
+        return try bootstrap(rootURL: rootURL)
+    }
+
+    nonisolated public static func bootstrapForTests(rootURL: URL) throws -> NexusService {
+        try bootstrap(rootURL: rootURL)
+    }
+
+    private nonisolated static func bootstrap(rootURL: URL) throws -> NexusService {
         try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
 
         let storeURL = rootURL.appendingPathComponent("Nexus.sqlite", isDirectory: false)
-        FileManager.default.createFile(atPath: storeURL.path, contents: Data())
+        if FileManager.default.fileExists(atPath: storeURL.path) == false {
+            FileManager.default.createFile(atPath: storeURL.path, contents: Data())
+        }
 
-        return NexusService(listener: NSXPCListener.anonymous(), storeURL: storeURL)
+        let metadataStore = try NexusMetadataStore(storeURL: storeURL)
+        return NexusService(listener: NSXPCListener.anonymous(), storeURL: storeURL, metadataStore: metadataStore)
     }
 
     nonisolated public func serviceStatus() -> NexusServiceStatus {
@@ -68,6 +81,22 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                 location: storeURL
             )
         )
+    }
+
+    func listWorkspaceGroups() throws -> [WorkspaceGroup] {
+        try metadataStore.listWorkspaceGroups()
+    }
+
+    func createWorkspaceGroup(name: String) throws -> WorkspaceGroup {
+        try metadataStore.createWorkspaceGroup(name: name)
+    }
+
+    func listWorkspaces() throws -> [Workspace] {
+        try metadataStore.listWorkspaces()
+    }
+
+    func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: UUID?) throws -> Workspace {
+        try metadataStore.createLocalWorkspace(name: name, folderPath: folderPath, primaryGroupID: primaryGroupID)
     }
 }
 
@@ -88,11 +117,47 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
     }
 
     func getServiceStatus(_ reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(with: { service.serviceStatus() }, reply: reply)
+    }
+
+    func listWorkspaceGroups(_ reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(with: service.listWorkspaceGroups, reply: reply)
+    }
+
+    func createWorkspaceGroup(name: String, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(with: { try service.createWorkspaceGroup(name: name) }, reply: reply)
+    }
+
+    func listWorkspaces(_ reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(with: service.listWorkspaces, reply: reply)
+    }
+
+    func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: String?, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(
+            with: {
+                try service.createLocalWorkspace(
+                    name: name,
+                    folderPath: folderPath,
+                    primaryGroupID: try primaryGroupID.map(resolveUUID)
+                )
+            },
+            reply: reply
+        )
+    }
+
+    private func sendReply<T: Encodable>(with operation: () throws -> T, reply: @escaping (Data?, NSString?) -> Void) {
         do {
-            let payload = try JSONEncoder().encode(service.serviceStatus())
+            let payload = try JSONEncoder().encode(operation())
             reply(payload, nil)
         } catch {
             reply(nil, error.localizedDescription as NSString)
         }
+    }
+
+    private func resolveUUID(_ rawValue: String) throws -> UUID {
+        guard let uuid = UUID(uuidString: rawValue) else {
+            throw CocoaError(.coderInvalidValue)
+        }
+        return uuid
     }
 }

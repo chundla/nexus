@@ -33,7 +33,10 @@ let package = Package(
         ),
         .target(
             name: "NexusService",
-            dependencies: ["NexusDomain", "NexusIPC"]
+            dependencies: ["NexusDomain", "NexusIPC"],
+            linkerSettings: [
+                .linkedLibrary("sqlite3")
+            ]
         )
     ]
 )

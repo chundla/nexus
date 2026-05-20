@@ -17,22 +17,30 @@ The current bootstrap path is implemented and exercised end-to-end:
 - the app connects over real local `NSXPCConnection` / `NSXPCListener`
 - the bootstrap uses an anonymous listener endpoint owned by the embedded service session
 - shared domain payloads are serialized across the XPC boundary as `Data`
-- `getServiceStatus()` is the first live IPC call on that boundary
+- `getServiceStatus()` proves service reachability and store ownership
+- `listWorkspaceGroups()` / `createWorkspaceGroup(name)` are live on the boundary
+- `listWorkspaces()` / `createLocalWorkspace(name?, folderPath, primaryGroupID?)` are live on the boundary
 
 ## Milestone one API surface
 
 ### Workspace groups
 
+Live now:
 - `listWorkspaceGroups()`
 - `createWorkspaceGroup(name)`
+
+Planned:
 - `renameWorkspaceGroup(id, name)`
 - `deleteWorkspaceGroup(id)`
 
 ### Workspaces
 
+Live now:
 - `listWorkspaces()`
-- `getWorkspace(id)`
 - `createLocalWorkspace(name?, folderPath, primaryGroupID?)`
+
+Planned:
+- `getWorkspace(id)`
 - `updateWorkspace(id, ...)`
 - `reassignWorkspaceGroup(workspaceID, groupID)`
 - `deleteWorkspace(id)`
