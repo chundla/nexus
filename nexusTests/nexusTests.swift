@@ -392,6 +392,42 @@ struct nexusTests {
         #expect(screen.cursorColumn == 2)
     }
 
+    @Test func sessionScreenTracksCursorLeftControlOverIPC() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let runtimeManager = StubSessionRuntimeManager(initialTranscript: "abc\u{001B}[2D")
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            ),
+            sessionRuntimeManager: runtimeManager
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+
+        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let screen = try await client.resizeSession(sessionID: session.id, columns: 5, rows: 3)
+
+        #expect(screen.transcript == "abc")
+        #expect(screen.visibleLines == ["abc"])
+        #expect(screen.cursorRow == 0)
+        #expect(screen.cursorColumn == 1)
+    }
+
     @Test func liveClaudeRuntimeStartsOnPseudoTerminalOverIPC() async throws {
         let workspaceFolderURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

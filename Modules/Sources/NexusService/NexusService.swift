@@ -508,18 +508,50 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
     }
 
     private func normalizedSessionScreen(_ screen: SessionScreen) -> SessionScreen {
-        SessionScreen(
-            session: screen.session,
-            transcript: normalizeTerminalTranscript(screen.transcript),
+        let renderState = renderTerminalState(
+            from: screen.transcript,
             terminalColumns: screen.terminalColumns,
             terminalRows: screen.terminalRows
         )
+
+        return SessionScreen(
+            session: screen.session,
+            transcript: renderState.transcript,
+            terminalColumns: screen.terminalColumns,
+            terminalRows: screen.terminalRows,
+            visibleLines: renderState.visibleLines,
+            cursorRow: renderState.cursorRow,
+            cursorColumn: renderState.cursorColumn
+        )
     }
 
-    private func normalizeTerminalTranscript(_ transcript: String) -> String {
-        var normalized = ""
-        var currentLine = ""
+    private func renderTerminalState(
+        from transcript: String,
+        terminalColumns: Int,
+        terminalRows: Int
+    ) -> (transcript: String, visibleLines: [String], cursorRow: Int, cursorColumn: Int) {
+        var lines: [[Character]] = [[]]
+        var cursorLine = 0
+        var cursorColumn = 0
         var iterator = transcript.makeIterator()
+
+        func ensureCurrentLine() {
+            while lines.count <= cursorLine {
+                lines.append([])
+            }
+        }
+
+        func parseCSI(finalCharacter: Character, parameters: String) {
+            let value = Int(parameters) ?? 1
+            switch finalCharacter {
+            case "D":
+                cursorColumn = max(0, cursorColumn - value)
+            case "C":
+                cursorColumn += value
+            default:
+                break
+            }
+        }
 
         while let character = iterator.next() {
             switch character {
@@ -529,29 +561,106 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                 }
 
                 if next == "[" {
+                    var parameters = ""
                     while let scalar = iterator.next() {
                         if ("@"..."~").contains(scalar) {
+                            parseCSI(finalCharacter: scalar, parameters: parameters)
                             break
                         }
+                        parameters.append(scalar)
                     }
                 }
             case "\r":
-                currentLine = ""
+                cursorColumn = 0
             case "\u{8}", "\u{7F}":
-                if currentLine.isEmpty == false {
-                    currentLine.removeLast()
+                guard cursorColumn > 0 else {
+                    continue
+                }
+                ensureCurrentLine()
+                cursorColumn -= 1
+                if cursorColumn < lines[cursorLine].count {
+                    lines[cursorLine].remove(at: cursorColumn)
                 }
             case "\n":
-                normalized += currentLine
-                normalized += "\n"
-                currentLine = ""
+                cursorLine += 1
+                cursorColumn = 0
+                ensureCurrentLine()
             default:
-                currentLine.append(character)
+                ensureCurrentLine()
+                if cursorColumn < lines[cursorLine].count {
+                    lines[cursorLine][cursorColumn] = character
+                } else {
+                    while lines[cursorLine].count < cursorColumn {
+                        lines[cursorLine].append(" ")
+                    }
+                    lines[cursorLine].append(character)
+                }
+                cursorColumn += 1
             }
         }
 
-        normalized += currentLine
-        return normalized
+        let renderedLines = lines.map { String($0) }
+        let normalizedTranscript = renderedLines.joined(separator: "\n")
+        return makeViewport(
+            lines: renderedLines,
+            cursorLine: cursorLine,
+            cursorColumn: cursorColumn,
+            terminalColumns: terminalColumns,
+            terminalRows: terminalRows,
+            transcript: normalizedTranscript
+        )
+    }
+
+    private func makeViewport(
+        lines: [String],
+        cursorLine: Int,
+        cursorColumn: Int,
+        terminalColumns: Int,
+        terminalRows: Int,
+        transcript: String
+    ) -> (transcript: String, visibleLines: [String], cursorRow: Int, cursorColumn: Int) {
+        let columns = max(1, terminalColumns)
+        let rows = max(1, terminalRows)
+        let sourceLines = lines.isEmpty ? [""] : lines
+        var wrappedLines: [String] = []
+        var cursorWrappedRow = 0
+        var cursorWrappedColumn = 0
+
+        for (lineIndex, line) in sourceLines.enumerated() {
+            let segments: [String]
+            if line.isEmpty {
+                segments = [""]
+            } else {
+                var builtSegments: [String] = []
+                var startIndex = line.startIndex
+                while startIndex < line.endIndex {
+                    let endIndex = line.index(startIndex, offsetBy: columns, limitedBy: line.endIndex) ?? line.endIndex
+                    builtSegments.append(String(line[startIndex..<endIndex]))
+                    startIndex = endIndex
+                }
+                segments = builtSegments
+            }
+
+            let baseWrappedRow = wrappedLines.count
+            wrappedLines.append(contentsOf: segments)
+
+            if lineIndex == cursorLine {
+                let segmentIndex = min(max(cursorColumn / columns, 0), max(segments.count - 1, 0))
+                cursorWrappedRow = baseWrappedRow + segmentIndex
+                cursorWrappedColumn = min(cursorColumn - (segmentIndex * columns), columns)
+            }
+        }
+
+        let visibleStartIndex = max(0, wrappedLines.count - rows)
+        let visibleLines = Array(wrappedLines.suffix(rows))
+        let cursorRow = max(0, cursorWrappedRow - visibleStartIndex)
+
+        return (
+            transcript: transcript,
+            visibleLines: visibleLines,
+            cursorRow: cursorRow,
+            cursorColumn: cursorWrappedColumn
+        )
     }
 
     private func defaultSessionSummary(for workspace: Workspace, providerID: ProviderID) throws -> ProviderDefaultSessionSummary {
