@@ -634,6 +634,75 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelCanRelaunchExitedFocusedSession() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let stateFileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: false)
+        let executableURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: false)
+        try """
+        #!/usr/bin/env python3
+        import os
+        import pathlib
+        import time
+
+        state_path = pathlib.Path(os.environ["NEXUS_RELAUNCH_STATE_FILE"])
+        if state_path.exists():
+            print("Claude relaunched", flush=True)
+            time.sleep(2)
+        else:
+            state_path.write_text("relaunched")
+            print("Claude finished work", flush=True)
+        """.write(to: executableURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
+
+        setenv("NEXUS_RELAUNCH_STATE_FILE", stateFileURL.path(percentEncoded: false), 1)
+        defer { unsetenv("NEXUS_RELAUNCH_STATE_FILE") }
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            )
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+        let firstSession = try await model.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        _ = try await waitForFocusedSessionScreen(model: model, sessionID: firstSession.id) { screen in
+            screen.session.state == .exited
+        }
+
+        let relaunchedSession = try await model.relaunchFocusedSession()
+        let readyScreen = try await waitForFocusedSessionScreen(model: model, sessionID: relaunchedSession.id) { screen in
+            screen.session.state == .ready && screen.transcript.contains("Claude relaunched")
+        }
+
+        let claudeCard = try #require(model.workspaceOverview(for: workspace.id)?.providerCards.first(where: { $0.provider.id == .claude }))
+        #expect(relaunchedSession.id == firstSession.id)
+        #expect(readyScreen.session.state == .ready)
+        #expect(readyScreen.transcript.contains("Claude relaunched"))
+        #expect(claudeCard.defaultSession.state == .ready)
+        #expect(claudeCard.defaultSession.actionTitle == "Resume")
+    }
+
+    @MainActor
     @Test func appModelSendInputUpdatesFocusedSessionTranscript() async throws {
         let workspaceFolderURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

@@ -225,10 +225,7 @@ struct ContentView: View {
                     Button("Relaunch Session") {
                         Task {
                             do {
-                                let session = try await appModel.launchOrResumeDefaultSession(
-                                    workspaceID: screen.session.workspaceID,
-                                    providerID: screen.session.providerID
-                                )
+                                let session = try await appModel.relaunchFocusedSession()
                                 selection = .session(session.id)
                             } catch {
                                 presentedError = PresentedError(message: error.localizedDescription)

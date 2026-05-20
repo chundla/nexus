@@ -97,6 +97,17 @@ final class NexusAppModel {
         try await loadSessionScreen(sessionID: sessionID)
     }
 
+    func relaunchFocusedSession() async throws -> Session {
+        guard let screen = focusedSessionScreen else {
+            throw NSError(domain: "NexusAppModel", code: 1, userInfo: [NSLocalizedDescriptionKey: "No focused session to relaunch"])
+        }
+
+        return try await launchOrResumeDefaultSession(
+            workspaceID: screen.session.workspaceID,
+            providerID: screen.session.providerID
+        )
+    }
+
     func sendInputToFocusedSession(_ text: String) async throws {
         guard let sessionID = focusedSessionScreen?.session.id else {
             return

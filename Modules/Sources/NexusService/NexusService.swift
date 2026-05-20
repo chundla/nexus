@@ -55,9 +55,11 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging {
 
     func launchOrResume(session: Session, workspace: Workspace, executable: String) throws {
         try withLock {
-            if runtimes[session.id] == nil {
-                runtimes[session.id] = try launcher.makeRuntime(session: session, workspace: workspace, executable: executable)
+            if let runtime = runtimes[session.id], runtime.state == .ready {
+                return
             }
+
+            runtimes[session.id] = try launcher.makeRuntime(session: session, workspace: workspace, executable: executable)
         }
     }
 
