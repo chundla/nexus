@@ -1,6 +1,24 @@
 import Foundation
 import NexusDomain
 
+@objc public protocol NexusSessionScreenObserverXPCProtocol {
+    func sessionScreenDidUpdate(observationID: String, payload: Data)
+}
+
+public struct SessionScreenObservationStart: Codable, Sendable {
+    public let observationID: UUID
+    public let screen: SessionScreen
+
+    public init(observationID: UUID, screen: SessionScreen) {
+        self.observationID = observationID
+        self.screen = screen
+    }
+}
+
+public protocol SessionScreenObservation: Sendable {
+    func cancel() async
+}
+
 @objc public protocol NexusXPCProtocol {
     func getServiceStatus(_ reply: @escaping (Data?, NSString?) -> Void)
     func listWorkspaceGroups(_ reply: @escaping (Data?, NSString?) -> Void)
@@ -10,6 +28,8 @@ import NexusDomain
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: String?, reply: @escaping (Data?, NSString?) -> Void)
     func launchOrResumeDefaultSession(workspaceID: String, providerID: String, reply: @escaping (Data?, NSString?) -> Void)
     func getSessionScreen(sessionID: String, reply: @escaping (Data?, NSString?) -> Void)
+    func observeSessionScreen(sessionID: String, reply: @escaping (Data?, NSString?) -> Void)
+    func cancelSessionScreenObservation(observationID: String, reply: @escaping (Data?, NSString?) -> Void)
     func sendSessionInput(sessionID: String, text: String, reply: @escaping (Data?, NSString?) -> Void)
     func sendSessionText(sessionID: String, text: String, reply: @escaping (Data?, NSString?) -> Void)
     func sendSessionInputKey(sessionID: String, key: String, reply: @escaping (Data?, NSString?) -> Void)
@@ -25,6 +45,7 @@ public protocol NexusServiceClient {
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: UUID?) async throws -> Workspace
     func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) async throws -> Session
     func getSessionScreen(sessionID: UUID) async throws -> SessionScreen
+    func observeSessionScreen(sessionID: UUID, onUpdate: @escaping @Sendable (SessionScreen) -> Void) async throws -> any SessionScreenObservation
     func sendSessionInput(sessionID: UUID, text: String) async throws -> SessionScreen
     func sendSessionText(sessionID: UUID, text: String) async throws -> SessionScreen
     func sendSessionInputKey(sessionID: UUID, key: SessionInputKey) async throws -> SessionScreen
@@ -33,12 +54,16 @@ public protocol NexusServiceClient {
 
 public typealias NexusServiceStatusClient = NexusServiceClient
 
-public final class NexusIPCClient: NexusServiceClient {
-    nonisolated private let connection: NSXPCConnection
+public final class NexusIPCClient: NexusServiceClient, @unchecked Sendable {
+    private let connection: NSXPCConnection
+    private let sessionScreenObserverBridge: NexusSessionScreenObserverBridge
 
     private init(connection: NSXPCConnection) {
         self.connection = connection
+        self.sessionScreenObserverBridge = NexusSessionScreenObserverBridge()
         self.connection.remoteObjectInterface = NSXPCInterface(with: NexusXPCProtocol.self)
+        self.connection.exportedInterface = NSXPCInterface(with: NexusSessionScreenObserverXPCProtocol.self)
+        self.connection.exportedObject = sessionScreenObserverBridge
         self.connection.resume()
     }
 
@@ -103,6 +128,33 @@ public final class NexusIPCClient: NexusServiceClient {
         }
     }
 
+    nonisolated public func observeSessionScreen(
+        sessionID: UUID,
+        onUpdate: @escaping @Sendable (SessionScreen) -> Void
+    ) async throws -> any SessionScreenObservation {
+        let start: SessionScreenObservationStart = try await requestDecodable { proxy, reply in
+            proxy.observeSessionScreen(sessionID: sessionID.uuidString, reply: reply)
+        }
+
+        sessionScreenObserverBridge.registerHandler(onUpdate, for: start.observationID)
+        onUpdate(start.screen)
+
+        let latestScreen = try await getSessionScreen(sessionID: sessionID)
+        if latestScreen != start.screen {
+            onUpdate(latestScreen)
+        }
+
+        return NexusSessionScreenObservationHandle(observationID: start.observationID, observerBridge: sessionScreenObserverBridge) { [weak self] observationID in
+            guard let self else {
+                return
+            }
+
+            let _: Bool = (try? await self.requestDecodable { proxy, reply in
+                proxy.cancelSessionScreenObservation(observationID: observationID.uuidString, reply: reply)
+            }) ?? false
+        }
+    }
+
     nonisolated public func sendSessionInput(sessionID: UUID, text: String) async throws -> SessionScreen {
         try await requestDecodable { proxy, reply in
             proxy.sendSessionInput(sessionID: sessionID.uuidString, text: text, reply: reply)
@@ -162,5 +214,87 @@ public final class NexusIPCClient: NexusServiceClient {
                 }
             }
         }
+    }
+}
+
+private final class NexusSessionScreenObserverBridge: NSObject, NexusSessionScreenObserverXPCProtocol {
+    private let lock = NSLock()
+    private var handlers: [UUID: @Sendable (SessionScreen) -> Void] = [:]
+
+    func registerHandler(_ handler: @escaping @Sendable (SessionScreen) -> Void, for observationID: UUID) {
+        lock.lock()
+        handlers[observationID] = handler
+        lock.unlock()
+    }
+
+    func removeHandler(for observationID: UUID) {
+        lock.lock()
+        handlers.removeValue(forKey: observationID)
+        lock.unlock()
+    }
+
+    func sessionScreenDidUpdate(observationID: String, payload: Data) {
+        guard let observationID = UUID(uuidString: observationID) else {
+            return
+        }
+
+        let handler: (@Sendable (SessionScreen) -> Void)?
+        lock.lock()
+        handler = handlers[observationID]
+        lock.unlock()
+
+        guard let handler else {
+            return
+        }
+
+        do {
+            let screen = try JSONDecoder().decode(SessionScreen.self, from: payload)
+            handler(screen)
+        } catch {
+            return
+        }
+    }
+}
+
+private final class NexusSessionScreenObservationHandle: SessionScreenObservation, @unchecked Sendable {
+    private let observationID: UUID
+    private let observerBridge: NexusSessionScreenObserverBridge
+    private let cancelRemote: @Sendable (UUID) async -> Void
+    private let cancellationState = ObservationCancellationState()
+
+    init(
+        observationID: UUID,
+        observerBridge: NexusSessionScreenObserverBridge,
+        cancelRemote: @escaping @Sendable (UUID) async -> Void
+    ) {
+        self.observationID = observationID
+        self.observerBridge = observerBridge
+        self.cancelRemote = cancelRemote
+    }
+
+    func cancel() async {
+        guard await cancellationState.beginCancellation() else {
+            return
+        }
+
+        observerBridge.removeHandler(for: observationID)
+        await cancelRemote(observationID)
+    }
+
+    deinit {
+        observerBridge.removeHandler(for: observationID)
+    }
+}
+
+private actor ObservationCancellationState {
+    private var isCancelled = false
+
+    func beginCancellation() -> Bool {
+        guard isCancelled == false else {
+            return false
+        }
+
+        isCancelled = true
+        return true
     }
 }

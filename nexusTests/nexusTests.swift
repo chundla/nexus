@@ -2201,6 +2201,61 @@ struct nexusTests {
         #expect(screen.transcript.contains("\u{001B}") == false)
     }
 
+    @Test func liveClaudeRuntimeStreamsSessionScreenUpdatesOverXPC() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let executableURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: false)
+        try """
+        #!/usr/bin/env python3
+        import time
+
+        print("Claude ready", flush=True)
+        time.sleep(0.2)
+        print("Claude streamed update", flush=True)
+        """.write(to: executableURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            )
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+
+        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let collector = SessionScreenCollector()
+        let observation = try await client.observeSessionScreen(sessionID: session.id) { screen in
+            Task {
+                await collector.record(screen)
+            }
+        }
+
+        let streamedScreen = try await collector.waitForScreen { screen in
+            screen.transcript.contains("Claude streamed update") && screen.session.state == .exited
+        }
+
+        #expect(streamedScreen.transcript.contains("Claude ready"))
+        #expect(streamedScreen.transcript.contains("Claude streamed update"))
+        #expect(streamedScreen.session.state == .exited)
+        await observation.cancel()
+    }
+
     @Test func liveClaudeRuntimeAcceptsEmptyInputAsEnterOverIPC() async throws {
         let workspaceFolderURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -3307,6 +3362,63 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelFocusSessionStreamRefreshesWorkspaceOverviewOnlyOnStateChanges() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let readySession = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let initialScreen = SessionScreen(session: readySession, transcript: "Claude ready")
+        let client = TrackingServiceClient(
+            workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []),
+            session: readySession,
+            screen: initialScreen
+        )
+        let model = NexusAppModel(client: client)
+
+        try await model.focusSession(sessionID: readySession.id)
+        #expect(model.focusedSessionScreen == initialScreen)
+        #expect(client.workspaceOverviewRequestCount == 0)
+
+        await client.emitObservedScreen(SessionScreen(session: readySession, transcript: "Claude ready[typed: abc]"))
+        let readyScreen = try await waitForObservedFocusedSessionScreen(model: model) { screen in
+            screen.transcript.contains("[typed: abc]")
+        }
+
+        #expect(readyScreen.session.state == .ready)
+        #expect(client.workspaceOverviewRequestCount == 0)
+
+        let exitedSession = Session(
+            id: readySession.id,
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .exited,
+            failureMessage: "Session exited. Relaunch to start a new live runtime."
+        )
+        await client.emitObservedScreen(SessionScreen(session: exitedSession, transcript: "Claude streamed update"))
+        let exitedScreen = try await waitForObservedFocusedSessionScreen(model: model) { screen in
+            screen.session.state == .exited
+        }
+        try await waitUntil {
+            client.workspaceOverviewRequestCount == 1
+        }
+
+        #expect(exitedScreen.transcript == "Claude streamed update")
+        #expect(client.workspaceOverviewRequestCount == 1)
+    }
+
+    @MainActor
     @Test func appModelLoadSessionScreenDoesNotRefreshWorkspaceOverviewDuringTerminalPolling() async throws {
         let group = WorkspaceGroup(id: UUID(), name: "Group")
         let workspace = Workspace(
@@ -3474,6 +3586,72 @@ private func waitForFocusedSessionScreen(
     return latestScreen
 }
 
+@MainActor
+private func waitForObservedFocusedSessionScreen(
+    model: NexusAppModel,
+    timeoutNanoseconds: UInt64 = 5_000_000_000,
+    pollIntervalNanoseconds: UInt64 = 50_000_000,
+    until predicate: @escaping (SessionScreen) -> Bool
+) async throws -> SessionScreen {
+    let deadline = ContinuousClock.now.advanced(by: .nanoseconds(Int64(timeoutNanoseconds)))
+    var latestScreen = try #require(model.focusedSessionScreen)
+
+    while predicate(latestScreen) == false {
+        guard ContinuousClock.now < deadline else {
+            throw NSError(domain: "nexusTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for observed focused session update: \(latestScreen.transcript)"])
+        }
+
+        try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
+        latestScreen = try #require(model.focusedSessionScreen)
+    }
+
+    return latestScreen
+}
+
+private func waitUntil(
+    timeoutNanoseconds: UInt64 = 5_000_000_000,
+    pollIntervalNanoseconds: UInt64 = 50_000_000,
+    until predicate: @escaping @Sendable () -> Bool
+) async throws {
+    let deadline = ContinuousClock.now.advanced(by: .nanoseconds(Int64(timeoutNanoseconds)))
+
+    while predicate() == false {
+        guard ContinuousClock.now < deadline else {
+            throw NSError(domain: "nexusTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for condition"])
+        }
+
+        try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
+    }
+}
+
+private actor SessionScreenCollector {
+    private var screens: [SessionScreen] = []
+
+    func record(_ screen: SessionScreen) {
+        screens.append(screen)
+    }
+
+    func waitForScreen(
+        timeoutNanoseconds: UInt64 = 5_000_000_000,
+        pollIntervalNanoseconds: UInt64 = 50_000_000,
+        until predicate: @escaping (SessionScreen) -> Bool
+    ) async throws -> SessionScreen {
+        let deadline = ContinuousClock.now.advanced(by: .nanoseconds(Int64(timeoutNanoseconds)))
+
+        while true {
+            if let matchingScreen = screens.last(where: predicate) {
+                return matchingScreen
+            }
+
+            guard ContinuousClock.now < deadline else {
+                throw NSError(domain: "nexusTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for streamed session screen update"])
+            }
+
+            try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
+        }
+    }
+}
+
 private struct StubExecutableResolver: ProviderExecutableResolving {
     let executables: [String: String]
     var searchedDirectories: [String] = ["/tmp/search-a", "/tmp/search-b"]
@@ -3518,6 +3696,8 @@ private final class StubSessionRuntimeManager: SessionRuntimeManaging {
     private let initialTranscript: String
     private var transcripts: [UUID: String] = [:]
     private var sizes: [UUID: (columns: Int, rows: Int)] = [:]
+    private var updateObservers: [UUID: [UUID: @Sendable () -> Void]] = [:]
+    private var observedSessionIDs: [UUID: UUID] = [:]
 
     init(initialTranscript: String = "") {
         self.initialTranscript = initialTranscript
@@ -3530,6 +3710,7 @@ private final class StubSessionRuntimeManager: SessionRuntimeManaging {
         if sizes[session.id] == nil {
             sizes[session.id] = (80, 24)
         }
+        notifyObservers(for: session.id)
     }
 
     func hasRuntime(for session: Session) -> Bool {
@@ -3550,10 +3731,26 @@ private final class StubSessionRuntimeManager: SessionRuntimeManaging {
         )
     }
 
+    func addUpdateObserver(id observationID: UUID, for session: Session, observer: @escaping @Sendable () -> Void) {
+        updateObservers[session.id, default: [:]][observationID] = observer
+        observedSessionIDs[observationID] = session.id
+    }
+
+    func removeUpdateObserver(id: UUID) {
+        guard let sessionID = observedSessionIDs.removeValue(forKey: id) else {
+            return
+        }
+        updateObservers[sessionID]?.removeValue(forKey: id)
+        if updateObservers[sessionID]?.isEmpty == true {
+            updateObservers.removeValue(forKey: sessionID)
+        }
+    }
+
     func sendInput(_ text: String, to session: Session) throws -> SessionScreen {
         let prefix = transcripts[session.id, default: initialTranscript]
         let separator = prefix.isEmpty ? "" : "\n"
         transcripts[session.id] = prefix + separator + "> \(text)\nClaude acknowledged: \(text)"
+        notifyObservers(for: session.id)
         let size = sizes[session.id] ?? (80, 24)
         return SessionScreen(
             session: session,
@@ -3566,6 +3763,7 @@ private final class StubSessionRuntimeManager: SessionRuntimeManaging {
     func sendText(_ text: String, to session: Session) throws -> SessionScreen {
         let prefix = transcripts[session.id, default: initialTranscript]
         transcripts[session.id] = prefix + "[typed: \(text)]"
+        notifyObservers(for: session.id)
         let size = sizes[session.id] ?? (80, 24)
         return SessionScreen(
             session: session,
@@ -3580,6 +3778,7 @@ private final class StubSessionRuntimeManager: SessionRuntimeManaging {
         let separator = prefix.isEmpty ? "" : "\n"
         let modeSuffix = applicationCursorMode ? ":application" : ""
         transcripts[session.id] = prefix + separator + "[key: \(key.rawValue)\(modeSuffix)]"
+        notifyObservers(for: session.id)
         let size = sizes[session.id] ?? (80, 24)
         return SessionScreen(
             session: session,
@@ -3591,6 +3790,7 @@ private final class StubSessionRuntimeManager: SessionRuntimeManaging {
 
     func resize(session: Session, columns: Int, rows: Int) throws -> SessionScreen {
         sizes[session.id] = (columns, rows)
+        notifyObservers(for: session.id)
         return SessionScreen(
             session: session,
             transcript: transcripts[session.id, default: initialTranscript],
@@ -3598,12 +3798,19 @@ private final class StubSessionRuntimeManager: SessionRuntimeManaging {
             terminalRows: rows
         )
     }
+
+    private func notifyObservers(for sessionID: UUID) {
+        for observer in updateObservers[sessionID, default: [:]].values {
+            observer()
+        }
+    }
 }
 
 private final class TrackingServiceClient: NexusServiceClient {
     private let workspaceOverviewValue: WorkspaceOverview
-    private let sessionValue: Session
+    private var sessionValue: Session
     private var screenValue: SessionScreen
+    private var observedScreenHandlers: [UUID: @Sendable (SessionScreen) -> Void] = [:]
 
     var workspaceOverviewRequestCount = 0
 
@@ -3646,6 +3853,15 @@ private final class TrackingServiceClient: NexusServiceClient {
         screenValue
     }
 
+    func observeSessionScreen(sessionID: UUID, onUpdate: @escaping @Sendable (SessionScreen) -> Void) async throws -> any SessionScreenObservation {
+        let observationID = UUID()
+        observedScreenHandlers[observationID] = onUpdate
+        onUpdate(screenValue)
+        return TestSessionScreenObservation { [weak self] in
+            self?.observedScreenHandlers.removeValue(forKey: observationID)
+        }
+    }
+
     func sendSessionInput(sessionID: UUID, text: String) async throws -> SessionScreen {
         screenValue = SessionScreen(session: sessionValue, transcript: screenValue.transcript + "\n> \(text)")
         return screenValue
@@ -3669,6 +3885,15 @@ private final class TrackingServiceClient: NexusServiceClient {
             terminalRows: rows
         )
         return screenValue
+    }
+
+    func emitObservedScreen(_ screen: SessionScreen) async {
+        sessionValue = screen.session
+        screenValue = screen
+        let handlers = observedScreenHandlers.values
+        for handler in handlers {
+            handler(screen)
+        }
     }
 }
 
@@ -3705,6 +3930,10 @@ private struct FailingServiceClient: NexusServiceClient {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 
+    func observeSessionScreen(sessionID: UUID, onUpdate: @escaping @Sendable (SessionScreen) -> Void) async throws -> any SessionScreenObservation {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
     func sendSessionInput(sessionID: UUID, text: String) async throws -> SessionScreen {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
@@ -3719,5 +3948,35 @@ private struct FailingServiceClient: NexusServiceClient {
 
     func resizeSession(sessionID: UUID, columns: Int, rows: Int) async throws -> SessionScreen {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+}
+
+private final class TestSessionScreenObservation: SessionScreenObservation, @unchecked Sendable {
+    private let onCancel: @Sendable () -> Void
+    private let cancellationState = TestObservationCancellationState()
+
+    init(onCancel: @escaping @Sendable () -> Void) {
+        self.onCancel = onCancel
+    }
+
+    func cancel() async {
+        guard await cancellationState.beginCancellation() else {
+            return
+        }
+
+        onCancel()
+    }
+}
+
+private actor TestObservationCancellationState {
+    private var isCancelled = false
+
+    func beginCancellation() -> Bool {
+        guard isCancelled == false else {
+            return false
+        }
+
+        isCancelled = true
+        return true
     }
 }

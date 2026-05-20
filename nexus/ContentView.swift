@@ -56,6 +56,17 @@ struct ContentView: View {
                 await appModel.refresh()
             }
         }
+        .task(id: selection) {
+            do {
+                if case .session(let sessionID) = selection {
+                    try await appModel.focusSession(sessionID: sessionID)
+                } else {
+                    await appModel.stopFocusingSession()
+                }
+            } catch {
+                presentedError = PresentedError(message: error.localizedDescription)
+            }
+        }
         .sheet(isPresented: $isShowingCreateWorkspaceGroupSheet) {
             createWorkspaceGroupSheet
         }
@@ -272,9 +283,6 @@ struct ContentView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .task(id: sessionID) {
-            await pollSessionScreen(sessionID: sessionID)
-        }
     }
 
     private func providerCard(workspaceID: UUID, card: WorkspaceProviderCard) -> some View {
@@ -515,22 +523,6 @@ struct ContentView: View {
         }
     }
 
-    private func pollSessionScreen(sessionID: UUID) async {
-        while Task.isCancelled == false,
-              case .session(sessionID) = selection {
-            do {
-                try await appModel.loadSessionScreen(sessionID: sessionID)
-            } catch {
-                if Task.isCancelled {
-                    return
-                }
-                presentedError = PresentedError(message: error.localizedDescription)
-                return
-            }
-
-            try? await Task.sleep(for: .milliseconds(50))
-        }
-    }
 }
 
 private enum SidebarSelection: Hashable {

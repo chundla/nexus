@@ -16,6 +16,7 @@ final class NexusAppModel {
 
     private let client: NexusServiceClient
     private let embeddedService: (any NexusEmbeddedServiceSession)?
+    private var focusedSessionObservation: (any SessionScreenObservation)?
 
     init(client: NexusServiceClient, embeddedService: (any NexusEmbeddedServiceSession)? = nil) {
         self.client = client
@@ -49,6 +50,7 @@ final class NexusAppModel {
             self.workspaceOverviews = loadedWorkspaceOverviews
             self.serviceErrorMessage = nil
         } catch {
+            await stopFocusingSession()
             serviceStatus = nil
             workspaceGroups = []
             workspaces = []
@@ -78,21 +80,40 @@ final class NexusAppModel {
 
     func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) async throws -> Session {
         let session = try await client.launchOrResumeDefaultSession(workspaceID: workspaceID, providerID: providerID)
-        focusedSessionScreen = try await client.getSessionScreen(sessionID: session.id)
+        try await focusSession(sessionID: session.id)
         try await refreshWorkspaceOverview(for: workspaceID)
         return session
     }
 
+    func focusSession(sessionID: UUID) async throws {
+        if focusedSessionScreen?.session.id == sessionID, focusedSessionObservation != nil {
+            return
+        }
+
+        await stopFocusingSession()
+        let observation = try await client.observeSessionScreen(sessionID: sessionID) { [weak self] screen in
+            Task { @MainActor [weak self] in
+                guard let self else {
+                    return
+                }
+
+                try? await self.applyFocusedSessionScreen(screen)
+            }
+        }
+        focusedSessionObservation = observation
+    }
+
+    func stopFocusingSession() async {
+        let observation = focusedSessionObservation
+        focusedSessionObservation = nil
+        if let observation {
+            await observation.cancel()
+        }
+    }
+
     func loadSessionScreen(sessionID: UUID) async throws {
         let screen = try await client.getSessionScreen(sessionID: sessionID)
-        let previousState = focusedSessionScreen?.session.id == screen.session.id
-            ? focusedSessionScreen?.session.state
-            : nil
-        focusedSessionScreen = screen
-
-        if let previousState, previousState != screen.session.state {
-            try await refreshWorkspaceOverview(for: screen.session.workspaceID)
-        }
+        try await applyFocusedSessionScreen(screen)
     }
 
     func refreshFocusedSession() async throws {
@@ -160,5 +181,16 @@ final class NexusAppModel {
 
     private func refreshWorkspaceOverview(for workspaceID: UUID) async throws {
         workspaceOverviews[workspaceID] = try await client.getWorkspaceOverview(workspaceID: workspaceID)
+    }
+
+    private func applyFocusedSessionScreen(_ screen: SessionScreen) async throws {
+        let previousState = focusedSessionScreen?.session.id == screen.session.id
+            ? focusedSessionScreen?.session.state
+            : nil
+        focusedSessionScreen = screen
+
+        if let previousState, previousState != screen.session.state {
+            try await refreshWorkspaceOverview(for: screen.session.workspaceID)
+        }
     }
 }

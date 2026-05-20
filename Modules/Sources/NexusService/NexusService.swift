@@ -27,6 +27,8 @@ protocol SessionRuntimeManaging: AnyObject {
     func hasRuntime(for session: Session) -> Bool
     func runtimeState(for session: Session) -> Session.State?
     func sessionScreen(for session: Session) throws -> SessionScreen
+    func addUpdateObserver(id: UUID, for session: Session, observer: @escaping @Sendable () -> Void)
+    func removeUpdateObserver(id: UUID)
     func sendInput(_ text: String, to session: Session) throws -> SessionScreen
     func sendText(_ text: String, to session: Session) throws -> SessionScreen
     func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool, to session: Session) throws -> SessionScreen
@@ -42,29 +44,45 @@ protocol SessionRuntime: AnyObject {
     var transcript: String { get }
     var terminalColumns: Int { get }
     var terminalRows: Int { get }
+    func setChangeHandler(_ handler: (@Sendable () -> Void)?)
     func sendInput(_ text: String) throws
     func sendText(_ text: String) throws
     func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool) throws
     func resize(columns: Int, rows: Int) throws
 }
 
-final class InMemorySessionRuntimeManager: SessionRuntimeManaging {
+final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Sendable {
     private let launcher: any SessionRuntimeLaunching
     private let lock = NSLock()
     private var runtimes: [UUID: any SessionRuntime] = [:]
+    private var updateObservers: [UUID: [UUID: @Sendable () -> Void]] = [:]
+    private var observedSessionIDs: [UUID: UUID] = [:]
 
     init(launcher: any SessionRuntimeLaunching = ProcessSessionRuntimeLauncher()) {
         self.launcher = launcher
     }
 
     func launchOrResume(session: Session, workspace: Workspace, executable: String) throws {
-        try withLock {
+        let shouldCreateRuntime = try withLock {
             if let runtime = runtimes[session.id], runtime.state == .ready {
-                return
+                return false
             }
-
-            runtimes[session.id] = try launcher.makeRuntime(session: session, workspace: workspace, executable: executable)
+            return true
         }
+
+        guard shouldCreateRuntime else {
+            return
+        }
+
+        let runtime = try launcher.makeRuntime(session: session, workspace: workspace, executable: executable)
+        runtime.setChangeHandler { [weak self] in
+            self?.notifyUpdateObservers(for: session.id)
+        }
+
+        try withLock {
+            runtimes[session.id] = runtime
+        }
+        notifyUpdateObservers(for: session.id)
     }
 
     func hasRuntime(for session: Session) -> Bool {
@@ -93,6 +111,27 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging {
             terminalColumns: runtime.terminalColumns,
             terminalRows: runtime.terminalRows
         )
+    }
+
+    func addUpdateObserver(id observationID: UUID, for session: Session, observer: @escaping @Sendable () -> Void) {
+        lock.lock()
+        updateObservers[session.id, default: [:]][observationID] = observer
+        observedSessionIDs[observationID] = session.id
+        lock.unlock()
+    }
+
+    func removeUpdateObserver(id: UUID) {
+        lock.lock()
+        guard let sessionID = observedSessionIDs.removeValue(forKey: id) else {
+            lock.unlock()
+            return
+        }
+
+        updateObservers[sessionID]?.removeValue(forKey: id)
+        if updateObservers[sessionID]?.isEmpty == true {
+            updateObservers.removeValue(forKey: sessionID)
+        }
+        lock.unlock()
     }
 
     func sendInput(_ text: String, to session: Session) throws -> SessionScreen {
@@ -163,6 +202,17 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging {
         )
     }
 
+    private func notifyUpdateObservers(for sessionID: UUID) {
+        let observers: [@Sendable () -> Void]
+        lock.lock()
+        observers = Array(updateObservers[sessionID, default: [:]].values)
+        lock.unlock()
+
+        for observer in observers {
+            observer()
+        }
+    }
+
     private func withLock<T>(_ operation: () throws -> T) throws -> T {
         lock.lock()
         defer { lock.unlock() }
@@ -189,6 +239,7 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
     private var pendingTerminalOutput: String
     private var columns: Int
     private var rows: Int
+    private var changeHandler: (@Sendable () -> Void)?
 
     init(executable: String, workspace: Workspace) throws {
         self.runtimeState = .ready
@@ -239,6 +290,7 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
             self.append(text)
             self.appendTerminalOutput(text)
             self.sendTerminalResponses(queryResponses)
+            self.notifyChange()
         }
         readSource.activate()
 
@@ -255,6 +307,7 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
             self.append("\n[Claude exited with status \(status)]\n")
             self.readSource.cancel()
             self.terminationSource.cancel()
+            self.notifyChange()
         }
         terminationSource.activate()
     }
@@ -294,6 +347,12 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
         return rows
     }
 
+    func setChangeHandler(_ handler: (@Sendable () -> Void)?) {
+        lock.lock()
+        changeHandler = handler
+        lock.unlock()
+    }
+
     func sendInput(_ text: String) throws {
         if text.isEmpty {
             try sendInputKey(.enter, applicationCursorMode: false)
@@ -306,6 +365,7 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
         }
 
         append("\n> \(trimmed)\n")
+        notifyChange()
         guard let data = "\(trimmed)\n".data(using: .utf8) else {
             return
         }
@@ -369,6 +429,7 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
         self.columns = clampedColumns
         self.rows = clampedRows
         lock.unlock()
+        notifyChange()
     }
 
     private func cursorPositionReportResponses(for incomingText: String) -> [String] {
@@ -432,13 +493,21 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
         terminalOutputStorage.append(text)
         lock.unlock()
     }
+
+    private func notifyChange() {
+        let handler: (@Sendable () -> Void)?
+        lock.lock()
+        handler = changeHandler
+        lock.unlock()
+        handler?()
+    }
 }
 
-public final class NexusService: NSObject, NexusEmbeddedServiceSession {
-    nonisolated public let listener: NSXPCListener
-    nonisolated public let storeURL: URL
+public final class NexusService: NSObject, NexusEmbeddedServiceSession, @unchecked Sendable {
+    public let listener: NSXPCListener
+    public let storeURL: URL
 
-    nonisolated public var listenerEndpoint: NSXPCListenerEndpoint {
+    public var listenerEndpoint: NSXPCListenerEndpoint {
         listener.endpoint
     }
 
@@ -463,7 +532,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
         self.listener.resume()
     }
 
-    nonisolated public static func bootstrap() throws -> NexusService {
+    public static func bootstrap() throws -> NexusService {
         let rootURL = try FileManager.default
             .url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
             .appendingPathComponent("Nexus", isDirectory: true)
@@ -471,7 +540,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
         return try bootstrap(rootURL: rootURL)
     }
 
-    nonisolated public static func bootstrapForTests() throws -> NexusService {
+    public static func bootstrapForTests() throws -> NexusService {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -479,7 +548,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
         return try bootstrap(rootURL: rootURL)
     }
 
-    nonisolated public static func bootstrapForTests(rootURL: URL) throws -> NexusService {
+    public static func bootstrapForTests(rootURL: URL) throws -> NexusService {
         try bootstrap(rootURL: rootURL)
     }
 
@@ -495,7 +564,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
         )
     }
 
-    private nonisolated static func bootstrap(
+    private static func bootstrap(
         rootURL: URL,
         providerHealthEvaluator: any ProviderHealthEvaluating = ProviderHealthEvaluator(),
         sessionRuntimeManager: any SessionRuntimeManaging = InMemorySessionRuntimeManager()
@@ -517,7 +586,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
         )
     }
 
-    nonisolated public func serviceStatus() -> NexusServiceStatus {
+    public func serviceStatus() -> NexusServiceStatus {
         NexusServiceStatus(
             state: .running,
             store: .init(
@@ -650,6 +719,31 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
         case .ready:
             return normalizedSessionScreen(try sessionRuntimeManager.sessionScreen(for: resolvedSession))
         }
+    }
+
+    func observeSessionScreen(
+        observationID: UUID,
+        sessionID: UUID,
+        onUpdate: @escaping @Sendable (SessionScreen) -> Void
+    ) throws -> SessionScreenObservationStart {
+        let screen = try getSessionScreen(sessionID: sessionID)
+        sessionRuntimeManager.addUpdateObserver(id: observationID, for: screen.session) { [weak self] in
+            guard let self else {
+                return
+            }
+
+            do {
+                onUpdate(try self.getSessionScreen(sessionID: sessionID))
+            } catch {
+                return
+            }
+        }
+
+        return SessionScreenObservationStart(observationID: observationID, screen: screen)
+    }
+
+    func cancelSessionScreenObservation(observationID: UUID) {
+        sessionRuntimeManager.removeUpdateObserver(id: observationID)
     }
 
     func sendSessionInput(sessionID: UUID, text: String) throws -> SessionScreen {
@@ -1607,8 +1701,16 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
 
 extension NexusService: NSXPCListenerDelegate {
     public func listener(_ listener: NSXPCListener, shouldAcceptNewConnection newConnection: NSXPCConnection) -> Bool {
+        let bridge = NexusXPCBridge(service: self, connection: newConnection)
         newConnection.exportedInterface = NSXPCInterface(with: NexusXPCProtocol.self)
-        newConnection.exportedObject = NexusXPCBridge(service: self)
+        newConnection.exportedObject = bridge
+        newConnection.remoteObjectInterface = NSXPCInterface(with: NexusSessionScreenObserverXPCProtocol.self)
+        newConnection.invalidationHandler = { [weak bridge] in
+            bridge?.invalidate()
+        }
+        newConnection.interruptionHandler = { [weak bridge] in
+            bridge?.invalidate()
+        }
         newConnection.resume()
         return true
     }
@@ -1616,9 +1718,25 @@ extension NexusService: NSXPCListenerDelegate {
 
 private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
     let service: NexusService
+    private let connection: NSXPCConnection
+    private let lock = NSLock()
+    private var observationIDs: Set<UUID> = []
 
-    init(service: NexusService) {
+    init(service: NexusService, connection: NSXPCConnection) {
         self.service = service
+        self.connection = connection
+    }
+
+    func invalidate() {
+        let activeObservationIDs: [UUID]
+        lock.lock()
+        activeObservationIDs = Array(observationIDs)
+        observationIDs.removeAll()
+        lock.unlock()
+
+        for observationID in activeObservationIDs {
+            service.cancelSessionScreenObservation(observationID: observationID)
+        }
     }
 
     func getServiceStatus(_ reply: @escaping (Data?, NSString?) -> Void) {
@@ -1674,6 +1792,42 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
         sendReply(with: { try service.getSessionScreen(sessionID: resolveUUID(sessionID)) }, reply: reply)
     }
 
+    func observeSessionScreen(sessionID: String, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(
+            with: {
+                guard let observer = connection.remoteObjectProxyWithErrorHandler({ _ in }) as? NexusSessionScreenObserverXPCProtocol else {
+                    throw CocoaError(.coderInvalidValue)
+                }
+
+                let observationID = UUID()
+                let screenObserver = SessionScreenObserverProxy(observer: observer, observationID: observationID)
+                let start = try service.observeSessionScreen(observationID: observationID, sessionID: resolveUUID(sessionID)) { screen in
+                    screenObserver.send(screen)
+                }
+
+                lock.lock()
+                observationIDs.insert(start.observationID)
+                lock.unlock()
+                return start
+            },
+            reply: reply
+        )
+    }
+
+    func cancelSessionScreenObservation(observationID: String, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(
+            with: {
+                let resolvedObservationID = try resolveUUID(observationID)
+                service.cancelSessionScreenObservation(observationID: resolvedObservationID)
+                lock.lock()
+                observationIDs.remove(resolvedObservationID)
+                lock.unlock()
+                return true
+            },
+            reply: reply
+        )
+    }
+
     func sendSessionInput(sessionID: String, text: String, reply: @escaping (Data?, NSString?) -> Void) {
         sendReply(
             with: { try service.sendSessionInput(sessionID: resolveUUID(sessionID), text: text) },
@@ -1722,5 +1876,23 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
             throw CocoaError(.coderInvalidValue)
         }
         return uuid
+    }
+}
+
+private final class SessionScreenObserverProxy: @unchecked Sendable {
+    private let observer: any NexusSessionScreenObserverXPCProtocol
+    private let observationID: UUID
+
+    init(observer: any NexusSessionScreenObserverXPCProtocol, observationID: UUID) {
+        self.observer = observer
+        self.observationID = observationID
+    }
+
+    func send(_ screen: SessionScreen) {
+        guard let payload = try? JSONEncoder().encode(screen) else {
+            return
+        }
+
+        observer.sessionScreenDidUpdate(observationID: observationID.uuidString, payload: payload)
     }
 }
