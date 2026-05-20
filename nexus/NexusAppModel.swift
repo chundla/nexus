@@ -11,6 +11,7 @@ final class NexusAppModel {
     var serviceErrorMessage: String?
     var workspaceGroups: [WorkspaceGroup] = []
     var workspaces: [Workspace] = []
+    var workspaceOverviews: [UUID: WorkspaceOverview] = [:]
 
     private let client: NexusServiceClient
     private let embeddedService: (any NexusEmbeddedServiceSession)?
@@ -32,14 +33,25 @@ final class NexusAppModel {
             async let workspaceGroups = client.listWorkspaceGroups()
             async let workspaces = client.listWorkspaces()
 
-            self.serviceStatus = try await serviceStatus
-            self.workspaceGroups = try await workspaceGroups
-            self.workspaces = try await workspaces
+            let loadedServiceStatus = try await serviceStatus
+            let loadedWorkspaceGroups = try await workspaceGroups
+            let loadedWorkspaces = try await workspaces
+
+            var loadedWorkspaceOverviews: [UUID: WorkspaceOverview] = [:]
+            for workspace in loadedWorkspaces {
+                loadedWorkspaceOverviews[workspace.id] = try await client.getWorkspaceOverview(workspaceID: workspace.id)
+            }
+
+            self.serviceStatus = loadedServiceStatus
+            self.workspaceGroups = loadedWorkspaceGroups
+            self.workspaces = loadedWorkspaces
+            self.workspaceOverviews = loadedWorkspaceOverviews
             self.serviceErrorMessage = nil
         } catch {
             serviceStatus = nil
             workspaceGroups = []
             workspaces = []
+            workspaceOverviews = [:]
             serviceErrorMessage = error.localizedDescription
         }
     }
@@ -56,11 +68,17 @@ final class NexusAppModel {
 
     func createLocalWorkspace(folderPath: String, primaryGroupID: UUID?) async throws -> Workspace {
         let workspace = try await client.createLocalWorkspace(name: nil, folderPath: folderPath, primaryGroupID: primaryGroupID)
+        let overview = try await client.getWorkspaceOverview(workspaceID: workspace.id)
         workspaces.append(workspace)
+        workspaceOverviews[workspace.id] = overview
         return workspace
     }
 
     func workspaceGroupName(for groupID: UUID) -> String? {
         workspaceGroups.first(where: { $0.id == groupID })?.name
+    }
+
+    func workspaceOverview(for workspaceID: UUID) -> WorkspaceOverview? {
+        workspaceOverviews[workspaceID]
     }
 }

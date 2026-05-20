@@ -6,6 +6,7 @@ import NexusDomain
     func listWorkspaceGroups(_ reply: @escaping (Data?, NSString?) -> Void)
     func createWorkspaceGroup(name: String, reply: @escaping (Data?, NSString?) -> Void)
     func listWorkspaces(_ reply: @escaping (Data?, NSString?) -> Void)
+    func getWorkspaceOverview(workspaceID: String, reply: @escaping (Data?, NSString?) -> Void)
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: String?, reply: @escaping (Data?, NSString?) -> Void)
 }
 
@@ -14,6 +15,7 @@ public protocol NexusServiceClient {
     func listWorkspaceGroups() async throws -> [WorkspaceGroup]
     func createWorkspaceGroup(name: String) async throws -> WorkspaceGroup
     func listWorkspaces() async throws -> [Workspace]
+    func getWorkspaceOverview(workspaceID: UUID) async throws -> WorkspaceOverview
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: UUID?) async throws -> Workspace
 }
 
@@ -53,6 +55,12 @@ public final class NexusIPCClient: NexusServiceClient {
     nonisolated public func listWorkspaces() async throws -> [Workspace] {
         try await requestDecodable { proxy, reply in
             proxy.listWorkspaces(reply)
+        }
+    }
+
+    nonisolated public func getWorkspaceOverview(workspaceID: UUID) async throws -> WorkspaceOverview {
+        try await requestDecodable { proxy, reply in
+            proxy.getWorkspaceOverview(workspaceID: workspaceID.uuidString, reply: reply)
         }
     }
 

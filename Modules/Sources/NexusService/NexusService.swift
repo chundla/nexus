@@ -95,6 +95,30 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
         try metadataStore.listWorkspaces()
     }
 
+    func getWorkspaceOverview(workspaceID: UUID) throws -> WorkspaceOverview {
+        guard let workspace = try metadataStore.workspace(id: workspaceID) else {
+            throw NexusMetadataStoreError.workspaceNotFound
+        }
+
+        return WorkspaceOverview(
+            workspace: workspace,
+            providerCards: ProviderID.allCases.map { providerID in
+                WorkspaceProviderCard(
+                    provider: Provider(id: providerID),
+                    health: ProviderHealthSummary(
+                        state: .notChecked,
+                        summary: "Health checks coming soon"
+                    ),
+                    defaultSession: ProviderDefaultSessionSummary(
+                        state: .notCreated,
+                        summary: "No default session yet",
+                        actionTitle: "Launch"
+                    )
+                )
+            }
+        )
+    }
+
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: UUID?) throws -> Workspace {
         try metadataStore.createLocalWorkspace(name: name, folderPath: folderPath, primaryGroupID: primaryGroupID)
     }
@@ -130,6 +154,10 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
 
     func listWorkspaces(_ reply: @escaping (Data?, NSString?) -> Void) {
         sendReply(with: service.listWorkspaces, reply: reply)
+    }
+
+    func getWorkspaceOverview(workspaceID: String, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(with: { try service.getWorkspaceOverview(workspaceID: resolveUUID(workspaceID)) }, reply: reply)
     }
 
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: String?, reply: @escaping (Data?, NSString?) -> Void) {

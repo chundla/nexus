@@ -72,6 +72,20 @@ struct nexusTests {
         }
     }
 
+    @Test func workspaceOverviewShowsAllSupportedProvidersOverIPC() async throws {
+        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests()
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(name: nil, folderPath: "/tmp/provider-overview-workspace", primaryGroupID: nil)
+
+        let overview = try await client.getWorkspaceOverview(workspaceID: workspace.id)
+
+        #expect(overview.workspace == workspace)
+        #expect(overview.providerCards.map(\.provider.id) == [.codex, .claude, .ibmBob, .pi])
+        #expect(overview.providerCards.map(\.health.state) == [.notChecked, .notChecked, .notChecked, .notChecked])
+        #expect(overview.providerCards.map(\.defaultSession.state) == [.notCreated, .notCreated, .notCreated, .notCreated])
+    }
+
     @MainActor
     @Test func appModelLoadsWorkspaceCatalogFromIPCClient() async throws {
         let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests()
@@ -85,6 +99,7 @@ struct nexusTests {
         #expect(model.serviceStatus?.state == .running)
         #expect(model.workspaceGroups.map(\.name) == ["Solo Group"])
         #expect(model.workspaces.map(\.name) == ["app-model-workspace"])
+        #expect(model.workspaceOverview(for: try #require(model.workspaces.first).id)?.providerCards.map(\.provider.displayName) == ["Codex", "Claude", "IBM Bob", "Pi"])
     }
 
     @MainActor
@@ -97,6 +112,7 @@ struct nexusTests {
         #expect(model.serviceErrorMessage == "Background Service unavailable")
         #expect(model.workspaceGroups.isEmpty)
         #expect(model.workspaces.isEmpty)
+        #expect(model.workspaceOverviews.isEmpty)
     }
 
     @MainActor
@@ -130,6 +146,10 @@ private struct FailingServiceClient: NexusServiceClient {
 
     func listWorkspaces() async throws -> [Workspace] {
         []
+    }
+
+    func getWorkspaceOverview(workspaceID: UUID) async throws -> WorkspaceOverview {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: UUID?) async throws -> Workspace {

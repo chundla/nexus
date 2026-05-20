@@ -90,25 +90,24 @@ final class NexusMetadataStore {
 
             var workspaces: [Workspace] = []
             while sqlite3_step(statement) == SQLITE_ROW {
-                let id = try readUUID(column: 0, from: statement)
-                let name = try readString(column: 1, from: statement)
-                let kindRawValue = try readString(column: 2, from: statement)
-                guard let kind = Workspace.Kind(rawValue: kindRawValue) else {
-                    throw NexusMetadataStoreError.sqlite("Unknown workspace kind: \(kindRawValue)")
-                }
-                let folderPath = try readString(column: 3, from: statement)
-                let primaryGroupID = try readUUID(column: 4, from: statement)
-                workspaces.append(
-                    Workspace(
-                        id: id,
-                        name: name,
-                        kind: kind,
-                        folderPath: folderPath,
-                        primaryGroupID: primaryGroupID
-                    )
-                )
+                workspaces.append(try readWorkspace(from: statement))
             }
             return workspaces
+        }
+    }
+
+    func workspace(id: UUID) throws -> Workspace? {
+        try withLock {
+            let statement = try prepare(
+                "SELECT id, name, kind, folder_path, primary_group_id FROM workspaces WHERE id = ? LIMIT 1;"
+            )
+            defer { sqlite3_finalize(statement) }
+
+            try bind(id.uuidString, at: 1, in: statement)
+            guard sqlite3_step(statement) == SQLITE_ROW else {
+                return nil
+            }
+            return try readWorkspace(from: statement)
         }
     }
 
@@ -233,6 +232,24 @@ final class NexusMetadataStore {
         return value
     }
 
+    private func readWorkspace(from statement: OpaquePointer?) throws -> Workspace {
+        let id = try readUUID(column: 0, from: statement)
+        let name = try readString(column: 1, from: statement)
+        let kindRawValue = try readString(column: 2, from: statement)
+        guard let kind = Workspace.Kind(rawValue: kindRawValue) else {
+            throw NexusMetadataStoreError.sqlite("Unknown workspace kind: \(kindRawValue)")
+        }
+        let folderPath = try readString(column: 3, from: statement)
+        let primaryGroupID = try readUUID(column: 4, from: statement)
+        return Workspace(
+            id: id,
+            name: name,
+            kind: kind,
+            folderPath: folderPath,
+            primaryGroupID: primaryGroupID
+        )
+    }
+
     private func currentSQLiteError() -> Error {
         NexusMetadataStoreError.sqlite(
             database.map { String(cString: sqlite3_errmsg($0)) } ?? "Unknown SQLite error"
@@ -247,6 +264,7 @@ enum NexusMetadataStoreError: LocalizedError {
     case workspaceGroupRequired
     case primaryWorkspaceGroupSelectionRequired
     case workspaceGroupNotFound
+    case workspaceNotFound
 
     var errorDescription: String? {
         switch self {
@@ -262,6 +280,8 @@ enum NexusMetadataStoreError: LocalizedError {
             "Choose a primary Workspace Group for the new Workspace"
         case .workspaceGroupNotFound:
             "The selected Workspace Group no longer exists"
+        case .workspaceNotFound:
+            "Workspace not found"
         }
     }
 }

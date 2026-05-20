@@ -141,24 +141,74 @@ struct ContentView: View {
 
     private func workspaceDetail(workspaceID: UUID) -> some View {
         let workspace = appModel.workspaces.first(where: { $0.id == workspaceID })
+        let overview = appModel.workspaceOverview(for: workspaceID)
 
-        return VStack(alignment: .leading, spacing: 16) {
-            Text(workspace?.name ?? "Workspace")
-                .font(.title2)
-                .fontWeight(.semibold)
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text(workspace?.name ?? "Workspace")
+                    .font(.title2)
+                    .fontWeight(.semibold)
 
-            if let workspace {
-                LabeledContent("Kind", value: workspace.kind.rawValue)
-                LabeledContent("Folder", value: workspace.folderPath)
-                LabeledContent("Primary Group", value: appModel.workspaceGroupName(for: workspace.primaryGroupID) ?? workspace.primaryGroupID.uuidString)
-            } else {
-                Text("Workspace not found.")
+                if let workspace {
+                    LabeledContent("Kind", value: workspace.kind.rawValue)
+                    LabeledContent("Folder", value: workspace.folderPath)
+                    LabeledContent("Primary Group", value: appModel.workspaceGroupName(for: workspace.primaryGroupID) ?? workspace.primaryGroupID.uuidString)
+
+                    Divider()
+
+                    Text("Providers")
+                        .font(.title3)
+                        .fontWeight(.semibold)
+
+                    if let overview {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 16)], spacing: 16) {
+                            ForEach(overview.providerCards) { card in
+                                providerCard(card)
+                            }
+                        }
+                    } else {
+                        Text("Loading provider overview…")
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text("Workspace not found.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func providerCard(_ card: WorkspaceProviderCard) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(card.provider.displayName)
+                .font(.headline)
+
+            Label(card.health.state.rawValue.replacingOccurrences(of: "Checked", with: " checked"), systemImage: "waveform.path.ecg")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            Text(card.health.summary)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Default Session")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                Text(card.defaultSession.summary)
+                    .font(.callout)
                     .foregroundStyle(.secondary)
             }
 
-            Spacer()
+            Button(card.defaultSession.actionTitle) {
+            }
+            .disabled(true)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var createWorkspaceGroupSheet: some View {
