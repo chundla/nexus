@@ -47,9 +47,21 @@ final class NexusMetadataStore {
                 provider_id TEXT NOT NULL,
                 is_default INTEGER NOT NULL,
                 state TEXT NOT NULL,
-                failure_message TEXT
+                failure_message TEXT,
+                terminal_columns INTEGER NOT NULL DEFAULT 80,
+                terminal_rows INTEGER NOT NULL DEFAULT 24
             );
             """
+        )
+        try ensureColumnExists(
+            table: "sessions",
+            column: "terminal_columns",
+            definition: "INTEGER NOT NULL DEFAULT 80"
+        )
+        try ensureColumnExists(
+            table: "sessions",
+            column: "terminal_rows",
+            definition: "INTEGER NOT NULL DEFAULT 24"
         )
     }
 
@@ -176,7 +188,7 @@ final class NexusMetadataStore {
             )
 
             let statement = try prepare(
-                "INSERT INTO sessions (id, workspace_id, provider_id, is_default, state, failure_message) VALUES (?, ?, ?, ?, ?, ?);"
+                "INSERT INTO sessions (id, workspace_id, provider_id, is_default, state, failure_message, terminal_columns, terminal_rows) VALUES (?, ?, ?, ?, ?, ?, ?, ?);"
             )
             defer { sqlite3_finalize(statement) }
 
@@ -186,6 +198,8 @@ final class NexusMetadataStore {
             try bind(session.isDefault ? 1 : 0, at: 4, in: statement)
             try bind(session.state.rawValue, at: 5, in: statement)
             try bind(failureMessage, at: 6, in: statement)
+            try bind(80, at: 7, in: statement)
+            try bind(24, at: 8, in: statement)
             try stepDone(statement)
             return session
         }
@@ -239,6 +253,39 @@ final class NexusMetadataStore {
         return candidate.isEmpty ? folderPath : candidate
     }
 
+    func updateSessionTerminalSize(id: UUID, columns: Int, rows: Int) throws {
+        try withLock {
+            let statement = try prepare(
+                "UPDATE sessions SET terminal_columns = ?, terminal_rows = ? WHERE id = ?;"
+            )
+            defer { sqlite3_finalize(statement) }
+
+            try bind(Int32(max(1, columns)), at: 1, in: statement)
+            try bind(Int32(max(1, rows)), at: 2, in: statement)
+            try bind(id.uuidString, at: 3, in: statement)
+            try stepDone(statement)
+        }
+    }
+
+    func sessionTerminalSize(id: UUID) throws -> (columns: Int, rows: Int) {
+        try withLock {
+            let statement = try prepare(
+                "SELECT terminal_columns, terminal_rows FROM sessions WHERE id = ? LIMIT 1;"
+            )
+            defer { sqlite3_finalize(statement) }
+
+            try bind(id.uuidString, at: 1, in: statement)
+            guard sqlite3_step(statement) == SQLITE_ROW else {
+                throw NexusMetadataStoreError.sessionNotFound
+            }
+
+            return (
+                columns: Int(sqlite3_column_int(statement, 0)),
+                rows: Int(sqlite3_column_int(statement, 1))
+            )
+        }
+    }
+
     private func defaultSessionWithoutLock(workspaceID: UUID, providerID: ProviderID) throws -> Session? {
         let statement = try prepare(
             "SELECT id, workspace_id, provider_id, is_default, state, failure_message FROM sessions WHERE workspace_id = ? AND provider_id = ? AND is_default = 1 LIMIT 1;"
@@ -283,6 +330,19 @@ final class NexusMetadataStore {
             groups.append(WorkspaceGroup(id: id, name: name))
         }
         return groups
+    }
+
+    private func ensureColumnExists(table: String, column: String, definition: String) throws {
+        let statement = try prepare("PRAGMA table_info(\(table));")
+        defer { sqlite3_finalize(statement) }
+
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if readOptionalString(column: 1, from: statement) == column {
+                return
+            }
+        }
+
+        try execute("ALTER TABLE \(table) ADD COLUMN \(column) \(definition);")
     }
 
     private func withLock<T>(_ operation: () throws -> T) throws -> T {

@@ -1117,6 +1117,59 @@ struct nexusTests {
         #expect(screen.transcript.contains("\u{001B}") == false)
     }
 
+    @Test func liveClaudeRuntimeAcceptsEmptyInputAsEnterOverIPC() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let executableURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: false)
+        try """
+        #!/usr/bin/env python3
+        import sys
+
+        print("Press enter to continue", flush=True)
+        line = sys.stdin.readline()
+        if line == "\\n":
+            print("Enter received", flush=True)
+        else:
+            print(f"Unexpected input: {line!r}", flush=True)
+        """.write(to: executableURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            )
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+
+        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        _ = try await waitForSessionScreen(client: client, sessionID: session.id) { currentScreen in
+            currentScreen.transcript.contains("Press enter to continue")
+        }
+
+        _ = try await client.sendSessionInput(sessionID: session.id, text: "")
+        let screen = try await waitForSessionScreen(client: client, sessionID: session.id) { currentScreen in
+            currentScreen.transcript.contains("Enter received")
+        }
+
+        #expect(screen.transcript.contains("Enter received"))
+    }
+
     @Test func exitedClaudeRuntimeBecomesInspectableAndRelaunchableOverIPC() async throws {
         let workspaceFolderURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1212,6 +1265,52 @@ struct nexusTests {
         #expect(interruptedScreen.session.id == launchedSession.id)
         #expect(interruptedScreen.session.state == .interrupted)
         #expect(interruptedScreen.transcript.contains("service restarted"))
+    }
+
+    @Test func interruptedSessionRetainsLastTerminalSizeAfterServiceRestart() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let healthEvaluator = ProviderHealthEvaluator(
+            executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+            commandRunner: StubCommandRunner(results: [
+                StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+            ])
+        )
+
+        let firstService = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: healthEvaluator,
+            sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
+        )
+        let firstClient = try NexusIPCClient.connect(to: firstService.listenerEndpoint)
+        _ = try await firstClient.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await firstClient.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+        let launchedSession = try await firstClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let resizedScreen = try await firstClient.resizeSession(sessionID: launchedSession.id, columns: 132, rows: 40)
+
+        let restartedService = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: healthEvaluator,
+            sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
+        )
+        let restartedClient = try NexusIPCClient.connect(to: restartedService.listenerEndpoint)
+        let interruptedScreen = try await restartedClient.getSessionScreen(sessionID: launchedSession.id)
+
+        #expect(resizedScreen.terminalColumns == 132)
+        #expect(resizedScreen.terminalRows == 40)
+        #expect(interruptedScreen.session.state == .interrupted)
+        #expect(interruptedScreen.terminalColumns == 132)
+        #expect(interruptedScreen.terminalRows == 40)
     }
 
     @Test func interruptedDefaultSessionCanBeRelaunchedAfterServiceRestart() async throws {

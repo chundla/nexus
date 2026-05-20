@@ -208,6 +208,7 @@ struct ContentView: View {
                         ForEach(Array(screen.visibleLines.enumerated()), id: \.offset) { index, line in
                             Text(renderedTerminalLine(line, row: index, screen: screen))
                                 .font(.system(.body, design: .monospaced))
+                                .foregroundStyle(.white)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
@@ -265,7 +266,7 @@ struct ContentView: View {
                         }
                     }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(isReady == false || sessionInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(isReady == false)
                 }
             } else {
                 ContentUnavailableView(
