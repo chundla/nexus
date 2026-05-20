@@ -632,6 +632,17 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                 }
                 let blanks = Array(repeating: Character(" "), count: insertCount)
                 lines[cursorLine].insert(contentsOf: blanks, at: cursorColumn)
+            case "M":
+                ensureCurrentLine()
+                let deleteCount = max(0, defaultValue)
+                guard deleteCount > 0 else {
+                    break
+                }
+                let endLine = min(lines.count, cursorLine + deleteCount)
+                if cursorLine < endLine {
+                    lines.removeSubrange(cursorLine..<endLine)
+                }
+                ensureCurrentLine()
             case "P":
                 ensureCurrentLine()
                 guard cursorColumn < lines[cursorLine].count else {
