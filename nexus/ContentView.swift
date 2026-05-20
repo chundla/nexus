@@ -504,6 +504,8 @@ struct ContentView: View {
             "Esc"
         case .backspace:
             "⌫"
+        case .deleteForward:
+            "Del"
         case .endOfTransmission:
             "⌃D"
         case .interrupt:
@@ -646,6 +648,8 @@ func mapSessionTerminalInput(
         return .key(.backspace)
     case 53:
         return .key(.escape)
+    case 117:
+        return .key(.deleteForward)
     case 123:
         return .key(.leftArrow)
     case 124:

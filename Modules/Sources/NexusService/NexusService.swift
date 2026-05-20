@@ -317,6 +317,8 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
             escapeSequence = "\u{001B}"
         case .backspace:
             escapeSequence = "\u{007F}"
+        case .deleteForward:
+            escapeSequence = "\u{001B}[3~"
         case .endOfTransmission:
             escapeSequence = "\u{0004}"
         case .interrupt:
