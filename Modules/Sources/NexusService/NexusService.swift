@@ -987,6 +987,16 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                     cursorLine = savedCursorLine
                     cursorColumn = savedCursorColumn
                     ensureCurrentLine()
+                } else if next == "D" {
+                    let visibleLineCount = max(lines.count, cursorLine + 1)
+                    if cursorLine + 1 < visibleLineCount {
+                        cursorLine += 1
+                    } else {
+                        lines.removeFirst()
+                        lines.append([])
+                        cursorLine = max(0, visibleLineCount - 1)
+                    }
+                    ensureCurrentLine()
                 } else if next == "M" {
                     if cursorLine > 0 {
                         cursorLine -= 1
