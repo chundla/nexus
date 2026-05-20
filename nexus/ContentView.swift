@@ -205,8 +205,8 @@ struct ContentView: View {
 
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 2) {
-                        ForEach(Array(screen.visibleLines.enumerated()), id: \.offset) { _, line in
-                            Text(line.isEmpty ? " " : line)
+                        ForEach(Array(screen.visibleLines.enumerated()), id: \.offset) { index, line in
+                            Text(renderedTerminalLine(line, row: index, screen: screen))
                                 .font(.system(.body, design: .monospaced))
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
@@ -461,6 +461,17 @@ struct ContentView: View {
         pendingWorkspaceGroupID = appModel.workspaceGroups.first?.id
         isShowingWorkspaceGroupPicker = true
     }
+    private func renderedTerminalLine(_ line: String, row: Int, screen: SessionScreen) -> String {
+        guard row == screen.cursorRow else {
+            return line.isEmpty ? " " : line
+        }
+
+        let clampedColumn = max(0, min(screen.cursorColumn, line.count))
+        let insertionIndex = line.index(line.startIndex, offsetBy: clampedColumn)
+        let withCursor = String(line[..<insertionIndex]) + "█" + String(line[insertionIndex...])
+        return withCursor.isEmpty ? "█" : withCursor
+    }
+
     private func reportTerminalSize(_ size: CGSize) {
         guard appModel.focusedSessionScreen?.session.state == .ready else {
             return

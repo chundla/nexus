@@ -38,30 +38,38 @@ public struct SessionScreen: Codable, Equatable, Sendable {
     public let terminalColumns: Int
     public let terminalRows: Int
     public let visibleLines: [String]
+    public let cursorRow: Int
+    public let cursorColumn: Int
 
     public init(
         session: Session,
         transcript: String,
         terminalColumns: Int = 80,
         terminalRows: Int = 24,
-        visibleLines: [String]? = nil
+        visibleLines: [String]? = nil,
+        cursorRow: Int? = nil,
+        cursorColumn: Int? = nil
     ) {
-        self.session = session
-        self.transcript = transcript
-        self.terminalColumns = terminalColumns
-        self.terminalRows = terminalRows
-        self.visibleLines = visibleLines ?? Self.makeVisibleLines(
+        let viewport = Self.makeViewport(
             transcript: transcript,
             terminalColumns: terminalColumns,
             terminalRows: terminalRows
         )
+
+        self.session = session
+        self.transcript = transcript
+        self.terminalColumns = terminalColumns
+        self.terminalRows = terminalRows
+        self.visibleLines = visibleLines ?? viewport.visibleLines
+        self.cursorRow = cursorRow ?? viewport.cursorRow
+        self.cursorColumn = cursorColumn ?? viewport.cursorColumn
     }
 
-    private static func makeVisibleLines(
+    private static func makeViewport(
         transcript: String,
         terminalColumns: Int,
         terminalRows: Int
-    ) -> [String] {
+    ) -> (visibleLines: [String], cursorRow: Int, cursorColumn: Int) {
         let columns = max(1, terminalColumns)
         let rows = max(1, terminalRows)
         var wrappedLines: [String] = []
@@ -83,9 +91,13 @@ public struct SessionScreen: Codable, Equatable, Sendable {
         }
 
         if wrappedLines.isEmpty {
-            return [""]
+            wrappedLines = [""]
         }
 
-        return Array(wrappedLines.suffix(rows))
+        let cursorSourceLine = wrappedLines.last ?? ""
+        let visibleLines = Array(wrappedLines.suffix(rows))
+        let cursorRow = max(0, visibleLines.count - 1)
+        let cursorColumn = min(cursorSourceLine.count, columns)
+        return (visibleLines, cursorRow, cursorColumn)
     }
 }
