@@ -245,8 +245,46 @@ struct nexusTests {
 
         #expect(firstScreen.session == session)
         #expect(firstScreen.transcript == "Claude ready")
+        #expect(firstScreen.terminalColumns == 80)
+        #expect(firstScreen.terminalRows == 24)
         #expect(updatedScreen.transcript.contains("> help"))
         #expect(updatedScreen.transcript.contains("Claude acknowledged: help"))
+    }
+
+    @Test func launchedSessionCanBeResizedOverIPC() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let runtimeManager = StubSessionRuntimeManager(initialTranscript: "Claude ready")
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            ),
+            sessionRuntimeManager: runtimeManager
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+
+        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let resizedScreen = try await client.resizeSession(sessionID: session.id, columns: 132, rows: 40)
+
+        #expect(resizedScreen.session == session)
+        #expect(resizedScreen.transcript == "Claude ready")
+        #expect(resizedScreen.terminalColumns == 132)
+        #expect(resizedScreen.terminalRows == 40)
     }
 
     @Test func launchOrResumeDefaultSessionPersistsFailedClaudeSessionWhenLaunchabilityFails() async throws {
@@ -374,6 +412,43 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelResizeFocusedSessionUpdatesTerminalDimensions() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            ),
+            sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+        _ = try await model.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        try await model.resizeFocusedSession(columns: 100, rows: 30)
+
+        #expect(model.focusedSessionScreen?.terminalColumns == 100)
+        #expect(model.focusedSessionScreen?.terminalRows == 30)
+        #expect(model.focusedSessionScreen?.transcript == "Claude ready")
+    }
+
+    @MainActor
     @Test func appModelReportsUnavailableServiceWhenStatusRefreshFails() async {
         let model = NexusAppModel(client: FailingServiceClient())
 
@@ -445,6 +520,7 @@ private struct StubCommandRunner: ProviderCommandRunning {
 private final class StubSessionRuntimeManager: SessionRuntimeManaging {
     private let initialTranscript: String
     private var transcripts: [UUID: String] = [:]
+    private var sizes: [UUID: (columns: Int, rows: Int)] = [:]
 
     init(initialTranscript: String = "") {
         self.initialTranscript = initialTranscript
@@ -454,17 +530,42 @@ private final class StubSessionRuntimeManager: SessionRuntimeManaging {
         if transcripts[session.id] == nil {
             transcripts[session.id] = initialTranscript
         }
+        if sizes[session.id] == nil {
+            sizes[session.id] = (80, 24)
+        }
     }
 
     func sessionScreen(for session: Session) throws -> SessionScreen {
-        SessionScreen(session: session, transcript: transcripts[session.id, default: initialTranscript])
+        let size = sizes[session.id] ?? (80, 24)
+        return SessionScreen(
+            session: session,
+            transcript: transcripts[session.id, default: initialTranscript],
+            terminalColumns: size.columns,
+            terminalRows: size.rows
+        )
     }
 
     func sendInput(_ text: String, to session: Session) throws -> SessionScreen {
         let prefix = transcripts[session.id, default: initialTranscript]
         let separator = prefix.isEmpty ? "" : "\n"
         transcripts[session.id] = prefix + separator + "> \(text)\nClaude acknowledged: \(text)"
-        return SessionScreen(session: session, transcript: transcripts[session.id] ?? "")
+        let size = sizes[session.id] ?? (80, 24)
+        return SessionScreen(
+            session: session,
+            transcript: transcripts[session.id] ?? "",
+            terminalColumns: size.columns,
+            terminalRows: size.rows
+        )
+    }
+
+    func resize(session: Session, columns: Int, rows: Int) throws -> SessionScreen {
+        sizes[session.id] = (columns, rows)
+        return SessionScreen(
+            session: session,
+            transcript: transcripts[session.id, default: initialTranscript],
+            terminalColumns: columns,
+            terminalRows: rows
+        )
     }
 }
 
@@ -502,6 +603,10 @@ private struct FailingServiceClient: NexusServiceClient {
     }
 
     func sendSessionInput(sessionID: UUID, text: String) async throws -> SessionScreen {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func resizeSession(sessionID: UUID, columns: Int, rows: Int) async throws -> SessionScreen {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 }

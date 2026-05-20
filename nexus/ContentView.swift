@@ -12,6 +12,7 @@ struct ContentView: View {
     @State private var pendingWorkspaceGroupID: UUID?
     @State private var isShowingWorkspaceGroupPicker = false
     @State private var sessionInput = ""
+    @State private var terminalViewportSize: CGSize = .zero
     @State private var presentedError: PresentedError?
 
     var body: some View {
@@ -192,10 +193,27 @@ struct ContentView: View {
                     .font(.title2)
                     .fontWeight(.semibold)
 
+                Text("Terminal: \(screen.terminalColumns) × \(screen.terminalRows)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 TextEditor(text: .constant(screen.transcript))
                     .font(.system(.body, design: .monospaced))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .border(.quaternary)
+                    .background {
+                        GeometryReader { proxy in
+                            Color.clear
+                                .onAppear {
+                                    terminalViewportSize = proxy.size
+                                    reportTerminalSize(proxy.size)
+                                }
+                                .onChange(of: proxy.size) { _, newSize in
+                                    terminalViewportSize = newSize
+                                    reportTerminalSize(newSize)
+                                }
+                        }
+                    }
 
                 HStack(alignment: .bottom, spacing: 12) {
                     TextField("Send input to session", text: $sessionInput, axis: .vertical)
@@ -405,6 +423,31 @@ struct ContentView: View {
         pendingWorkspaceFolderPath = folderPath
         pendingWorkspaceGroupID = appModel.workspaceGroups.first?.id
         isShowingWorkspaceGroupPicker = true
+    }
+    private func reportTerminalSize(_ size: CGSize) {
+        guard appModel.focusedSessionScreen != nil else {
+            return
+        }
+
+        let columns = max(40, Int(size.width / 8))
+        let rows = max(12, Int(size.height / 18))
+        guard columns > 0, rows > 0 else {
+            return
+        }
+
+        if let screen = appModel.focusedSessionScreen,
+           screen.terminalColumns == columns,
+           screen.terminalRows == rows {
+            return
+        }
+
+        Task {
+            do {
+                try await appModel.resizeFocusedSession(columns: columns, rows: rows)
+            } catch {
+                presentedError = PresentedError(message: error.localizedDescription)
+            }
+        }
     }
 }
 

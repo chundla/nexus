@@ -33,9 +33,13 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
 public struct SessionScreen: Codable, Equatable, Sendable {
     public let session: Session
     public let transcript: String
+    public let terminalColumns: Int
+    public let terminalRows: Int
 
-    public init(session: Session, transcript: String) {
+    public init(session: Session, transcript: String, terminalColumns: Int = 80, terminalRows: Int = 24) {
         self.session = session
         self.transcript = transcript
+        self.terminalColumns = terminalColumns
+        self.terminalRows = terminalRows
     }
 }

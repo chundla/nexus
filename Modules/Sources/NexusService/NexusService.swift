@@ -25,6 +25,7 @@ protocol SessionRuntimeManaging: AnyObject {
     func launchOrResume(session: Session, workspace: Workspace, executable: String) throws
     func sessionScreen(for session: Session) throws -> SessionScreen
     func sendInput(_ text: String, to session: Session) throws -> SessionScreen
+    func resize(session: Session, columns: Int, rows: Int) throws -> SessionScreen
 }
 
 protocol SessionRuntimeLaunching {
@@ -33,7 +34,10 @@ protocol SessionRuntimeLaunching {
 
 protocol SessionRuntime: AnyObject {
     var transcript: String { get }
+    var terminalColumns: Int { get }
+    var terminalRows: Int { get }
     func sendInput(_ text: String) throws
+    func resize(columns: Int, rows: Int) throws
 }
 
 final class InMemorySessionRuntimeManager: SessionRuntimeManaging {
@@ -61,7 +65,12 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging {
             return runtime
         }
 
-        return SessionScreen(session: session, transcript: runtime.transcript)
+        return SessionScreen(
+            session: session,
+            transcript: runtime.transcript,
+            terminalColumns: runtime.terminalColumns,
+            terminalRows: runtime.terminalRows
+        )
     }
 
     func sendInput(_ text: String, to session: Session) throws -> SessionScreen {
@@ -73,7 +82,29 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging {
         }
 
         try runtime.sendInput(text)
-        return SessionScreen(session: session, transcript: runtime.transcript)
+        return SessionScreen(
+            session: session,
+            transcript: runtime.transcript,
+            terminalColumns: runtime.terminalColumns,
+            terminalRows: runtime.terminalRows
+        )
+    }
+
+    func resize(session: Session, columns: Int, rows: Int) throws -> SessionScreen {
+        let runtime = try withLock {
+            guard let runtime = runtimes[session.id] else {
+                throw NexusMetadataStoreError.sessionNotFound
+            }
+            return runtime
+        }
+
+        try runtime.resize(columns: columns, rows: rows)
+        return SessionScreen(
+            session: session,
+            transcript: runtime.transcript,
+            terminalColumns: runtime.terminalColumns,
+            terminalRows: runtime.terminalRows
+        )
     }
 
     private func withLock<T>(_ operation: () throws -> T) throws -> T {
@@ -95,10 +126,14 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
     private let outputHandle: FileHandle
     private let lock = NSLock()
     private var storage: String
+    private var columns: Int
+    private var rows: Int
 
     init(executable: String, workspace: Workspace) throws {
         self.process = Process()
         self.storage = "Launching \(workspace.name) with Claude…\n"
+        self.columns = 80
+        self.rows = 24
 
         let inputPipe = Pipe()
         let outputPipe = Pipe()
@@ -137,6 +172,18 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
         return storage
     }
 
+    var terminalColumns: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return columns
+    }
+
+    var terminalRows: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return rows
+    }
+
     func sendInput(_ text: String) throws {
         let trimmed = text.trimmingCharacters(in: .newlines)
         guard trimmed.isEmpty == false else {
@@ -148,6 +195,13 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
             return
         }
         inputHandle.write(data)
+    }
+
+    func resize(columns: Int, rows: Int) throws {
+        lock.lock()
+        self.columns = max(1, columns)
+        self.rows = max(1, rows)
+        lock.unlock()
     }
 
     private func append(_ text: String) {
@@ -362,6 +416,18 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
         return try sessionRuntimeManager.sendInput(text, to: session)
     }
 
+    func resizeSession(sessionID: UUID, columns: Int, rows: Int) throws -> SessionScreen {
+        guard let session = try metadataStore.session(id: sessionID) else {
+            throw NexusMetadataStoreError.sessionNotFound
+        }
+
+        guard session.state == .ready else {
+            throw NexusMetadataStoreError.sessionNotReady
+        }
+
+        return try sessionRuntimeManager.resize(session: session, columns: columns, rows: rows)
+    }
+
     private func defaultSessionSummary(for workspace: Workspace, providerID: ProviderID) throws -> ProviderDefaultSessionSummary {
         guard let session = try metadataStore.defaultSession(workspaceID: workspace.id, providerID: providerID) else {
             return ProviderDefaultSessionSummary(
@@ -462,6 +528,13 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
     func sendSessionInput(sessionID: String, text: String, reply: @escaping (Data?, NSString?) -> Void) {
         sendReply(
             with: { try service.sendSessionInput(sessionID: resolveUUID(sessionID), text: text) },
+            reply: reply
+        )
+    }
+
+    func resizeSession(sessionID: String, columns: Int, rows: Int, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(
+            with: { try service.resizeSession(sessionID: resolveUUID(sessionID), columns: columns, rows: rows) },
             reply: reply
         )
     }

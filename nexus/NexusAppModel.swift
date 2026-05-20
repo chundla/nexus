@@ -95,6 +95,14 @@ final class NexusAppModel {
         focusedSessionScreen = try await client.sendSessionInput(sessionID: sessionID, text: text)
     }
 
+    func resizeFocusedSession(columns: Int, rows: Int) async throws {
+        guard let sessionID = focusedSessionScreen?.session.id else {
+            return
+        }
+
+        focusedSessionScreen = try await client.resizeSession(sessionID: sessionID, columns: columns, rows: rows)
+    }
+
     func workspaceGroupName(for groupID: UUID) -> String? {
         workspaceGroups.first(where: { $0.id == groupID })?.name
     }
