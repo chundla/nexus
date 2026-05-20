@@ -31,6 +31,12 @@ Responsibilities:
 - PTY/process ownership
 - diagnostics
 
+Current bootstrap implementation:
+- lives in the shared `NexusService` module
+- is bootstrapped by the app through `NexusEmbeddedServiceBootstrap`
+- exposes a narrow embedded-session surface to the app (`listenerEndpoint`, `storeURL`)
+- currently proves the boundary with service-owned SQLite metadata-store creation and `getServiceStatus()` over real local IPC
+
 ### NexusDomain
 
 Responsibilities:

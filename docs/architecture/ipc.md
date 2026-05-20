@@ -9,6 +9,16 @@ The macOS app talks to the Background Service over real local IPC.
 - App requests actions in Nexus concepts.
 - Terminal streaming is attached separately from CRUD-style requests.
 
+## Current milestone-one bootstrap
+
+The current bootstrap path is implemented and exercised end-to-end:
+
+- the macOS app bootstraps an embedded Background Service session at launch
+- the app connects over real local `NSXPCConnection` / `NSXPCListener`
+- the bootstrap uses an anonymous listener endpoint owned by the embedded service session
+- shared domain payloads are serialized across the XPC boundary as `Data`
+- `getServiceStatus()` is the first live IPC call on that boundary
+
 ## Milestone one API surface
 
 ### Workspace groups

@@ -6,27 +6,20 @@
 //
 
 import SwiftUI
-import SwiftData
 
 @main
 struct nexusApp: App {
-    var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            Item.self,
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-
+    @State private var appModel = {
         do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
+            return try NexusAppModel.live()
         } catch {
-            fatalError("Could not create ModelContainer: \(error)")
+            fatalError("Could not bootstrap Nexus background service: \(error)")
         }
     }()
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(appModel: appModel)
         }
-        .modelContainer(sharedModelContainer)
     }
 }

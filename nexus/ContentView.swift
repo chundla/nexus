@@ -5,76 +5,54 @@
 //  Created by Chandler on 5/18/26.
 //
 
+import NexusDomain
 import SwiftUI
-import SwiftData
 
 struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+    @Bindable var appModel: NexusAppModel
 
     var body: some View {
-        NavigationViewWrapper {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
-                    }
-                }
-                .onDelete(perform: deleteItems)
-            }
-#if os(macOS)
-            .navigationSplitViewColumnWidth(min: 180, ideal: 200)
-#endif
-            .toolbar {
-#if os(iOS)
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
-                }
-#endif
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
-                }
-            }
-        }
-    }
-
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
-        }
-    }
-
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
-            }
-        }
-    }
-}
-
-fileprivate struct NavigationViewWrapper<Content: View>: View {
-    let content: () -> Content
-
-    var body: some View {
-#if os(macOS)
         NavigationSplitView {
-            content()
-        } detail: {
-            Text("Select an item")
-        }
-#else
-        content()
+            List {
+                Label("Background Service", systemImage: "server.rack")
+            }
+#if os(macOS)
+            .navigationSplitViewColumnWidth(min: 200, ideal: 220)
 #endif
+        } detail: {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Nexus Service Status")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+
+                if let serviceStatus = appModel.serviceStatus {
+                    LabeledContent("State", value: serviceStatus.state.rawValue)
+                    LabeledContent("Store", value: serviceStatus.store.kind.rawValue)
+                    LabeledContent("Owner", value: serviceStatus.store.owner.rawValue)
+                    LabeledContent("Location", value: serviceStatus.store.location.path(percentEncoded: false))
+                } else if let serviceErrorMessage = appModel.serviceErrorMessage {
+                    ContentUnavailableView("Background Service unavailable", systemImage: "exclamationmark.triangle", description: Text(serviceErrorMessage))
+                } else {
+                    Text("Loading service status…")
+                        .foregroundStyle(.secondary)
+                }
+
+                Button("Refresh Status") {
+                    Task {
+                        await appModel.refreshServiceStatus()
+                    }
+                }
+            }
+            .padding()
+            .task {
+                if appModel.serviceStatus == nil {
+                    await appModel.refreshServiceStatus()
+                }
+            }
+        }
     }
 }
 
 #Preview {
-    ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
+    ContentView(appModel: try! .live())
 }

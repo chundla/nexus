@@ -75,9 +75,14 @@ Prove the Nexus architecture with a useful macOS-only local-workspace slice cent
 - terminal-first view
 - restored last active session and basic viewing state when feasible
 
+## Current bootstrap decisions
+
+- local IPC bootstrap uses anonymous `NSXPCListener` / `NSXPCConnection`
+- the first live service API is `getServiceStatus()`
+- the Background Service owns a SQLite metadata store created by the service runtime
+
 ## Open implementation choices
 
-- exact local IPC technology
-- exact SQLite layer/library
+- exact SQLite layer/library beyond the bootstrap store file
 - exact macOS terminal component
 - which provider adapter to implement first
