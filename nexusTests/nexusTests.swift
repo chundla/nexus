@@ -3307,6 +3307,61 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelLoadSessionScreenDoesNotRefreshWorkspaceOverviewDuringTerminalPolling() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let screen = SessionScreen(session: session, transcript: "Claude ready")
+        let client = TrackingServiceClient(workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []), session: session, screen: screen)
+        let model = NexusAppModel(client: client)
+
+        try await model.loadSessionScreen(sessionID: session.id)
+
+        #expect(model.focusedSessionScreen == screen)
+        #expect(client.workspaceOverviewRequestCount == 0)
+    }
+
+    @MainActor
+    @Test func appModelSendTypedTextDoesNotRefreshWorkspaceOverviewWhileTyping() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let initialScreen = SessionScreen(session: session, transcript: "Claude ready")
+        let client = TrackingServiceClient(workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []), session: session, screen: initialScreen)
+        let model = NexusAppModel(client: client)
+        model.focusedSessionScreen = initialScreen
+
+        try await model.sendTypedTextToFocusedSession("abc")
+
+        #expect(model.focusedSessionScreen?.transcript == "Claude ready[typed: abc]")
+        #expect(client.workspaceOverviewRequestCount == 0)
+    }
+
+    @MainActor
     @Test func appModelResizeFocusedSessionUpdatesTerminalDimensions() async throws {
         let workspaceFolderURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -3542,6 +3597,78 @@ private final class StubSessionRuntimeManager: SessionRuntimeManaging {
             terminalColumns: columns,
             terminalRows: rows
         )
+    }
+}
+
+private final class TrackingServiceClient: NexusServiceClient {
+    private let workspaceOverviewValue: WorkspaceOverview
+    private let sessionValue: Session
+    private var screenValue: SessionScreen
+
+    var workspaceOverviewRequestCount = 0
+
+    init(workspaceOverview: WorkspaceOverview, session: Session, screen: SessionScreen) {
+        self.workspaceOverviewValue = workspaceOverview
+        self.sessionValue = session
+        self.screenValue = screen
+    }
+
+    func getServiceStatus() async throws -> NexusServiceStatus {
+        NexusServiceStatus(state: .running, store: .init(kind: .sqlite, owner: .backgroundService, location: URL(fileURLWithPath: "/tmp/Nexus.sqlite")))
+    }
+
+    func listWorkspaceGroups() async throws -> [WorkspaceGroup] {
+        [WorkspaceGroup(id: workspaceOverviewValue.workspace.primaryGroupID, name: "Group")]
+    }
+
+    func createWorkspaceGroup(name: String) async throws -> WorkspaceGroup {
+        WorkspaceGroup(id: UUID(), name: name)
+    }
+
+    func listWorkspaces() async throws -> [Workspace] {
+        [workspaceOverviewValue.workspace]
+    }
+
+    func getWorkspaceOverview(workspaceID: UUID) async throws -> WorkspaceOverview {
+        workspaceOverviewRequestCount += 1
+        return workspaceOverviewValue
+    }
+
+    func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: UUID?) async throws -> Workspace {
+        workspaceOverviewValue.workspace
+    }
+
+    func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) async throws -> Session {
+        sessionValue
+    }
+
+    func getSessionScreen(sessionID: UUID) async throws -> SessionScreen {
+        screenValue
+    }
+
+    func sendSessionInput(sessionID: UUID, text: String) async throws -> SessionScreen {
+        screenValue = SessionScreen(session: sessionValue, transcript: screenValue.transcript + "\n> \(text)")
+        return screenValue
+    }
+
+    func sendSessionText(sessionID: UUID, text: String) async throws -> SessionScreen {
+        screenValue = SessionScreen(session: sessionValue, transcript: screenValue.transcript + "[typed: \(text)]")
+        return screenValue
+    }
+
+    func sendSessionInputKey(sessionID: UUID, key: SessionInputKey) async throws -> SessionScreen {
+        screenValue = SessionScreen(session: sessionValue, transcript: screenValue.transcript + "[key: \(key.rawValue)]")
+        return screenValue
+    }
+
+    func resizeSession(sessionID: UUID, columns: Int, rows: Int) async throws -> SessionScreen {
+        screenValue = SessionScreen(
+            session: sessionValue,
+            transcript: screenValue.transcript,
+            terminalColumns: columns,
+            terminalRows: rows
+        )
+        return screenValue
     }
 }
 

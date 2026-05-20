@@ -11,7 +11,6 @@ struct ContentView: View {
     @State private var pendingWorkspaceFolderPath: String?
     @State private var pendingWorkspaceGroupID: UUID?
     @State private var isShowingWorkspaceGroupPicker = false
-    @State private var sessionInput = ""
     @State private var terminalViewportSize: CGSize = .zero
     @State private var terminalFocusToken = UUID()
     @State private var presentedError: PresentedError?
@@ -264,42 +263,6 @@ struct ContentView: View {
                         }
                     }
                 }
-
-                HStack(spacing: 8) {
-                    ForEach(SessionInputKey.allCases, id: \.self) { key in
-                        Button(sessionInputKeyTitle(key)) {
-                            Task {
-                                do {
-                                    try await appModel.sendInputKeyToFocusedSession(key)
-                                } catch {
-                                    presentedError = PresentedError(message: error.localizedDescription)
-                                }
-                            }
-                        }
-                        .disabled(isReady == false)
-                    }
-                }
-                .buttonStyle(.bordered)
-
-                HStack(alignment: .bottom, spacing: 12) {
-                    TextField("Send input to session", text: $sessionInput, axis: .vertical)
-                        .textFieldStyle(.roundedBorder)
-                        .disabled(isReady == false)
-
-                    Button("Send") {
-                        let text = sessionInput
-                        sessionInput = ""
-                        Task {
-                            do {
-                                try await appModel.sendInputToFocusedSession(text)
-                            } catch {
-                                presentedError = PresentedError(message: error.localizedDescription)
-                            }
-                        }
-                    }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(isReady == false)
-                }
             } else {
                 ContentUnavailableView(
                     "Session unavailable",
@@ -494,36 +457,6 @@ struct ContentView: View {
         pendingWorkspaceGroupID = appModel.workspaceGroups.first?.id
         isShowingWorkspaceGroupPicker = true
     }
-    private func sessionInputKeyTitle(_ key: SessionInputKey) -> String {
-        switch key {
-        case .enter:
-            "Enter"
-        case .tab:
-            "Tab"
-        case .escape:
-            "Esc"
-        case .backspace:
-            "⌫"
-        case .deleteForward:
-            "Del"
-        case .endOfTransmission:
-            "⌃D"
-        case .interrupt:
-            "⌃C"
-        case .home:
-            "Home"
-        case .end:
-            "End"
-        case .upArrow:
-            "↑"
-        case .downArrow:
-            "↓"
-        case .leftArrow:
-            "←"
-        case .rightArrow:
-            "→"
-        }
-    }
 
     private func handleTerminalTypedText(_ text: String) {
         Task {
@@ -595,7 +528,7 @@ struct ContentView: View {
                 return
             }
 
-            try? await Task.sleep(for: .milliseconds(500))
+            try? await Task.sleep(for: .milliseconds(50))
         }
     }
 }

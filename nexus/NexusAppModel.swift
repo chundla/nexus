@@ -85,8 +85,14 @@ final class NexusAppModel {
 
     func loadSessionScreen(sessionID: UUID) async throws {
         let screen = try await client.getSessionScreen(sessionID: sessionID)
+        let previousState = focusedSessionScreen?.session.id == screen.session.id
+            ? focusedSessionScreen?.session.state
+            : nil
         focusedSessionScreen = screen
-        try await refreshWorkspaceOverview(for: screen.session.workspaceID)
+
+        if let previousState, previousState != screen.session.state {
+            try await refreshWorkspaceOverview(for: screen.session.workspaceID)
+        }
     }
 
     func refreshFocusedSession() async throws {
@@ -115,7 +121,6 @@ final class NexusAppModel {
 
         let screen = try await client.sendSessionInput(sessionID: sessionID, text: text)
         focusedSessionScreen = screen
-        try await refreshWorkspaceOverview(for: screen.session.workspaceID)
     }
 
     func sendTypedTextToFocusedSession(_ text: String) async throws {
@@ -125,7 +130,6 @@ final class NexusAppModel {
 
         let screen = try await client.sendSessionText(sessionID: sessionID, text: text)
         focusedSessionScreen = screen
-        try await refreshWorkspaceOverview(for: screen.session.workspaceID)
     }
 
     func sendInputKeyToFocusedSession(_ key: SessionInputKey) async throws {
@@ -135,7 +139,6 @@ final class NexusAppModel {
 
         let screen = try await client.sendSessionInputKey(sessionID: sessionID, key: key)
         focusedSessionScreen = screen
-        try await refreshWorkspaceOverview(for: screen.session.workspaceID)
     }
 
     func resizeFocusedSession(columns: Int, rows: Int) async throws {
@@ -145,7 +148,6 @@ final class NexusAppModel {
 
         let screen = try await client.resizeSession(sessionID: sessionID, columns: columns, rows: rows)
         focusedSessionScreen = screen
-        try await refreshWorkspaceOverview(for: screen.session.workspaceID)
     }
 
     func workspaceGroupName(for groupID: UUID) -> String? {
