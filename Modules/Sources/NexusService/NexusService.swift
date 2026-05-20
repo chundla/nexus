@@ -544,6 +544,12 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
         func parseCSI(finalCharacter: Character, parameters: String) {
             let value = Int(parameters) ?? 1
             switch finalCharacter {
+            case "A":
+                cursorLine = max(0, cursorLine - value)
+                ensureCurrentLine()
+            case "B":
+                cursorLine += value
+                ensureCurrentLine()
             case "D":
                 cursorColumn = max(0, cursorColumn - value)
             case "C":
