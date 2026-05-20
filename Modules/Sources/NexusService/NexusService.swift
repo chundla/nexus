@@ -659,7 +659,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
             terminalRows: screen.terminalRows,
             visibleLines: renderState.visibleLines,
             cursorRow: renderState.cursorRow,
-            cursorColumn: renderState.cursorColumn
+            cursorColumn: renderState.cursorColumn,
+            cursorVisible: renderState.cursorVisible
         )
     }
 
@@ -667,10 +668,11 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
         from transcript: String,
         terminalColumns: Int,
         terminalRows: Int
-    ) -> (transcript: String, visibleLines: [String], cursorRow: Int, cursorColumn: Int) {
+    ) -> (transcript: String, visibleLines: [String], cursorRow: Int, cursorColumn: Int, cursorVisible: Bool) {
         var lines: [[Character]] = [[]]
         var cursorLine = 0
         var cursorColumn = 0
+        var cursorVisible = true
         var savedCursorLine = 0
         var savedCursorColumn = 0
         var primaryBufferLines = lines
@@ -735,6 +737,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                         cursorLine = 0
                         cursorColumn = 0
                         usingAlternateBuffer = true
+                    case 25:
+                        cursorVisible = true
                     case 1048:
                         savedCursorLine = cursorLine
                         savedCursorColumn = cursorColumn
@@ -743,6 +747,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                     }
                 case "l":
                     switch value {
+                    case 25:
+                        cursorVisible = false
                     case 47, 1047, 1049:
                         guard usingAlternateBuffer else {
                             break
@@ -960,13 +966,21 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
 
         let renderedLines = lines.map { String($0) }
         let normalizedTranscript = renderedLines.joined(separator: "\n")
-        return makeViewport(
+        let viewport = makeViewport(
             lines: renderedLines,
             cursorLine: cursorLine,
             cursorColumn: cursorColumn,
             terminalColumns: terminalColumns,
             terminalRows: terminalRows,
             transcript: normalizedTranscript
+        )
+
+        return (
+            transcript: viewport.transcript,
+            visibleLines: viewport.visibleLines,
+            cursorRow: viewport.cursorRow,
+            cursorColumn: viewport.cursorColumn,
+            cursorVisible: cursorVisible
         )
     }
 

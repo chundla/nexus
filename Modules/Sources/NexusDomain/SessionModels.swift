@@ -52,6 +52,7 @@ public struct SessionScreen: Codable, Equatable, Sendable {
     public let visibleLines: [String]
     public let cursorRow: Int
     public let cursorColumn: Int
+    public let cursorVisible: Bool
 
     public init(
         session: Session,
@@ -60,7 +61,8 @@ public struct SessionScreen: Codable, Equatable, Sendable {
         terminalRows: Int = 24,
         visibleLines: [String]? = nil,
         cursorRow: Int? = nil,
-        cursorColumn: Int? = nil
+        cursorColumn: Int? = nil,
+        cursorVisible: Bool = true
     ) {
         let viewport = Self.makeViewport(
             transcript: transcript,
@@ -75,6 +77,7 @@ public struct SessionScreen: Codable, Equatable, Sendable {
         self.visibleLines = visibleLines ?? viewport.visibleLines
         self.cursorRow = cursorRow ?? viewport.cursorRow
         self.cursorColumn = cursorColumn ?? viewport.cursorColumn
+        self.cursorVisible = cursorVisible
     }
 
     private static func makeViewport(

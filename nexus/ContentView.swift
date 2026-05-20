@@ -538,7 +538,7 @@ struct ContentView: View {
     }
 
     private func renderedTerminalLine(_ line: String, row: Int, screen: SessionScreen) -> String {
-        guard row == screen.cursorRow else {
+        guard screen.cursorVisible, row == screen.cursorRow else {
             return line.isEmpty ? " " : line
         }
 
