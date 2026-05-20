@@ -30,11 +30,18 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
     }
 
     private let metadataStore: NexusMetadataStore
+    private let providerHealthEvaluator: any ProviderHealthEvaluating
 
-    private init(listener: NSXPCListener, storeURL: URL, metadataStore: NexusMetadataStore) {
+    private init(
+        listener: NSXPCListener,
+        storeURL: URL,
+        metadataStore: NexusMetadataStore,
+        providerHealthEvaluator: any ProviderHealthEvaluating
+    ) {
         self.listener = listener
         self.storeURL = storeURL
         self.metadataStore = metadataStore
+        self.providerHealthEvaluator = providerHealthEvaluator
         super.init()
         self.listener.delegate = self
         self.listener.resume()
@@ -60,7 +67,17 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
         try bootstrap(rootURL: rootURL)
     }
 
-    private nonisolated static func bootstrap(rootURL: URL) throws -> NexusService {
+    static func bootstrapForTests(
+        rootURL: URL,
+        providerHealthEvaluator: any ProviderHealthEvaluating
+    ) throws -> NexusService {
+        try bootstrap(rootURL: rootURL, providerHealthEvaluator: providerHealthEvaluator)
+    }
+
+    private nonisolated static func bootstrap(
+        rootURL: URL,
+        providerHealthEvaluator: any ProviderHealthEvaluating = ProviderHealthEvaluator()
+    ) throws -> NexusService {
         try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
 
         let storeURL = rootURL.appendingPathComponent("Nexus.sqlite", isDirectory: false)
@@ -69,7 +86,12 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
         }
 
         let metadataStore = try NexusMetadataStore(storeURL: storeURL)
-        return NexusService(listener: NSXPCListener.anonymous(), storeURL: storeURL, metadataStore: metadataStore)
+        return NexusService(
+            listener: NSXPCListener.anonymous(),
+            storeURL: storeURL,
+            metadataStore: metadataStore,
+            providerHealthEvaluator: providerHealthEvaluator
+        )
     }
 
     nonisolated public func serviceStatus() -> NexusServiceStatus {
@@ -102,20 +124,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
 
         return WorkspaceOverview(
             workspace: workspace,
-            providerCards: ProviderID.allCases.map { providerID in
-                WorkspaceProviderCard(
-                    provider: Provider(id: providerID),
-                    health: ProviderHealthSummary(
-                        state: .notChecked,
-                        summary: "Health checks coming soon"
-                    ),
-                    defaultSession: ProviderDefaultSessionSummary(
-                        state: .notCreated,
-                        summary: "No default session yet",
-                        actionTitle: "Launch"
-                    )
-                )
-            }
+            providerCards: providerHealthEvaluator.providerCards(for: workspace)
         )
     }
 

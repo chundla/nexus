@@ -60,17 +60,59 @@ public struct Provider: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+public struct ProviderHealthDiagnostic: Codable, Equatable, Sendable {
+    public let severity: Severity
+    public let code: String
+    public let message: String
+
+    public init(severity: Severity, code: String, message: String) {
+        self.severity = severity
+        self.code = code
+        self.message = message
+    }
+
+    public enum Severity: String, Codable, Sendable {
+        case info
+        case warning
+        case error
+    }
+}
+
 public struct ProviderHealthSummary: Codable, Equatable, Sendable {
     public let state: State
     public let summary: String
+    public let resolvedExecutable: String?
+    public let version: String?
+    public let launchability: Launchability
+    public let diagnostics: [ProviderHealthDiagnostic]
 
-    public init(state: State, summary: String) {
+    public init(
+        state: State,
+        summary: String,
+        resolvedExecutable: String? = nil,
+        version: String? = nil,
+        launchability: Launchability = .notChecked,
+        diagnostics: [ProviderHealthDiagnostic] = []
+    ) {
         self.state = state
         self.summary = summary
+        self.resolvedExecutable = resolvedExecutable
+        self.version = version
+        self.launchability = launchability
+        self.diagnostics = diagnostics
     }
 
     public enum State: String, Codable, Sendable {
         case notChecked
+        case available
+        case unavailable
+        case misconfigured
+    }
+
+    public enum Launchability: String, Codable, Sendable {
+        case notChecked
+        case launchable
+        case notLaunchable
     }
 }
 

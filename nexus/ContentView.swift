@@ -193,6 +193,30 @@ struct ContentView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
+            if let version = card.health.version {
+                LabeledContent("Version", value: version)
+                    .font(.caption)
+            }
+
+            if let resolvedExecutable = card.health.resolvedExecutable {
+                LabeledContent("Executable", value: resolvedExecutable)
+                    .font(.caption)
+            }
+
+            if card.health.diagnostics.isEmpty == false {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Diagnostics")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+
+                    ForEach(Array(card.health.diagnostics.enumerated()), id: \.offset) { _, diagnostic in
+                        Text(diagnostic.message)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
             VStack(alignment: .leading, spacing: 4) {
                 Text("Default Session")
                     .font(.subheadline)

@@ -1,7 +1,7 @@
 import Foundation
 import NexusDomain
 import NexusIPC
-import NexusService
+@testable import NexusService
 import Testing
 @testable import nexus
 
@@ -82,8 +82,92 @@ struct nexusTests {
 
         #expect(overview.workspace == workspace)
         #expect(overview.providerCards.map(\.provider.id) == [.codex, .claude, .ibmBob, .pi])
-        #expect(overview.providerCards.map(\.health.state) == [.notChecked, .notChecked, .notChecked, .notChecked])
         #expect(overview.providerCards.map(\.defaultSession.state) == [.notCreated, .notCreated, .notCreated, .notCreated])
+        #expect(overview.providerCards.filter { $0.provider.id != .claude }.map(\.health.state) == [.notChecked, .notChecked, .notChecked])
+    }
+
+    @Test func workspaceOverviewShowsLaunchableClaudeHealthFromServiceOwnedAdapter() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            )
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+
+        let overview = try await client.getWorkspaceOverview(workspaceID: workspace.id)
+        let claudeCard = try #require(overview.providerCards.first(where: { $0.provider.id == .claude }))
+
+        #expect(claudeCard.health.state == .available)
+        #expect(claudeCard.health.summary == "Claude 9.9.9 (Claude Code) is available")
+        #expect(claudeCard.health.resolvedExecutable == "/tmp/fake-claude")
+        #expect(claudeCard.health.version == "9.9.9 (Claude Code)")
+        #expect(claudeCard.health.launchability == .launchable)
+        #expect(claudeCard.health.diagnostics.isEmpty)
+    }
+
+    @Test func workspaceOverviewShowsUnavailableClaudeHealthWhenExecutableCannotBeResolved() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: [:]),
+                commandRunner: StubCommandRunner(results: [:])
+            )
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+
+        let overview = try await client.getWorkspaceOverview(workspaceID: workspace.id)
+        let claudeCard = try #require(overview.providerCards.first(where: { $0.provider.id == .claude }))
+
+        #expect(claudeCard.health.state == .unavailable)
+        #expect(claudeCard.health.summary == "Claude executable was not found")
+        #expect(claudeCard.health.resolvedExecutable == nil)
+        #expect(claudeCard.health.version == nil)
+        #expect(claudeCard.health.launchability == .notLaunchable)
+        #expect(claudeCard.health.diagnostics.contains(where: {
+            $0 == ProviderHealthDiagnostic(
+                severity: .error,
+                code: "executableNotFound",
+                message: "Claude executable was not found in the service search paths."
+            )
+        }))
+        #expect(claudeCard.health.diagnostics.contains(where: {
+            $0.code == "searchedDirectories" && $0.message.contains("/tmp/search-a")
+        }))
+        #expect(claudeCard.health.diagnostics.contains(where: {
+            $0.code == "homeDirectories" && $0.message.contains("/tmp/home")
+        }))
+        #expect(claudeCard.health.diagnostics.contains(where: {
+            $0.code == "pathEnvironment" && $0.message.contains("/tmp/search-a:/tmp/search-b")
+        }))
     }
 
     @MainActor
@@ -128,6 +212,46 @@ struct nexusTests {
         #expect(status.store.location.path(percentEncoded: false).contains("Application Support"))
         #expect(status.store.location.lastPathComponent == "Nexus.sqlite")
         #expect(model.serviceErrorMessage == nil)
+    }
+}
+
+private struct StubExecutableResolver: ProviderExecutableResolving {
+    let executables: [String: String]
+    var searchedDirectories: [String] = ["/tmp/search-a", "/tmp/search-b"]
+    var homeDirectories: [String] = ["/tmp/home"]
+    var pathEnvironment: String? = "/tmp/search-a:/tmp/search-b"
+
+    func resolveExecutable(named command: String) -> ProviderExecutableResolution {
+        ProviderExecutableResolution(
+            resolvedExecutable: executables[command],
+            searchedDirectories: searchedDirectories,
+            homeDirectories: homeDirectories,
+            pathEnvironment: pathEnvironment
+        )
+    }
+}
+
+private struct StubCommandRunner: ProviderCommandRunning {
+    struct Invocation: Hashable {
+        let executable: String
+        let arguments: [String]
+    }
+
+    enum StubbedResult {
+        case success(stdout: String, stderr: String = "", exitStatus: Int32 = 0)
+    }
+
+    let results: [Invocation: StubbedResult]
+
+    func run(executable: String, arguments: [String], currentDirectoryURL: URL?) throws -> ProviderCommandResult {
+        guard let result = results[Invocation(executable: executable, arguments: arguments)] else {
+            throw NSError(domain: "StubCommandRunner", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing stub for \(arguments)"])
+        }
+
+        switch result {
+        case .success(let stdout, let stderr, let exitStatus):
+            return ProviderCommandResult(exitStatus: exitStatus, stdout: stdout, stderr: stderr)
+        }
     }
 }
 
