@@ -854,9 +854,12 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                 ensureCurrentLine()
                 switch eraseMode {
                 case 1:
-                    let endIndex = min(cursorColumn, lines[cursorLine].count)
-                    lines[cursorLine].removeFirst(endIndex)
-                    cursorColumn = 0
+                    while lines[cursorLine].count <= cursorColumn {
+                        lines[cursorLine].append(" ")
+                    }
+                    for index in 0...cursorColumn {
+                        lines[cursorLine][index] = " "
+                    }
                 case 2:
                     lines[cursorLine].removeAll()
                 default:
@@ -1019,10 +1022,27 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                         }
                     }
                     ensureCurrentLine()
+                } else if next == "c" {
+                    lines = [[]]
+                    cursorLine = 0
+                    cursorColumn = 0
+                    cursorVisible = true
+                    applicationCursorMode = false
+                    savedCursorLine = 0
+                    savedCursorColumn = 0
+                    primaryBufferLines = lines
+                    primaryBufferCursorLine = cursorLine
+                    primaryBufferCursorColumn = cursorColumn
+                    usingAlternateBuffer = false
                 }
             case "\r":
                 cursorColumn = 0
-            case "\u{8}", "\u{7F}":
+            case "\u{8}":
+                guard cursorColumn > 0 else {
+                    continue
+                }
+                cursorColumn -= 1
+            case "\u{7F}":
                 guard cursorColumn > 0 else {
                     continue
                 }
