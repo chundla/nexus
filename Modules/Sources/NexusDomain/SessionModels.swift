@@ -8,6 +8,8 @@ public enum SessionInputKey: String, Codable, CaseIterable, Sendable {
     case deleteForward
     case endOfTransmission
     case interrupt
+    case home
+    case end
     case upArrow
     case downArrow
     case leftArrow

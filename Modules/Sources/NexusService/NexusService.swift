@@ -323,6 +323,10 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
             escapeSequence = "\u{0004}"
         case .interrupt:
             escapeSequence = "\u{0003}"
+        case .home:
+            escapeSequence = applicationCursorMode ? "\u{001B}OH" : "\u{001B}[H"
+        case .end:
+            escapeSequence = applicationCursorMode ? "\u{001B}OF" : "\u{001B}[F"
         case .upArrow:
             escapeSequence = applicationCursorMode ? "\u{001B}OA" : "\u{001B}[A"
         case .downArrow:

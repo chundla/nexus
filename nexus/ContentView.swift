@@ -510,6 +510,10 @@ struct ContentView: View {
             "⌃D"
         case .interrupt:
             "⌃C"
+        case .home:
+            "Home"
+        case .end:
+            "End"
         case .upArrow:
             "↑"
         case .downArrow:
@@ -648,8 +652,12 @@ func mapSessionTerminalInput(
         return .key(.backspace)
     case 53:
         return .key(.escape)
+    case 115:
+        return .key(.home)
     case 117:
         return .key(.deleteForward)
+    case 119:
+        return .key(.end)
     case 123:
         return .key(.leftArrow)
     case 124:
