@@ -347,6 +347,55 @@ struct nexusTests {
         #expect(screen.transcript.contains("TTY 24 80"))
     }
 
+    @Test func exitedClaudeRuntimeBecomesInspectableAndRelaunchableOverIPC() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let executableURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: false)
+        try """
+        #!/usr/bin/env python3
+        print("Claude finished work", flush=True)
+        """.write(to: executableURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            )
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+
+        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let exitedScreen = try await waitForSessionScreen(client: client, sessionID: session.id) { screen in
+            screen.session.state == .exited
+        }
+        let overview = try await client.getWorkspaceOverview(workspaceID: workspace.id)
+        let claudeCard = try #require(overview.providerCards.first(where: { $0.provider.id == .claude }))
+
+        #expect(exitedScreen.session.id == session.id)
+        #expect(exitedScreen.session.state == .exited)
+        #expect(exitedScreen.transcript.contains("Claude finished work"))
+        #expect(exitedScreen.transcript.contains("Claude exited"))
+        #expect(claudeCard.defaultSession.state == .exited)
+        #expect(claudeCard.defaultSession.actionTitle == "Relaunch")
+        #expect(claudeCard.defaultSession.sessionID == session.id)
+    }
+
     @Test func persistedReadySessionBecomesRelaunchableAfterServiceRestart() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)
@@ -714,6 +763,10 @@ private final class StubSessionRuntimeManager: SessionRuntimeManaging {
 
     func hasRuntime(for session: Session) -> Bool {
         transcripts[session.id] != nil
+    }
+
+    func runtimeState(for session: Session) -> Session.State? {
+        transcripts[session.id] == nil ? nil : .ready
     }
 
     func sessionScreen(for session: Session) throws -> SessionScreen {

@@ -25,6 +25,7 @@ public enum NexusEmbeddedServiceBootstrap {
 protocol SessionRuntimeManaging: AnyObject {
     func launchOrResume(session: Session, workspace: Workspace, executable: String) throws
     func hasRuntime(for session: Session) -> Bool
+    func runtimeState(for session: Session) -> Session.State?
     func sessionScreen(for session: Session) throws -> SessionScreen
     func sendInput(_ text: String, to session: Session) throws -> SessionScreen
     func resize(session: Session, columns: Int, rows: Int) throws -> SessionScreen
@@ -35,6 +36,7 @@ protocol SessionRuntimeLaunching {
 }
 
 protocol SessionRuntime: AnyObject {
+    var state: Session.State { get }
     var transcript: String { get }
     var terminalColumns: Int { get }
     var terminalRows: Int { get }
@@ -63,6 +65,12 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging {
         lock.lock()
         defer { lock.unlock() }
         return runtimes[session.id] != nil
+    }
+
+    func runtimeState(for session: Session) -> Session.State? {
+        lock.lock()
+        defer { lock.unlock() }
+        return runtimes[session.id]?.state
     }
 
     func sessionScreen(for session: Session) throws -> SessionScreen {
@@ -135,11 +143,13 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
     private let readSource: DispatchSourceRead
     private let terminationSource: DispatchSourceProcess
     private let lock = NSLock()
+    private var runtimeState: Session.State
     private var storage: String
     private var columns: Int
     private var rows: Int
 
     init(executable: String, workspace: Workspace) throws {
+        self.runtimeState = .ready
         self.storage = "Launching \(workspace.name) with Claude…\n"
         self.columns = 80
         self.rows = 24
@@ -192,6 +202,9 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
 
             var status: Int32 = 0
             _ = waitpid(self.pid, &status, 0)
+            self.lock.lock()
+            self.runtimeState = .exited
+            self.lock.unlock()
             self.append("\n[Claude exited with status \(status)]\n")
             self.readSource.cancel()
             self.terminationSource.cancel()
@@ -202,6 +215,12 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
     deinit {
         readSource.cancel()
         terminationSource.cancel()
+    }
+
+    var state: Session.State {
+        lock.lock()
+        defer { lock.unlock() }
+        return runtimeState
     }
 
     var transcript: String {
@@ -450,6 +469,11 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
             return SessionScreen(session: resolvedSession, transcript: resolvedSession.failureMessage ?? "Session launch failed")
         case .interrupted:
             return SessionScreen(session: resolvedSession, transcript: resolvedSession.failureMessage ?? "Session interrupted")
+        case .exited:
+            if sessionRuntimeManager.hasRuntime(for: resolvedSession) {
+                return try sessionRuntimeManager.sessionScreen(for: resolvedSession)
+            }
+            return SessionScreen(session: resolvedSession, transcript: resolvedSession.failureMessage ?? "Session exited")
         case .ready:
             return try sessionRuntimeManager.sessionScreen(for: resolvedSession)
         }
@@ -460,11 +484,12 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
             throw NexusMetadataStoreError.sessionNotFound
         }
 
-        guard session.state == .ready else {
+        let resolvedSession = try reconcileSessionRuntimeState(session)
+        guard resolvedSession.state == .ready else {
             throw NexusMetadataStoreError.sessionNotReady
         }
 
-        return try sessionRuntimeManager.sendInput(text, to: session)
+        return try sessionRuntimeManager.sendInput(text, to: resolvedSession)
     }
 
     func resizeSession(sessionID: UUID, columns: Int, rows: Int) throws -> SessionScreen {
@@ -472,11 +497,12 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
             throw NexusMetadataStoreError.sessionNotFound
         }
 
-        guard session.state == .ready else {
+        let resolvedSession = try reconcileSessionRuntimeState(session)
+        guard resolvedSession.state == .ready else {
             throw NexusMetadataStoreError.sessionNotReady
         }
 
-        return try sessionRuntimeManager.resize(session: session, columns: columns, rows: rows)
+        return try sessionRuntimeManager.resize(session: resolvedSession, columns: columns, rows: rows)
     }
 
     private func defaultSessionSummary(for workspace: Workspace, providerID: ProviderID) throws -> ProviderDefaultSessionSummary {
@@ -505,6 +531,13 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                 actionTitle: "Relaunch",
                 sessionID: resolvedSession.id
             )
+        case .exited:
+            return ProviderDefaultSessionSummary(
+                state: .exited,
+                summary: resolvedSession.failureMessage ?? "Session exited",
+                actionTitle: "Relaunch",
+                sessionID: resolvedSession.id
+            )
         case .failed:
             return ProviderDefaultSessionSummary(
                 state: .failed,
@@ -516,7 +549,23 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
     }
 
     private func reconcileSessionRuntimeState(_ session: Session) throws -> Session {
-        guard session.state == .ready, sessionRuntimeManager.hasRuntime(for: session) == false else {
+        guard session.state == .ready else {
+            return session
+        }
+
+        if let runtimeState = sessionRuntimeManager.runtimeState(for: session) {
+            guard runtimeState != .ready else {
+                return session
+            }
+
+            return try metadataStore.updateSession(
+                id: session.id,
+                state: .exited,
+                failureMessage: "Session exited. Relaunch to start a new live runtime."
+            )
+        }
+
+        guard sessionRuntimeManager.hasRuntime(for: session) == false else {
             return session
         }
 

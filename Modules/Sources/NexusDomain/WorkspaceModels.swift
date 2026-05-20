@@ -133,6 +133,7 @@ public struct ProviderDefaultSessionSummary: Codable, Equatable, Sendable {
         case notCreated
         case ready
         case interrupted
+        case exited
         case failed
     }
 }
