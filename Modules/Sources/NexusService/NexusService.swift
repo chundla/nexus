@@ -621,6 +621,13 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                         lines[cursorLine].removeSubrange(cursorColumn...)
                     }
                 }
+            case "P":
+                ensureCurrentLine()
+                guard cursorColumn < lines[cursorLine].count else {
+                    break
+                }
+                let endIndex = min(lines[cursorLine].count, cursorColumn + defaultValue)
+                lines[cursorLine].removeSubrange(cursorColumn..<endIndex)
             default:
                 break
             }
