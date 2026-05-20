@@ -701,7 +701,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
         var primaryBufferCursorLine = cursorLine
         var primaryBufferCursorColumn = cursorColumn
         var usingAlternateBuffer = false
-        var iterator = transcript.makeIterator()
+        var iterator = transcript.unicodeScalars.makeIterator()
 
         func ensureCurrentLine() {
             while lines.count <= cursorLine {
@@ -736,7 +736,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
             }
         }
 
-        func parseCSI(finalCharacter: Character, parameters: String) {
+        func parseCSI(finalCharacter: UnicodeScalar, parameters: String) {
+            let finalCharacter = Character(finalCharacter)
             let isPrivateMode = parameters.first == "?"
             let normalizedParameters = isPrivateMode ? String(parameters.dropFirst()) : parameters
             let values = csiParameters(normalizedParameters)
@@ -916,9 +917,15 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                     }
                 }
             case "s":
+                guard parameters.isEmpty else {
+                    break
+                }
                 savedCursorLine = cursorLine
                 savedCursorColumn = cursorColumn
             case "u":
+                guard parameters.isEmpty else {
+                    break
+                }
                 cursorLine = savedCursorLine
                 cursorColumn = savedCursorColumn
                 ensureCurrentLine()
@@ -927,8 +934,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
             }
         }
 
-        while let character = iterator.next() {
-            switch character {
+        while let scalar = iterator.next() {
+            switch scalar {
             case "\u{001B}":
                 guard let next = iterator.next() else {
                     continue
@@ -937,11 +944,11 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                 if next == "[" {
                     var parameters = ""
                     while let scalar = iterator.next() {
-                        if ("@"..."~").contains(scalar) {
+                        if (0x40...0x7E).contains(scalar.value) {
                             parseCSI(finalCharacter: scalar, parameters: parameters)
                             break
                         }
-                        parameters.append(scalar)
+                        parameters.unicodeScalars.append(scalar)
                     }
                 } else if next == "]" {
                     skipOperatingSystemCommand()
@@ -977,6 +984,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                 }
                 cursorColumn = nextTabStop
             default:
+                let character = Character(scalar)
                 ensureCurrentLine()
                 if cursorColumn < lines[cursorLine].count {
                     lines[cursorLine][cursorColumn] = character
