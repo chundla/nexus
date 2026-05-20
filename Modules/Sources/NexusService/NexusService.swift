@@ -700,10 +700,18 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
         var primaryBufferLines = lines
         var primaryBufferCursorLine = cursorLine
         var primaryBufferCursorColumn = cursorColumn
+        enum TerminalCharacterSet {
+            case ascii
+            case lineDrawing
+        }
+
         var usingAlternateBuffer = false
         var scrollRegionTop = 0
         var scrollRegionBottom = max(0, terminalRows - 1)
         var hasExplicitScrollRegion = false
+        var g0CharacterSet: TerminalCharacterSet = .ascii
+        var g1CharacterSet: TerminalCharacterSet = .ascii
+        var usingG1CharacterSet = false
         var iterator = transcript.unicodeScalars.makeIterator()
 
         func ensureLine(_ lineIndex: Int) {
@@ -828,6 +836,39 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                 if scalar == "\u{001B}", let terminator = iterator.next(), terminator == "\\" {
                     return
                 }
+            }
+        }
+
+        func characterSet(for designator: UnicodeScalar) -> TerminalCharacterSet? {
+            switch designator {
+            case "0":
+                .lineDrawing
+            case "B":
+                .ascii
+            default:
+                nil
+            }
+        }
+
+        func renderedCharacter(for scalar: UnicodeScalar) -> Character {
+            let activeCharacterSet = usingG1CharacterSet ? g1CharacterSet : g0CharacterSet
+            guard activeCharacterSet == .lineDrawing else {
+                return Character(scalar)
+            }
+
+            switch scalar {
+            case "j": return "┘"
+            case "k": return "┐"
+            case "l": return "┌"
+            case "m": return "└"
+            case "n": return "┼"
+            case "q": return "─"
+            case "t": return "├"
+            case "u": return "┤"
+            case "v": return "┴"
+            case "w": return "┬"
+            case "x": return "│"
+            default: return Character(scalar)
             }
         }
 
@@ -1114,6 +1155,14 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                     }
                 } else if next == "]" {
                     skipOperatingSystemCommand()
+                } else if next == "(" {
+                    if let designator = iterator.next(), let characterSet = characterSet(for: designator) {
+                        g0CharacterSet = characterSet
+                    }
+                } else if next == ")" {
+                    if let designator = iterator.next(), let characterSet = characterSet(for: designator) {
+                        g1CharacterSet = characterSet
+                    }
                 } else if next == "7" {
                     savedCursorLine = cursorLine
                     savedCursorColumn = cursorColumn
@@ -1190,7 +1239,14 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                     scrollRegionTop = 0
                     scrollRegionBottom = max(0, terminalRows - 1)
                     hasExplicitScrollRegion = false
+                    g0CharacterSet = .ascii
+                    g1CharacterSet = .ascii
+                    usingG1CharacterSet = false
                 }
+            case "\u{000E}":
+                usingG1CharacterSet = true
+            case "\u{000F}":
+                usingG1CharacterSet = false
             case "\r":
                 cursorColumn = 0
             case "\u{8}":
@@ -1228,7 +1284,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                 }
                 cursorColumn = nextTabStop
             default:
-                let character = Character(scalar)
+                let character = renderedCharacter(for: scalar)
                 ensureCurrentLine()
                 if cursorColumn < lines[cursorLine].count {
                     lines[cursorLine][cursorColumn] = character
