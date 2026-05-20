@@ -16,3 +16,4 @@ This repo uses a single-context domain-docs layout. See `docs/agents/domain.md`.
 
 - Do not run test commands with `bash` `usePTY=true`.
 - Run `xcodebuild test` and other test commands without PTY to avoid interrupted/invalid runs.
+- Cap tool timeouts at `120s` max. Do not use longer timeouts like `1200s`.
