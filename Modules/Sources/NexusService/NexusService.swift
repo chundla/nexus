@@ -541,19 +541,60 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
             }
         }
 
+        func csiParameters(_ parameters: String) -> [Int?] {
+            guard parameters.isEmpty == false else {
+                return []
+            }
+
+            return parameters
+                .split(separator: ";", omittingEmptySubsequences: false)
+                .map { segment in
+                    guard segment.isEmpty == false else {
+                        return nil
+                    }
+                    return Int(segment)
+                }
+        }
+
         func parseCSI(finalCharacter: Character, parameters: String) {
-            let value = Int(parameters) ?? 1
+            let values = csiParameters(parameters)
+            let value = values.first.flatMap { $0 }
+            let defaultValue = value ?? 1
+            let eraseMode = value ?? 0
             switch finalCharacter {
             case "A":
-                cursorLine = max(0, cursorLine - value)
+                cursorLine = max(0, cursorLine - defaultValue)
                 ensureCurrentLine()
             case "B":
-                cursorLine += value
+                cursorLine += defaultValue
                 ensureCurrentLine()
-            case "D":
-                cursorColumn = max(0, cursorColumn - value)
             case "C":
-                cursorColumn += value
+                cursorColumn += defaultValue
+            case "D":
+                cursorColumn = max(0, cursorColumn - defaultValue)
+            case "G":
+                cursorColumn = max(0, defaultValue - 1)
+            case "H", "f":
+                let row = values.first.flatMap { $0 } ?? 1
+                let column = values.dropFirst().first.flatMap { $0 } ?? 1
+                cursorLine = max(0, row - 1)
+                cursorColumn = max(0, column - 1)
+                ensureCurrentLine()
+            case "K":
+                ensureCurrentLine()
+                switch eraseMode {
+                case 1:
+                    let endIndex = min(cursorColumn, lines[cursorLine].count)
+                    lines[cursorLine].removeFirst(endIndex)
+                    cursorColumn = 0
+                case 2:
+                    lines[cursorLine].removeAll()
+                    cursorColumn = 0
+                default:
+                    if cursorColumn < lines[cursorLine].count {
+                        lines[cursorLine].removeSubrange(cursorColumn...)
+                    }
+                }
             default:
                 break
             }
