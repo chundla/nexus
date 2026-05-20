@@ -983,6 +983,14 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                 }
                 cursorColumn = max(0, column - 1)
                 ensureCurrentLine()
+            case "d":
+                let row = values.first.flatMap { $0 } ?? 1
+                if originMode, let region = activeScrollRegion() {
+                    cursorLine = min(region.upperBound, region.lowerBound + max(0, row - 1))
+                } else {
+                    cursorLine = max(0, row - 1)
+                }
+                ensureCurrentLine()
             case "J":
                 ensureCurrentLine()
                 switch eraseMode {
