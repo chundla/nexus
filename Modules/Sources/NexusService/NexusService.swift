@@ -658,6 +658,21 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                 }
                 let endIndex = min(lines[cursorLine].count, cursorColumn + defaultValue)
                 lines[cursorLine].removeSubrange(cursorColumn..<endIndex)
+            case "X":
+                ensureCurrentLine()
+                let eraseCount = max(0, defaultValue)
+                guard eraseCount > 0 else {
+                    break
+                }
+                while lines[cursorLine].count < cursorColumn {
+                    lines[cursorLine].append(" ")
+                }
+                let endIndex = min(lines[cursorLine].count, cursorColumn + eraseCount)
+                if cursorColumn < endIndex {
+                    for index in cursorColumn..<endIndex {
+                        lines[cursorLine][index] = " "
+                    }
+                }
             default:
                 break
             }
