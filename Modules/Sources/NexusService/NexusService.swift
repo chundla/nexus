@@ -317,6 +317,8 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
             escapeSequence = "\u{001B}"
         case .backspace:
             escapeSequence = "\u{007F}"
+        case .interrupt:
+            escapeSequence = "\u{0003}"
         case .upArrow:
             escapeSequence = "\u{001B}[A"
         case .downArrow:
@@ -671,6 +673,10 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
         var cursorColumn = 0
         var savedCursorLine = 0
         var savedCursorColumn = 0
+        var primaryBufferLines = lines
+        var primaryBufferCursorLine = cursorLine
+        var primaryBufferCursorColumn = cursorColumn
+        var usingAlternateBuffer = false
         var iterator = transcript.makeIterator()
 
         func ensureCurrentLine() {
@@ -707,10 +713,57 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
         }
 
         func parseCSI(finalCharacter: Character, parameters: String) {
-            let values = csiParameters(parameters)
+            let isPrivateMode = parameters.first == "?"
+            let normalizedParameters = isPrivateMode ? String(parameters.dropFirst()) : parameters
+            let values = csiParameters(normalizedParameters)
             let value = values.first.flatMap { $0 }
             let defaultValue = value ?? 1
             let eraseMode = value ?? 0
+
+            if isPrivateMode {
+                switch finalCharacter {
+                case "h":
+                    switch value {
+                    case 47, 1047, 1049:
+                        guard usingAlternateBuffer == false else {
+                            break
+                        }
+                        primaryBufferLines = lines
+                        primaryBufferCursorLine = cursorLine
+                        primaryBufferCursorColumn = cursorColumn
+                        lines = [[]]
+                        cursorLine = 0
+                        cursorColumn = 0
+                        usingAlternateBuffer = true
+                    case 1048:
+                        savedCursorLine = cursorLine
+                        savedCursorColumn = cursorColumn
+                    default:
+                        break
+                    }
+                case "l":
+                    switch value {
+                    case 47, 1047, 1049:
+                        guard usingAlternateBuffer else {
+                            break
+                        }
+                        lines = primaryBufferLines
+                        cursorLine = primaryBufferCursorLine
+                        cursorColumn = primaryBufferCursorColumn
+                        usingAlternateBuffer = false
+                    case 1048:
+                        cursorLine = savedCursorLine
+                        cursorColumn = savedCursorColumn
+                        ensureCurrentLine()
+                    default:
+                        break
+                    }
+                default:
+                    break
+                }
+                return
+            }
+
             switch finalCharacter {
             case "A":
                 cursorLine = max(0, cursorLine - defaultValue)

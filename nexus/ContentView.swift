@@ -504,6 +504,8 @@ struct ContentView: View {
             "Esc"
         case .backspace:
             "⌫"
+        case .interrupt:
+            "⌃C"
         case .upArrow:
             "↑"
         case .downArrow:
@@ -641,6 +643,11 @@ private final class SessionTerminalKeyCaptureNSView: NSView {
     override func keyDown(with event: NSEvent) {
         guard isEnabled else {
             super.keyDown(with: event)
+            return
+        }
+
+        if event.modifierFlags.contains(.control), event.charactersIgnoringModifiers?.lowercased() == "c" {
+            onKey?(.interrupt)
             return
         }
 
