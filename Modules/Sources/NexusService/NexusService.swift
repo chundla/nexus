@@ -28,6 +28,7 @@ protocol SessionRuntimeManaging: AnyObject {
     func runtimeState(for session: Session) -> Session.State?
     func sessionScreen(for session: Session) throws -> SessionScreen
     func sendInput(_ text: String, to session: Session) throws -> SessionScreen
+    func sendText(_ text: String, to session: Session) throws -> SessionScreen
     func sendInputKey(_ key: SessionInputKey, to session: Session) throws -> SessionScreen
     func resize(session: Session, columns: Int, rows: Int) throws -> SessionScreen
 }
@@ -42,6 +43,7 @@ protocol SessionRuntime: AnyObject {
     var terminalColumns: Int { get }
     var terminalRows: Int { get }
     func sendInput(_ text: String) throws
+    func sendText(_ text: String) throws
     func sendInputKey(_ key: SessionInputKey) throws
     func resize(columns: Int, rows: Int) throws
 }
@@ -102,6 +104,23 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging {
         }
 
         try runtime.sendInput(text)
+        return SessionScreen(
+            session: session,
+            transcript: runtime.transcript,
+            terminalColumns: runtime.terminalColumns,
+            terminalRows: runtime.terminalRows
+        )
+    }
+
+    func sendText(_ text: String, to session: Session) throws -> SessionScreen {
+        let runtime = try withLock {
+            guard let runtime = runtimes[session.id] else {
+                throw NexusMetadataStoreError.sessionNotFound
+            }
+            return runtime
+        }
+
+        try runtime.sendText(text)
         return SessionScreen(
             session: session,
             transcript: runtime.transcript,
@@ -280,6 +299,13 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
         terminalHandle.write(data)
     }
 
+    func sendText(_ text: String) throws {
+        guard text.isEmpty == false, let data = text.data(using: .utf8) else {
+            return
+        }
+        terminalHandle.write(data)
+    }
+
     func sendInputKey(_ key: SessionInputKey) throws {
         let escapeSequence: String
         switch key {
@@ -289,6 +315,8 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
             escapeSequence = "\t"
         case .escape:
             escapeSequence = "\u{001B}"
+        case .backspace:
+            escapeSequence = "\u{007F}"
         case .upArrow:
             escapeSequence = "\u{001B}[A"
         case .downArrow:
@@ -556,6 +584,19 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
         }
 
         return normalizedSessionScreen(try sessionRuntimeManager.sendInput(text, to: resolvedSession))
+    }
+
+    func sendSessionText(sessionID: UUID, text: String) throws -> SessionScreen {
+        guard let session = try metadataStore.session(id: sessionID) else {
+            throw NexusMetadataStoreError.sessionNotFound
+        }
+
+        let resolvedSession = try reconcileSessionRuntimeState(session)
+        guard resolvedSession.state == .ready else {
+            throw NexusMetadataStoreError.sessionNotReady
+        }
+
+        return normalizedSessionScreen(try sessionRuntimeManager.sendText(text, to: resolvedSession))
     }
 
     func sendSessionInputKey(sessionID: UUID, key: SessionInputKey) throws -> SessionScreen {
@@ -1072,6 +1113,13 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
     func sendSessionInput(sessionID: String, text: String, reply: @escaping (Data?, NSString?) -> Void) {
         sendReply(
             with: { try service.sendSessionInput(sessionID: resolveUUID(sessionID), text: text) },
+            reply: reply
+        )
+    }
+
+    func sendSessionText(sessionID: String, text: String, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(
+            with: { try service.sendSessionText(sessionID: resolveUUID(sessionID), text: text) },
             reply: reply
         )
     }

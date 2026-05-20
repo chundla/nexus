@@ -1225,6 +1225,64 @@ struct nexusTests {
         #expect(screen.transcript.contains("UP"))
     }
 
+    @Test func liveClaudeRuntimeReceivesTypedTextAndBackspaceOverIPC() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let executableURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: false)
+        try #"""
+        #!/usr/bin/env python3
+        import os
+        import sys
+        import tty
+
+        tty.setraw(sys.stdin.fileno())
+        print("READY", flush=True)
+        data = b''
+        while len(data) < 3:
+            data += os.read(sys.stdin.fileno(), 3 - len(data))
+        if data == b'ab\x7f':
+            print("BACKSPACE", flush=True)
+        else:
+            print(repr(data), flush=True)
+        """#.write(to: executableURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            )
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+
+        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        _ = try await waitForSessionScreen(client: client, sessionID: session.id) { currentScreen in
+            currentScreen.transcript.contains("READY")
+        }
+        _ = try await client.sendSessionText(sessionID: session.id, text: "ab")
+        _ = try await client.sendSessionInputKey(sessionID: session.id, key: .backspace)
+        let screen = try await waitForSessionScreen(client: client, sessionID: session.id) { currentScreen in
+            currentScreen.transcript.contains("BACKSPACE")
+        }
+
+        #expect(screen.transcript.contains("BACKSPACE"))
+    }
+
     @Test func exitedClaudeRuntimeBecomesInspectableAndRelaunchableOverIPC() async throws {
         let workspaceFolderURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1698,6 +1756,41 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelSendTypedTextUpdatesFocusedSessionTranscript() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            ),
+            sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+        _ = try await model.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        try await model.sendTypedTextToFocusedSession("abc")
+
+        #expect(model.focusedSessionScreen?.transcript.contains("[typed: abc]") == true)
+    }
+
+    @MainActor
     @Test func appModelResizeFocusedSessionUpdatesTerminalDimensions() async throws {
         let workspaceFolderURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1899,6 +1992,18 @@ private final class StubSessionRuntimeManager: SessionRuntimeManaging {
         )
     }
 
+    func sendText(_ text: String, to session: Session) throws -> SessionScreen {
+        let prefix = transcripts[session.id, default: initialTranscript]
+        transcripts[session.id] = prefix + "[typed: \(text)]"
+        let size = sizes[session.id] ?? (80, 24)
+        return SessionScreen(
+            session: session,
+            transcript: transcripts[session.id] ?? "",
+            terminalColumns: size.columns,
+            terminalRows: size.rows
+        )
+    }
+
     func sendInputKey(_ key: SessionInputKey, to session: Session) throws -> SessionScreen {
         let prefix = transcripts[session.id, default: initialTranscript]
         let separator = prefix.isEmpty ? "" : "\n"
@@ -1957,6 +2062,10 @@ private struct FailingServiceClient: NexusServiceClient {
     }
 
     func sendSessionInput(sessionID: UUID, text: String) async throws -> SessionScreen {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func sendSessionText(sessionID: UUID, text: String) async throws -> SessionScreen {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 

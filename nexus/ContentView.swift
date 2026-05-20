@@ -13,6 +13,7 @@ struct ContentView: View {
     @State private var isShowingWorkspaceGroupPicker = false
     @State private var sessionInput = ""
     @State private var terminalViewportSize: CGSize = .zero
+    @State private var terminalFocusToken = UUID()
     @State private var presentedError: PresentedError?
 
     var body: some View {
@@ -228,12 +229,27 @@ struct ContentView: View {
                             .onAppear {
                                 terminalViewportSize = proxy.size
                                 reportTerminalSize(proxy.size)
+                                if isReady {
+                                    terminalFocusToken = UUID()
+                                }
                             }
                             .onChange(of: proxy.size) { _, newSize in
                                 terminalViewportSize = newSize
                                 reportTerminalSize(newSize)
                             }
                     }
+                }
+                .background {
+                    SessionTerminalKeyCaptureView(
+                        isEnabled: isReady,
+                        focusToken: terminalFocusToken,
+                        onText: handleTerminalTypedText,
+                        onKey: handleTerminalInputKey
+                    )
+                    .frame(width: 0, height: 0)
+                }
+                .onTapGesture {
+                    terminalFocusToken = UUID()
                 }
 
                 if isReady == false {
@@ -486,6 +502,8 @@ struct ContentView: View {
             "Tab"
         case .escape:
             "Esc"
+        case .backspace:
+            "⌫"
         case .upArrow:
             "↑"
         case .downArrow:
@@ -494,6 +512,26 @@ struct ContentView: View {
             "←"
         case .rightArrow:
             "→"
+        }
+    }
+
+    private func handleTerminalTypedText(_ text: String) {
+        Task {
+            do {
+                try await appModel.sendTypedTextToFocusedSession(text)
+            } catch {
+                presentedError = PresentedError(message: error.localizedDescription)
+            }
+        }
+    }
+
+    private func handleTerminalInputKey(_ key: SessionInputKey) {
+        Task {
+            do {
+                try await appModel.sendInputKeyToFocusedSession(key)
+            } catch {
+                presentedError = PresentedError(message: error.localizedDescription)
+            }
         }
     }
 
@@ -561,6 +599,115 @@ private enum SidebarSelection: Hashable {
 private struct PresentedError: Identifiable {
     let id = UUID()
     let message: String
+}
+
+private struct SessionTerminalKeyCaptureView: NSViewRepresentable {
+    let isEnabled: Bool
+    let focusToken: UUID
+    let onText: (String) -> Void
+    let onKey: (SessionInputKey) -> Void
+
+    func makeNSView(context: Context) -> SessionTerminalKeyCaptureNSView {
+        let view = SessionTerminalKeyCaptureNSView()
+        view.onText = onText
+        view.onKey = onKey
+        return view
+    }
+
+    func updateNSView(_ nsView: SessionTerminalKeyCaptureNSView, context: Context) {
+        nsView.onText = onText
+        nsView.onKey = onKey
+        nsView.isEnabled = isEnabled
+        nsView.focusToken = focusToken
+        nsView.focusIfNeeded()
+    }
+}
+
+private final class SessionTerminalKeyCaptureNSView: NSView {
+    var onText: ((String) -> Void)?
+    var onKey: ((SessionInputKey) -> Void)?
+    var isEnabled = false
+    var focusToken = UUID()
+
+    private var lastFocusedToken: UUID?
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        super.mouseDown(with: event)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        guard isEnabled else {
+            super.keyDown(with: event)
+            return
+        }
+
+        if event.modifierFlags.intersection([.command, .control, .option]).isEmpty == false {
+            super.keyDown(with: event)
+            return
+        }
+
+        switch event.keyCode {
+        case 51:
+            onKey?(.backspace)
+            return
+        case 53:
+            onKey?(.escape)
+            return
+        case 123:
+            onKey?(.leftArrow)
+            return
+        case 124:
+            onKey?(.rightArrow)
+            return
+        case 125:
+            onKey?(.downArrow)
+            return
+        case 126:
+            onKey?(.upArrow)
+            return
+        default:
+            break
+        }
+
+        guard let characters = event.characters else {
+            super.keyDown(with: event)
+            return
+        }
+
+        switch characters {
+        case "\r", "\n":
+            onKey?(.enter)
+        case "\t":
+            onKey?(.tab)
+        case "\u{001B}":
+            onKey?(.escape)
+        default:
+            let printableScalars = characters.unicodeScalars.filter { $0.value >= 0x20 && $0.value != 0x7F }
+            if printableScalars.isEmpty == false {
+                onText?(String(String.UnicodeScalarView(printableScalars)))
+            } else {
+                super.keyDown(with: event)
+            }
+        }
+    }
+
+    func focusIfNeeded() {
+        guard isEnabled, lastFocusedToken != focusToken else {
+            return
+        }
+
+        lastFocusedToken = focusToken
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isEnabled else {
+                return
+            }
+
+            self.window?.makeFirstResponder(self)
+        }
+    }
 }
 
 #Preview {
