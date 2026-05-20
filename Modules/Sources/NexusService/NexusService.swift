@@ -701,12 +701,75 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
         var primaryBufferCursorLine = cursorLine
         var primaryBufferCursorColumn = cursorColumn
         var usingAlternateBuffer = false
+        var scrollRegionTop = 0
+        var scrollRegionBottom = max(0, terminalRows - 1)
+        var hasExplicitScrollRegion = false
         var iterator = transcript.unicodeScalars.makeIterator()
 
-        func ensureCurrentLine() {
-            while lines.count <= cursorLine {
+        func ensureLine(_ lineIndex: Int) {
+            while lines.count <= lineIndex {
                 lines.append([])
             }
+        }
+
+        func ensureCurrentLine() {
+            ensureLine(cursorLine)
+        }
+
+        func activeScrollRegion() -> ClosedRange<Int>? {
+            guard hasExplicitScrollRegion else {
+                return nil
+            }
+
+            let top = max(0, scrollRegionTop)
+            let bottom = max(top, scrollRegionBottom)
+            ensureLine(bottom)
+            return top...bottom
+        }
+
+        func explicitScrollRegion() -> ClosedRange<Int> {
+            let top = max(0, scrollRegionTop)
+            let bottom = max(top, scrollRegionBottom)
+            ensureLine(bottom)
+            return top...bottom
+        }
+
+        func scrollUpWithinRegion(_ count: Int) {
+            let region = explicitScrollRegion()
+            let scrollCount = max(0, count)
+            guard scrollCount > 0 else {
+                return
+            }
+
+            let regionHeight = region.count
+            if scrollCount >= regionHeight {
+                for lineIndex in region {
+                    lines[lineIndex] = []
+                }
+                return
+            }
+
+            lines.removeSubrange(region.lowerBound..<(region.lowerBound + scrollCount))
+            lines.insert(contentsOf: Array(repeating: [], count: scrollCount), at: region.upperBound - scrollCount + 1)
+        }
+
+        func scrollDownWithinRegion(_ count: Int) {
+            let region = explicitScrollRegion()
+            let scrollCount = max(0, count)
+            guard scrollCount > 0 else {
+                return
+            }
+
+            let regionHeight = region.count
+            if scrollCount >= regionHeight {
+                for lineIndex in region {
+                    lines[lineIndex] = []
+                }
+                return
+            }
+
+            lines.removeSubrange((region.upperBound - scrollCount + 1)...region.upperBound)
+            lines.insert(contentsOf: Array(repeating: [], count: scrollCount), at: region.lowerBound)
         }
 
         func csiParameters(_ parameters: String) -> [Int?] {
@@ -809,7 +872,17 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
             case "D":
                 cursorColumn = max(0, cursorColumn - defaultValue)
             case "E":
-                cursorLine += defaultValue
+                if let region = activeScrollRegion() {
+                    for _ in 0..<defaultValue {
+                        if cursorLine == region.upperBound {
+                            scrollUpWithinRegion(1)
+                        } else {
+                            cursorLine += 1
+                        }
+                    }
+                } else {
+                    cursorLine += defaultValue
+                }
                 cursorColumn = 0
                 ensureCurrentLine()
             case "F":
@@ -932,6 +1005,15 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                     lines.removeLast(min(scrollCount, lines.count))
                 }
                 ensureCurrentLine()
+            case "r":
+                let requestedTop = max(1, values.first.flatMap { $0 } ?? 1)
+                let requestedBottom = max(requestedTop, values.dropFirst().first.flatMap { $0 } ?? terminalRows)
+                scrollRegionTop = min(max(0, requestedTop - 1), max(0, terminalRows - 1))
+                scrollRegionBottom = min(max(scrollRegionTop, requestedBottom - 1), max(0, terminalRows - 1))
+                hasExplicitScrollRegion = true
+                cursorLine = 0
+                cursorColumn = 0
+                ensureCurrentLine()
             case "X":
                 ensureCurrentLine()
                 let eraseCount = max(0, defaultValue)
@@ -991,28 +1073,50 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                     cursorColumn = savedCursorColumn
                     ensureCurrentLine()
                 } else if next == "D" {
-                    let visibleLineCount = max(lines.count, cursorLine + 1)
-                    if cursorLine + 1 < visibleLineCount {
-                        cursorLine += 1
+                    if let region = activeScrollRegion() {
+                        if cursorLine == region.upperBound {
+                            scrollUpWithinRegion(1)
+                        } else {
+                            cursorLine += 1
+                        }
                     } else {
-                        lines.removeFirst()
-                        lines.append([])
-                        cursorLine = max(0, visibleLineCount - 1)
+                        let visibleLineCount = max(lines.count, cursorLine + 1)
+                        if cursorLine + 1 < visibleLineCount {
+                            cursorLine += 1
+                        } else {
+                            lines.removeFirst()
+                            lines.append([])
+                            cursorLine = max(0, visibleLineCount - 1)
+                        }
                     }
                     ensureCurrentLine()
                 } else if next == "E" {
-                    let visibleLineCount = max(lines.count, cursorLine + 1)
-                    if cursorLine + 1 < visibleLineCount {
-                        cursorLine += 1
+                    if let region = activeScrollRegion() {
+                        if cursorLine == region.upperBound {
+                            scrollUpWithinRegion(1)
+                        } else {
+                            cursorLine += 1
+                        }
                     } else {
-                        lines.removeFirst()
-                        lines.append([])
-                        cursorLine = max(0, visibleLineCount - 1)
+                        let visibleLineCount = max(lines.count, cursorLine + 1)
+                        if cursorLine + 1 < visibleLineCount {
+                            cursorLine += 1
+                        } else {
+                            lines.removeFirst()
+                            lines.append([])
+                            cursorLine = max(0, visibleLineCount - 1)
+                        }
                     }
                     cursorColumn = 0
                     ensureCurrentLine()
                 } else if next == "M" {
-                    if cursorLine > 0 {
+                    if let region = activeScrollRegion() {
+                        if cursorLine == region.lowerBound {
+                            scrollDownWithinRegion(1)
+                        } else {
+                            cursorLine -= 1
+                        }
+                    } else if cursorLine > 0 {
                         cursorLine -= 1
                     } else {
                         let visibleLineCount = max(lines.count, 1)
@@ -1034,6 +1138,9 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                     primaryBufferCursorLine = cursorLine
                     primaryBufferCursorColumn = cursorColumn
                     usingAlternateBuffer = false
+                    scrollRegionTop = 0
+                    scrollRegionBottom = max(0, terminalRows - 1)
+                    hasExplicitScrollRegion = false
                 }
             case "\r":
                 cursorColumn = 0
@@ -1052,7 +1159,15 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                     lines[cursorLine].remove(at: cursorColumn)
                 }
             case "\n":
-                cursorLine += 1
+                if let region = activeScrollRegion() {
+                    if cursorLine == region.upperBound {
+                        scrollUpWithinRegion(1)
+                    } else {
+                        cursorLine += 1
+                    }
+                } else {
+                    cursorLine += 1
+                }
                 cursorColumn = 0
                 ensureCurrentLine()
             case "\t":
