@@ -253,6 +253,12 @@ final class NexusMetadataStore {
         return try readSession(from: statement)
     }
 
+    func session(id: UUID) throws -> Session? {
+        try withLock {
+            try sessionWithoutLock(id: id)
+        }
+    }
+
     private func sessionWithoutLock(id: UUID) throws -> Session? {
         let statement = try prepare(
             "SELECT id, workspace_id, provider_id, is_default, state, failure_message FROM sessions WHERE id = ? LIMIT 1;"
@@ -409,6 +415,7 @@ enum NexusMetadataStoreError: LocalizedError {
     case workspaceNotFound
     case sessionNotFound
     case providerNotSupported
+    case sessionNotReady
 
     var errorDescription: String? {
         switch self {
@@ -430,6 +437,8 @@ enum NexusMetadataStoreError: LocalizedError {
             "Session not found"
         case .providerNotSupported:
             "Provider launch is not implemented yet"
+        case .sessionNotReady:
+            "Session is not ready for input"
         }
     }
 }

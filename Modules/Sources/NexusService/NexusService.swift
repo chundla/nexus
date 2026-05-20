@@ -21,6 +21,142 @@ public enum NexusEmbeddedServiceBootstrap {
     }
 }
 
+protocol SessionRuntimeManaging: AnyObject {
+    func launchOrResume(session: Session, workspace: Workspace, executable: String) throws
+    func sessionScreen(for session: Session) throws -> SessionScreen
+    func sendInput(_ text: String, to session: Session) throws -> SessionScreen
+}
+
+protocol SessionRuntimeLaunching {
+    func makeRuntime(session: Session, workspace: Workspace, executable: String) throws -> any SessionRuntime
+}
+
+protocol SessionRuntime: AnyObject {
+    var transcript: String { get }
+    func sendInput(_ text: String) throws
+}
+
+final class InMemorySessionRuntimeManager: SessionRuntimeManaging {
+    private let launcher: any SessionRuntimeLaunching
+    private let lock = NSLock()
+    private var runtimes: [UUID: any SessionRuntime] = [:]
+
+    init(launcher: any SessionRuntimeLaunching = ProcessSessionRuntimeLauncher()) {
+        self.launcher = launcher
+    }
+
+    func launchOrResume(session: Session, workspace: Workspace, executable: String) throws {
+        try withLock {
+            if runtimes[session.id] == nil {
+                runtimes[session.id] = try launcher.makeRuntime(session: session, workspace: workspace, executable: executable)
+            }
+        }
+    }
+
+    func sessionScreen(for session: Session) throws -> SessionScreen {
+        let runtime = try withLock {
+            guard let runtime = runtimes[session.id] else {
+                throw NexusMetadataStoreError.sessionNotFound
+            }
+            return runtime
+        }
+
+        return SessionScreen(session: session, transcript: runtime.transcript)
+    }
+
+    func sendInput(_ text: String, to session: Session) throws -> SessionScreen {
+        let runtime = try withLock {
+            guard let runtime = runtimes[session.id] else {
+                throw NexusMetadataStoreError.sessionNotFound
+            }
+            return runtime
+        }
+
+        try runtime.sendInput(text)
+        return SessionScreen(session: session, transcript: runtime.transcript)
+    }
+
+    private func withLock<T>(_ operation: () throws -> T) throws -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return try operation()
+    }
+}
+
+final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
+    func makeRuntime(session: Session, workspace: Workspace, executable: String) throws -> any SessionRuntime {
+        try ProcessSessionRuntime(executable: executable, workspace: workspace)
+    }
+}
+
+final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
+    private let process: Process
+    private let inputHandle: FileHandle
+    private let outputHandle: FileHandle
+    private let lock = NSLock()
+    private var storage: String
+
+    init(executable: String, workspace: Workspace) throws {
+        self.process = Process()
+        self.storage = "Launching \(workspace.name) with Claude…\n"
+
+        let inputPipe = Pipe()
+        let outputPipe = Pipe()
+
+        process.executableURL = URL(fileURLWithPath: executable, isDirectory: false)
+        process.currentDirectoryURL = URL(fileURLWithPath: workspace.folderPath, isDirectory: true)
+        process.standardInput = inputPipe
+        process.standardOutput = outputPipe
+        process.standardError = outputPipe
+        process.environment = ProcessInfo.processInfo.environment.merging(["TERM": "xterm-256color"]) { _, newValue in newValue }
+
+        inputHandle = inputPipe.fileHandleForWriting
+        outputHandle = outputPipe.fileHandleForReading
+
+        outputHandle.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            guard data.isEmpty == false, let self else {
+                return
+            }
+
+            let text = String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
+            self.append(text)
+        }
+
+        process.terminationHandler = { [weak self] process in
+            self?.append("\n[Claude exited with status \(process.terminationStatus)]\n")
+            self?.outputHandle.readabilityHandler = nil
+        }
+
+        try process.run()
+    }
+
+    var transcript: String {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func sendInput(_ text: String) throws {
+        let trimmed = text.trimmingCharacters(in: .newlines)
+        guard trimmed.isEmpty == false else {
+            return
+        }
+
+        append("\n> \(trimmed)\n")
+        guard let data = "\(trimmed)\n".data(using: .utf8) else {
+            return
+        }
+        inputHandle.write(data)
+    }
+
+    private func append(_ text: String) {
+        lock.lock()
+        storage.append(text)
+        lock.unlock()
+    }
+}
+
 public final class NexusService: NSObject, NexusEmbeddedServiceSession {
     nonisolated public let listener: NSXPCListener
     nonisolated public let storeURL: URL
@@ -31,17 +167,20 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
 
     private let metadataStore: NexusMetadataStore
     private let providerHealthEvaluator: any ProviderHealthEvaluating
+    private let sessionRuntimeManager: any SessionRuntimeManaging
 
     private init(
         listener: NSXPCListener,
         storeURL: URL,
         metadataStore: NexusMetadataStore,
-        providerHealthEvaluator: any ProviderHealthEvaluating
+        providerHealthEvaluator: any ProviderHealthEvaluating,
+        sessionRuntimeManager: any SessionRuntimeManaging
     ) {
         self.listener = listener
         self.storeURL = storeURL
         self.metadataStore = metadataStore
         self.providerHealthEvaluator = providerHealthEvaluator
+        self.sessionRuntimeManager = sessionRuntimeManager
         super.init()
         self.listener.delegate = self
         self.listener.resume()
@@ -69,14 +208,20 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
 
     static func bootstrapForTests(
         rootURL: URL,
-        providerHealthEvaluator: any ProviderHealthEvaluating
+        providerHealthEvaluator: any ProviderHealthEvaluating,
+        sessionRuntimeManager: any SessionRuntimeManaging = InMemorySessionRuntimeManager()
     ) throws -> NexusService {
-        try bootstrap(rootURL: rootURL, providerHealthEvaluator: providerHealthEvaluator)
+        try bootstrap(
+            rootURL: rootURL,
+            providerHealthEvaluator: providerHealthEvaluator,
+            sessionRuntimeManager: sessionRuntimeManager
+        )
     }
 
     private nonisolated static func bootstrap(
         rootURL: URL,
-        providerHealthEvaluator: any ProviderHealthEvaluating = ProviderHealthEvaluator()
+        providerHealthEvaluator: any ProviderHealthEvaluating = ProviderHealthEvaluator(),
+        sessionRuntimeManager: any SessionRuntimeManaging = InMemorySessionRuntimeManager()
     ) throws -> NexusService {
         try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
 
@@ -90,7 +235,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
             listener: NSXPCListener.anonymous(),
             storeURL: storeURL,
             metadataStore: metadataStore,
-            providerHealthEvaluator: providerHealthEvaluator
+            providerHealthEvaluator: providerHealthEvaluator,
+            sessionRuntimeManager: sessionRuntimeManager
         )
     }
 
@@ -147,20 +293,31 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
         }
 
         let health = providerHealthEvaluator.healthSummary(for: providerID, workspace: workspace)
-        if health.launchability == .launchable {
+        guard health.launchability == .launchable, let executable = health.resolvedExecutable else {
+            let failureMessage = health.diagnostics.first(where: { $0.severity == .error })?.message ?? health.summary
             if let session = try metadataStore.defaultSession(workspaceID: workspaceID, providerID: providerID) {
-                if session.state == .ready, session.failureMessage == nil {
-                    return session
-                }
-
                 return try metadataStore.updateSession(
                     id: session.id,
-                    state: .ready,
-                    failureMessage: nil
+                    state: .failed,
+                    failureMessage: failureMessage
                 )
             }
 
             return try metadataStore.createDefaultSession(
+                workspaceID: workspaceID,
+                providerID: providerID,
+                state: .failed,
+                failureMessage: failureMessage
+            )
+        }
+
+        let session: Session
+        if let existingSession = try metadataStore.defaultSession(workspaceID: workspaceID, providerID: providerID) {
+            session = existingSession.state == .ready && existingSession.failureMessage == nil
+                ? existingSession
+                : try metadataStore.updateSession(id: existingSession.id, state: .ready, failureMessage: nil)
+        } else {
+            session = try metadataStore.createDefaultSession(
                 workspaceID: workspaceID,
                 providerID: providerID,
                 state: .ready,
@@ -168,21 +325,41 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
             )
         }
 
-        let failureMessage = health.diagnostics.first(where: { $0.severity == .error })?.message ?? health.summary
-        if let session = try metadataStore.defaultSession(workspaceID: workspaceID, providerID: providerID) {
-            return try metadataStore.updateSession(
+        do {
+            try sessionRuntimeManager.launchOrResume(session: session, workspace: workspace, executable: executable)
+            return session
+        } catch {
+            let failedSession = try metadataStore.updateSession(
                 id: session.id,
                 state: .failed,
-                failureMessage: failureMessage
+                failureMessage: error.localizedDescription
             )
+            return failedSession
+        }
+    }
+
+    func getSessionScreen(sessionID: UUID) throws -> SessionScreen {
+        guard let session = try metadataStore.session(id: sessionID) else {
+            throw NexusMetadataStoreError.sessionNotFound
         }
 
-        return try metadataStore.createDefaultSession(
-            workspaceID: workspaceID,
-            providerID: providerID,
-            state: .failed,
-            failureMessage: failureMessage
-        )
+        if session.state == .failed {
+            return SessionScreen(session: session, transcript: session.failureMessage ?? "Session launch failed")
+        }
+
+        return try sessionRuntimeManager.sessionScreen(for: session)
+    }
+
+    func sendSessionInput(sessionID: UUID, text: String) throws -> SessionScreen {
+        guard let session = try metadataStore.session(id: sessionID) else {
+            throw NexusMetadataStoreError.sessionNotFound
+        }
+
+        guard session.state == .ready else {
+            throw NexusMetadataStoreError.sessionNotReady
+        }
+
+        return try sessionRuntimeManager.sendInput(text, to: session)
     }
 
     private func defaultSessionSummary(for workspace: Workspace, providerID: ProviderID) throws -> ProviderDefaultSessionSummary {
@@ -274,6 +451,17 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
                     providerID: resolvedProviderID
                 )
             },
+            reply: reply
+        )
+    }
+
+    func getSessionScreen(sessionID: String, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(with: { try service.getSessionScreen(sessionID: resolveUUID(sessionID)) }, reply: reply)
+    }
+
+    func sendSessionInput(sessionID: String, text: String, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(
+            with: { try service.sendSessionInput(sessionID: resolveUUID(sessionID), text: text) },
             reply: reply
         )
     }

@@ -12,6 +12,7 @@ final class NexusAppModel {
     var workspaceGroups: [WorkspaceGroup] = []
     var workspaces: [Workspace] = []
     var workspaceOverviews: [UUID: WorkspaceOverview] = [:]
+    var focusedSessionScreen: SessionScreen?
 
     private let client: NexusServiceClient
     private let embeddedService: (any NexusEmbeddedServiceSession)?
@@ -52,6 +53,7 @@ final class NexusAppModel {
             workspaceGroups = []
             workspaces = []
             workspaceOverviews = [:]
+            focusedSessionScreen = nil
             serviceErrorMessage = error.localizedDescription
         }
     }
@@ -76,8 +78,21 @@ final class NexusAppModel {
 
     func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) async throws -> Session {
         let session = try await client.launchOrResumeDefaultSession(workspaceID: workspaceID, providerID: providerID)
+        focusedSessionScreen = try await client.getSessionScreen(sessionID: session.id)
         workspaceOverviews[workspaceID] = try await client.getWorkspaceOverview(workspaceID: workspaceID)
         return session
+    }
+
+    func loadSessionScreen(sessionID: UUID) async throws {
+        focusedSessionScreen = try await client.getSessionScreen(sessionID: sessionID)
+    }
+
+    func sendInputToFocusedSession(_ text: String) async throws {
+        guard let sessionID = focusedSessionScreen?.session.id else {
+            return
+        }
+
+        focusedSessionScreen = try await client.sendSessionInput(sessionID: sessionID, text: text)
     }
 
     func workspaceGroupName(for groupID: UUID) -> String? {

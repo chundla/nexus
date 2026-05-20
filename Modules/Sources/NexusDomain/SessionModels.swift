@@ -29,3 +29,13 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
         case failed
     }
 }
+
+public struct SessionScreen: Codable, Equatable, Sendable {
+    public let session: Session
+    public let transcript: String
+
+    public init(session: Session, transcript: String) {
+        self.session = session
+        self.transcript = transcript
+    }
+}

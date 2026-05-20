@@ -11,6 +11,7 @@ struct ContentView: View {
     @State private var pendingWorkspaceFolderPath: String?
     @State private var pendingWorkspaceGroupID: UUID?
     @State private var isShowingWorkspaceGroupPicker = false
+    @State private var sessionInput = ""
     @State private var presentedError: PresentedError?
 
     var body: some View {
@@ -73,6 +74,8 @@ struct ContentView: View {
                 workspaceGroupDetail(groupID: groupID)
             case .workspace(let workspaceID):
                 workspaceDetail(workspaceID: workspaceID)
+            case .session(let sessionID):
+                sessionDetail(sessionID: sessionID)
             }
         } else {
             overviewDetail
@@ -180,6 +183,49 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
+    private func sessionDetail(sessionID: UUID) -> some View {
+        let screen = appModel.focusedSessionScreen?.session.id == sessionID ? appModel.focusedSessionScreen : nil
+
+        return VStack(alignment: .leading, spacing: 16) {
+            if let screen {
+                Text("\(screen.session.providerID.displayName) Session")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+
+                TextEditor(text: .constant(screen.transcript))
+                    .font(.system(.body, design: .monospaced))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .border(.quaternary)
+
+                HStack(alignment: .bottom, spacing: 12) {
+                    TextField("Send input to session", text: $sessionInput, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+
+                    Button("Send") {
+                        let text = sessionInput
+                        sessionInput = ""
+                        Task {
+                            do {
+                                try await appModel.sendInputToFocusedSession(text)
+                            } catch {
+                                presentedError = PresentedError(message: error.localizedDescription)
+                            }
+                        }
+                    }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(sessionInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            } else {
+                ContentUnavailableView(
+                    "Session unavailable",
+                    systemImage: "terminal",
+                    description: Text("Launch or resume the session from a Workspace provider card.")
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
     private func providerCard(workspaceID: UUID, card: WorkspaceProviderCard) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(card.provider.displayName)
@@ -229,7 +275,8 @@ struct ContentView: View {
             Button(card.defaultSession.actionTitle) {
                 Task {
                     do {
-                        _ = try await appModel.launchOrResumeDefaultSession(workspaceID: workspaceID, providerID: card.provider.id)
+                        let session = try await appModel.launchOrResumeDefaultSession(workspaceID: workspaceID, providerID: card.provider.id)
+                        selection = .session(session.id)
                     } catch {
                         presentedError = PresentedError(message: error.localizedDescription)
                     }
@@ -364,6 +411,7 @@ struct ContentView: View {
 private enum SidebarSelection: Hashable {
     case workspaceGroup(UUID)
     case workspace(UUID)
+    case session(UUID)
 }
 
 private struct PresentedError: Identifiable {

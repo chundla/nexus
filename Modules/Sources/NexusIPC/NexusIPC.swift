@@ -9,6 +9,8 @@ import NexusDomain
     func getWorkspaceOverview(workspaceID: String, reply: @escaping (Data?, NSString?) -> Void)
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: String?, reply: @escaping (Data?, NSString?) -> Void)
     func launchOrResumeDefaultSession(workspaceID: String, providerID: String, reply: @escaping (Data?, NSString?) -> Void)
+    func getSessionScreen(sessionID: String, reply: @escaping (Data?, NSString?) -> Void)
+    func sendSessionInput(sessionID: String, text: String, reply: @escaping (Data?, NSString?) -> Void)
 }
 
 public protocol NexusServiceClient {
@@ -19,6 +21,8 @@ public protocol NexusServiceClient {
     func getWorkspaceOverview(workspaceID: UUID) async throws -> WorkspaceOverview
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: UUID?) async throws -> Workspace
     func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) async throws -> Session
+    func getSessionScreen(sessionID: UUID) async throws -> SessionScreen
+    func sendSessionInput(sessionID: UUID, text: String) async throws -> SessionScreen
 }
 
 public typealias NexusServiceStatusClient = NexusServiceClient
@@ -84,6 +88,18 @@ public final class NexusIPCClient: NexusServiceClient {
                 providerID: providerID.rawValue,
                 reply: reply
             )
+        }
+    }
+
+    nonisolated public func getSessionScreen(sessionID: UUID) async throws -> SessionScreen {
+        try await requestDecodable { proxy, reply in
+            proxy.getSessionScreen(sessionID: sessionID.uuidString, reply: reply)
+        }
+    }
+
+    nonisolated public func sendSessionInput(sessionID: UUID, text: String) async throws -> SessionScreen {
+        try await requestDecodable { proxy, reply in
+            proxy.sendSessionInput(sessionID: sessionID.uuidString, text: text, reply: reply)
         }
     }
 
