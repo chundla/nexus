@@ -901,6 +901,20 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                 }
                 let endIndex = min(lines[cursorLine].count, cursorColumn + defaultValue)
                 lines[cursorLine].removeSubrange(cursorColumn..<endIndex)
+            case "S":
+                ensureCurrentLine()
+                let scrollCount = max(0, defaultValue)
+                guard scrollCount > 0 else {
+                    break
+                }
+                let visibleLineCount = max(lines.count, cursorLine + 1)
+                if scrollCount >= visibleLineCount {
+                    lines = Array(repeating: [], count: visibleLineCount)
+                } else {
+                    lines.removeFirst(scrollCount)
+                    lines.append(contentsOf: Array(repeating: [], count: scrollCount))
+                }
+                ensureCurrentLine()
             case "X":
                 ensureCurrentLine()
                 let eraseCount = max(0, defaultValue)
