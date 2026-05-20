@@ -2015,6 +2015,42 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelLaunchOrResumeFailedSessionShowsInspectableFailureScreen() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: [:]),
+                commandRunner: StubCommandRunner(results: [:])
+            )
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+        let session = try await model.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+
+        let claudeCard = try #require(model.workspaceOverview(for: workspace.id)?.providerCards.first(where: { $0.provider.id == .claude }))
+        #expect(session.state == .failed)
+        #expect(claudeCard.defaultSession.state == .failed)
+        #expect(claudeCard.defaultSession.actionTitle == "Relaunch")
+        #expect(model.focusedSessionScreen?.session.id == session.id)
+        #expect(model.focusedSessionScreen?.session.state == .failed)
+        #expect(model.focusedSessionScreen?.transcript == "Claude executable was not found in the service search paths.")
+    }
+
+    @MainActor
     @Test func appModelRefreshesExitedFocusedSessionAndWorkspaceOverview() async throws {
         let workspaceFolderURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
