@@ -772,6 +772,38 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
             lines.insert(contentsOf: Array(repeating: [], count: scrollCount), at: region.lowerBound)
         }
 
+        func insertBlankLinesWithinRegion(_ count: Int, at lineIndex: Int) {
+            let region = explicitScrollRegion()
+            guard region.contains(lineIndex) else {
+                return
+            }
+
+            let insertCount = min(max(0, count), region.upperBound - lineIndex + 1)
+            guard insertCount > 0 else {
+                return
+            }
+
+            let regionSlice = Array(lines[lineIndex...region.upperBound])
+            let replacement = Array(repeating: [Character](), count: insertCount) + Array(regionSlice.dropLast(insertCount))
+            lines.replaceSubrange(lineIndex...region.upperBound, with: replacement)
+        }
+
+        func deleteLinesWithinRegion(_ count: Int, at lineIndex: Int) {
+            let region = explicitScrollRegion()
+            guard region.contains(lineIndex) else {
+                return
+            }
+
+            let deleteCount = min(max(0, count), region.upperBound - lineIndex + 1)
+            guard deleteCount > 0 else {
+                return
+            }
+
+            let regionSlice = Array(lines[lineIndex...region.upperBound])
+            let replacement = Array(regionSlice.dropFirst(deleteCount)) + Array(repeating: [Character](), count: deleteCount)
+            lines.replaceSubrange(lineIndex...region.upperBound, with: replacement)
+        }
+
         func csiParameters(_ parameters: String) -> [Int?] {
             guard parameters.isEmpty == false else {
                 return []
@@ -906,11 +938,12 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                             lines[lineIndex].removeAll()
                         }
                     }
-                    let endIndex = min(cursorColumn, lines[cursorLine].count)
-                    if endIndex > 0 {
-                        lines[cursorLine].removeFirst(endIndex)
+                    while lines[cursorLine].count <= cursorColumn {
+                        lines[cursorLine].append(" ")
                     }
-                    cursorColumn = 0
+                    for index in 0...cursorColumn {
+                        lines[cursorLine][index] = " "
+                    }
                 case 2:
                     lines = [[]]
                     cursorLine = 0
@@ -957,19 +990,27 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession {
                 guard insertCount > 0 else {
                     break
                 }
-                let blanks = Array(repeating: [Character](), count: insertCount)
-                lines.insert(contentsOf: blanks, at: cursorLine)
+                if activeScrollRegion()?.contains(cursorLine) == true {
+                    insertBlankLinesWithinRegion(insertCount, at: cursorLine)
+                } else {
+                    let blanks = Array(repeating: [Character](), count: insertCount)
+                    lines.insert(contentsOf: blanks, at: cursorLine)
+                }
             case "M":
                 ensureCurrentLine()
                 let deleteCount = max(0, defaultValue)
                 guard deleteCount > 0 else {
                     break
                 }
-                let endLine = min(lines.count, cursorLine + deleteCount)
-                if cursorLine < endLine {
-                    lines.removeSubrange(cursorLine..<endLine)
+                if activeScrollRegion()?.contains(cursorLine) == true {
+                    deleteLinesWithinRegion(deleteCount, at: cursorLine)
+                } else {
+                    let endLine = min(lines.count, cursorLine + deleteCount)
+                    if cursorLine < endLine {
+                        lines.removeSubrange(cursorLine..<endLine)
+                    }
+                    ensureCurrentLine()
                 }
-                ensureCurrentLine()
             case "P":
                 ensureCurrentLine()
                 guard cursorColumn < lines[cursorLine].count else {
