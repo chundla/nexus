@@ -639,11 +639,32 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             WorkspaceProviderCard(
                 provider: Provider(id: providerID),
                 health: providerHealthEvaluator.healthSummary(for: providerID, workspace: workspace),
-                defaultSession: try defaultSessionSummary(for: workspace, providerID: providerID)
+                defaultSession: try defaultSessionSummary(for: workspace, providerID: providerID),
+                alternateSessionCount: try metadataStore.listSessions(workspaceID: workspaceID, providerID: providerID)
+                    .filter { $0.isDefault == false }
+                    .count
             )
         }
 
         return WorkspaceOverview(workspace: workspace, providerCards: providerCards)
+    }
+
+    func getProviderDetail(workspaceID: UUID, providerID: ProviderID) throws -> ProviderDetail {
+        guard let workspace = try metadataStore.workspace(id: workspaceID) else {
+            throw NexusMetadataStoreError.workspaceNotFound
+        }
+
+        let sessions = try metadataStore.listSessions(workspaceID: workspaceID, providerID: providerID)
+            .map(reconcileSessionRuntimeState)
+
+        return ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: providerID),
+            health: providerHealthEvaluator.healthSummary(for: providerID, workspace: workspace),
+            defaultSession: sessions.first(where: \.isDefault),
+            alternateSessions: sessions.filter { $0.isDefault == false && $0.state != .failed },
+            failedSessions: sessions.filter { $0.isDefault == false && $0.state == .failed }
+        )
     }
 
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: UUID?) throws -> Workspace {
@@ -692,23 +713,41 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             )
         }
 
-        do {
-            try sessionRuntimeManager.launchOrResume(session: session, workspace: workspace, executable: executable)
-            let terminalSize = try metadataStore.sessionTerminalSize(id: session.id)
-            _ = try sessionRuntimeManager.resize(
-                session: session,
-                columns: terminalSize.columns,
-                rows: terminalSize.rows
-            )
-            return session
-        } catch {
-            let failedSession = try metadataStore.updateSession(
-                id: session.id,
-                state: .failed,
-                failureMessage: error.localizedDescription
-            )
-            return failedSession
+        return try launchSession(session, workspace: workspace, executable: executable)
+    }
+
+    func createNamedSession(workspaceID: UUID, providerID: ProviderID, name: String?) throws -> Session {
+        guard let workspace = try metadataStore.workspace(id: workspaceID) else {
+            throw NexusMetadataStoreError.workspaceNotFound
         }
+
+        guard providerID == .claude else {
+            throw NexusMetadataStoreError.providerNotSupported
+        }
+
+        let existingSessions = try metadataStore.listSessions(workspaceID: workspaceID, providerID: providerID)
+        let resolvedName = resolveNamedSessionName(name, existingSessions: existingSessions)
+        let health = providerHealthEvaluator.healthSummary(for: providerID, workspace: workspace)
+
+        guard health.launchability == .launchable, let executable = health.resolvedExecutable else {
+            let failureMessage = health.diagnostics.first(where: { $0.severity == .error })?.message ?? health.summary
+            return try metadataStore.createNamedSession(
+                workspaceID: workspaceID,
+                providerID: providerID,
+                name: resolvedName,
+                state: .failed,
+                failureMessage: failureMessage
+            )
+        }
+
+        let session = try metadataStore.createNamedSession(
+            workspaceID: workspaceID,
+            providerID: providerID,
+            name: resolvedName,
+            state: .ready,
+            failureMessage: nil
+        )
+        return try launchSession(session, workspace: workspace, executable: executable)
     }
 
     func getSessionScreen(sessionID: UUID) throws -> SessionScreen {
@@ -836,6 +875,25 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             rows: screen.terminalRows
         )
         return normalizedSessionScreen(screen)
+    }
+
+    private func launchSession(_ session: Session, workspace: Workspace, executable: String) throws -> Session {
+        do {
+            try sessionRuntimeManager.launchOrResume(session: session, workspace: workspace, executable: executable)
+            let terminalSize = try metadataStore.sessionTerminalSize(id: session.id)
+            _ = try sessionRuntimeManager.resize(
+                session: session,
+                columns: terminalSize.columns,
+                rows: terminalSize.rows
+            )
+            return session
+        } catch {
+            return try metadataStore.updateSession(
+                id: session.id,
+                state: .failed,
+                failureMessage: error.localizedDescription
+            )
+        }
     }
 
     private func staticSessionScreen(for session: Session, transcript: String) throws -> SessionScreen {
@@ -1649,6 +1707,14 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         )
     }
 
+    private func resolveNamedSessionName(_ requestedName: String?, existingSessions: [Session]) -> String {
+        if let trimmedName = requestedName?.trimmingCharacters(in: .whitespacesAndNewlines), trimmedName.isEmpty == false {
+            return trimmedName
+        }
+
+        return "Session \(existingSessions.filter { $0.isDefault == false }.count + 1)"
+    }
+
     private func defaultSessionSummary(for workspace: Workspace, providerID: ProviderID) throws -> ProviderDefaultSessionSummary {
         guard let session = try metadataStore.defaultSession(workspaceID: workspace.id, providerID: providerID) else {
             return ProviderDefaultSessionSummary(
@@ -1781,6 +1847,22 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
         sendReply(with: { try service.getWorkspaceOverview(workspaceID: resolveUUID(workspaceID)) }, reply: reply)
     }
 
+    func getProviderDetail(workspaceID: String, providerID: String, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(
+            with: {
+                guard let resolvedProviderID = ProviderID(rawValue: providerID) else {
+                    throw CocoaError(.coderInvalidValue)
+                }
+
+                return try service.getProviderDetail(
+                    workspaceID: resolveUUID(workspaceID),
+                    providerID: resolvedProviderID
+                )
+            },
+            reply: reply
+        )
+    }
+
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: String?, reply: @escaping (Data?, NSString?) -> Void) {
         sendReply(
             with: {
@@ -1804,6 +1886,23 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
                 return try service.launchOrResumeDefaultSession(
                     workspaceID: resolveUUID(workspaceID),
                     providerID: resolvedProviderID
+                )
+            },
+            reply: reply
+        )
+    }
+
+    func createNamedSession(workspaceID: String, providerID: String, name: String?, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(
+            with: {
+                guard let resolvedProviderID = ProviderID(rawValue: providerID) else {
+                    throw CocoaError(.coderInvalidValue)
+                }
+
+                return try service.createNamedSession(
+                    workspaceID: resolveUUID(workspaceID),
+                    providerID: resolvedProviderID,
+                    name: name
                 )
             },
             reply: reply

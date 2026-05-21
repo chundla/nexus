@@ -320,6 +320,48 @@ struct nexusTests {
         #expect(claudeCard.defaultSession.sessionID == firstSession.id)
     }
 
+    @Test func createNamedSessionAddsAlternateSessionToProviderDetailOverIPC() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            ),
+            sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+
+        let defaultSession = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let namedSession = try await client.createNamedSession(workspaceID: workspace.id, providerID: .claude, name: nil)
+        let providerDetail = try await client.getProviderDetail(workspaceID: workspace.id, providerID: .claude)
+        let overview = try await client.getWorkspaceOverview(workspaceID: workspace.id)
+        let claudeCard = try #require(overview.providerCards.first(where: { $0.provider.id == .claude }))
+
+        #expect(defaultSession.isDefault)
+        #expect(namedSession.isDefault == false)
+        #expect(namedSession.name == "Session 1")
+        #expect(providerDetail.defaultSession?.id == defaultSession.id)
+        #expect(providerDetail.alternateSessions.map(\.id) == [namedSession.id])
+        #expect(providerDetail.alternateSessions.first?.name == "Session 1")
+        #expect(providerDetail.failedSessions.isEmpty)
+        #expect(claudeCard.alternateSessionCount == 1)
+    }
+
     @Test func launchedSessionReturnsFocusedTranscriptAndAcceptsInputOverIPC() async throws {
         let workspaceFolderURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -3164,6 +3206,66 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelCreateNamedSessionRefreshesProviderDetailAndFocusesNewSession() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let defaultSession = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let workspaceOverview = WorkspaceOverview(
+            workspace: workspace,
+            providerCards: [
+                WorkspaceProviderCard(
+                    provider: Provider(id: .claude),
+                    health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+                    defaultSession: ProviderDefaultSessionSummary(
+                        state: .ready,
+                        summary: "Default session ready",
+                        actionTitle: "Resume",
+                        sessionID: defaultSession.id
+                    )
+                )
+            ]
+        )
+        let providerDetail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+            defaultSession: defaultSession,
+            alternateSessions: [],
+            failedSessions: []
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: workspaceOverview,
+            session: defaultSession,
+            screen: SessionScreen(session: defaultSession, transcript: "Claude ready"),
+            providerDetail: providerDetail
+        )
+        let model = NexusAppModel(client: client)
+
+        try await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
+        let namedSession = try await model.createNamedSession(workspaceID: workspace.id, providerID: .claude)
+
+        let refreshedDetail = try #require(model.providerDetail(for: workspace.id, providerID: .claude))
+        let claudeCard = try #require(model.workspaceOverview(for: workspace.id)?.providerCards.first)
+        #expect(namedSession.isDefault == false)
+        #expect(namedSession.name == "Session 1")
+        #expect(model.focusedSessionScreen?.session.id == namedSession.id)
+        #expect(refreshedDetail.alternateSessions.map(\.id) == [namedSession.id])
+        #expect(claudeCard.alternateSessionCount == 1)
+    }
+
+    @MainActor
     @Test func appModelLaunchOrResumeFailedSessionShowsInspectableFailureScreen() async throws {
         let workspaceFolderURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -3874,15 +3976,30 @@ private final class StubSessionRuntimeManager: SessionRuntimeManaging {
 }
 
 private final class TrackingServiceClient: NexusServiceClient {
-    private let workspaceOverviewValue: WorkspaceOverview
+    private var workspaceOverviewValue: WorkspaceOverview
+    private var providerDetailValue: ProviderDetail
     private var sessionValue: Session
     private var screenValue: SessionScreen
     private var observedScreenHandlers: [UUID: @Sendable (SessionScreen) -> Void] = [:]
 
     var workspaceOverviewRequestCount = 0
 
-    init(workspaceOverview: WorkspaceOverview, session: Session, screen: SessionScreen) {
+    init(
+        workspaceOverview: WorkspaceOverview,
+        session: Session,
+        screen: SessionScreen,
+        providerDetail: ProviderDetail? = nil
+    ) {
         self.workspaceOverviewValue = workspaceOverview
+        self.providerDetailValue = providerDetail ?? ProviderDetail(
+            workspace: workspaceOverview.workspace,
+            provider: Provider(id: session.providerID),
+            health: workspaceOverview.providerCards.first(where: { $0.provider.id == session.providerID })?.health
+                ?? ProviderHealthSummary(state: .notChecked, summary: "Not checked"),
+            defaultSession: session.isDefault ? session : nil,
+            alternateSessions: session.isDefault ? [] : [session],
+            failedSessions: session.state == .failed && session.isDefault == false ? [session] : []
+        )
         self.sessionValue = session
         self.screenValue = screen
     }
@@ -3908,12 +4025,49 @@ private final class TrackingServiceClient: NexusServiceClient {
         return workspaceOverviewValue
     }
 
+    func getProviderDetail(workspaceID: UUID, providerID: ProviderID) async throws -> ProviderDetail {
+        providerDetailValue
+    }
+
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: UUID?) async throws -> Workspace {
         workspaceOverviewValue.workspace
     }
 
     func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) async throws -> Session {
         sessionValue
+    }
+
+    func createNamedSession(workspaceID: UUID, providerID: ProviderID, name: String?) async throws -> Session {
+        let namedSession = Session(
+            id: UUID(),
+            workspaceID: workspaceID,
+            providerID: providerID,
+            name: name ?? "Session 1",
+            isDefault: false,
+            state: .ready
+        )
+        sessionValue = namedSession
+        screenValue = SessionScreen(session: namedSession, transcript: screenValue.transcript)
+        providerDetailValue = ProviderDetail(
+            workspace: providerDetailValue.workspace,
+            provider: providerDetailValue.provider,
+            health: providerDetailValue.health,
+            defaultSession: providerDetailValue.defaultSession,
+            alternateSessions: providerDetailValue.alternateSessions + [namedSession],
+            failedSessions: providerDetailValue.failedSessions
+        )
+        if let index = workspaceOverviewValue.providerCards.firstIndex(where: { $0.provider.id == providerID }) {
+            let card = workspaceOverviewValue.providerCards[index]
+            var providerCards = workspaceOverviewValue.providerCards
+            providerCards[index] = WorkspaceProviderCard(
+                provider: card.provider,
+                health: card.health,
+                defaultSession: card.defaultSession,
+                alternateSessionCount: card.alternateSessionCount + 1
+            )
+            workspaceOverviewValue = WorkspaceOverview(workspace: workspaceOverviewValue.workspace, providerCards: providerCards)
+        }
+        return namedSession
     }
 
     func getSessionScreen(sessionID: UUID) async throws -> SessionScreen {
@@ -3985,11 +4139,19 @@ private struct FailingServiceClient: NexusServiceClient {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 
+    func getProviderDetail(workspaceID: UUID, providerID: ProviderID) async throws -> ProviderDetail {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: UUID?) async throws -> Workspace {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 
     func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) async throws -> Session {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func createNamedSession(workspaceID: UUID, providerID: ProviderID, name: String?) async throws -> Session {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 

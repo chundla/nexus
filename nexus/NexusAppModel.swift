@@ -12,6 +12,7 @@ final class NexusAppModel {
     var workspaceGroups: [WorkspaceGroup] = []
     var workspaces: [Workspace] = []
     var workspaceOverviews: [UUID: WorkspaceOverview] = [:]
+    var providerDetails: [ProviderDetailKey: ProviderDetail] = [:]
     var focusedSessionScreen: SessionScreen?
 
     private let client: NexusServiceClient
@@ -48,6 +49,7 @@ final class NexusAppModel {
             self.workspaceGroups = loadedWorkspaceGroups
             self.workspaces = loadedWorkspaces
             self.workspaceOverviews = loadedWorkspaceOverviews
+            self.providerDetails = [:]
             self.serviceErrorMessage = nil
         } catch {
             await stopFocusingSession()
@@ -55,6 +57,7 @@ final class NexusAppModel {
             workspaceGroups = []
             workspaces = []
             workspaceOverviews = [:]
+            providerDetails = [:]
             focusedSessionScreen = nil
             serviceErrorMessage = error.localizedDescription
         }
@@ -82,7 +85,20 @@ final class NexusAppModel {
         let session = try await client.launchOrResumeDefaultSession(workspaceID: workspaceID, providerID: providerID)
         try await focusSession(sessionID: session.id)
         try await refreshWorkspaceOverview(for: workspaceID)
+        try await refreshProviderDetailIfLoaded(workspaceID: workspaceID, providerID: providerID)
         return session
+    }
+
+    func createNamedSession(workspaceID: UUID, providerID: ProviderID, name: String? = nil) async throws -> Session {
+        let session = try await client.createNamedSession(workspaceID: workspaceID, providerID: providerID, name: name)
+        try await focusSession(sessionID: session.id)
+        try await refreshWorkspaceOverview(for: workspaceID)
+        try await refreshProviderDetail(workspaceID: workspaceID, providerID: providerID)
+        return session
+    }
+
+    func loadProviderDetail(workspaceID: UUID, providerID: ProviderID) async throws {
+        try await refreshProviderDetail(workspaceID: workspaceID, providerID: providerID)
     }
 
     func focusSession(sessionID: UUID) async throws {
@@ -179,8 +195,28 @@ final class NexusAppModel {
         workspaceOverviews[workspaceID]
     }
 
+    func providerDetail(for workspaceID: UUID, providerID: ProviderID) -> ProviderDetail? {
+        providerDetails[ProviderDetailKey(workspaceID: workspaceID, providerID: providerID)]
+    }
+
     private func refreshWorkspaceOverview(for workspaceID: UUID) async throws {
         workspaceOverviews[workspaceID] = try await client.getWorkspaceOverview(workspaceID: workspaceID)
+    }
+
+    private func refreshProviderDetail(workspaceID: UUID, providerID: ProviderID) async throws {
+        providerDetails[ProviderDetailKey(workspaceID: workspaceID, providerID: providerID)] = try await client.getProviderDetail(
+            workspaceID: workspaceID,
+            providerID: providerID
+        )
+    }
+
+    private func refreshProviderDetailIfLoaded(workspaceID: UUID, providerID: ProviderID) async throws {
+        let key = ProviderDetailKey(workspaceID: workspaceID, providerID: providerID)
+        guard providerDetails[key] != nil else {
+            return
+        }
+
+        try await refreshProviderDetail(workspaceID: workspaceID, providerID: providerID)
     }
 
     private func applyFocusedSessionScreen(_ screen: SessionScreen) async throws {
@@ -191,6 +227,15 @@ final class NexusAppModel {
 
         if let previousState, previousState != screen.session.state {
             try await refreshWorkspaceOverview(for: screen.session.workspaceID)
+            try await refreshProviderDetailIfLoaded(
+                workspaceID: screen.session.workspaceID,
+                providerID: screen.session.providerID
+            )
         }
     }
+}
+
+struct ProviderDetailKey: Hashable {
+    let workspaceID: UUID
+    let providerID: ProviderID
 }

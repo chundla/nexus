@@ -142,15 +142,47 @@ public struct WorkspaceProviderCard: Codable, Equatable, Identifiable, Sendable 
     public let provider: Provider
     public let health: ProviderHealthSummary
     public let defaultSession: ProviderDefaultSessionSummary
+    public let alternateSessionCount: Int
 
-    public init(provider: Provider, health: ProviderHealthSummary, defaultSession: ProviderDefaultSessionSummary) {
+    public init(
+        provider: Provider,
+        health: ProviderHealthSummary,
+        defaultSession: ProviderDefaultSessionSummary,
+        alternateSessionCount: Int = 0
+    ) {
         self.provider = provider
         self.health = health
         self.defaultSession = defaultSession
+        self.alternateSessionCount = alternateSessionCount
     }
 
     public var id: ProviderID {
         provider.id
+    }
+}
+
+public struct ProviderDetail: Codable, Equatable, Sendable {
+    public let workspace: Workspace
+    public let provider: Provider
+    public let health: ProviderHealthSummary
+    public let defaultSession: Session?
+    public let alternateSessions: [Session]
+    public let failedSessions: [Session]
+
+    public init(
+        workspace: Workspace,
+        provider: Provider,
+        health: ProviderHealthSummary,
+        defaultSession: Session?,
+        alternateSessions: [Session],
+        failedSessions: [Session]
+    ) {
+        self.workspace = workspace
+        self.provider = provider
+        self.health = health
+        self.defaultSession = defaultSession
+        self.alternateSessions = alternateSessions
+        self.failedSessions = failedSessions
     }
 }
 

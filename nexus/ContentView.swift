@@ -60,9 +60,13 @@ struct ContentView: View {
         }
         .task(id: selection) {
             do {
-                if case .session(let sessionID) = selection {
+                switch selection {
+                case .session(let sessionID):
                     try await appModel.focusSession(sessionID: sessionID)
-                } else {
+                case .provider(let workspaceID, let providerID):
+                    await appModel.stopFocusingSession()
+                    try await appModel.loadProviderDetail(workspaceID: workspaceID, providerID: providerID)
+                default:
                     await appModel.stopFocusingSession()
                 }
             } catch {
@@ -88,6 +92,8 @@ struct ContentView: View {
                 workspaceGroupDetail(groupID: groupID)
             case .workspace(let workspaceID):
                 workspaceDetail(workspaceID: workspaceID)
+            case .provider(let workspaceID, let providerID):
+                providerDetail(workspaceID: workspaceID, providerID: providerID)
             case .session(let sessionID):
                 sessionDetail(sessionID: sessionID)
             }
@@ -189,6 +195,120 @@ struct ContentView: View {
                     }
                 } else {
                     Text("Workspace not found.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func providerDetail(workspaceID: UUID, providerID: ProviderID) -> some View {
+        let detail = appModel.providerDetail(for: workspaceID, providerID: providerID)
+
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text(providerID.displayName)
+                    .font(.title2)
+                    .fontWeight(.semibold)
+
+                if let detail {
+                    Label(detail.health.state.rawValue.replacingOccurrences(of: "Checked", with: " checked"), systemImage: "waveform.path.ecg")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                    Text(detail.health.summary)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+
+                    if detail.health.diagnostics.isEmpty == false {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Diagnostics")
+                                .font(.headline)
+                            ForEach(Array(detail.health.diagnostics.enumerated()), id: \.offset) { _, diagnostic in
+                                Text(diagnostic.message)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Default Session")
+                            .font(.headline)
+
+                        if let defaultSession = detail.defaultSession {
+                            providerSessionRow(defaultSession, actionTitle: defaultSession.state == .ready ? "Open" : "Inspect") {
+                                selection = .session(defaultSession.id)
+                            }
+                        } else {
+                            Text("No default session yet.")
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Button(defaultSessionButtonTitle(for: detail)) {
+                            Task {
+                                do {
+                                    let session = try await appModel.launchOrResumeDefaultSession(workspaceID: workspaceID, providerID: providerID)
+                                    selection = .session(session.id)
+                                } catch {
+                                    presentedError = PresentedError(message: error.localizedDescription)
+                                }
+                            }
+                        }
+                        .disabled(providerID != .claude)
+                    }
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Alternate Sessions")
+                                .font(.headline)
+                            Spacer()
+                            Button("New Session") {
+                                Task {
+                                    do {
+                                        let session = try await appModel.createNamedSession(workspaceID: workspaceID, providerID: providerID)
+                                        selection = .session(session.id)
+                                    } catch {
+                                        presentedError = PresentedError(message: error.localizedDescription)
+                                    }
+                                }
+                            }
+                            .disabled(providerID != .claude)
+                        }
+
+                        if detail.alternateSessions.isEmpty {
+                            Text("No alternate sessions yet.")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(detail.alternateSessions) { session in
+                                providerSessionRow(session, actionTitle: session.state == .ready ? "Open" : "Inspect") {
+                                    selection = .session(session.id)
+                                }
+                            }
+                        }
+                    }
+
+                    if detail.failedSessions.isEmpty == false {
+                        Divider()
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Failed Session Records")
+                                .font(.headline)
+
+                            ForEach(detail.failedSessions) { session in
+                                providerSessionRow(session, actionTitle: "Inspect") {
+                                    selection = .session(session.id)
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    Text("Loading provider detail…")
                         .foregroundStyle(.secondary)
                 }
             }
@@ -329,23 +449,61 @@ struct ContentView: View {
                 Text(card.defaultSession.summary)
                     .font(.callout)
                     .foregroundStyle(.secondary)
-            }
-
-            Button(card.defaultSession.actionTitle) {
-                Task {
-                    do {
-                        let session = try await appModel.launchOrResumeDefaultSession(workspaceID: workspaceID, providerID: card.provider.id)
-                        selection = .session(session.id)
-                    } catch {
-                        presentedError = PresentedError(message: error.localizedDescription)
-                    }
+                if card.alternateSessionCount > 0 {
+                    Text("\(card.alternateSessionCount) alternate session\(card.alternateSessionCount == 1 ? "" : "s")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
-            .disabled(card.provider.id != .claude)
+
+            HStack {
+                Button(card.defaultSession.actionTitle) {
+                    Task {
+                        do {
+                            let session = try await appModel.launchOrResumeDefaultSession(workspaceID: workspaceID, providerID: card.provider.id)
+                            selection = .session(session.id)
+                        } catch {
+                            presentedError = PresentedError(message: error.localizedDescription)
+                        }
+                    }
+                }
+                .disabled(card.provider.id != .claude)
+
+                Button("Details") {
+                    selection = .provider(workspaceID, card.provider.id)
+                }
+            }
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func providerSessionRow(_ session: Session, actionTitle: String, action: @escaping () -> Void) -> some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(session.isDefault ? "Default Session" : (session.name ?? "Session"))
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                Text(session.failureMessage ?? session.state.rawValue.capitalized)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Button(actionTitle, action: action)
+        }
+        .padding()
+        .background(.quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func defaultSessionButtonTitle(for detail: ProviderDetail) -> String {
+        guard let session = detail.defaultSession else {
+            return "Launch"
+        }
+
+        return session.state == .ready ? "Resume" : "Relaunch"
     }
 
     private var createWorkspaceGroupSheet: some View {
@@ -696,6 +854,7 @@ private struct TerminalLineSegment {
 private enum SidebarSelection: Hashable {
     case workspaceGroup(UUID)
     case workspace(UUID)
+    case provider(UUID, ProviderID)
     case session(UUID)
 }
 

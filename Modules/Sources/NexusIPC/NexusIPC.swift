@@ -25,8 +25,10 @@ public protocol SessionScreenObservation: Sendable {
     func createWorkspaceGroup(name: String, reply: @escaping (Data?, NSString?) -> Void)
     func listWorkspaces(_ reply: @escaping (Data?, NSString?) -> Void)
     func getWorkspaceOverview(workspaceID: String, reply: @escaping (Data?, NSString?) -> Void)
+    func getProviderDetail(workspaceID: String, providerID: String, reply: @escaping (Data?, NSString?) -> Void)
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: String?, reply: @escaping (Data?, NSString?) -> Void)
     func launchOrResumeDefaultSession(workspaceID: String, providerID: String, reply: @escaping (Data?, NSString?) -> Void)
+    func createNamedSession(workspaceID: String, providerID: String, name: String?, reply: @escaping (Data?, NSString?) -> Void)
     func getSessionScreen(sessionID: String, reply: @escaping (Data?, NSString?) -> Void)
     func observeSessionScreen(sessionID: String, reply: @escaping (Data?, NSString?) -> Void)
     func cancelSessionScreenObservation(observationID: String, reply: @escaping (Data?, NSString?) -> Void)
@@ -42,8 +44,10 @@ public protocol NexusServiceClient {
     func createWorkspaceGroup(name: String) async throws -> WorkspaceGroup
     func listWorkspaces() async throws -> [Workspace]
     func getWorkspaceOverview(workspaceID: UUID) async throws -> WorkspaceOverview
+    func getProviderDetail(workspaceID: UUID, providerID: ProviderID) async throws -> ProviderDetail
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: UUID?) async throws -> Workspace
     func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) async throws -> Session
+    func createNamedSession(workspaceID: UUID, providerID: ProviderID, name: String?) async throws -> Session
     func getSessionScreen(sessionID: UUID) async throws -> SessionScreen
     func observeSessionScreen(sessionID: UUID, onUpdate: @escaping @Sendable (SessionScreen) -> Void) async throws -> any SessionScreenObservation
     func sendSessionInput(sessionID: UUID, text: String) async throws -> SessionScreen
@@ -101,6 +105,16 @@ public final class NexusIPCClient: NexusServiceClient, @unchecked Sendable {
         }
     }
 
+    nonisolated public func getProviderDetail(workspaceID: UUID, providerID: ProviderID) async throws -> ProviderDetail {
+        try await requestDecodable { proxy, reply in
+            proxy.getProviderDetail(
+                workspaceID: workspaceID.uuidString,
+                providerID: providerID.rawValue,
+                reply: reply
+            )
+        }
+    }
+
     nonisolated public func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: UUID?) async throws -> Workspace {
         try await requestDecodable { proxy, reply in
             proxy.createLocalWorkspace(
@@ -117,6 +131,17 @@ public final class NexusIPCClient: NexusServiceClient, @unchecked Sendable {
             proxy.launchOrResumeDefaultSession(
                 workspaceID: workspaceID.uuidString,
                 providerID: providerID.rawValue,
+                reply: reply
+            )
+        }
+    }
+
+    nonisolated public func createNamedSession(workspaceID: UUID, providerID: ProviderID, name: String?) async throws -> Session {
+        try await requestDecodable { proxy, reply in
+            proxy.createNamedSession(
+                workspaceID: workspaceID.uuidString,
+                providerID: providerID.rawValue,
+                name: name,
                 reply: reply
             )
         }

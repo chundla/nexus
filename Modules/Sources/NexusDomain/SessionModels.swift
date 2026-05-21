@@ -20,6 +20,7 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
     public let id: UUID
     public let workspaceID: UUID
     public let providerID: ProviderID
+    public let name: String?
     public let isDefault: Bool
     public let state: State
     public let failureMessage: String?
@@ -28,6 +29,7 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
         id: UUID,
         workspaceID: UUID,
         providerID: ProviderID,
+        name: String? = nil,
         isDefault: Bool,
         state: State,
         failureMessage: String? = nil
@@ -35,6 +37,7 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
         self.id = id
         self.workspaceID = workspaceID
         self.providerID = providerID
+        self.name = name
         self.isDefault = isDefault
         self.state = state
         self.failureMessage = failureMessage

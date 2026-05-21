@@ -46,12 +46,18 @@ final class NexusMetadataStore {
                 workspace_id TEXT NOT NULL REFERENCES workspaces(id),
                 provider_id TEXT NOT NULL,
                 is_default INTEGER NOT NULL,
+                name TEXT,
                 state TEXT NOT NULL,
                 failure_message TEXT,
                 terminal_columns INTEGER NOT NULL DEFAULT 80,
                 terminal_rows INTEGER NOT NULL DEFAULT 24
             );
             """
+        )
+        try ensureColumnExists(
+            table: "sessions",
+            column: "name",
+            definition: "TEXT"
         )
         try ensureColumnExists(
             table: "sessions",
@@ -171,6 +177,24 @@ final class NexusMetadataStore {
         }
     }
 
+    func listSessions(workspaceID: UUID, providerID: ProviderID) throws -> [Session] {
+        try withLock {
+            let statement = try prepare(
+                "SELECT id, workspace_id, provider_id, is_default, name, state, failure_message FROM sessions WHERE workspace_id = ? AND provider_id = ? ORDER BY is_default DESC, rowid ASC;"
+            )
+            defer { sqlite3_finalize(statement) }
+
+            try bind(workspaceID.uuidString, at: 1, in: statement)
+            try bind(providerID.rawValue, at: 2, in: statement)
+
+            var sessions: [Session] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                sessions.append(try readSession(from: statement))
+            }
+            return sessions
+        }
+    }
+
     func createDefaultSession(
         workspaceID: UUID,
         providerID: ProviderID,
@@ -188,7 +212,7 @@ final class NexusMetadataStore {
             )
 
             let statement = try prepare(
-                "INSERT INTO sessions (id, workspace_id, provider_id, is_default, state, failure_message, terminal_columns, terminal_rows) VALUES (?, ?, ?, ?, ?, ?, ?, ?);"
+                "INSERT INTO sessions (id, workspace_id, provider_id, is_default, name, state, failure_message, terminal_columns, terminal_rows) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);"
             )
             defer { sqlite3_finalize(statement) }
 
@@ -196,10 +220,53 @@ final class NexusMetadataStore {
             try bind(session.workspaceID.uuidString, at: 2, in: statement)
             try bind(session.providerID.rawValue, at: 3, in: statement)
             try bind(session.isDefault ? 1 : 0, at: 4, in: statement)
-            try bind(session.state.rawValue, at: 5, in: statement)
-            try bind(failureMessage, at: 6, in: statement)
-            try bind(80, at: 7, in: statement)
-            try bind(24, at: 8, in: statement)
+            try bind(session.name, at: 5, in: statement)
+            try bind(session.state.rawValue, at: 6, in: statement)
+            try bind(failureMessage, at: 7, in: statement)
+            try bind(80, at: 8, in: statement)
+            try bind(24, at: 9, in: statement)
+            try stepDone(statement)
+            return session
+        }
+    }
+
+    func createNamedSession(
+        workspaceID: UUID,
+        providerID: ProviderID,
+        name: String,
+        state: Session.State,
+        failureMessage: String?
+    ) throws -> Session {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedName.isEmpty == false else {
+            throw NexusMetadataStoreError.invalidSessionName
+        }
+
+        return try withLock {
+            let session = Session(
+                id: UUID(),
+                workspaceID: workspaceID,
+                providerID: providerID,
+                name: trimmedName,
+                isDefault: false,
+                state: state,
+                failureMessage: failureMessage
+            )
+
+            let statement = try prepare(
+                "INSERT INTO sessions (id, workspace_id, provider_id, is_default, name, state, failure_message, terminal_columns, terminal_rows) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);"
+            )
+            defer { sqlite3_finalize(statement) }
+
+            try bind(session.id.uuidString, at: 1, in: statement)
+            try bind(session.workspaceID.uuidString, at: 2, in: statement)
+            try bind(session.providerID.rawValue, at: 3, in: statement)
+            try bind(session.isDefault ? 1 : 0, at: 4, in: statement)
+            try bind(session.name, at: 5, in: statement)
+            try bind(session.state.rawValue, at: 6, in: statement)
+            try bind(failureMessage, at: 7, in: statement)
+            try bind(80, at: 8, in: statement)
+            try bind(24, at: 9, in: statement)
             try stepDone(statement)
             return session
         }
@@ -288,7 +355,7 @@ final class NexusMetadataStore {
 
     private func defaultSessionWithoutLock(workspaceID: UUID, providerID: ProviderID) throws -> Session? {
         let statement = try prepare(
-            "SELECT id, workspace_id, provider_id, is_default, state, failure_message FROM sessions WHERE workspace_id = ? AND provider_id = ? AND is_default = 1 LIMIT 1;"
+            "SELECT id, workspace_id, provider_id, is_default, name, state, failure_message FROM sessions WHERE workspace_id = ? AND provider_id = ? AND is_default = 1 LIMIT 1;"
         )
         defer { sqlite3_finalize(statement) }
 
@@ -308,7 +375,7 @@ final class NexusMetadataStore {
 
     private func sessionWithoutLock(id: UUID) throws -> Session? {
         let statement = try prepare(
-            "SELECT id, workspace_id, provider_id, is_default, state, failure_message FROM sessions WHERE id = ? LIMIT 1;"
+            "SELECT id, workspace_id, provider_id, is_default, name, state, failure_message FROM sessions WHERE id = ? LIMIT 1;"
         )
         defer { sqlite3_finalize(statement) }
 
@@ -443,15 +510,17 @@ final class NexusMetadataStore {
             throw NexusMetadataStoreError.sqlite("Unknown provider id: \(providerRawValue)")
         }
         let isDefault = sqlite3_column_int(statement, 3) != 0
-        let stateRawValue = try readString(column: 4, from: statement)
+        let name = readOptionalString(column: 4, from: statement)
+        let stateRawValue = try readString(column: 5, from: statement)
         guard let state = Session.State(rawValue: stateRawValue) else {
             throw NexusMetadataStoreError.sqlite("Unknown session state: \(stateRawValue)")
         }
-        let failureMessage = readOptionalString(column: 5, from: statement)
+        let failureMessage = readOptionalString(column: 6, from: statement)
         return Session(
             id: id,
             workspaceID: workspaceID,
             providerID: providerID,
+            name: name,
             isDefault: isDefault,
             state: state,
             failureMessage: failureMessage
@@ -469,6 +538,7 @@ enum NexusMetadataStoreError: LocalizedError {
     case sqlite(String)
     case invalidWorkspaceGroupName
     case invalidWorkspaceFolderPath
+    case invalidSessionName
     case workspaceGroupRequired
     case primaryWorkspaceGroupSelectionRequired
     case workspaceGroupNotFound
@@ -485,6 +555,8 @@ enum NexusMetadataStoreError: LocalizedError {
             "Workspace Group name is required"
         case .invalidWorkspaceFolderPath:
             "Workspace folder path is required"
+        case .invalidSessionName:
+            "Session name is required"
         case .workspaceGroupRequired:
             "Create a Workspace Group before adding a Workspace"
         case .primaryWorkspaceGroupSelectionRequired:
