@@ -719,6 +719,10 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         )
     }
 
+    func deleteHost(hostID: UUID) throws -> Bool {
+        try metadataStore.deleteHost(id: hostID)
+    }
+
     func listRecentNavigation(limit: Int) throws -> [NavigationItem] {
         try metadataStore.listRecentNavigation(limit: limit).compactMap(navigationItem)
     }
@@ -2141,6 +2145,10 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
 
     func validateHost(hostID: String, reply: @escaping (Data?, NSString?) -> Void) {
         sendReply(with: { try service.validateHost(hostID: resolveUUID(hostID)) }, reply: reply)
+    }
+
+    func deleteHost(hostID: String, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(with: { try service.deleteHost(hostID: resolveUUID(hostID)) }, reply: reply)
     }
 
     func listRecentNavigation(limit: Int, reply: @escaping (Data?, NSString?) -> Void) {

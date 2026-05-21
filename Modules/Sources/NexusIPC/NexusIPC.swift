@@ -29,6 +29,7 @@ public protocol SessionScreenObservation: Sendable {
     func createHost(name: String, sshTarget: String, port: NSNumber?, reply: @escaping (Data?, NSString?) -> Void)
     func updateHost(hostID: String, name: String, sshTarget: String, port: NSNumber?, reply: @escaping (Data?, NSString?) -> Void)
     func validateHost(hostID: String, reply: @escaping (Data?, NSString?) -> Void)
+    func deleteHost(hostID: String, reply: @escaping (Data?, NSString?) -> Void)
     func listRecentNavigation(limit: Int, reply: @escaping (Data?, NSString?) -> Void)
     func recordNavigation(targetPayload: Data, reply: @escaping (Data?, NSString?) -> Void)
     func searchNavigation(query: String, reply: @escaping (Data?, NSString?) -> Void)
@@ -58,6 +59,7 @@ public protocol NexusServiceClient {
     func createHost(name: String, sshTarget: String, port: Int?) async throws -> NexusDomain.Host
     func updateHost(hostID: UUID, name: String, sshTarget: String, port: Int?) async throws -> NexusDomain.Host
     func validateHost(hostID: UUID) async throws -> HostValidationSnapshot
+    func deleteHost(hostID: UUID) async throws -> Bool
     func listRecentNavigation(limit: Int) async throws -> [NavigationItem]
     func recordNavigation(target: NavigationTarget) async throws
     func searchNavigation(query: String) async throws -> [NavigationItem]
@@ -152,6 +154,12 @@ public final class NexusIPCClient: NexusServiceClient, @unchecked Sendable {
     nonisolated public func validateHost(hostID: UUID) async throws -> HostValidationSnapshot {
         try await requestDecodable { proxy, reply in
             proxy.validateHost(hostID: hostID.uuidString, reply: reply)
+        }
+    }
+
+    nonisolated public func deleteHost(hostID: UUID) async throws -> Bool {
+        try await requestDecodable { proxy, reply in
+            proxy.deleteHost(hostID: hostID.uuidString, reply: reply)
         }
     }
 

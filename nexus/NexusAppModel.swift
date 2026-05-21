@@ -129,6 +129,17 @@ final class NexusAppModel {
         return snapshot
     }
 
+    func deleteHost(hostID: UUID) async throws -> Bool {
+        let deleted = try await client.deleteHost(hostID: hostID)
+        guard deleted else {
+            return false
+        }
+
+        hosts.removeAll { $0.id == hostID }
+        hostDetails.removeValue(forKey: hostID)
+        return true
+    }
+
     func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) async throws -> Session {
         let session = try await client.launchOrResumeDefaultSession(workspaceID: workspaceID, providerID: providerID)
         try await focusSession(sessionID: session.id)

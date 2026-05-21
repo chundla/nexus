@@ -3555,6 +3555,50 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelDeleteHostRemovesCachedHostState() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let host = NexusDomain.Host(id: UUID(), name: "Build Server", sshTarget: "build-box", port: 2222)
+        let snapshot = HostValidationSnapshot(
+            hostID: host.id,
+            state: .available,
+            summary: "Host is available",
+            checkedAt: Date(timeIntervalSince1970: 456),
+            diagnostics: [HostValidationDiagnostic(severity: .info, code: "sshTarget", message: "Validated build-box")]
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []),
+            session: session,
+            screen: SessionScreen(session: session, transcript: "Claude ready"),
+            hosts: [host],
+            hostDetails: [host.id: HostDetail(host: host, latestValidation: snapshot)]
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+        try await model.loadHostDetail(hostID: host.id)
+
+        let deleted = try await model.deleteHost(hostID: host.id)
+
+        #expect(deleted)
+        #expect(model.hosts.isEmpty)
+        #expect(model.hostDetail(for: host.id) == nil)
+    }
+
+    @MainActor
     @Test func appModelLoadsAndUpdatesRecentNavigation() async throws {
         let group = WorkspaceGroup(id: UUID(), name: "Group")
         let workspace = Workspace(
@@ -4373,6 +4417,31 @@ struct nexusTests {
         #expect(persistedDetail.host == updatedHost)
         #expect(persistedDetail.latestValidation == nil)
     }
+
+    @Test func hostDeletionRemovesPersistedHostAndValidationOverIPC() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let firstService = try NexusService.bootstrapForTests(rootURL: rootURL)
+        let firstClient = try NexusIPCClient.connect(to: firstService.listenerEndpoint)
+        let host = try await firstClient.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
+        _ = try await firstClient.validateHost(hostID: host.id)
+
+        let deleted = try await firstClient.deleteHost(hostID: host.id)
+        let listedHosts = try await firstClient.listHosts()
+
+        #expect(deleted)
+        #expect(listedHosts.isEmpty)
+
+        let secondService = try NexusService.bootstrapForTests(rootURL: rootURL)
+        let secondClient = try NexusIPCClient.connect(to: secondService.listenerEndpoint)
+
+        #expect(try await secondClient.listHosts().isEmpty)
+        await #expect(throws: (any Error).self) {
+            _ = try await secondClient.getHostDetail(hostID: host.id)
+        }
+    }
 }
 
 private func waitForSessionScreen(
@@ -4779,6 +4848,15 @@ private final class TrackingServiceClient: NexusServiceClient {
         return snapshot
     }
 
+    func deleteHost(hostID: UUID) async throws -> Bool {
+        guard hostsValue.contains(where: { $0.id == hostID }) else {
+            throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Host not found"])
+        }
+        hostsValue.removeAll { $0.id == hostID }
+        hostDetailsValue.removeValue(forKey: hostID)
+        return true
+    }
+
     func listRecentNavigation(limit: Int) async throws -> [NavigationItem] {
         Array(recentNavigationValue.prefix(limit))
     }
@@ -5014,6 +5092,10 @@ private struct FailingServiceClient: NexusServiceClient {
     }
 
     func validateHost(hostID: UUID) async throws -> HostValidationSnapshot {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func deleteHost(hostID: UUID) async throws -> Bool {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 

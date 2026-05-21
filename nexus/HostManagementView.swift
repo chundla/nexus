@@ -7,6 +7,7 @@ struct HostManagementSheet: View {
 
     @State private var selection: UUID?
     @State private var editorMode: HostEditorMode?
+    @State private var pendingDeletionHost: NexusDomain.Host?
     @State private var presentedError: HostManagementPresentedError?
 
     var body: some View {
@@ -52,6 +53,11 @@ struct HostManagementSheet: View {
                                 return
                             }
                             editorMode = .edit(host)
+                        }
+                        .disabled(selectedHost == nil)
+
+                        Button("Delete", role: .destructive) {
+                            pendingDeletionHost = selectedHost
                         }
                         .disabled(selectedHost == nil)
                     }
@@ -110,6 +116,26 @@ struct HostManagementSheet: View {
                 onError: { presentedError = HostManagementPresentedError(message: $0.localizedDescription) }
             )
         }
+        .confirmationDialog(
+            "Delete Host?",
+            isPresented: Binding(
+                get: { pendingDeletionHost != nil },
+                set: { isPresented in
+                    if isPresented == false {
+                        pendingDeletionHost = nil
+                    }
+                }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingDeletionHost
+        ) { host in
+            Button("Delete \(host.name)", role: .destructive) {
+                pendingDeletionHost = nil
+                deleteHost(host)
+            }
+        } message: { host in
+            Text("This removes \(host.name) from the saved Host catalog.")
+        }
         .alert(item: $presentedError) { error in
             Alert(title: Text("Hosts"), message: Text(error.message))
         }
@@ -131,6 +157,16 @@ struct HostManagementSheet: View {
         Task {
             do {
                 _ = try await appModel.validateHost(hostID: hostID)
+            } catch {
+                presentedError = HostManagementPresentedError(message: error.localizedDescription)
+            }
+        }
+    }
+
+    private func deleteHost(_ host: NexusDomain.Host) {
+        Task {
+            do {
+                _ = try await appModel.deleteHost(hostID: host.id)
             } catch {
                 presentedError = HostManagementPresentedError(message: error.localizedDescription)
             }

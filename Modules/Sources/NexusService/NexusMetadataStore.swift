@@ -241,6 +241,22 @@ final class NexusMetadataStore {
         }
     }
 
+    func deleteHost(id: UUID) throws -> Bool {
+        try withLock {
+            let statement = try prepare("DELETE FROM hosts WHERE id = ?;")
+            defer { sqlite3_finalize(statement) }
+
+            try bind(id.uuidString, at: 1, in: statement)
+            try stepDone(statement)
+
+            guard sqlite3_changes(database) > 0 else {
+                throw NexusMetadataStoreError.hostNotFound
+            }
+
+            return true
+        }
+    }
+
     func host(id: UUID) throws -> NexusDomain.Host? {
         try withLock {
             let statement = try prepare(
