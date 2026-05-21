@@ -668,6 +668,63 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         try metadataStore.listWorkspaces()
     }
 
+    func listRecentNavigation(limit: Int) throws -> [NavigationItem] {
+        try metadataStore.listRecentNavigation(limit: limit).compactMap(navigationItem)
+    }
+
+    func recordNavigation(target: NavigationTarget) throws {
+        try metadataStore.recordNavigation(target: target)
+    }
+
+    func searchNavigation(query: String) throws -> [NavigationItem] {
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard normalizedQuery.isEmpty == false else {
+            return []
+        }
+
+        let tokens = normalizedQuery
+            .split(whereSeparator: \.isWhitespace)
+            .map(String.init)
+
+        let workspaces = try metadataStore.listWorkspaces()
+        let workspaceItems = workspaces.compactMap { workspace -> NavigationItem? in
+            let item = NavigationItem(
+                target: .workspace(workspace.id),
+                title: workspace.name,
+                subtitle: workspace.folderPath
+            )
+            return itemMatchesAllTokens(tokens, fields: [workspace.name.lowercased(), workspace.folderPath.lowercased()]) ? item : nil
+        }
+
+        let providerItems = try workspaces.flatMap { workspace in
+            ProviderID.allCases.compactMap { providerID -> NavigationItem? in
+                let item = NavigationItem(
+                    target: .provider(workspaceID: workspace.id, providerID: providerID),
+                    title: providerID.displayName,
+                    subtitle: workspace.name
+                )
+                return providerMatchesQuery(tokens: tokens, normalizedQuery: normalizedQuery, providerID: providerID, workspace: workspace) ? item : nil
+            }
+        }
+
+        let sessionItems = try metadataStore.listAllSessions().compactMap { session -> NavigationItem? in
+            guard let workspace = try metadataStore.workspace(id: session.workspaceID) else {
+                return nil
+            }
+
+            let item = NavigationItem(
+                target: .session(session.id),
+                title: sessionNavigationTitle(session),
+                subtitle: "\(workspace.name) • \(session.providerID.displayName)"
+            )
+            return sessionMatchesQuery(tokens: tokens, normalizedQuery: normalizedQuery, session: session, workspace: workspace) ? item : nil
+        }
+
+        return workspaceItems.sorted(by: navigationItemSort)
+            + providerItems.sorted(by: navigationItemSort)
+            + sessionItems.sorted(by: navigationItemSort)
+    }
+
     func getWorkspaceOverview(workspaceID: UUID) throws -> WorkspaceOverview {
         guard let workspace = try metadataStore.workspace(id: workspaceID) else {
             throw NexusMetadataStoreError.workspaceNotFound
@@ -975,6 +1032,83 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 terminalRows: terminalSize.rows
             )
         )
+    }
+
+    private func navigationItem(_ target: NavigationTarget) throws -> NavigationItem? {
+        switch target.kind {
+        case .workspace:
+            guard let workspaceID = target.workspaceID,
+                  let workspace = try metadataStore.workspace(id: workspaceID) else {
+                return nil
+            }
+
+            return NavigationItem(
+                target: .workspace(workspace.id),
+                title: workspace.name,
+                subtitle: workspace.folderPath
+            )
+        case .provider:
+            guard let workspaceID = target.workspaceID,
+                  let providerID = target.providerID,
+                  let workspace = try metadataStore.workspace(id: workspaceID) else {
+                return nil
+            }
+
+            return NavigationItem(
+                target: .provider(workspaceID: workspace.id, providerID: providerID),
+                title: providerID.displayName,
+                subtitle: workspace.name
+            )
+        case .session:
+            guard let sessionID = target.sessionID,
+                  let session = try metadataStore.session(id: sessionID),
+                  let workspace = try metadataStore.workspace(id: session.workspaceID) else {
+                return nil
+            }
+
+            return NavigationItem(
+                target: .session(session.id),
+                title: sessionNavigationTitle(session),
+                subtitle: "\(workspace.name) • \(session.providerID.displayName)"
+            )
+        }
+    }
+
+    private func sessionNavigationTitle(_ session: Session) -> String {
+        if session.isDefault {
+            return "Default Session"
+        }
+
+        return session.name ?? "Session"
+    }
+
+    private func itemMatchesAllTokens(_ tokens: [String], fields: [String]) -> Bool {
+        tokens.allSatisfy { token in
+            fields.contains { $0.contains(token) }
+        }
+    }
+
+    private func providerMatchesQuery(tokens: [String], normalizedQuery: String, providerID: ProviderID, workspace: Workspace) -> Bool {
+        let providerName = providerID.displayName.lowercased()
+        if tokens.count == 1 {
+            return providerName.contains(normalizedQuery)
+        }
+
+        return itemMatchesAllTokens(tokens, fields: [providerName, workspace.name.lowercased()])
+    }
+
+    private func sessionMatchesQuery(tokens: [String], normalizedQuery: String, session: Session, workspace: Workspace) -> Bool {
+        let sessionName = sessionNavigationTitle(session).lowercased()
+        let providerName = session.providerID.displayName.lowercased()
+        if tokens.count == 1 {
+            return sessionName.contains(normalizedQuery) || providerName.contains(normalizedQuery)
+        }
+
+        return itemMatchesAllTokens(tokens, fields: [sessionName, providerName, workspace.name.lowercased()])
+    }
+
+    private func navigationItemSort(_ lhs: NavigationItem, _ rhs: NavigationItem) -> Bool {
+        lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
     }
 
     private func normalizedSessionScreen(_ screen: SessionScreen) -> SessionScreen {
@@ -1910,6 +2044,25 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
 
     func listWorkspaces(_ reply: @escaping (Data?, NSString?) -> Void) {
         sendReply(with: service.listWorkspaces, reply: reply)
+    }
+
+    func listRecentNavigation(limit: Int, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(with: { try service.listRecentNavigation(limit: limit) }, reply: reply)
+    }
+
+    func recordNavigation(targetPayload: Data, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(
+            with: {
+                let target = try JSONDecoder().decode(NavigationTarget.self, from: targetPayload)
+                try service.recordNavigation(target: target)
+                return true
+            },
+            reply: reply
+        )
+    }
+
+    func searchNavigation(query: String, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(with: { try service.searchNavigation(query: query) }, reply: reply)
     }
 
     func getWorkspaceOverview(workspaceID: String, reply: @escaping (Data?, NSString?) -> Void) {

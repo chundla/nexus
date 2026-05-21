@@ -13,6 +13,7 @@ final class NexusAppModel {
     var workspaces: [Workspace] = []
     var workspaceOverviews: [UUID: WorkspaceOverview] = [:]
     var providerDetails: [ProviderDetailKey: ProviderDetail] = [:]
+    var recentNavigation: [NavigationItem] = []
     var focusedSessionScreen: SessionScreen?
 
     private let client: NexusServiceClient
@@ -35,10 +36,12 @@ final class NexusAppModel {
             async let serviceStatus = client.getServiceStatus()
             async let workspaceGroups = client.listWorkspaceGroups()
             async let workspaces = client.listWorkspaces()
+            async let recentNavigation = client.listRecentNavigation(limit: 10)
 
             let loadedServiceStatus = try await serviceStatus
             let loadedWorkspaceGroups = try await workspaceGroups
             let loadedWorkspaces = try await workspaces
+            let loadedRecentNavigation = try await recentNavigation
 
             var loadedWorkspaceOverviews: [UUID: WorkspaceOverview] = [:]
             for workspace in loadedWorkspaces {
@@ -50,6 +53,7 @@ final class NexusAppModel {
             self.workspaces = loadedWorkspaces
             self.workspaceOverviews = loadedWorkspaceOverviews
             self.providerDetails = [:]
+            self.recentNavigation = loadedRecentNavigation
             self.serviceErrorMessage = nil
         } catch {
             await stopFocusingSession()
@@ -58,6 +62,7 @@ final class NexusAppModel {
             workspaces = []
             workspaceOverviews = [:]
             providerDetails = [:]
+            recentNavigation = []
             focusedSessionScreen = nil
             serviceErrorMessage = error.localizedDescription
         }
@@ -210,6 +215,19 @@ final class NexusAppModel {
 
         let screen = try await client.resizeSession(sessionID: sessionID, columns: columns, rows: rows)
         focusedSessionScreen = screen
+    }
+
+    func loadRecentNavigation() async throws {
+        recentNavigation = try await client.listRecentNavigation(limit: 10)
+    }
+
+    func recordNavigation(_ target: NavigationTarget) async throws {
+        try await client.recordNavigation(target: target)
+        try await loadRecentNavigation()
+    }
+
+    func searchNavigation(query: String) async throws -> [NavigationItem] {
+        try await client.searchNavigation(query: query)
     }
 
     func workspaceGroupName(for groupID: UUID) -> String? {

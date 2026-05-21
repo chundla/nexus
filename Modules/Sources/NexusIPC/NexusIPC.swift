@@ -24,6 +24,9 @@ public protocol SessionScreenObservation: Sendable {
     func listWorkspaceGroups(_ reply: @escaping (Data?, NSString?) -> Void)
     func createWorkspaceGroup(name: String, reply: @escaping (Data?, NSString?) -> Void)
     func listWorkspaces(_ reply: @escaping (Data?, NSString?) -> Void)
+    func listRecentNavigation(limit: Int, reply: @escaping (Data?, NSString?) -> Void)
+    func recordNavigation(targetPayload: Data, reply: @escaping (Data?, NSString?) -> Void)
+    func searchNavigation(query: String, reply: @escaping (Data?, NSString?) -> Void)
     func getWorkspaceOverview(workspaceID: String, reply: @escaping (Data?, NSString?) -> Void)
     func getProviderDetail(workspaceID: String, providerID: String, reply: @escaping (Data?, NSString?) -> Void)
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: String?, reply: @escaping (Data?, NSString?) -> Void)
@@ -45,6 +48,9 @@ public protocol NexusServiceClient {
     func listWorkspaceGroups() async throws -> [WorkspaceGroup]
     func createWorkspaceGroup(name: String) async throws -> WorkspaceGroup
     func listWorkspaces() async throws -> [Workspace]
+    func listRecentNavigation(limit: Int) async throws -> [NavigationItem]
+    func recordNavigation(target: NavigationTarget) async throws
+    func searchNavigation(query: String) async throws -> [NavigationItem]
     func getWorkspaceOverview(workspaceID: UUID) async throws -> WorkspaceOverview
     func getProviderDetail(workspaceID: UUID, providerID: ProviderID) async throws -> ProviderDetail
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: UUID?) async throws -> Workspace
@@ -100,6 +106,25 @@ public final class NexusIPCClient: NexusServiceClient, @unchecked Sendable {
     nonisolated public func listWorkspaces() async throws -> [Workspace] {
         try await requestDecodable { proxy, reply in
             proxy.listWorkspaces(reply)
+        }
+    }
+
+    nonisolated public func listRecentNavigation(limit: Int = 10) async throws -> [NavigationItem] {
+        try await requestDecodable { proxy, reply in
+            proxy.listRecentNavigation(limit: limit, reply: reply)
+        }
+    }
+
+    nonisolated public func recordNavigation(target: NavigationTarget) async throws {
+        let payload = try JSONEncoder().encode(target)
+        let _: Bool = try await requestDecodable { proxy, reply in
+            proxy.recordNavigation(targetPayload: payload, reply: reply)
+        }
+    }
+
+    nonisolated public func searchNavigation(query: String) async throws -> [NavigationItem] {
+        try await requestDecodable { proxy, reply in
+            proxy.searchNavigation(query: query, reply: reply)
         }
     }
 

@@ -320,6 +320,86 @@ struct nexusTests {
         #expect(claudeCard.defaultSession.sessionID == firstSession.id)
     }
 
+    @Test func quickSwitchPrioritizesWorkspaceMatchesBeforeProviderAndSessionMatchesOverIPC() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            ),
+            sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: "Claude Lab",
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+
+        _ = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let results = try await client.searchNavigation(query: "claude")
+
+        #expect(results.map(\.kind).prefix(3).elementsEqual([.workspace, .provider, .session]))
+        #expect(results.first?.title == "Claude Lab")
+        #expect(results.dropFirst().first?.subtitle.contains("Claude Lab") == true)
+    }
+
+    @Test func recentNavigationPersistsWorkspaceAndSessionContextsOverIPC() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let firstService = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            ),
+            sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
+        )
+        let firstClient = try NexusIPCClient.connect(to: firstService.listenerEndpoint)
+        _ = try await firstClient.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await firstClient.createLocalWorkspace(
+            name: "Recents Workspace",
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+        let session = try await firstClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+
+        try await firstClient.recordNavigation(target: .workspace(workspace.id))
+        try await Task.sleep(nanoseconds: 20_000_000)
+        try await firstClient.recordNavigation(target: .session(session.id))
+
+        let initialRecents = try await firstClient.listRecentNavigation(limit: 10)
+        #expect(initialRecents.map(\.kind).prefix(2).elementsEqual([.session, .workspace]))
+        #expect(initialRecents.first?.title == "Default Session")
+        #expect(initialRecents.dropFirst().first?.title == "Recents Workspace")
+
+        let secondService = try NexusService.bootstrapForTests(rootURL: rootURL)
+        let secondClient = try NexusIPCClient.connect(to: secondService.listenerEndpoint)
+        let persistedRecents = try await secondClient.listRecentNavigation(limit: 10)
+
+        #expect(persistedRecents.map(\.kind).prefix(2).elementsEqual([.session, .workspace]))
+        #expect(persistedRecents.first?.subtitle.contains("Recents Workspace") == true)
+        #expect(persistedRecents.dropFirst().first?.title == "Recents Workspace")
+    }
+
     @Test func createNamedSessionAddsAlternateSessionToProviderDetailOverIPC() async throws {
         let workspaceFolderURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -3279,6 +3359,53 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelLoadsAndUpdatesRecentNavigation() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let workspaceItem = NavigationItem(
+            target: .workspace(workspace.id),
+            title: workspace.name,
+            subtitle: workspace.folderPath
+        )
+        let sessionItem = NavigationItem(
+            target: .session(session.id),
+            title: "Default Session",
+            subtitle: "\(workspace.name) • Claude"
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []),
+            session: session,
+            screen: SessionScreen(session: session, transcript: "Claude ready"),
+            recentNavigation: [workspaceItem],
+            searchResults: [sessionItem]
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+        #expect(model.recentNavigation == [workspaceItem])
+
+        try await model.recordNavigation(.session(session.id))
+        #expect(model.recentNavigation == [sessionItem, workspaceItem])
+        #expect(client.recordedNavigationTargets == [.session(session.id)])
+
+        let searchResults = try await model.searchNavigation(query: "claude")
+        #expect(searchResults == [sessionItem])
+    }
+
+    @MainActor
     @Test func appModelLaunchOrResumeDefaultSessionRefreshesWorkspaceOverview() async throws {
         let workspaceFolderURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -4241,15 +4368,20 @@ private final class TrackingServiceClient: NexusServiceClient {
     private var providerDetailValue: ProviderDetail
     private var sessionValue: Session
     private var screenValue: SessionScreen
+    private var recentNavigationValue: [NavigationItem]
+    private var searchResultsValue: [NavigationItem]
     private var observedScreenHandlers: [UUID: @Sendable (SessionScreen) -> Void] = [:]
 
     var workspaceOverviewRequestCount = 0
+    var recordedNavigationTargets: [NavigationTarget] = []
 
     init(
         workspaceOverview: WorkspaceOverview,
         session: Session,
         screen: SessionScreen,
-        providerDetail: ProviderDetail? = nil
+        providerDetail: ProviderDetail? = nil,
+        recentNavigation: [NavigationItem] = [],
+        searchResults: [NavigationItem] = []
     ) {
         self.workspaceOverviewValue = workspaceOverview
         self.providerDetailValue = providerDetail ?? ProviderDetail(
@@ -4263,6 +4395,8 @@ private final class TrackingServiceClient: NexusServiceClient {
         )
         self.sessionValue = session
         self.screenValue = screen
+        self.recentNavigationValue = recentNavigation
+        self.searchResultsValue = searchResults
     }
 
     func getServiceStatus() async throws -> NexusServiceStatus {
@@ -4279,6 +4413,56 @@ private final class TrackingServiceClient: NexusServiceClient {
 
     func listWorkspaces() async throws -> [Workspace] {
         [workspaceOverviewValue.workspace]
+    }
+
+    func listRecentNavigation(limit: Int) async throws -> [NavigationItem] {
+        Array(recentNavigationValue.prefix(limit))
+    }
+
+    func recordNavigation(target: NavigationTarget) async throws {
+        recordedNavigationTargets.append(target)
+        switch target.kind {
+        case .workspace:
+            if let workspaceID = target.workspaceID, workspaceID == workspaceOverviewValue.workspace.id {
+                recentNavigationValue.removeAll { $0.target == target }
+                recentNavigationValue.insert(
+                    NavigationItem(
+                        target: .workspace(workspaceID),
+                        title: workspaceOverviewValue.workspace.name,
+                        subtitle: workspaceOverviewValue.workspace.folderPath
+                    ),
+                    at: 0
+                )
+            }
+        case .session:
+            if let sessionID = target.sessionID, sessionID == sessionValue.id {
+                recentNavigationValue.removeAll { $0.target == target }
+                recentNavigationValue.insert(
+                    NavigationItem(
+                        target: .session(sessionID),
+                        title: sessionValue.isDefault ? "Default Session" : (sessionValue.name ?? "Session"),
+                        subtitle: "\(workspaceOverviewValue.workspace.name) • \(sessionValue.providerID.displayName)"
+                    ),
+                    at: 0
+                )
+            }
+        case .provider:
+            if let workspaceID = target.workspaceID, let providerID = target.providerID {
+                recentNavigationValue.removeAll { $0.target == target }
+                recentNavigationValue.insert(
+                    NavigationItem(
+                        target: .provider(workspaceID: workspaceID, providerID: providerID),
+                        title: providerID.displayName,
+                        subtitle: workspaceOverviewValue.workspace.name
+                    ),
+                    at: 0
+                )
+            }
+        }
+    }
+
+    func searchNavigation(query: String) async throws -> [NavigationItem] {
+        searchResultsValue
     }
 
     func getWorkspaceOverview(workspaceID: UUID) async throws -> WorkspaceOverview {
@@ -4447,6 +4631,18 @@ private struct FailingServiceClient: NexusServiceClient {
 
     func listWorkspaces() async throws -> [Workspace] {
         []
+    }
+
+    func listRecentNavigation(limit: Int) async throws -> [NavigationItem] {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func recordNavigation(target: NavigationTarget) async throws {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func searchNavigation(query: String) async throws -> [NavigationItem] {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 
     func getWorkspaceOverview(workspaceID: UUID) async throws -> WorkspaceOverview {

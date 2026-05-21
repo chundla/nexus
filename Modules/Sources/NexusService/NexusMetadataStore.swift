@@ -52,6 +52,15 @@ final class NexusMetadataStore {
                 terminal_columns INTEGER NOT NULL DEFAULT 80,
                 terminal_rows INTEGER NOT NULL DEFAULT 24
             );
+
+            CREATE TABLE IF NOT EXISTS recent_navigation (
+                target_key TEXT PRIMARY KEY NOT NULL,
+                target_kind TEXT NOT NULL,
+                workspace_id TEXT,
+                provider_id TEXT,
+                session_id TEXT,
+                last_accessed_at INTEGER NOT NULL
+            );
             """
         )
         try ensureColumnExists(
@@ -138,6 +147,48 @@ final class NexusMetadataStore {
         }
     }
 
+    func listRecentNavigation(limit: Int) throws -> [NavigationTarget] {
+        try withLock {
+            let statement = try prepare(
+                "SELECT target_kind, workspace_id, provider_id, session_id FROM recent_navigation ORDER BY last_accessed_at DESC LIMIT ?;"
+            )
+            defer { sqlite3_finalize(statement) }
+
+            try bind(Int32(max(1, limit)), at: 1, in: statement)
+            var targets: [NavigationTarget] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                targets.append(try readNavigationTarget(from: statement))
+            }
+            return targets
+        }
+    }
+
+    func recordNavigation(target: NavigationTarget) throws {
+        try withLock {
+            let statement = try prepare(
+                """
+                INSERT INTO recent_navigation (target_key, target_kind, workspace_id, provider_id, session_id, last_accessed_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(target_key) DO UPDATE SET
+                    target_kind = excluded.target_kind,
+                    workspace_id = excluded.workspace_id,
+                    provider_id = excluded.provider_id,
+                    session_id = excluded.session_id,
+                    last_accessed_at = excluded.last_accessed_at;
+                """
+            )
+            defer { sqlite3_finalize(statement) }
+
+            try bind(navigationTargetKey(target), at: 1, in: statement)
+            try bind(target.kind.rawValue, at: 2, in: statement)
+            try bind(target.workspaceID?.uuidString, at: 3, in: statement)
+            try bind(target.providerID?.rawValue, at: 4, in: statement)
+            try bind(target.sessionID?.uuidString, at: 5, in: statement)
+            try bind(Int64(Date().timeIntervalSince1970 * 1_000), at: 6, in: statement)
+            try stepDone(statement)
+        }
+    }
+
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: UUID?) throws -> Workspace {
         let resolvedFolderPath = folderPath.trimmingCharacters(in: .whitespacesAndNewlines)
         guard resolvedFolderPath.isEmpty == false else {
@@ -195,6 +246,21 @@ final class NexusMetadataStore {
         }
     }
 
+    func listAllSessions() throws -> [Session] {
+        try withLock {
+            let statement = try prepare(
+                "SELECT id, workspace_id, provider_id, is_default, name, state, failure_message FROM sessions ORDER BY rowid ASC;"
+            )
+            defer { sqlite3_finalize(statement) }
+
+            var sessions: [Session] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                sessions.append(try readSession(from: statement))
+            }
+            return sessions
+        }
+    }
+
     func createDefaultSession(
         workspaceID: UUID,
         providerID: ProviderID,
@@ -219,12 +285,12 @@ final class NexusMetadataStore {
             try bind(session.id.uuidString, at: 1, in: statement)
             try bind(session.workspaceID.uuidString, at: 2, in: statement)
             try bind(session.providerID.rawValue, at: 3, in: statement)
-            try bind(session.isDefault ? 1 : 0, at: 4, in: statement)
+            try bind(Int32(session.isDefault ? 1 : 0), at: 4, in: statement)
             try bind(session.name, at: 5, in: statement)
             try bind(session.state.rawValue, at: 6, in: statement)
             try bind(failureMessage, at: 7, in: statement)
-            try bind(80, at: 8, in: statement)
-            try bind(24, at: 9, in: statement)
+            try bind(Int32(80), at: 8, in: statement)
+            try bind(Int32(24), at: 9, in: statement)
             try stepDone(statement)
             return session
         }
@@ -261,12 +327,12 @@ final class NexusMetadataStore {
             try bind(session.id.uuidString, at: 1, in: statement)
             try bind(session.workspaceID.uuidString, at: 2, in: statement)
             try bind(session.providerID.rawValue, at: 3, in: statement)
-            try bind(session.isDefault ? 1 : 0, at: 4, in: statement)
+            try bind(Int32(session.isDefault ? 1 : 0), at: 4, in: statement)
             try bind(session.name, at: 5, in: statement)
             try bind(session.state.rawValue, at: 6, in: statement)
             try bind(failureMessage, at: 7, in: statement)
-            try bind(80, at: 8, in: statement)
-            try bind(24, at: 9, in: statement)
+            try bind(Int32(80), at: 8, in: statement)
+            try bind(Int32(24), at: 9, in: statement)
             try stepDone(statement)
             return session
         }
@@ -455,6 +521,12 @@ final class NexusMetadataStore {
         }
     }
 
+    private func bind(_ value: Int64, at index: Int32, in statement: OpaquePointer?) throws {
+        guard sqlite3_bind_int64(statement, index, value) == SQLITE_OK else {
+            throw currentSQLiteError()
+        }
+    }
+
     private func bind(_ value: String?, at index: Int32, in statement: OpaquePointer?) throws {
         guard let value else {
             guard sqlite3_bind_null(statement, index) == SQLITE_OK else {
@@ -536,6 +608,40 @@ final class NexusMetadataStore {
             state: state,
             failureMessage: failureMessage
         )
+    }
+
+    private func readNavigationTarget(from statement: OpaquePointer?) throws -> NavigationTarget {
+        let kindRawValue = try readString(column: 0, from: statement)
+        guard let kind = NavigationTarget.Kind(rawValue: kindRawValue) else {
+            throw NexusMetadataStoreError.sqlite("Unknown navigation target kind: \(kindRawValue)")
+        }
+
+        let workspaceID = try readOptionalUUID(column: 1, from: statement)
+        let providerID = readOptionalString(column: 2, from: statement).flatMap(ProviderID.init(rawValue:))
+        let sessionID = try readOptionalUUID(column: 3, from: statement)
+        return NavigationTarget(kind: kind, workspaceID: workspaceID, providerID: providerID, sessionID: sessionID)
+    }
+
+    private func readOptionalUUID(column: Int32, from statement: OpaquePointer?) throws -> UUID? {
+        guard let rawValue = readOptionalString(column: column, from: statement) else {
+            return nil
+        }
+
+        guard let value = UUID(uuidString: rawValue) else {
+            throw NexusMetadataStoreError.sqlite("Invalid UUID: \(rawValue)")
+        }
+        return value
+    }
+
+    private func navigationTargetKey(_ target: NavigationTarget) -> String {
+        switch target.kind {
+        case .workspace:
+            "workspace:\(target.workspaceID?.uuidString ?? "missing")"
+        case .provider:
+            "provider:\(target.workspaceID?.uuidString ?? "missing"):\(target.providerID?.rawValue ?? "missing")"
+        case .session:
+            "session:\(target.sessionID?.uuidString ?? "missing")"
+        }
     }
 
     private func currentSQLiteError() -> Error {

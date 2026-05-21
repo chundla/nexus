@@ -195,3 +195,60 @@ public struct WorkspaceOverview: Codable, Equatable, Sendable {
         self.providerCards = providerCards
     }
 }
+
+public struct NavigationTarget: Codable, Equatable, Hashable, Sendable {
+    public let kind: Kind
+    public let workspaceID: UUID?
+    public let providerID: ProviderID?
+    public let sessionID: UUID?
+
+    public init(kind: Kind, workspaceID: UUID? = nil, providerID: ProviderID? = nil, sessionID: UUID? = nil) {
+        self.kind = kind
+        self.workspaceID = workspaceID
+        self.providerID = providerID
+        self.sessionID = sessionID
+    }
+
+    public static func workspace(_ workspaceID: UUID) -> NavigationTarget {
+        NavigationTarget(kind: .workspace, workspaceID: workspaceID)
+    }
+
+    public static func provider(workspaceID: UUID, providerID: ProviderID) -> NavigationTarget {
+        NavigationTarget(kind: .provider, workspaceID: workspaceID, providerID: providerID)
+    }
+
+    public static func session(_ sessionID: UUID) -> NavigationTarget {
+        NavigationTarget(kind: .session, sessionID: sessionID)
+    }
+
+    public enum Kind: String, Codable, Sendable {
+        case workspace
+        case provider
+        case session
+    }
+}
+
+public struct NavigationItem: Codable, Equatable, Identifiable, Sendable {
+    public let target: NavigationTarget
+    public let title: String
+    public let subtitle: String
+    public let kind: NavigationTarget.Kind
+
+    public init(target: NavigationTarget, title: String, subtitle: String, kind: NavigationTarget.Kind? = nil) {
+        self.target = target
+        self.title = title
+        self.subtitle = subtitle
+        self.kind = kind ?? target.kind
+    }
+
+    public var id: String {
+        switch target.kind {
+        case .workspace:
+            "workspace:\(target.workspaceID?.uuidString ?? "missing")"
+        case .provider:
+            "provider:\(target.workspaceID?.uuidString ?? "missing"):\(target.providerID?.rawValue ?? "missing")"
+        case .session:
+            "session:\(target.sessionID?.uuidString ?? "missing")"
+        }
+    }
+}

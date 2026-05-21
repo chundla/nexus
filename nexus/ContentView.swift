@@ -7,7 +7,10 @@ struct ContentView: View {
 
     @State private var selection: SidebarSelection?
     @State private var isShowingCreateWorkspaceGroupSheet = false
+    @State private var isShowingQuickSwitchSheet = false
     @State private var newWorkspaceGroupName = ""
+    @State private var quickSwitchQuery = ""
+    @State private var quickSwitchResults: [NavigationItem] = []
     @State private var pendingWorkspaceFolderPath: String?
     @State private var pendingWorkspaceGroupID: UUID?
     @State private var isShowingWorkspaceGroupPicker = false
@@ -20,6 +23,24 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: $selection) {
+                if appModel.recentNavigation.isEmpty == false {
+                    Section("Recents") {
+                        ForEach(appModel.recentNavigation) { item in
+                            Button {
+                                navigate(to: item.target)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Label(item.title, systemImage: navigationItemIcon(for: item.kind))
+                                    Text(item.subtitle)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
                 Section("Workspace Groups") {
                     ForEach(appModel.workspaceGroups) { group in
                         Label(group.name, systemImage: "folder.badge.plus")
@@ -39,6 +60,13 @@ struct ContentView: View {
 #endif
             .toolbar {
                 ToolbarItemGroup {
+                    Button("Quick Switch") {
+                        quickSwitchQuery = ""
+                        quickSwitchResults = []
+                        isShowingQuickSwitchSheet = true
+                    }
+                    .keyboardShortcut("k", modifiers: [.command])
+
                     Button("New Workspace Group") {
                         newWorkspaceGroupName = ""
                         isShowingCreateWorkspaceGroupSheet = true
@@ -69,12 +97,19 @@ struct ContentView: View {
                 default:
                     await appModel.stopFocusingSession()
                 }
+
+                if let navigationTarget = selection?.navigationTarget {
+                    try await appModel.recordNavigation(navigationTarget)
+                }
             } catch {
                 presentedError = PresentedError(message: error.localizedDescription)
             }
         }
         .sheet(isPresented: $isShowingCreateWorkspaceGroupSheet) {
             createWorkspaceGroupSheet
+        }
+        .sheet(isPresented: $isShowingQuickSwitchSheet) {
+            quickSwitchSheet
         }
         .sheet(isPresented: $isShowingWorkspaceGroupPicker) {
             workspaceGroupPickerSheet
@@ -131,6 +166,55 @@ struct ContentView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var quickSwitchSheet: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Quick Switch")
+                .font(.title3)
+                .fontWeight(.semibold)
+
+            TextField("Search Workspaces, Providers, and Sessions", text: $quickSwitchQuery)
+                .textFieldStyle(.roundedBorder)
+                .onChange(of: quickSwitchQuery) { _, _ in
+                    Task {
+                        await updateQuickSwitchResults()
+                    }
+                }
+
+            List(quickSwitchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? appModel.recentNavigation : quickSwitchResults) { item in
+                Button {
+                    isShowingQuickSwitchSheet = false
+                    navigate(to: item.target)
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Label(item.title, systemImage: navigationItemIcon(for: item.kind))
+                        Text(item.subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+            .overlay {
+                if quickSwitchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false, quickSwitchResults.isEmpty {
+                    ContentUnavailableView(
+                        "No matches",
+                        systemImage: "magnifyingglass",
+                        description: Text("Try a Workspace, Provider, or Session name.")
+                    )
+                }
+            }
+        }
+        .padding()
+        .frame(minWidth: 440, minHeight: 360)
+        .task {
+            do {
+                try await appModel.loadRecentNavigation()
+            } catch {
+                presentedError = PresentedError(message: error.localizedDescription)
+            }
+        }
     }
 
     private func workspaceGroupDetail(groupID: UUID) -> some View {
@@ -569,6 +653,52 @@ struct ContentView: View {
         return session.state == .ready ? "Resume" : "Relaunch"
     }
 
+    private func navigate(to target: NavigationTarget) {
+        switch target.kind {
+        case .workspace:
+            guard let workspaceID = target.workspaceID else {
+                return
+            }
+            selection = .workspace(workspaceID)
+        case .provider:
+            guard let workspaceID = target.workspaceID, let providerID = target.providerID else {
+                return
+            }
+            selection = .provider(workspaceID, providerID)
+        case .session:
+            guard let sessionID = target.sessionID else {
+                return
+            }
+            selection = .session(sessionID)
+        }
+    }
+
+    private func navigationItemIcon(for kind: NavigationTarget.Kind) -> String {
+        switch kind {
+        case .workspace:
+            "folder"
+        case .provider:
+            "square.stack.3d.up"
+        case .session:
+            "terminal"
+        }
+    }
+
+    @MainActor
+    private func updateQuickSwitchResults() async {
+        let query = quickSwitchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard query.isEmpty == false else {
+            quickSwitchResults = []
+            return
+        }
+
+        do {
+            quickSwitchResults = try await appModel.searchNavigation(query: query)
+        } catch {
+            presentedError = PresentedError(message: error.localizedDescription)
+        }
+    }
+
     private var createWorkspaceGroupSheet: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("New Workspace Group")
@@ -919,6 +1049,19 @@ private enum SidebarSelection: Hashable {
     case workspace(UUID)
     case provider(UUID, ProviderID)
     case session(UUID)
+
+    var navigationTarget: NavigationTarget? {
+        switch self {
+        case .workspaceGroup:
+            nil
+        case .workspace(let workspaceID):
+            .workspace(workspaceID)
+        case .provider(let workspaceID, let providerID):
+            .provider(workspaceID: workspaceID, providerID: providerID)
+        case .session(let sessionID):
+            .session(sessionID)
+        }
+    }
 }
 
 private struct PresentedError: Identifiable {
