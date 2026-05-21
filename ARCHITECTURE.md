@@ -177,4 +177,5 @@ Milestone one proves the service-centered architecture with local-only execution
 - `docs/architecture/session-lifecycle.md`
 - `docs/architecture/modules.md`
 - `docs/architecture/milestone-1.md`
+- `docs/architecture/milestone-2.md`
 - `docs/adr/`
