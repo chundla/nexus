@@ -4187,6 +4187,104 @@ struct nexusTests {
         #expect(status.store.location.lastPathComponent == "Nexus.sqlite")
         #expect(model.serviceErrorMessage == nil)
     }
+
+    @Test func hostManagementCreatesListsAndPersistsHostsOverIPC() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let firstService = try NexusService.bootstrapForTests(rootURL: rootURL)
+        let firstClient = try NexusIPCClient.connect(to: firstService.listenerEndpoint)
+
+        let createdHost = try await firstClient.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
+        let listedHosts = try await firstClient.listHosts()
+
+        #expect(createdHost.name == "Build Server")
+        #expect(createdHost.sshTarget == "build-box")
+        #expect(createdHost.port == 2222)
+        #expect(listedHosts == [createdHost])
+
+        let secondService = try NexusService.bootstrapForTests(rootURL: rootURL)
+        let secondClient = try NexusIPCClient.connect(to: secondService.listenerEndpoint)
+        let persistedHosts = try await secondClient.listHosts()
+        let detail = try await secondClient.getHostDetail(hostID: createdHost.id)
+
+        #expect(persistedHosts == [createdHost])
+        #expect(detail.host == createdHost)
+        #expect(detail.latestValidation == nil)
+    }
+
+    @Test func hostValidationPersistsLatestSnapshotAndDiagnosticsOverIPC() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let validation = HostValidationResult(
+            state: .unavailable,
+            summary: "SSH connection timed out",
+            diagnostics: [
+                HostValidationDiagnostic(
+                    severity: .error,
+                    code: "sshTimedOut",
+                    message: "ssh build-box timed out while validating the Host."
+                )
+            ]
+        )
+
+        let firstService = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: ["build-box": validation])
+        )
+        let firstClient = try NexusIPCClient.connect(to: firstService.listenerEndpoint)
+        let host = try await firstClient.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
+
+        let snapshot = try await firstClient.validateHost(hostID: host.id)
+        let detail = try await firstClient.getHostDetail(hostID: host.id)
+
+        #expect(snapshot.hostID == host.id)
+        #expect(snapshot.state == .unavailable)
+        #expect(snapshot.summary == "SSH connection timed out")
+        #expect(snapshot.diagnostics == validation.diagnostics)
+        #expect(detail.latestValidation == snapshot)
+
+        let secondService = try NexusService.bootstrapForTests(rootURL: rootURL)
+        let secondClient = try NexusIPCClient.connect(to: secondService.listenerEndpoint)
+        let persistedDetail = try await secondClient.getHostDetail(hostID: host.id)
+
+        #expect(persistedDetail.latestValidation == snapshot)
+    }
+
+    @Test func hostEditingUpdatesPersistedFieldsAndClearsStaleValidationOverIPC() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let service = try NexusService.bootstrapForTests(rootURL: rootURL)
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        let host = try await client.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
+        _ = try await client.validateHost(hostID: host.id)
+
+        let updatedHost = try await client.updateHost(
+            hostID: host.id,
+            name: "Primary Build Server",
+            sshTarget: "build-box-2",
+            port: nil
+        )
+        let detail = try await client.getHostDetail(hostID: host.id)
+
+        #expect(updatedHost.id == host.id)
+        #expect(updatedHost.name == "Primary Build Server")
+        #expect(updatedHost.sshTarget == "build-box-2")
+        #expect(updatedHost.port == nil)
+        #expect(detail.host == updatedHost)
+        #expect(detail.latestValidation == nil)
+
+        let secondService = try NexusService.bootstrapForTests(rootURL: rootURL)
+        let secondClient = try NexusIPCClient.connect(to: secondService.listenerEndpoint)
+        let persistedDetail = try await secondClient.getHostDetail(hostID: host.id)
+
+        #expect(persistedDetail.host == updatedHost)
+        #expect(persistedDetail.latestValidation == nil)
+    }
 }
 
 private func waitForSessionScreen(
@@ -4339,6 +4437,18 @@ private struct StubCommandRunner: ProviderCommandRunning {
         case .success(let stdout, let stderr, let exitStatus):
             return ProviderCommandResult(exitStatus: exitStatus, stdout: stdout, stderr: stderr)
         }
+    }
+}
+
+private struct StubHostValidationEvaluator: HostValidationEvaluating {
+    let resultsByTarget: [String: HostValidationResult]
+
+    func validate(host: NexusDomain.Host) -> HostValidationResult {
+        resultsByTarget[host.sshTarget] ?? HostValidationResult(
+            state: .available,
+            summary: "Host is available",
+            diagnostics: []
+        )
     }
 }
 
@@ -4526,6 +4636,26 @@ private final class TrackingServiceClient: NexusServiceClient {
 
     func listWorkspaces() async throws -> [Workspace] {
         [workspaceOverviewValue.workspace]
+    }
+
+    func listHosts() async throws -> [NexusDomain.Host] {
+        []
+    }
+
+    func getHostDetail(hostID: UUID) async throws -> NexusDomain.HostDetail {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Host not found"])
+    }
+
+    func createHost(name: String, sshTarget: String, port: Int?) async throws -> NexusDomain.Host {
+        NexusDomain.Host(id: UUID(), name: name, sshTarget: sshTarget, port: port)
+    }
+
+    func updateHost(hostID: UUID, name: String, sshTarget: String, port: Int?) async throws -> NexusDomain.Host {
+        NexusDomain.Host(id: hostID, name: name, sshTarget: sshTarget, port: port)
+    }
+
+    func validateHost(hostID: UUID) async throws -> HostValidationSnapshot {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Host validation unavailable"])
     }
 
     func listRecentNavigation(limit: Int) async throws -> [NavigationItem] {
@@ -4744,6 +4874,26 @@ private struct FailingServiceClient: NexusServiceClient {
 
     func listWorkspaces() async throws -> [Workspace] {
         []
+    }
+
+    func listHosts() async throws -> [NexusDomain.Host] {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func getHostDetail(hostID: UUID) async throws -> NexusDomain.HostDetail {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func createHost(name: String, sshTarget: String, port: Int?) async throws -> NexusDomain.Host {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func updateHost(hostID: UUID, name: String, sshTarget: String, port: Int?) async throws -> NexusDomain.Host {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func validateHost(hostID: UUID) async throws -> HostValidationSnapshot {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 
     func listRecentNavigation(limit: Int) async throws -> [NavigationItem] {

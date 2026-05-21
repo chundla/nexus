@@ -30,6 +30,77 @@ public struct Workspace: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+public struct Host: Codable, Equatable, Identifiable, Sendable {
+    public let id: UUID
+    public let name: String
+    public let sshTarget: String
+    public let port: Int?
+
+    public init(id: UUID, name: String, sshTarget: String, port: Int? = nil) {
+        self.id = id
+        self.name = name
+        self.sshTarget = sshTarget
+        self.port = port
+    }
+}
+
+public struct HostValidationDiagnostic: Codable, Equatable, Sendable {
+    public let severity: Severity
+    public let code: String
+    public let message: String
+
+    public init(severity: Severity, code: String, message: String) {
+        self.severity = severity
+        self.code = code
+        self.message = message
+    }
+
+    public enum Severity: String, Codable, Sendable {
+        case info
+        case warning
+        case error
+    }
+}
+
+public struct HostValidationSnapshot: Codable, Equatable, Sendable {
+    public let hostID: UUID
+    public let state: State
+    public let summary: String
+    public let checkedAt: Date
+    public let diagnostics: [HostValidationDiagnostic]
+
+    public init(
+        hostID: UUID,
+        state: State,
+        summary: String,
+        checkedAt: Date,
+        diagnostics: [HostValidationDiagnostic] = []
+    ) {
+        self.hostID = hostID
+        self.state = state
+        self.summary = summary
+        self.checkedAt = checkedAt
+        self.diagnostics = diagnostics
+    }
+
+    public enum State: String, Codable, Sendable {
+        case notChecked
+        case available
+        case unavailable
+        case broken
+    }
+}
+
+public struct HostDetail: Codable, Equatable, Sendable {
+    public let host: Host
+    public let latestValidation: HostValidationSnapshot?
+
+    public init(host: Host, latestValidation: HostValidationSnapshot?) {
+        self.host = host
+        self.latestValidation = latestValidation
+    }
+}
+
 public enum ProviderID: String, Codable, CaseIterable, Sendable {
     case codex
     case claude

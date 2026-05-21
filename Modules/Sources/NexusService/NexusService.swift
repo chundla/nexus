@@ -572,6 +572,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
 
     private let metadataStore: NexusMetadataStore
     private let providerHealthEvaluator: any ProviderHealthEvaluating
+    private let hostValidationEvaluator: any HostValidationEvaluating
     private let sessionRuntimeManager: any SessionRuntimeManaging
 
     private init(
@@ -579,12 +580,14 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         storeURL: URL,
         metadataStore: NexusMetadataStore,
         providerHealthEvaluator: any ProviderHealthEvaluating,
+        hostValidationEvaluator: any HostValidationEvaluating,
         sessionRuntimeManager: any SessionRuntimeManaging
     ) {
         self.listener = listener
         self.storeURL = storeURL
         self.metadataStore = metadataStore
         self.providerHealthEvaluator = providerHealthEvaluator
+        self.hostValidationEvaluator = hostValidationEvaluator
         self.sessionRuntimeManager = sessionRuntimeManager
         super.init()
         self.listener.delegate = self
@@ -614,11 +617,25 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     static func bootstrapForTests(
         rootURL: URL,
         providerHealthEvaluator: any ProviderHealthEvaluating,
+        hostValidationEvaluator: any HostValidationEvaluating = HostValidationEvaluator(),
         sessionRuntimeManager: any SessionRuntimeManaging = InMemorySessionRuntimeManager()
     ) throws -> NexusService {
         try bootstrap(
             rootURL: rootURL,
             providerHealthEvaluator: providerHealthEvaluator,
+            hostValidationEvaluator: hostValidationEvaluator,
+            sessionRuntimeManager: sessionRuntimeManager
+        )
+    }
+
+    static func bootstrapForTests(
+        rootURL: URL,
+        hostValidationEvaluator: any HostValidationEvaluating,
+        sessionRuntimeManager: any SessionRuntimeManaging = InMemorySessionRuntimeManager()
+    ) throws -> NexusService {
+        try bootstrap(
+            rootURL: rootURL,
+            hostValidationEvaluator: hostValidationEvaluator,
             sessionRuntimeManager: sessionRuntimeManager
         )
     }
@@ -626,6 +643,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     private static func bootstrap(
         rootURL: URL,
         providerHealthEvaluator: any ProviderHealthEvaluating = ProviderHealthEvaluator(),
+        hostValidationEvaluator: any HostValidationEvaluating = HostValidationEvaluator(),
         sessionRuntimeManager: any SessionRuntimeManaging = InMemorySessionRuntimeManager()
     ) throws -> NexusService {
         try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
@@ -641,6 +659,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             storeURL: storeURL,
             metadataStore: metadataStore,
             providerHealthEvaluator: providerHealthEvaluator,
+            hostValidationEvaluator: hostValidationEvaluator,
             sessionRuntimeManager: sessionRuntimeManager
         )
     }
@@ -666,6 +685,38 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
 
     func listWorkspaces() throws -> [Workspace] {
         try metadataStore.listWorkspaces()
+    }
+
+    func listHosts() throws -> [NexusDomain.Host] {
+        try metadataStore.listHosts()
+    }
+
+    func getHostDetail(hostID: UUID) throws -> NexusDomain.HostDetail {
+        guard let host = try metadataStore.host(id: hostID) else {
+            throw NexusMetadataStoreError.hostNotFound
+        }
+
+        return NexusDomain.HostDetail(host: host, latestValidation: try metadataStore.hostValidation(hostID: hostID))
+    }
+
+    func createHost(name: String, sshTarget: String, port: Int?) throws -> NexusDomain.Host {
+        try metadataStore.createHost(name: name, sshTarget: sshTarget, port: port)
+    }
+
+    func updateHost(hostID: UUID, name: String, sshTarget: String, port: Int?) throws -> NexusDomain.Host {
+        try metadataStore.updateHost(id: hostID, name: name, sshTarget: sshTarget, port: port)
+    }
+
+    func validateHost(hostID: UUID) throws -> HostValidationSnapshot {
+        guard let host = try metadataStore.host(id: hostID) else {
+            throw NexusMetadataStoreError.hostNotFound
+        }
+
+        return try metadataStore.saveHostValidation(
+            hostID: hostID,
+            result: hostValidationEvaluator.validate(host: host),
+            checkedAt: Date()
+        )
     }
 
     func listRecentNavigation(limit: Int) throws -> [NavigationItem] {
@@ -2070,6 +2121,26 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
 
     func listWorkspaces(_ reply: @escaping (Data?, NSString?) -> Void) {
         sendReply(with: service.listWorkspaces, reply: reply)
+    }
+
+    func listHosts(_ reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(with: service.listHosts, reply: reply)
+    }
+
+    func getHostDetail(hostID: String, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(with: { try service.getHostDetail(hostID: resolveUUID(hostID)) }, reply: reply)
+    }
+
+    func createHost(name: String, sshTarget: String, port: NSNumber?, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(with: { try service.createHost(name: name, sshTarget: sshTarget, port: port?.intValue) }, reply: reply)
+    }
+
+    func updateHost(hostID: String, name: String, sshTarget: String, port: NSNumber?, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(with: { try service.updateHost(hostID: resolveUUID(hostID), name: name, sshTarget: sshTarget, port: port?.intValue) }, reply: reply)
+    }
+
+    func validateHost(hostID: String, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(with: { try service.validateHost(hostID: resolveUUID(hostID)) }, reply: reply)
     }
 
     func listRecentNavigation(limit: Int, reply: @escaping (Data?, NSString?) -> Void) {

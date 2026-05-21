@@ -41,6 +41,21 @@ final class NexusMetadataStore {
                 primary_group_id TEXT NOT NULL REFERENCES workspace_groups(id)
             );
 
+            CREATE TABLE IF NOT EXISTS hosts (
+                id TEXT PRIMARY KEY NOT NULL,
+                name TEXT NOT NULL,
+                ssh_target TEXT NOT NULL,
+                port INTEGER
+            );
+
+            CREATE TABLE IF NOT EXISTS host_validation_snapshots (
+                host_id TEXT PRIMARY KEY NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+                state TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                checked_at INTEGER NOT NULL,
+                diagnostics_json TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS sessions (
                 id TEXT PRIMARY KEY NOT NULL,
                 workspace_id TEXT NOT NULL REFERENCES workspaces(id),
@@ -137,6 +152,156 @@ final class NexusMetadataStore {
                 workspaces.append(try readWorkspace(from: statement))
             }
             return workspaces
+        }
+    }
+
+    func listHosts() throws -> [NexusDomain.Host] {
+        try withLock {
+            let statement = try prepare(
+                "SELECT id, name, ssh_target, port FROM hosts ORDER BY rowid ASC;"
+            )
+            defer { sqlite3_finalize(statement) }
+
+            var hosts: [NexusDomain.Host] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                hosts.append(try readHost(from: statement))
+            }
+            return hosts
+        }
+    }
+
+    func createHost(name: String, sshTarget: String, port: Int?) throws -> NexusDomain.Host {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedName.isEmpty == false else {
+            throw NexusMetadataStoreError.invalidHostName
+        }
+
+        let trimmedTarget = sshTarget.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedTarget.isEmpty == false else {
+            throw NexusMetadataStoreError.invalidHostTarget
+        }
+
+        if let port, (1...65_535).contains(port) == false {
+            throw NexusMetadataStoreError.invalidHostPort
+        }
+
+        return try withLock {
+            let host = NexusDomain.Host(id: UUID(), name: trimmedName, sshTarget: trimmedTarget, port: port)
+            let statement = try prepare(
+                "INSERT INTO hosts (id, name, ssh_target, port) VALUES (?, ?, ?, ?);"
+            )
+            defer { sqlite3_finalize(statement) }
+
+            try bind(host.id.uuidString, at: 1, in: statement)
+            try bind(host.name, at: 2, in: statement)
+            try bind(host.sshTarget, at: 3, in: statement)
+            try bind(host.port.map(Int32.init), at: 4, in: statement)
+            try stepDone(statement)
+            return host
+        }
+    }
+
+    func updateHost(id: UUID, name: String, sshTarget: String, port: Int?) throws -> NexusDomain.Host {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedName.isEmpty == false else {
+            throw NexusMetadataStoreError.invalidHostName
+        }
+
+        let trimmedTarget = sshTarget.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedTarget.isEmpty == false else {
+            throw NexusMetadataStoreError.invalidHostTarget
+        }
+
+        if let port, (1...65_535).contains(port) == false {
+            throw NexusMetadataStoreError.invalidHostPort
+        }
+
+        return try withLock {
+            let statement = try prepare(
+                "UPDATE hosts SET name = ?, ssh_target = ?, port = ? WHERE id = ?;"
+            )
+            defer { sqlite3_finalize(statement) }
+
+            try bind(trimmedName, at: 1, in: statement)
+            try bind(trimmedTarget, at: 2, in: statement)
+            try bind(port.map(Int32.init), at: 3, in: statement)
+            try bind(id.uuidString, at: 4, in: statement)
+            try stepDone(statement)
+
+            guard sqlite3_changes(database) > 0 else {
+                throw NexusMetadataStoreError.hostNotFound
+            }
+
+            let clearValidationStatement = try prepare("DELETE FROM host_validation_snapshots WHERE host_id = ?;")
+            defer { sqlite3_finalize(clearValidationStatement) }
+            try bind(id.uuidString, at: 1, in: clearValidationStatement)
+            try stepDone(clearValidationStatement)
+
+            return NexusDomain.Host(id: id, name: trimmedName, sshTarget: trimmedTarget, port: port)
+        }
+    }
+
+    func host(id: UUID) throws -> NexusDomain.Host? {
+        try withLock {
+            let statement = try prepare(
+                "SELECT id, name, ssh_target, port FROM hosts WHERE id = ? LIMIT 1;"
+            )
+            defer { sqlite3_finalize(statement) }
+
+            try bind(id.uuidString, at: 1, in: statement)
+            guard sqlite3_step(statement) == SQLITE_ROW else {
+                return nil
+            }
+            return try readHost(from: statement)
+        }
+    }
+
+    func hostValidation(hostID: UUID) throws -> HostValidationSnapshot? {
+        try withLock {
+            let statement = try prepare(
+                "SELECT host_id, state, summary, checked_at, diagnostics_json FROM host_validation_snapshots WHERE host_id = ? LIMIT 1;"
+            )
+            defer { sqlite3_finalize(statement) }
+
+            try bind(hostID.uuidString, at: 1, in: statement)
+            guard sqlite3_step(statement) == SQLITE_ROW else {
+                return nil
+            }
+            return try readHostValidationSnapshot(from: statement)
+        }
+    }
+
+    func saveHostValidation(hostID: UUID, result: HostValidationResult, checkedAt: Date) throws -> HostValidationSnapshot {
+        try withLock {
+            let checkedAtMilliseconds = Int64(checkedAt.timeIntervalSince1970 * 1_000)
+            let normalizedCheckedAt = Date(timeIntervalSince1970: Double(checkedAtMilliseconds) / 1_000)
+            let snapshot = HostValidationSnapshot(
+                hostID: hostID,
+                state: result.state,
+                summary: result.summary,
+                checkedAt: normalizedCheckedAt,
+                diagnostics: result.diagnostics
+            )
+            let statement = try prepare(
+                """
+                INSERT INTO host_validation_snapshots (host_id, state, summary, checked_at, diagnostics_json)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(host_id) DO UPDATE SET
+                    state = excluded.state,
+                    summary = excluded.summary,
+                    checked_at = excluded.checked_at,
+                    diagnostics_json = excluded.diagnostics_json;
+                """
+            )
+            defer { sqlite3_finalize(statement) }
+
+            try bind(snapshot.hostID.uuidString, at: 1, in: statement)
+            try bind(snapshot.state.rawValue, at: 2, in: statement)
+            try bind(snapshot.summary, at: 3, in: statement)
+            try bind(checkedAtMilliseconds, at: 4, in: statement)
+            try bind(try encodeHostValidationDiagnostics(snapshot.diagnostics), at: 5, in: statement)
+            try stepDone(statement)
+            return snapshot
         }
     }
 
@@ -582,6 +747,17 @@ final class NexusMetadataStore {
         }
     }
 
+    private func bind(_ value: Int32?, at index: Int32, in statement: OpaquePointer?) throws {
+        guard let value else {
+            guard sqlite3_bind_null(statement, index) == SQLITE_OK else {
+                throw currentSQLiteError()
+            }
+            return
+        }
+
+        try bind(value, at: index, in: statement)
+    }
+
     private func bind(_ value: Int64, at index: Int32, in statement: OpaquePointer?) throws {
         guard sqlite3_bind_int64(statement, index, value) == SQLITE_OK else {
             throw currentSQLiteError()
@@ -628,6 +804,13 @@ final class NexusMetadataStore {
         return String(cString: pointer)
     }
 
+    private func readOptionalInt(column: Int32, from statement: OpaquePointer?) -> Int? {
+        guard sqlite3_column_type(statement, column) != SQLITE_NULL else {
+            return nil
+        }
+        return Int(sqlite3_column_int(statement, column))
+    }
+
     private func readWorkspace(from statement: OpaquePointer?) throws -> Workspace {
         let id = try readUUID(column: 0, from: statement)
         let name = try readString(column: 1, from: statement)
@@ -643,6 +826,15 @@ final class NexusMetadataStore {
             kind: kind,
             folderPath: folderPath,
             primaryGroupID: primaryGroupID
+        )
+    }
+
+    private func readHost(from statement: OpaquePointer?) throws -> NexusDomain.Host {
+        NexusDomain.Host(
+            id: try readUUID(column: 0, from: statement),
+            name: try readString(column: 1, from: statement),
+            sshTarget: try readString(column: 2, from: statement),
+            port: readOptionalInt(column: 3, from: statement)
         )
     }
 
@@ -669,6 +861,18 @@ final class NexusMetadataStore {
             state: state,
             failureMessage: failureMessage
         )
+    }
+
+    private func readHostValidationSnapshot(from statement: OpaquePointer?) throws -> HostValidationSnapshot {
+        let hostID = try readUUID(column: 0, from: statement)
+        let stateRawValue = try readString(column: 1, from: statement)
+        guard let state = HostValidationSnapshot.State(rawValue: stateRawValue) else {
+            throw NexusMetadataStoreError.sqlite("Unknown host validation state: \(stateRawValue)")
+        }
+        let summary = try readString(column: 2, from: statement)
+        let checkedAt = Date(timeIntervalSince1970: Double(sqlite3_column_int64(statement, 3)) / 1_000)
+        let diagnostics = try decodeHostValidationDiagnostics(from: readString(column: 4, from: statement))
+        return HostValidationSnapshot(hostID: hostID, state: state, summary: summary, checkedAt: checkedAt, diagnostics: diagnostics)
     }
 
     private func readLaunchSnapshot(from statement: OpaquePointer?) throws -> LaunchSnapshot {
@@ -712,6 +916,21 @@ final class NexusMetadataStore {
         return value
     }
 
+    private func encodeHostValidationDiagnostics(_ diagnostics: [HostValidationDiagnostic]) throws -> String {
+        let data = try JSONEncoder().encode(diagnostics)
+        guard let json = String(data: data, encoding: .utf8) else {
+            throw NexusMetadataStoreError.sqlite("Could not encode host validation diagnostics")
+        }
+        return json
+    }
+
+    private func decodeHostValidationDiagnostics(from json: String) throws -> [HostValidationDiagnostic] {
+        guard let data = json.data(using: .utf8) else {
+            throw NexusMetadataStoreError.sqlite("Could not decode host validation diagnostics")
+        }
+        return try JSONDecoder().decode([HostValidationDiagnostic].self, from: data)
+    }
+
     private func navigationTargetKey(_ target: NavigationTarget) -> String {
         switch target.kind {
         case .workspace:
@@ -734,11 +953,15 @@ enum NexusMetadataStoreError: LocalizedError {
     case sqlite(String)
     case invalidWorkspaceGroupName
     case invalidWorkspaceFolderPath
+    case invalidHostName
+    case invalidHostTarget
+    case invalidHostPort
     case invalidSessionName
     case workspaceGroupRequired
     case primaryWorkspaceGroupSelectionRequired
     case workspaceGroupNotFound
     case workspaceNotFound
+    case hostNotFound
     case sessionNotFound
     case providerNotSupported
     case sessionNotReady
@@ -752,6 +975,12 @@ enum NexusMetadataStoreError: LocalizedError {
             "Workspace Group name is required"
         case .invalidWorkspaceFolderPath:
             "Workspace folder path is required"
+        case .invalidHostName:
+            "Host name is required"
+        case .invalidHostTarget:
+            "SSH target or alias is required"
+        case .invalidHostPort:
+            "Host port must be between 1 and 65535"
         case .invalidSessionName:
             "Session name is required"
         case .workspaceGroupRequired:
@@ -762,6 +991,8 @@ enum NexusMetadataStoreError: LocalizedError {
             "The selected Workspace Group no longer exists"
         case .workspaceNotFound:
             "Workspace not found"
+        case .hostNotFound:
+            "Host not found"
         case .sessionNotFound:
             "Session not found"
         case .providerNotSupported:
