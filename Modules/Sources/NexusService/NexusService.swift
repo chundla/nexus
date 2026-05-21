@@ -239,6 +239,7 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
     private var pendingTerminalOutput: String
     private var columns: Int
     private var rows: Int
+    private var utf8Decoder = UTF8StreamDecoder()
     private var changeHandler: (@Sendable () -> Void)?
 
     init(executable: String, workspace: Workspace) throws {
@@ -285,7 +286,10 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
             }
 
             let data = Data(buffer.prefix(bytesRead))
-            let text = String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
+            let text = self.decodeTerminalText(data)
+            guard text.isEmpty == false else {
+                return
+            }
             let queryResponses = self.cursorPositionReportResponses(for: text)
             self.append(text)
             self.appendTerminalOutput(text)
@@ -304,6 +308,11 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
             self.lock.lock()
             self.runtimeState = .exited
             self.lock.unlock()
+            let trailingText = self.flushDecodedTerminalText()
+            if trailingText.isEmpty == false {
+                self.append(trailingText)
+                self.appendTerminalOutput(trailingText)
+            }
             self.append("\n[Claude exited with status \(status)]\n")
             self.readSource.cancel()
             self.terminationSource.cancel()
@@ -457,7 +466,7 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
                 let incomingCount = combinedText.distance(from: pendingBoundary, to: range.upperBound)
                 let incomingEndIndex = incomingText.index(incomingText.startIndex, offsetBy: incomingCount)
                 let transcriptPrefix = baseTranscript + String(incomingText[..<incomingEndIndex])
-                let renderState = NexusService.renderTerminalState(
+                let renderState = TerminalRenderer.renderState(
                     from: transcriptPrefix,
                     terminalColumns: columns,
                     terminalRows: rows
@@ -480,6 +489,18 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
             }
             terminalHandle.write(data)
         }
+    }
+
+    private func decodeTerminalText(_ data: Data) -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        return utf8Decoder.decode(data)
+    }
+
+    private func flushDecodedTerminalText() -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        return utf8Decoder.finish()
     }
 
     private func append(_ text: String) {
@@ -783,7 +804,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         }
 
         let currentScreen = try sessionRuntimeManager.sessionScreen(for: resolvedSession)
-        let renderState = Self.renderTerminalState(
+        let renderState = TerminalRenderer.renderState(
             from: currentScreen.transcript,
             terminalColumns: currentScreen.terminalColumns,
             terminalRows: currentScreen.terminalRows
@@ -830,7 +851,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     private func normalizedSessionScreen(_ screen: SessionScreen) -> SessionScreen {
-        let renderState = Self.renderTerminalState(
+        let renderState = TerminalRenderer.renderState(
             from: screen.transcript,
             terminalColumns: screen.terminalColumns,
             terminalRows: screen.terminalRows
@@ -842,6 +863,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             terminalColumns: screen.terminalColumns,
             terminalRows: screen.terminalRows,
             visibleLines: renderState.visibleLines,
+            styledVisibleLines: renderState.styledVisibleLines,
             cursorRow: renderState.cursorRow,
             cursorColumn: renderState.cursorColumn,
             cursorVisible: renderState.cursorVisible

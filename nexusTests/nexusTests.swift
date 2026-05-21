@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import NexusDomain
+import SwiftUI
 import NexusIPC
 @testable import NexusService
 import Testing
@@ -46,6 +47,72 @@ struct nexusTests {
 
         #expect(homeInput == .key(.home))
         #expect(endInput == .key(.end))
+    }
+
+    @Test func utf8StreamDecoderBuffersSplitMultibyteTerminalGlyphs() {
+        var decoder = UTF8StreamDecoder()
+
+        let firstChunk = decoder.decode(Data([0xE2, 0x95]))
+        let secondChunk = decoder.decode(Data([0xAD, 0xE2, 0x94]))
+        let thirdChunk = decoder.decode(Data([0x80, 0xE2, 0x9D]))
+        let fourthChunk = decoder.decode(Data([0xAF]))
+
+        #expect(firstChunk.isEmpty)
+        #expect(secondChunk == "╭")
+        #expect(thirdChunk == "─")
+        #expect(fourthChunk == "❯")
+    }
+
+    @Test func terminalRendererPreservesClaudeAnsiColorsAndInverseVideo() {
+        let renderState = TerminalRenderer.renderState(
+            from: "\u{001B}[38;5;153m/add-dir\u{001B}[39m\n/\u{001B}[7m \u{001B}[27m",
+            terminalColumns: 40,
+            terminalRows: 4
+        )
+
+        #expect(renderState.visibleLines == ["/add-dir", "/ "])
+        #expect(renderState.styledVisibleLines[0].cells.allSatisfy { $0.style.foregroundColor == .ansi256(153) })
+        #expect(renderState.styledVisibleLines[1].cells[0].style.isInverse == false)
+        #expect(renderState.styledVisibleLines[1].cells[1].style.isInverse == true)
+    }
+
+    @Test func terminalRendererWrapsSequentialTextAtTerminalWidth() {
+        let renderState = TerminalRenderer.renderState(
+            from: "123456789",
+            terminalColumns: 5,
+            terminalRows: 3
+        )
+
+        #expect(renderState.visibleLines == ["12345", "6789"])
+        #expect(renderState.cursorRow == 1)
+        #expect(renderState.cursorColumn == 4)
+    }
+
+    @Test func terminalRendererDoesNotSoftWrapAbsolutePositionedOffscreenCells() {
+        let renderState = TerminalRenderer.renderState(
+            from: "a\u{001B}[143G|",
+            terminalColumns: 139,
+            terminalRows: 10
+        )
+
+        #expect(renderState.styledVisibleLines.count == 1)
+        #expect(renderState.visibleLines[0].hasPrefix("a"))
+    }
+
+    @Test func terminalViewportLayoutUsesContentAreaInsteadOfOuterFrame() {
+        let layout = TerminalViewportLayout(
+            font: .system(size: 13, design: .monospaced),
+            cellWidth: 8,
+            cellHeight: 16,
+            contentPadding: CGSize(width: 12, height: 12),
+            minimumColumns: 40,
+            minimumRows: 12
+        )
+
+        let gridSize = layout.gridSize(fitting: CGSize(width: 1_148, height: 344))
+
+        #expect(gridSize.columns == 140)
+        #expect(gridSize.rows == 20)
     }
 
     @Test func embeddedServiceBootstrapStartsBackgroundServiceReachableOverIPC() async throws {

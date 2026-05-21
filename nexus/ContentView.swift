@@ -15,6 +15,8 @@ struct ContentView: View {
     @State private var terminalFocusToken = UUID()
     @State private var presentedError: PresentedError?
 
+    private let terminalLayout = TerminalViewportLayout.live
+
     var body: some View {
         NavigationSplitView {
             List(selection: $selection) {
@@ -215,19 +217,17 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
 
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 2) {
-                        ForEach(Array(screen.visibleLines.enumerated()), id: \.offset) { index, line in
-                            Text(renderedTerminalLine(line, row: index, screen: screen))
-                                .font(.system(.body, design: .monospaced))
-                                .foregroundStyle(.white)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(screen.styledVisibleLines.enumerated()), id: \.offset) { index, line in
+                            terminalLineView(line, row: index, screen: screen)
                         }
                     }
-                    .padding(12)
+                    .padding(.horizontal, terminalLayout.contentPadding.width)
+                    .padding(.vertical, terminalLayout.contentPadding.height)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.black.opacity(0.92))
+                .background(terminalBackgroundColor)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .overlay {
                     RoundedRectangle(cornerRadius: 8)
@@ -486,15 +486,144 @@ struct ContentView: View {
         }
     }
 
-    private func renderedTerminalLine(_ line: String, row: Int, screen: SessionScreen) -> String {
-        guard screen.cursorVisible, row == screen.cursorRow else {
-            return line.isEmpty ? " " : line
+    private var terminalBackgroundColor: Color {
+        Color.black.opacity(0.92)
+    }
+
+    @ViewBuilder
+    private func terminalLineView(_ line: TerminalLine, row: Int, screen: SessionScreen) -> some View {
+        let segments = renderedTerminalSegments(for: line, row: row, screen: screen)
+
+        HStack(spacing: 0) {
+            ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
+                terminalSegmentView(segment)
+            }
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    @ViewBuilder
+    private func terminalSegmentView(_ segment: TerminalLineSegment) -> some View {
+        let colors = resolvedTerminalColors(for: segment.style)
+        let text = Text(segment.text)
+            .font(terminalLayout.font)
+            .fontWeight(segment.style.isBold ? .bold : .regular)
+            .foregroundStyle(colors.foreground)
+            .background(colors.background)
+            .opacity(segment.style.isDim ? 0.65 : 1)
+            .lineLimit(1)
+
+        if segment.style.isItalic {
+            text.italic()
+        } else {
+            text
+        }
+    }
+
+    private func renderedTerminalSegments(for line: TerminalLine, row: Int, screen: SessionScreen) -> [TerminalLineSegment] {
+        var cells = line.cells
+
+        if screen.cursorVisible, row == screen.cursorRow {
+            let cursorIndex = max(0, min(screen.cursorColumn, cells.count))
+            cells.insert(TerminalCell(text: "█"), at: cursorIndex)
         }
 
-        let clampedColumn = max(0, min(screen.cursorColumn, line.count))
-        let insertionIndex = line.index(line.startIndex, offsetBy: clampedColumn)
-        let withCursor = String(line[..<insertionIndex]) + "█" + String(line[insertionIndex...])
-        return withCursor.isEmpty ? "█" : withCursor
+        if cells.isEmpty {
+            cells = [TerminalCell(text: " ")]
+        }
+
+        var segments: [TerminalLineSegment] = []
+        for cell in cells {
+            if let lastIndex = segments.indices.last, segments[lastIndex].style == cell.style {
+                segments[lastIndex].text.append(cell.text)
+            } else {
+                segments.append(TerminalLineSegment(text: cell.text, style: cell.style))
+            }
+        }
+
+        return segments
+    }
+
+    private func resolvedTerminalColors(for style: TerminalStyle) -> (foreground: Color, background: Color) {
+        let defaultForeground = Color.white
+        let defaultBackground = Color.black
+        let foreground = color(for: style.foregroundColor) ?? defaultForeground
+        let background = color(for: style.backgroundColor)
+
+        if style.isInverse {
+            return (background ?? defaultBackground, foreground)
+        }
+
+        return (foreground, background ?? .clear)
+    }
+
+    private func color(for terminalColor: TerminalColor?) -> Color? {
+        guard let terminalColor else {
+            return nil
+        }
+
+        switch terminalColor.kind {
+        case .ansi256:
+            guard let index = terminalColor.index else {
+                return nil
+            }
+            return color(forANSI256: index)
+        case .rgb:
+            guard let red = terminalColor.red,
+                  let green = terminalColor.green,
+                  let blue = terminalColor.blue else {
+                return nil
+            }
+            return Color(
+                red: Double(red) / 255,
+                green: Double(green) / 255,
+                blue: Double(blue) / 255
+            )
+        }
+    }
+
+    private func color(forANSI256 index: Int) -> Color {
+        let clampedIndex = max(0, min(index, 255))
+        let standardPalette: [(Double, Double, Double)] = [
+            (0, 0, 0),
+            (205, 49, 49),
+            (13, 188, 121),
+            (229, 229, 16),
+            (36, 114, 200),
+            (188, 63, 188),
+            (17, 168, 205),
+            (229, 229, 229),
+            (102, 102, 102),
+            (241, 76, 76),
+            (35, 209, 139),
+            (245, 245, 67),
+            (59, 142, 234),
+            (214, 112, 214),
+            (41, 184, 219),
+            (255, 255, 255)
+        ]
+
+        let rgb: (Double, Double, Double)
+        switch clampedIndex {
+        case 0..<16:
+            rgb = standardPalette[clampedIndex]
+        case 16..<232:
+            let cubeIndex = clampedIndex - 16
+            let redIndex = cubeIndex / 36
+            let greenIndex = (cubeIndex / 6) % 6
+            let blueIndex = cubeIndex % 6
+            let levels: [Double] = [0, 95, 135, 175, 215, 255]
+            rgb = (levels[redIndex], levels[greenIndex], levels[blueIndex])
+        default:
+            let grayscale = Double(8 + ((clampedIndex - 232) * 10))
+            rgb = (grayscale, grayscale, grayscale)
+        }
+
+        return Color(
+            red: rgb.0 / 255,
+            green: rgb.1 / 255,
+            blue: rgb.2 / 255
+        )
     }
 
     private func reportTerminalSize(_ size: CGSize) {
@@ -502,8 +631,9 @@ struct ContentView: View {
             return
         }
 
-        let columns = max(40, Int(size.width / 8))
-        let rows = max(12, Int(size.height / 18))
+        let gridSize = terminalLayout.gridSize(fitting: size)
+        let columns = gridSize.columns
+        let rows = gridSize.rows
         guard columns > 0, rows > 0 else {
             return
         }
@@ -523,6 +653,44 @@ struct ContentView: View {
         }
     }
 
+}
+
+struct TerminalViewportLayout {
+    let font: Font
+    let cellWidth: CGFloat
+    let cellHeight: CGFloat
+    let contentPadding: CGSize
+    let minimumColumns: Int
+    let minimumRows: Int
+
+    static let live: TerminalViewportLayout = {
+        let pointSize: CGFloat = 13
+        let nsFont = NSFont.monospacedSystemFont(ofSize: pointSize, weight: .regular)
+        let glyphWidth = ("M" as NSString).size(withAttributes: [.font: nsFont]).width
+        let glyphHeight = ceil(nsFont.ascender - nsFont.descender + nsFont.leading)
+
+        return TerminalViewportLayout(
+            font: .system(size: pointSize, design: .monospaced),
+            cellWidth: glyphWidth,
+            cellHeight: glyphHeight,
+            contentPadding: CGSize(width: 12, height: 12),
+            minimumColumns: 40,
+            minimumRows: 12
+        )
+    }()
+
+    func gridSize(fitting viewportSize: CGSize) -> (columns: Int, rows: Int) {
+        let contentWidth = max(0, viewportSize.width - (contentPadding.width * 2))
+        let contentHeight = max(0, viewportSize.height - (contentPadding.height * 2))
+        let columns = max(minimumColumns, Int(floor(contentWidth / max(1, cellWidth))))
+        let rows = max(minimumRows, Int(floor(contentHeight / max(1, cellHeight))))
+        return (columns, rows)
+    }
+}
+
+private struct TerminalLineSegment {
+    var text: String
+    let style: TerminalStyle
 }
 
 private enum SidebarSelection: Hashable {

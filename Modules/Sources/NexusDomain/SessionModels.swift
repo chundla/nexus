@@ -48,12 +48,89 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+public struct TerminalColor: Codable, Equatable, Sendable {
+    public enum Kind: String, Codable, Sendable {
+        case ansi256
+        case rgb
+    }
+
+    public let kind: Kind
+    public let index: Int?
+    public let red: Int?
+    public let green: Int?
+    public let blue: Int?
+
+    public init(kind: Kind, index: Int? = nil, red: Int? = nil, green: Int? = nil, blue: Int? = nil) {
+        self.kind = kind
+        self.index = index
+        self.red = red
+        self.green = green
+        self.blue = blue
+    }
+
+    public static func ansi256(_ index: Int) -> TerminalColor {
+        TerminalColor(kind: .ansi256, index: index)
+    }
+
+    public static func rgb(red: Int, green: Int, blue: Int) -> TerminalColor {
+        TerminalColor(kind: .rgb, red: red, green: green, blue: blue)
+    }
+}
+
+public struct TerminalStyle: Codable, Equatable, Sendable {
+    public let foregroundColor: TerminalColor?
+    public let backgroundColor: TerminalColor?
+    public let isBold: Bool
+    public let isDim: Bool
+    public let isItalic: Bool
+    public let isInverse: Bool
+
+    public init(
+        foregroundColor: TerminalColor? = nil,
+        backgroundColor: TerminalColor? = nil,
+        isBold: Bool = false,
+        isDim: Bool = false,
+        isItalic: Bool = false,
+        isInverse: Bool = false
+    ) {
+        self.foregroundColor = foregroundColor
+        self.backgroundColor = backgroundColor
+        self.isBold = isBold
+        self.isDim = isDim
+        self.isItalic = isItalic
+        self.isInverse = isInverse
+    }
+}
+
+public struct TerminalCell: Codable, Equatable, Sendable {
+    public let text: String
+    public let style: TerminalStyle
+
+    public init(text: String, style: TerminalStyle = TerminalStyle()) {
+        self.text = text
+        self.style = style
+    }
+}
+
+public struct TerminalLine: Codable, Equatable, Sendable {
+    public let cells: [TerminalCell]
+
+    public init(cells: [TerminalCell] = []) {
+        self.cells = cells
+    }
+
+    public var text: String {
+        cells.map(\.text).joined()
+    }
+}
+
 public struct SessionScreen: Codable, Equatable, Sendable {
     public let session: Session
     public let transcript: String
     public let terminalColumns: Int
     public let terminalRows: Int
     public let visibleLines: [String]
+    public let styledVisibleLines: [TerminalLine]
     public let cursorRow: Int
     public let cursorColumn: Int
     public let cursorVisible: Bool
@@ -64,6 +141,7 @@ public struct SessionScreen: Codable, Equatable, Sendable {
         terminalColumns: Int = 80,
         terminalRows: Int = 24,
         visibleLines: [String]? = nil,
+        styledVisibleLines: [TerminalLine]? = nil,
         cursorRow: Int? = nil,
         cursorColumn: Int? = nil,
         cursorVisible: Bool = true
@@ -73,15 +151,21 @@ public struct SessionScreen: Codable, Equatable, Sendable {
             terminalColumns: terminalColumns,
             terminalRows: terminalRows
         )
+        let resolvedVisibleLines = visibleLines ?? viewport.visibleLines
 
         self.session = session
         self.transcript = transcript
         self.terminalColumns = terminalColumns
         self.terminalRows = terminalRows
-        self.visibleLines = visibleLines ?? viewport.visibleLines
+        self.visibleLines = resolvedVisibleLines
+        self.styledVisibleLines = styledVisibleLines ?? resolvedVisibleLines.map(Self.defaultStyledLine)
         self.cursorRow = cursorRow ?? viewport.cursorRow
         self.cursorColumn = cursorColumn ?? viewport.cursorColumn
         self.cursorVisible = cursorVisible
+    }
+
+    private static func defaultStyledLine(for line: String) -> TerminalLine {
+        TerminalLine(cells: line.map { TerminalCell(text: String($0)) })
     }
 
     private static func makeViewport(
