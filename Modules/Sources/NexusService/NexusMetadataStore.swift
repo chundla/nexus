@@ -53,6 +53,14 @@ final class NexusMetadataStore {
                 terminal_rows INTEGER NOT NULL DEFAULT 24
             );
 
+            CREATE TABLE IF NOT EXISTS launch_snapshots (
+                session_id TEXT PRIMARY KEY NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                workspace_id TEXT NOT NULL,
+                provider_id TEXT NOT NULL,
+                resolved_executable TEXT NOT NULL,
+                resolved_working_directory TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS recent_navigation (
                 target_key TEXT PRIMARY KEY NOT NULL,
                 target_kind TEXT NOT NULL,
@@ -261,6 +269,46 @@ final class NexusMetadataStore {
         }
     }
 
+    func launchSnapshot(sessionID: UUID) throws -> LaunchSnapshot? {
+        try withLock {
+            try launchSnapshotWithoutLock(sessionID: sessionID)
+        }
+    }
+
+    func ensureLaunchSnapshot(
+        sessionID: UUID,
+        workspaceID: UUID,
+        providerID: ProviderID,
+        resolvedExecutable: String,
+        resolvedWorkingDirectory: String
+    ) throws -> LaunchSnapshot {
+        try withLock {
+            if let existingSnapshot = try launchSnapshotWithoutLock(sessionID: sessionID) {
+                return existingSnapshot
+            }
+
+            let snapshot = LaunchSnapshot(
+                sessionID: sessionID,
+                workspaceID: workspaceID,
+                providerID: providerID,
+                resolvedExecutable: resolvedExecutable,
+                resolvedWorkingDirectory: resolvedWorkingDirectory
+            )
+            let statement = try prepare(
+                "INSERT INTO launch_snapshots (session_id, workspace_id, provider_id, resolved_executable, resolved_working_directory) VALUES (?, ?, ?, ?, ?);"
+            )
+            defer { sqlite3_finalize(statement) }
+
+            try bind(snapshot.sessionID.uuidString, at: 1, in: statement)
+            try bind(snapshot.workspaceID.uuidString, at: 2, in: statement)
+            try bind(snapshot.providerID.rawValue, at: 3, in: statement)
+            try bind(snapshot.resolvedExecutable, at: 4, in: statement)
+            try bind(snapshot.resolvedWorkingDirectory, at: 5, in: statement)
+            try stepDone(statement)
+            return snapshot
+        }
+    }
+
     func createDefaultSession(
         workspaceID: UUID,
         providerID: ProviderID,
@@ -444,6 +492,19 @@ final class NexusMetadataStore {
         return try readSession(from: statement)
     }
 
+    private func launchSnapshotWithoutLock(sessionID: UUID) throws -> LaunchSnapshot? {
+        let statement = try prepare(
+            "SELECT session_id, workspace_id, provider_id, resolved_executable, resolved_working_directory FROM launch_snapshots WHERE session_id = ? LIMIT 1;"
+        )
+        defer { sqlite3_finalize(statement) }
+
+        try bind(sessionID.uuidString, at: 1, in: statement)
+        guard sqlite3_step(statement) == SQLITE_ROW else {
+            return nil
+        }
+        return try readLaunchSnapshot(from: statement)
+    }
+
     func session(id: UUID) throws -> Session? {
         try withLock {
             try sessionWithoutLock(id: id)
@@ -607,6 +668,24 @@ final class NexusMetadataStore {
             isDefault: isDefault,
             state: state,
             failureMessage: failureMessage
+        )
+    }
+
+    private func readLaunchSnapshot(from statement: OpaquePointer?) throws -> LaunchSnapshot {
+        let sessionID = try readUUID(column: 0, from: statement)
+        let workspaceID = try readUUID(column: 1, from: statement)
+        let providerRawValue = try readString(column: 2, from: statement)
+        guard let providerID = ProviderID(rawValue: providerRawValue) else {
+            throw NexusMetadataStoreError.sqlite("Unknown provider id: \(providerRawValue)")
+        }
+        let resolvedExecutable = try readString(column: 3, from: statement)
+        let resolvedWorkingDirectory = try readString(column: 4, from: statement)
+        return LaunchSnapshot(
+            sessionID: sessionID,
+            workspaceID: workspaceID,
+            providerID: providerID,
+            resolvedExecutable: resolvedExecutable,
+            resolvedWorkingDirectory: resolvedWorkingDirectory
         )
     }
 

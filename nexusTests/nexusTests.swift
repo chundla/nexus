@@ -3308,6 +3308,115 @@ struct nexusTests {
         #expect(relaunchedScreen.transcript == "Claude ready")
     }
 
+    @Test func interruptedDefaultSessionRelaunchesFromPersistedLaunchSnapshotWhenCurrentHealthIsUnavailable() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let firstRuntimeManager = StubSessionRuntimeManager(launchTranscriptForExecutable: { executable in
+            "launched with \(executable)"
+        })
+        let firstService = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/claude-a"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/claude-a", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/claude-a", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            ),
+            sessionRuntimeManager: firstRuntimeManager
+        )
+        let firstClient = try NexusIPCClient.connect(to: firstService.listenerEndpoint)
+        _ = try await firstClient.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await firstClient.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+        let launchedSession = try await firstClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+
+        let restartedService = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: [:]),
+                commandRunner: StubCommandRunner(results: [:])
+            ),
+            sessionRuntimeManager: StubSessionRuntimeManager(launchTranscriptForExecutable: { executable in
+                "launched with \(executable)"
+            })
+        )
+        let restartedClient = try NexusIPCClient.connect(to: restartedService.listenerEndpoint)
+        let interruptedScreen = try await restartedClient.getSessionScreen(sessionID: launchedSession.id)
+
+        #expect(interruptedScreen.session.state == .interrupted)
+
+        let relaunchedSession = try await restartedClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let relaunchedScreen = try await restartedClient.getSessionScreen(sessionID: launchedSession.id)
+
+        #expect(relaunchedSession.id == launchedSession.id)
+        #expect(relaunchedScreen.session.state == .ready)
+        #expect(relaunchedScreen.transcript == "launched with /tmp/claude-a")
+    }
+
+    @Test func newSessionsUseUpdatedLaunchConfigWithoutMutatingPersistedLaunchSnapshots() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let firstService = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/claude-a"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/claude-a", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/claude-a", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            ),
+            sessionRuntimeManager: StubSessionRuntimeManager(launchTranscriptForExecutable: { executable in
+                "launched with \(executable)"
+            })
+        )
+        let firstClient = try NexusIPCClient.connect(to: firstService.listenerEndpoint)
+        _ = try await firstClient.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await firstClient.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+        let defaultSession = try await firstClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+
+        let restartedService = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/claude-b"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/claude-b", arguments: ["--version"]): .success(stdout: "9.9.10 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/claude-b", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            ),
+            sessionRuntimeManager: StubSessionRuntimeManager(launchTranscriptForExecutable: { executable in
+                "launched with \(executable)"
+            })
+        )
+        let restartedClient = try NexusIPCClient.connect(to: restartedService.listenerEndpoint)
+
+        let relaunchedDefaultSession = try await restartedClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let defaultSessionScreen = try await restartedClient.getSessionScreen(sessionID: defaultSession.id)
+        let namedSession = try await restartedClient.createNamedSession(workspaceID: workspace.id, providerID: .claude, name: "Fresh Session")
+        let namedSessionScreen = try await restartedClient.getSessionScreen(sessionID: namedSession.id)
+
+        #expect(relaunchedDefaultSession.id == defaultSession.id)
+        #expect(defaultSessionScreen.transcript == "launched with /tmp/claude-a")
+        #expect(namedSessionScreen.transcript == "launched with /tmp/claude-b")
+    }
+
     @Test func launchOrResumeDefaultSessionPersistsFailedClaudeSessionWhenLaunchabilityFails() async throws {
         let workspaceFolderURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -4235,18 +4344,22 @@ private struct StubCommandRunner: ProviderCommandRunning {
 
 private final class StubSessionRuntimeManager: SessionRuntimeManaging {
     private let initialTranscript: String
+    private let launchTranscriptForExecutable: ((String) -> String)?
     private var transcripts: [UUID: String] = [:]
     private var states: [UUID: Session.State] = [:]
     private var sizes: [UUID: (columns: Int, rows: Int)] = [:]
     private var updateObservers: [UUID: [UUID: @Sendable () -> Void]] = [:]
     private var observedSessionIDs: [UUID: UUID] = [:]
 
-    init(initialTranscript: String = "") {
+    init(initialTranscript: String = "", launchTranscriptForExecutable: ((String) -> String)? = nil) {
         self.initialTranscript = initialTranscript
+        self.launchTranscriptForExecutable = launchTranscriptForExecutable
     }
 
     func launchOrResume(session: Session, workspace: Workspace, executable: String) throws {
-        if transcripts[session.id] == nil {
+        if let launchTranscriptForExecutable {
+            transcripts[session.id] = launchTranscriptForExecutable(executable)
+        } else if transcripts[session.id] == nil {
             transcripts[session.id] = initialTranscript
         }
         states[session.id] = .ready

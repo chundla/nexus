@@ -775,6 +775,14 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             throw NexusMetadataStoreError.providerNotSupported
         }
 
+        if let existingSession = try metadataStore.defaultSession(workspaceID: workspaceID, providerID: providerID),
+           let launchSnapshot = try metadataStore.launchSnapshot(sessionID: existingSession.id) {
+            let session = existingSession.state == .ready && existingSession.failureMessage == nil
+                ? existingSession
+                : try metadataStore.updateSession(id: existingSession.id, state: .ready, failureMessage: nil)
+            return try launchSession(session, workspace: workspace, launchSnapshot: launchSnapshot)
+        }
+
         let health = providerHealthEvaluator.healthSummary(for: providerID, workspace: workspace)
         guard health.launchability == .launchable, let executable = health.resolvedExecutable else {
             let failureMessage = health.diagnostics.first(where: { $0.severity == .error })?.message ?? health.summary
@@ -808,7 +816,14 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             )
         }
 
-        return try launchSession(session, workspace: workspace, executable: executable)
+        let launchSnapshot = try metadataStore.ensureLaunchSnapshot(
+            sessionID: session.id,
+            workspaceID: session.workspaceID,
+            providerID: session.providerID,
+            resolvedExecutable: executable,
+            resolvedWorkingDirectory: workspace.folderPath
+        )
+        return try launchSession(session, workspace: workspace, launchSnapshot: launchSnapshot)
     }
 
     func createNamedSession(workspaceID: UUID, providerID: ProviderID, name: String?) throws -> Session {
@@ -842,7 +857,14 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             state: .ready,
             failureMessage: nil
         )
-        return try launchSession(session, workspace: workspace, executable: executable)
+        let launchSnapshot = try metadataStore.ensureLaunchSnapshot(
+            sessionID: session.id,
+            workspaceID: session.workspaceID,
+            providerID: session.providerID,
+            resolvedExecutable: executable,
+            resolvedWorkingDirectory: workspace.folderPath
+        )
+        return try launchSession(session, workspace: workspace, launchSnapshot: launchSnapshot)
     }
 
     func stopSession(sessionID: UUID) throws -> Session {
@@ -1003,9 +1025,13 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         return normalizedSessionScreen(screen)
     }
 
-    private func launchSession(_ session: Session, workspace: Workspace, executable: String) throws -> Session {
+    private func launchSession(_ session: Session, workspace: Workspace, launchSnapshot: LaunchSnapshot) throws -> Session {
         do {
-            try sessionRuntimeManager.launchOrResume(session: session, workspace: workspace, executable: executable)
+            try sessionRuntimeManager.launchOrResume(
+                session: session,
+                workspace: workspace,
+                executable: launchSnapshot.resolvedExecutable
+            )
             let terminalSize = try metadataStore.sessionTerminalSize(id: session.id)
             _ = try sessionRuntimeManager.resize(
                 session: session,

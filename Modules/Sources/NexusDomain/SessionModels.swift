@@ -51,6 +51,28 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+public struct LaunchSnapshot: Codable, Equatable, Sendable {
+    public let sessionID: UUID
+    public let workspaceID: UUID
+    public let providerID: ProviderID
+    public let resolvedExecutable: String
+    public let resolvedWorkingDirectory: String
+
+    public init(
+        sessionID: UUID,
+        workspaceID: UUID,
+        providerID: ProviderID,
+        resolvedExecutable: String,
+        resolvedWorkingDirectory: String
+    ) {
+        self.sessionID = sessionID
+        self.workspaceID = workspaceID
+        self.providerID = providerID
+        self.resolvedExecutable = resolvedExecutable
+        self.resolvedWorkingDirectory = resolvedWorkingDirectory
+    }
+}
+
 public struct TerminalColor: Codable, Equatable, Sendable {
     public enum Kind: String, Codable, Sendable {
         case ansi256
