@@ -9,6 +9,7 @@ struct ContentView: View {
     @State private var isShowingCreateWorkspaceGroupSheet = false
     @State private var isShowingQuickSwitchSheet = false
     @State private var newWorkspaceGroupName = ""
+    @State private var isShowingHostsSheet = false
     @State private var quickSwitchQuery = ""
     @State private var quickSwitchResults: [NavigationItem] = []
     @State private var pendingWorkspaceFolderPath: String?
@@ -72,6 +73,10 @@ struct ContentView: View {
                         isShowingCreateWorkspaceGroupSheet = true
                     }
 
+                    Button("Hosts") {
+                        isShowingHostsSheet = true
+                    }
+
                     Button("Add Local Workspace") {
                         addLocalWorkspace()
                     }
@@ -107,6 +112,9 @@ struct ContentView: View {
         }
         .sheet(isPresented: $isShowingCreateWorkspaceGroupSheet) {
             createWorkspaceGroupSheet
+        }
+        .sheet(isPresented: $isShowingHostsSheet) {
+            HostManagementSheet(appModel: appModel, isPresented: $isShowingHostsSheet)
         }
         .sheet(isPresented: $isShowingQuickSwitchSheet) {
             quickSwitchSheet
@@ -148,6 +156,11 @@ struct ContentView: View {
                 LabeledContent("Store", value: serviceStatus.store.location.path(percentEncoded: false))
                 LabeledContent("Workspace Groups", value: "\(appModel.workspaceGroups.count)")
                 LabeledContent("Workspaces", value: "\(appModel.workspaces.count)")
+                LabeledContent("Hosts", value: "\(appModel.hosts.count)")
+
+                Button("Manage Hosts") {
+                    isShowingHostsSheet = true
+                }
             } else if let serviceErrorMessage = appModel.serviceErrorMessage {
                 ContentUnavailableView(
                     "Background Service unavailable",

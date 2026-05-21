@@ -3468,6 +3468,93 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelLoadsHostsAndCachesHostDetailOnDemand() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let host = NexusDomain.Host(id: UUID(), name: "Build Server", sshTarget: "build-box", port: 2222)
+        let snapshot = HostValidationSnapshot(
+            hostID: host.id,
+            state: .unavailable,
+            summary: "SSH connection timed out",
+            checkedAt: Date(timeIntervalSince1970: 123),
+            diagnostics: [HostValidationDiagnostic(severity: .error, code: "sshTimedOut", message: "ssh build-box timed out while validating the Host.")]
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []),
+            session: session,
+            screen: SessionScreen(session: session, transcript: "Claude ready"),
+            hosts: [host],
+            hostDetails: [host.id: HostDetail(host: host, latestValidation: snapshot)]
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+
+        #expect(model.hosts == [host])
+        #expect(model.hostDetail(for: host.id) == nil)
+
+        try await model.loadHostDetail(hostID: host.id)
+
+        #expect(model.hostDetail(for: host.id)?.host == host)
+        #expect(model.hostDetail(for: host.id)?.latestValidation == snapshot)
+    }
+
+    @MainActor
+    @Test func appModelCreateUpdateAndValidateHostRefreshesCachedHostState() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []),
+            session: session,
+            screen: SessionScreen(session: session, transcript: "Claude ready")
+        )
+        let model = NexusAppModel(client: client)
+
+        let createdHost = try await model.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
+
+        #expect(model.hosts == [createdHost])
+        #expect(model.hostDetail(for: createdHost.id) == HostDetail(host: createdHost, latestValidation: nil))
+
+        let updatedHost = try await model.updateHost(hostID: createdHost.id, name: "Primary Build Server", sshTarget: "build-box-2", port: nil)
+
+        #expect(model.hosts == [updatedHost])
+        #expect(model.hostDetail(for: updatedHost.id) == HostDetail(host: updatedHost, latestValidation: nil))
+
+        let snapshot = try await model.validateHost(hostID: updatedHost.id)
+
+        #expect(snapshot.hostID == updatedHost.id)
+        #expect(snapshot.state == .available)
+        #expect(snapshot.summary == "Host is available")
+        #expect(model.hostDetail(for: updatedHost.id) == HostDetail(host: updatedHost, latestValidation: snapshot))
+    }
+
+    @MainActor
     @Test func appModelLoadsAndUpdatesRecentNavigation() async throws {
         let group = WorkspaceGroup(id: UUID(), name: "Group")
         let workspace = Workspace(
@@ -4170,6 +4257,7 @@ struct nexusTests {
         #expect(model.serviceErrorMessage == "Background Service unavailable")
         #expect(model.workspaceGroups.isEmpty)
         #expect(model.workspaces.isEmpty)
+        #expect(model.hosts.isEmpty)
         #expect(model.workspaceOverviews.isEmpty)
     }
 
@@ -4591,6 +4679,8 @@ private final class TrackingServiceClient: NexusServiceClient {
     private var providerDetailValue: ProviderDetail
     private var sessionValue: Session
     private var screenValue: SessionScreen
+    private var hostsValue: [NexusDomain.Host]
+    private var hostDetailsValue: [UUID: HostDetail]
     private var recentNavigationValue: [NavigationItem]
     private var searchResultsValue: [NavigationItem]
     private var observedScreenHandlers: [UUID: @Sendable (SessionScreen) -> Void] = [:]
@@ -4603,6 +4693,8 @@ private final class TrackingServiceClient: NexusServiceClient {
         session: Session,
         screen: SessionScreen,
         providerDetail: ProviderDetail? = nil,
+        hosts: [NexusDomain.Host] = [],
+        hostDetails: [UUID: HostDetail] = [:],
         recentNavigation: [NavigationItem] = [],
         searchResults: [NavigationItem] = []
     ) {
@@ -4618,6 +4710,8 @@ private final class TrackingServiceClient: NexusServiceClient {
         )
         self.sessionValue = session
         self.screenValue = screen
+        self.hostsValue = hosts
+        self.hostDetailsValue = hostDetails
         self.recentNavigationValue = recentNavigation
         self.searchResultsValue = searchResults
     }
@@ -4639,23 +4733,50 @@ private final class TrackingServiceClient: NexusServiceClient {
     }
 
     func listHosts() async throws -> [NexusDomain.Host] {
-        []
+        hostsValue
     }
 
     func getHostDetail(hostID: UUID) async throws -> NexusDomain.HostDetail {
-        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Host not found"])
+        if let detail = hostDetailsValue[hostID] {
+            return detail
+        }
+        guard let host = hostsValue.first(where: { $0.id == hostID }) else {
+            throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Host not found"])
+        }
+        return HostDetail(host: host, latestValidation: nil)
     }
 
     func createHost(name: String, sshTarget: String, port: Int?) async throws -> NexusDomain.Host {
-        NexusDomain.Host(id: UUID(), name: name, sshTarget: sshTarget, port: port)
+        let host = NexusDomain.Host(id: UUID(), name: name, sshTarget: sshTarget, port: port)
+        hostsValue.append(host)
+        hostDetailsValue[host.id] = HostDetail(host: host, latestValidation: nil)
+        return host
     }
 
     func updateHost(hostID: UUID, name: String, sshTarget: String, port: Int?) async throws -> NexusDomain.Host {
-        NexusDomain.Host(id: hostID, name: name, sshTarget: sshTarget, port: port)
+        let host = NexusDomain.Host(id: hostID, name: name, sshTarget: sshTarget, port: port)
+        if let index = hostsValue.firstIndex(where: { $0.id == hostID }) {
+            hostsValue[index] = host
+        } else {
+            hostsValue.append(host)
+        }
+        hostDetailsValue[hostID] = HostDetail(host: host, latestValidation: nil)
+        return host
     }
 
     func validateHost(hostID: UUID) async throws -> HostValidationSnapshot {
-        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Host validation unavailable"])
+        guard let host = hostsValue.first(where: { $0.id == hostID }) else {
+            throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Host not found"])
+        }
+        let snapshot = HostValidationSnapshot(
+            hostID: hostID,
+            state: .available,
+            summary: "Host is available",
+            checkedAt: Date(timeIntervalSince1970: 456),
+            diagnostics: [HostValidationDiagnostic(severity: .info, code: "sshTarget", message: "Validated \(host.sshTarget)")]
+        )
+        hostDetailsValue[hostID] = HostDetail(host: host, latestValidation: snapshot)
+        return snapshot
     }
 
     func listRecentNavigation(limit: Int) async throws -> [NavigationItem] {

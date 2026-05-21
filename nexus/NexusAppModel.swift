@@ -11,7 +11,9 @@ final class NexusAppModel {
     var serviceErrorMessage: String?
     var workspaceGroups: [WorkspaceGroup] = []
     var workspaces: [Workspace] = []
+    var hosts: [NexusDomain.Host] = []
     var workspaceOverviews: [UUID: WorkspaceOverview] = [:]
+    var hostDetails: [UUID: HostDetail] = [:]
     var providerDetails: [ProviderDetailKey: ProviderDetail] = [:]
     var recentNavigation: [NavigationItem] = []
     var focusedSessionScreen: SessionScreen?
@@ -36,11 +38,13 @@ final class NexusAppModel {
             async let serviceStatus = client.getServiceStatus()
             async let workspaceGroups = client.listWorkspaceGroups()
             async let workspaces = client.listWorkspaces()
+            async let hosts = client.listHosts()
             async let recentNavigation = client.listRecentNavigation(limit: 10)
 
             let loadedServiceStatus = try await serviceStatus
             let loadedWorkspaceGroups = try await workspaceGroups
             let loadedWorkspaces = try await workspaces
+            let loadedHosts = try await hosts
             let loadedRecentNavigation = try await recentNavigation
 
             var loadedWorkspaceOverviews: [UUID: WorkspaceOverview] = [:]
@@ -51,6 +55,7 @@ final class NexusAppModel {
             self.serviceStatus = loadedServiceStatus
             self.workspaceGroups = loadedWorkspaceGroups
             self.workspaces = loadedWorkspaces
+            syncHosts(loadedHosts)
             self.workspaceOverviews = loadedWorkspaceOverviews
             self.providerDetails = [:]
             self.recentNavigation = loadedRecentNavigation
@@ -60,7 +65,9 @@ final class NexusAppModel {
             serviceStatus = nil
             workspaceGroups = []
             workspaces = []
+            hosts = []
             workspaceOverviews = [:]
+            hostDetails = [:]
             providerDetails = [:]
             recentNavigation = []
             focusedSessionScreen = nil
@@ -84,6 +91,42 @@ final class NexusAppModel {
         workspaces.append(workspace)
         workspaceOverviews[workspace.id] = overview
         return workspace
+    }
+
+    func refreshHosts() async throws {
+        syncHosts(try await client.listHosts())
+    }
+
+    func loadHostDetail(hostID: UUID) async throws {
+        hostDetails[hostID] = try await client.getHostDetail(hostID: hostID)
+    }
+
+    func createHost(name: String, sshTarget: String, port: Int?) async throws -> NexusDomain.Host {
+        let host = try await client.createHost(name: name, sshTarget: sshTarget, port: port)
+        hosts.append(host)
+        hostDetails[host.id] = HostDetail(host: host, latestValidation: nil)
+        return host
+    }
+
+    func updateHost(hostID: UUID, name: String, sshTarget: String, port: Int?) async throws -> NexusDomain.Host {
+        let host = try await client.updateHost(hostID: hostID, name: name, sshTarget: sshTarget, port: port)
+        if let index = hosts.firstIndex(where: { $0.id == hostID }) {
+            hosts[index] = host
+        } else {
+            hosts.append(host)
+        }
+        hostDetails[hostID] = HostDetail(host: host, latestValidation: nil)
+        return host
+    }
+
+    func validateHost(hostID: UUID) async throws -> HostValidationSnapshot {
+        let snapshot = try await client.validateHost(hostID: hostID)
+        if let host = hosts.first(where: { $0.id == hostID }) {
+            hostDetails[hostID] = HostDetail(host: host, latestValidation: snapshot)
+        } else {
+            hostDetails[hostID] = try await client.getHostDetail(hostID: hostID)
+        }
+        return snapshot
     }
 
     func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) async throws -> Session {
@@ -238,12 +281,26 @@ final class NexusAppModel {
         workspaceOverviews[workspaceID]
     }
 
+    func hostDetail(for hostID: UUID) -> HostDetail? {
+        hostDetails[hostID]
+    }
+
     func providerDetail(for workspaceID: UUID, providerID: ProviderID) -> ProviderDetail? {
         providerDetails[ProviderDetailKey(workspaceID: workspaceID, providerID: providerID)]
     }
 
     private func refreshWorkspaceOverview(for workspaceID: UUID) async throws {
         workspaceOverviews[workspaceID] = try await client.getWorkspaceOverview(workspaceID: workspaceID)
+    }
+
+    private func syncHosts(_ loadedHosts: [NexusDomain.Host]) {
+        hosts = loadedHosts
+        hostDetails = hostDetails.reduce(into: [:]) { result, entry in
+            guard let host = loadedHosts.first(where: { $0.id == entry.key }) else {
+                return
+            }
+            result[entry.key] = HostDetail(host: host, latestValidation: entry.value.latestValidation)
+        }
     }
 
     private func refreshProviderDetail(workspaceID: UUID, providerID: ProviderID) async throws {
