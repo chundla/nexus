@@ -240,9 +240,21 @@ struct ContentView: View {
                             .font(.headline)
 
                         if let defaultSession = detail.defaultSession {
-                            providerSessionRow(defaultSession, actionTitle: defaultSession.state == .ready ? "Open" : "Inspect") {
-                                selection = .session(defaultSession.id)
-                            }
+                            providerSessionRow(
+                                defaultSession,
+                                primaryActionTitle: defaultSession.state == .ready ? "Open" : "Inspect",
+                                primaryAction: {
+                                    selection = .session(defaultSession.id)
+                                },
+                                secondaryActionTitle: defaultSession.state == .ready ? "Stop" : "Delete",
+                                secondaryAction: {
+                                    if defaultSession.state == .ready {
+                                        stopSession(defaultSession, workspaceID: workspaceID, providerID: providerID)
+                                    } else {
+                                        deleteSessionRecord(defaultSession, workspaceID: workspaceID, providerID: providerID)
+                                    }
+                                }
+                            )
                         } else {
                             Text("No default session yet.")
                                 .foregroundStyle(.secondary)
@@ -286,9 +298,21 @@ struct ContentView: View {
                                 .foregroundStyle(.secondary)
                         } else {
                             ForEach(detail.alternateSessions) { session in
-                                providerSessionRow(session, actionTitle: session.state == .ready ? "Open" : "Inspect") {
-                                    selection = .session(session.id)
-                                }
+                                providerSessionRow(
+                                    session,
+                                    primaryActionTitle: session.state == .ready ? "Open" : "Inspect",
+                                    primaryAction: {
+                                        selection = .session(session.id)
+                                    },
+                                    secondaryActionTitle: session.state == .ready ? "Stop" : "Delete",
+                                    secondaryAction: {
+                                        if session.state == .ready {
+                                            stopSession(session, workspaceID: workspaceID, providerID: providerID)
+                                        } else {
+                                            deleteSessionRecord(session, workspaceID: workspaceID, providerID: providerID)
+                                        }
+                                    }
+                                )
                             }
                         }
                     }
@@ -301,9 +325,17 @@ struct ContentView: View {
                                 .font(.headline)
 
                             ForEach(detail.failedSessions) { session in
-                                providerSessionRow(session, actionTitle: "Inspect") {
-                                    selection = .session(session.id)
-                                }
+                                providerSessionRow(
+                                    session,
+                                    primaryActionTitle: "Inspect",
+                                    primaryAction: {
+                                        selection = .session(session.id)
+                                    },
+                                    secondaryActionTitle: "Delete",
+                                    secondaryAction: {
+                                        deleteSessionRecord(session, workspaceID: workspaceID, providerID: providerID)
+                                    }
+                                )
                             }
                         }
                     }
@@ -479,7 +511,13 @@ struct ContentView: View {
         .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
     }
 
-    private func providerSessionRow(_ session: Session, actionTitle: String, action: @escaping () -> Void) -> some View {
+    private func providerSessionRow(
+        _ session: Session,
+        primaryActionTitle: String,
+        primaryAction: @escaping () -> Void,
+        secondaryActionTitle: String? = nil,
+        secondaryAction: (() -> Void)? = nil
+    ) -> some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(session.isDefault ? "Default Session" : (session.name ?? "Session"))
@@ -492,10 +530,35 @@ struct ContentView: View {
 
             Spacer()
 
-            Button(actionTitle, action: action)
+            HStack(spacing: 8) {
+                if let secondaryActionTitle, let secondaryAction {
+                    Button(secondaryActionTitle, action: secondaryAction)
+                }
+                Button(primaryActionTitle, action: primaryAction)
+            }
         }
         .padding()
         .background(.quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func stopSession(_ session: Session, workspaceID: UUID, providerID: ProviderID) {
+        Task {
+            do {
+                _ = try await appModel.stopSession(sessionID: session.id, workspaceID: workspaceID, providerID: providerID)
+            } catch {
+                presentedError = PresentedError(message: error.localizedDescription)
+            }
+        }
+    }
+
+    private func deleteSessionRecord(_ session: Session, workspaceID: UUID, providerID: ProviderID) {
+        Task {
+            do {
+                _ = try await appModel.deleteSessionRecord(sessionID: session.id, workspaceID: workspaceID, providerID: providerID)
+            } catch {
+                presentedError = PresentedError(message: error.localizedDescription)
+            }
+        }
     }
 
     private func defaultSessionButtonTitle(for detail: ProviderDetail) -> String {

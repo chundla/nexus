@@ -97,6 +97,31 @@ final class NexusAppModel {
         return session
     }
 
+    func stopSession(sessionID: UUID, workspaceID: UUID, providerID: ProviderID) async throws -> Session {
+        let session = try await client.stopSession(sessionID: sessionID)
+        if focusedSessionScreen?.session.id == sessionID {
+            try await refreshFocusedSession()
+        }
+        try await refreshWorkspaceOverview(for: workspaceID)
+        try await refreshProviderDetail(workspaceID: workspaceID, providerID: providerID)
+        return session
+    }
+
+    func deleteSessionRecord(sessionID: UUID, workspaceID: UUID, providerID: ProviderID) async throws -> Bool {
+        let deleted = try await client.deleteSessionRecord(sessionID: sessionID)
+        guard deleted else {
+            return false
+        }
+
+        if focusedSessionScreen?.session.id == sessionID {
+            await stopFocusingSession()
+            focusedSessionScreen = nil
+        }
+        try await refreshWorkspaceOverview(for: workspaceID)
+        try await refreshProviderDetail(workspaceID: workspaceID, providerID: providerID)
+        return true
+    }
+
     func loadProviderDetail(workspaceID: UUID, providerID: ProviderID) async throws {
         try await refreshProviderDetail(workspaceID: workspaceID, providerID: providerID)
     }

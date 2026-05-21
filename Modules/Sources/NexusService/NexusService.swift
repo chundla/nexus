@@ -24,6 +24,8 @@ public enum NexusEmbeddedServiceBootstrap {
 
 protocol SessionRuntimeManaging: AnyObject {
     func launchOrResume(session: Session, workspace: Workspace, executable: String) throws
+    func stop(session: Session) throws
+    func remove(session: Session)
     func hasRuntime(for session: Session) -> Bool
     func runtimeState(for session: Session) -> Session.State?
     func sessionScreen(for session: Session) throws -> SessionScreen
@@ -45,6 +47,7 @@ protocol SessionRuntime: AnyObject {
     var terminalColumns: Int { get }
     var terminalRows: Int { get }
     func setChangeHandler(_ handler: (@Sendable () -> Void)?)
+    func stop() throws
     func sendInput(_ text: String) throws
     func sendText(_ text: String) throws
     func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool) throws
@@ -83,6 +86,26 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Se
             runtimes[session.id] = runtime
         }
         notifyUpdateObservers(for: session.id)
+    }
+
+    func stop(session: Session) throws {
+        let runtime = try withLock {
+            guard let runtime = runtimes[session.id] else {
+                throw NexusMetadataStoreError.sessionNotFound
+            }
+            return runtime
+        }
+
+        try runtime.stop()
+        notifyUpdateObservers(for: session.id)
+    }
+
+    func remove(session: Session) {
+        lock.lock()
+        runtimes.removeValue(forKey: session.id)?.setChangeHandler(nil)
+        updateObservers.removeValue(forKey: session.id)
+        observedSessionIDs = observedSessionIDs.filter { $0.value != session.id }
+        lock.unlock()
     }
 
     func hasRuntime(for session: Session) -> Bool {
@@ -360,6 +383,21 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
         lock.lock()
         changeHandler = handler
         lock.unlock()
+    }
+
+    func stop() throws {
+        guard state == .ready else {
+            return
+        }
+
+        guard kill(pid, SIGTERM) == 0 || errno == ESRCH else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno), userInfo: [NSLocalizedDescriptionKey: String(cString: strerror(errno))])
+        }
+
+        lock.lock()
+        runtimeState = .exited
+        lock.unlock()
+        notifyChange()
     }
 
     func sendInput(_ text: String) throws {
@@ -748,6 +786,37 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             failureMessage: nil
         )
         return try launchSession(session, workspace: workspace, executable: executable)
+    }
+
+    func stopSession(sessionID: UUID) throws -> Session {
+        guard let session = try metadataStore.session(id: sessionID) else {
+            throw NexusMetadataStoreError.sessionNotFound
+        }
+
+        let resolvedSession = try reconcileSessionRuntimeState(session)
+        guard resolvedSession.state == .ready else {
+            return resolvedSession
+        }
+
+        try sessionRuntimeManager.stop(session: resolvedSession)
+        guard let updatedSession = try metadataStore.session(id: sessionID) else {
+            throw NexusMetadataStoreError.sessionNotFound
+        }
+        return try reconcileSessionRuntimeState(updatedSession)
+    }
+
+    func deleteSessionRecord(sessionID: UUID) throws -> Bool {
+        guard let session = try metadataStore.session(id: sessionID) else {
+            throw NexusMetadataStoreError.sessionNotFound
+        }
+
+        let resolvedSession = try reconcileSessionRuntimeState(session)
+        guard resolvedSession.state != .ready else {
+            throw NexusMetadataStoreError.sessionRecordDeletionRequiresStoppedSession
+        }
+
+        sessionRuntimeManager.remove(session: resolvedSession)
+        return try metadataStore.deleteSession(id: sessionID)
     }
 
     func getSessionScreen(sessionID: UUID) throws -> SessionScreen {
@@ -1907,6 +1976,14 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
             },
             reply: reply
         )
+    }
+
+    func stopSession(sessionID: String, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(with: { try service.stopSession(sessionID: resolveUUID(sessionID)) }, reply: reply)
+    }
+
+    func deleteSessionRecord(sessionID: String, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(with: { try service.deleteSessionRecord(sessionID: resolveUUID(sessionID)) }, reply: reply)
     }
 
     func getSessionScreen(sessionID: String, reply: @escaping (Data?, NSString?) -> Void) {

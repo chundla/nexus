@@ -362,6 +362,117 @@ struct nexusTests {
         #expect(claudeCard.alternateSessionCount == 1)
     }
 
+    @Test func stopSessionKeepsAlternateSessionRecordInspectableOverIPC() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            ),
+            sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+
+        let namedSession = try await client.createNamedSession(workspaceID: workspace.id, providerID: .claude, name: nil)
+        let stoppedSession = try await client.stopSession(sessionID: namedSession.id)
+        let providerDetail = try await client.getProviderDetail(workspaceID: workspace.id, providerID: .claude)
+        let screen = try await client.getSessionScreen(sessionID: namedSession.id)
+
+        #expect(stoppedSession.id == namedSession.id)
+        #expect(stoppedSession.state == .exited)
+        #expect(providerDetail.alternateSessions.map(\.id) == [namedSession.id])
+        #expect(providerDetail.alternateSessions.first?.state == .exited)
+        #expect(providerDetail.failedSessions.isEmpty)
+        #expect(screen.session.state == .exited)
+        #expect(screen.transcript == "Claude ready")
+    }
+
+    @Test func deleteStoppedSessionRecordRemovesItFromProviderDetailOverIPC() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            ),
+            sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+
+        let namedSession = try await client.createNamedSession(workspaceID: workspace.id, providerID: .claude, name: nil)
+        _ = try await client.stopSession(sessionID: namedSession.id)
+        let deleted = try await client.deleteSessionRecord(sessionID: namedSession.id)
+        let providerDetail = try await client.getProviderDetail(workspaceID: workspace.id, providerID: .claude)
+
+        #expect(deleted)
+        #expect(providerDetail.alternateSessions.isEmpty)
+        await #expect(throws: (any Error).self) {
+            _ = try await client.getSessionScreen(sessionID: namedSession.id)
+        }
+    }
+
+    @Test func deleteRunningSessionRecordIsRejectedOverIPC() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            ),
+            sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+
+        let namedSession = try await client.createNamedSession(workspaceID: workspace.id, providerID: .claude, name: nil)
+
+        await #expect(throws: (any Error).self) {
+            _ = try await client.deleteSessionRecord(sessionID: namedSession.id)
+        }
+    }
+
     @Test func launchedSessionReturnsFocusedTranscriptAndAcceptsInputOverIPC() async throws {
         let workspaceFolderURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -3266,6 +3377,140 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelStopSessionRefreshesProviderDetail() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let defaultSession = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let namedSession = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            name: "Session 1",
+            isDefault: false,
+            state: .ready
+        )
+        let workspaceOverview = WorkspaceOverview(
+            workspace: workspace,
+            providerCards: [
+                WorkspaceProviderCard(
+                    provider: Provider(id: .claude),
+                    health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+                    defaultSession: ProviderDefaultSessionSummary(
+                        state: .ready,
+                        summary: "Default session ready",
+                        actionTitle: "Resume",
+                        sessionID: defaultSession.id
+                    ),
+                    alternateSessionCount: 1
+                )
+            ]
+        )
+        let providerDetail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+            defaultSession: defaultSession,
+            alternateSessions: [namedSession],
+            failedSessions: []
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: workspaceOverview,
+            session: namedSession,
+            screen: SessionScreen(session: namedSession, transcript: "Claude ready"),
+            providerDetail: providerDetail
+        )
+        let model = NexusAppModel(client: client)
+
+        try await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
+        let stoppedSession = try await model.stopSession(sessionID: namedSession.id, workspaceID: workspace.id, providerID: .claude)
+
+        let refreshedDetail = try #require(model.providerDetail(for: workspace.id, providerID: .claude))
+        #expect(stoppedSession.state == .exited)
+        #expect(refreshedDetail.alternateSessions.first?.id == namedSession.id)
+        #expect(refreshedDetail.alternateSessions.first?.state == .exited)
+    }
+
+    @MainActor
+    @Test func appModelDeleteSessionRecordRefreshesProviderDetailAndWorkspaceOverview() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let defaultSession = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let stoppedSession = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            name: "Session 1",
+            isDefault: false,
+            state: .exited,
+            failureMessage: "Session exited. Relaunch to start a new live runtime."
+        )
+        let workspaceOverview = WorkspaceOverview(
+            workspace: workspace,
+            providerCards: [
+                WorkspaceProviderCard(
+                    provider: Provider(id: .claude),
+                    health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+                    defaultSession: ProviderDefaultSessionSummary(
+                        state: .ready,
+                        summary: "Default session ready",
+                        actionTitle: "Resume",
+                        sessionID: defaultSession.id
+                    ),
+                    alternateSessionCount: 1
+                )
+            ]
+        )
+        let providerDetail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+            defaultSession: defaultSession,
+            alternateSessions: [stoppedSession],
+            failedSessions: []
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: workspaceOverview,
+            session: stoppedSession,
+            screen: SessionScreen(session: stoppedSession, transcript: "Claude ready"),
+            providerDetail: providerDetail
+        )
+        let model = NexusAppModel(client: client)
+
+        try await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
+        let deleted = try await model.deleteSessionRecord(sessionID: stoppedSession.id, workspaceID: workspace.id, providerID: .claude)
+
+        let refreshedDetail = try #require(model.providerDetail(for: workspace.id, providerID: .claude))
+        let refreshedCard = try #require(model.workspaceOverview(for: workspace.id)?.providerCards.first)
+        #expect(deleted)
+        #expect(refreshedDetail.alternateSessions.isEmpty)
+        #expect(refreshedCard.alternateSessionCount == 0)
+    }
+
+    @MainActor
     @Test func appModelLaunchOrResumeFailedSessionShowsInspectableFailureScreen() async throws {
         let workspaceFolderURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -3864,6 +4109,7 @@ private struct StubCommandRunner: ProviderCommandRunning {
 private final class StubSessionRuntimeManager: SessionRuntimeManaging {
     private let initialTranscript: String
     private var transcripts: [UUID: String] = [:]
+    private var states: [UUID: Session.State] = [:]
     private var sizes: [UUID: (columns: Int, rows: Int)] = [:]
     private var updateObservers: [UUID: [UUID: @Sendable () -> Void]] = [:]
     private var observedSessionIDs: [UUID: UUID] = [:]
@@ -3876,10 +4122,25 @@ private final class StubSessionRuntimeManager: SessionRuntimeManaging {
         if transcripts[session.id] == nil {
             transcripts[session.id] = initialTranscript
         }
+        states[session.id] = .ready
         if sizes[session.id] == nil {
             sizes[session.id] = (80, 24)
         }
         notifyObservers(for: session.id)
+    }
+
+    func stop(session: Session) throws {
+        transcripts[session.id] = transcripts[session.id, default: initialTranscript]
+        states[session.id] = .exited
+        notifyObservers(for: session.id)
+    }
+
+    func remove(session: Session) {
+        transcripts.removeValue(forKey: session.id)
+        states.removeValue(forKey: session.id)
+        sizes.removeValue(forKey: session.id)
+        updateObservers.removeValue(forKey: session.id)
+        observedSessionIDs = observedSessionIDs.filter { $0.value != session.id }
     }
 
     func hasRuntime(for session: Session) -> Bool {
@@ -3887,7 +4148,7 @@ private final class StubSessionRuntimeManager: SessionRuntimeManaging {
     }
 
     func runtimeState(for session: Session) -> Session.State? {
-        transcripts[session.id] == nil ? nil : .ready
+        states[session.id]
     }
 
     func sessionScreen(for session: Session) throws -> SessionScreen {
@@ -4070,8 +4331,61 @@ private final class TrackingServiceClient: NexusServiceClient {
         return namedSession
     }
 
+    func stopSession(sessionID: UUID) async throws -> Session {
+        let stoppedSession = Session(
+            id: sessionValue.id,
+            workspaceID: sessionValue.workspaceID,
+            providerID: sessionValue.providerID,
+            name: sessionValue.name,
+            isDefault: sessionValue.isDefault,
+            state: .exited,
+            failureMessage: "Session exited. Relaunch to start a new live runtime."
+        )
+        sessionValue = stoppedSession
+        screenValue = SessionScreen(session: stoppedSession, transcript: screenValue.transcript)
+        providerDetailValue = ProviderDetail(
+            workspace: providerDetailValue.workspace,
+            provider: providerDetailValue.provider,
+            health: providerDetailValue.health,
+            defaultSession: stoppedSession.isDefault ? stoppedSession : providerDetailValue.defaultSession,
+            alternateSessions: providerDetailValue.alternateSessions.map { $0.id == stoppedSession.id ? stoppedSession : $0 },
+            failedSessions: providerDetailValue.failedSessions
+        )
+        return stoppedSession
+    }
+
+    func deleteSessionRecord(sessionID: UUID) async throws -> Bool {
+        guard sessionValue.id == sessionID, sessionValue.state != .ready else {
+            throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Stop the session before deleting its record"])
+        }
+
+        providerDetailValue = ProviderDetail(
+            workspace: providerDetailValue.workspace,
+            provider: providerDetailValue.provider,
+            health: providerDetailValue.health,
+            defaultSession: sessionValue.isDefault ? nil : providerDetailValue.defaultSession,
+            alternateSessions: providerDetailValue.alternateSessions.filter { $0.id != sessionID },
+            failedSessions: providerDetailValue.failedSessions.filter { $0.id != sessionID }
+        )
+        if let index = workspaceOverviewValue.providerCards.firstIndex(where: { $0.provider.id == sessionValue.providerID }) {
+            let card = workspaceOverviewValue.providerCards[index]
+            var providerCards = workspaceOverviewValue.providerCards
+            providerCards[index] = WorkspaceProviderCard(
+                provider: card.provider,
+                health: card.health,
+                defaultSession: card.defaultSession,
+                alternateSessionCount: max(0, card.alternateSessionCount - 1)
+            )
+            workspaceOverviewValue = WorkspaceOverview(workspace: workspaceOverviewValue.workspace, providerCards: providerCards)
+        }
+        return true
+    }
+
     func getSessionScreen(sessionID: UUID) async throws -> SessionScreen {
-        screenValue
+        guard sessionValue.id == sessionID else {
+            throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Session not found"])
+        }
+        return screenValue
     }
 
     func observeSessionScreen(sessionID: UUID, onUpdate: @escaping @Sendable (SessionScreen) -> Void) async throws -> any SessionScreenObservation {
@@ -4152,6 +4466,14 @@ private struct FailingServiceClient: NexusServiceClient {
     }
 
     func createNamedSession(workspaceID: UUID, providerID: ProviderID, name: String?) async throws -> Session {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func stopSession(sessionID: UUID) async throws -> Session {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func deleteSessionRecord(sessionID: UUID) async throws -> Bool {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 

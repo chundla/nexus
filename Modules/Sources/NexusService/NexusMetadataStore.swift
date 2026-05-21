@@ -292,6 +292,17 @@ final class NexusMetadataStore {
         }
     }
 
+    func deleteSession(id: UUID) throws -> Bool {
+        try withLock {
+            let statement = try prepare("DELETE FROM sessions WHERE id = ?;")
+            defer { sqlite3_finalize(statement) }
+
+            try bind(id.uuidString, at: 1, in: statement)
+            try stepDone(statement)
+            return sqlite3_changes(database) > 0
+        }
+    }
+
     private func resolvePrimaryGroupID(_ primaryGroupID: UUID?, groups: [WorkspaceGroup]) throws -> UUID {
         if let primaryGroupID {
             guard groups.contains(where: { $0.id == primaryGroupID }) else {
@@ -546,6 +557,7 @@ enum NexusMetadataStoreError: LocalizedError {
     case sessionNotFound
     case providerNotSupported
     case sessionNotReady
+    case sessionRecordDeletionRequiresStoppedSession
 
     var errorDescription: String? {
         switch self {
@@ -571,6 +583,8 @@ enum NexusMetadataStoreError: LocalizedError {
             "Provider launch is not implemented yet"
         case .sessionNotReady:
             "Session is not ready for input"
+        case .sessionRecordDeletionRequiresStoppedSession:
+            "Stop the session before deleting its record"
         }
     }
 }

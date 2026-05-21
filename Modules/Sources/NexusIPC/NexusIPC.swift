@@ -29,6 +29,8 @@ public protocol SessionScreenObservation: Sendable {
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: String?, reply: @escaping (Data?, NSString?) -> Void)
     func launchOrResumeDefaultSession(workspaceID: String, providerID: String, reply: @escaping (Data?, NSString?) -> Void)
     func createNamedSession(workspaceID: String, providerID: String, name: String?, reply: @escaping (Data?, NSString?) -> Void)
+    func stopSession(sessionID: String, reply: @escaping (Data?, NSString?) -> Void)
+    func deleteSessionRecord(sessionID: String, reply: @escaping (Data?, NSString?) -> Void)
     func getSessionScreen(sessionID: String, reply: @escaping (Data?, NSString?) -> Void)
     func observeSessionScreen(sessionID: String, reply: @escaping (Data?, NSString?) -> Void)
     func cancelSessionScreenObservation(observationID: String, reply: @escaping (Data?, NSString?) -> Void)
@@ -48,6 +50,8 @@ public protocol NexusServiceClient {
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: UUID?) async throws -> Workspace
     func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) async throws -> Session
     func createNamedSession(workspaceID: UUID, providerID: ProviderID, name: String?) async throws -> Session
+    func stopSession(sessionID: UUID) async throws -> Session
+    func deleteSessionRecord(sessionID: UUID) async throws -> Bool
     func getSessionScreen(sessionID: UUID) async throws -> SessionScreen
     func observeSessionScreen(sessionID: UUID, onUpdate: @escaping @Sendable (SessionScreen) -> Void) async throws -> any SessionScreenObservation
     func sendSessionInput(sessionID: UUID, text: String) async throws -> SessionScreen
@@ -144,6 +148,18 @@ public final class NexusIPCClient: NexusServiceClient, @unchecked Sendable {
                 name: name,
                 reply: reply
             )
+        }
+    }
+
+    nonisolated public func stopSession(sessionID: UUID) async throws -> Session {
+        try await requestDecodable { proxy, reply in
+            proxy.stopSession(sessionID: sessionID.uuidString, reply: reply)
+        }
+    }
+
+    nonisolated public func deleteSessionRecord(sessionID: UUID) async throws -> Bool {
+        try await requestDecodable { proxy, reply in
+            proxy.deleteSessionRecord(sessionID: sessionID.uuidString, reply: reply)
         }
     }
 
