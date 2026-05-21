@@ -23,7 +23,7 @@ public enum NexusEmbeddedServiceBootstrap {
 }
 
 protocol SessionRuntimeManaging: AnyObject {
-    func launchOrResume(session: Session, workspace: Workspace, executable: String) throws
+    func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) throws
     func stop(session: Session) throws
     func remove(session: Session)
     func hasRuntime(for session: Session) -> Bool
@@ -37,8 +37,14 @@ protocol SessionRuntimeManaging: AnyObject {
     func resize(session: Session, columns: Int, rows: Int) throws -> SessionScreen
 }
 
+struct SessionRuntimeLaunchConfiguration {
+    let executable: String
+    let workingDirectory: String
+    let remoteHost: NexusDomain.Host?
+}
+
 protocol SessionRuntimeLaunching {
-    func makeRuntime(session: Session, workspace: Workspace, executable: String) throws -> any SessionRuntime
+    func makeRuntime(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) throws -> any SessionRuntime
 }
 
 protocol SessionRuntime: AnyObject {
@@ -65,7 +71,7 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Se
         self.launcher = launcher
     }
 
-    func launchOrResume(session: Session, workspace: Workspace, executable: String) throws {
+    func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) throws {
         let shouldCreateRuntime = try withLock {
             if let runtime = runtimes[session.id], runtime.state == .ready {
                 return false
@@ -77,7 +83,7 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Se
             return
         }
 
-        let runtime = try launcher.makeRuntime(session: session, workspace: workspace, executable: executable)
+        let runtime = try launcher.makeRuntime(session: session, workspace: workspace, launchConfiguration: launchConfiguration)
         runtime.setChangeHandler { [weak self] in
             self?.notifyUpdateObservers(for: session.id)
         }
@@ -243,9 +249,99 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Se
     }
 }
 
+struct RemoteSessionCommandBuilder {
+    func attachArguments(session: Session, configuration: SessionRuntimeLaunchConfiguration) -> [String] {
+        guard let host = configuration.remoteHost else {
+            return []
+        }
+
+        var arguments = [
+            "-tt",
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=5"
+        ]
+        if let port = host.port {
+            arguments += ["-p", String(port)]
+        }
+        arguments += [
+            host.sshTarget,
+            "cd \(shellQuoted(configuration.workingDirectory)) && exec tmux new-session -A -s \(shellQuoted(sessionName(for: session))) \(shellQuoted(configuration.executable))"
+        ]
+        return arguments
+    }
+
+    func stopArguments(session: Session, host: NexusDomain.Host) -> [String] {
+        var arguments = [
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=5"
+        ]
+        if let port = host.port {
+            arguments += ["-p", String(port)]
+        }
+        arguments += [
+            host.sshTarget,
+            "tmux kill-session -t \(shellQuoted(sessionName(for: session)))"
+        ]
+        return arguments
+    }
+
+    func sessionName(for session: Session) -> String {
+        "nexus-\(session.id.uuidString.lowercased())"
+    }
+
+    private func shellQuoted(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+}
+
 final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
-    func makeRuntime(session: Session, workspace: Workspace, executable: String) throws -> any SessionRuntime {
-        try ProcessSessionRuntime(executable: executable, workspace: workspace)
+    private let remoteSessionCommandBuilder = RemoteSessionCommandBuilder()
+
+    func makeRuntime(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) throws -> any SessionRuntime {
+        if let remoteHost = launchConfiguration.remoteHost {
+            return try ProcessSessionRuntime(
+                executable: "/usr/bin/ssh",
+                arguments: remoteSessionCommandBuilder.attachArguments(session: session, configuration: launchConfiguration),
+                workingDirectory: nil,
+                initialTranscript: "Connecting to \(workspace.name) on \(remoteHost.name) with Claude…\n",
+                stopHandler: {
+                    try Self.runCommand(
+                        executable: "/usr/bin/ssh",
+                        arguments: self.remoteSessionCommandBuilder.stopArguments(session: session, host: remoteHost)
+                    )
+                }
+            )
+        }
+
+        return try ProcessSessionRuntime(
+            executable: launchConfiguration.executable,
+            arguments: [],
+            workingDirectory: launchConfiguration.workingDirectory,
+            initialTranscript: "Launching \(workspace.name) with Claude…\n"
+        )
+    }
+
+    private static func runCommand(executable: String, arguments: [String]) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+
+        try process.run()
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0 else {
+            let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let stdout = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let detail = [stderr, stdout]
+                .compactMap { $0 }
+                .first(where: { $0.isEmpty == false }) ?? "Remote command failed"
+            throw NSError(domain: "ProcessSessionRuntimeLauncher", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: detail])
+        }
     }
 }
 
@@ -255,6 +351,7 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
     private let masterFileDescriptor: Int32
     private let readSource: DispatchSourceRead
     private let terminationSource: DispatchSourceProcess
+    private let stopHandler: (() throws -> Void)?
     private let lock = NSLock()
     private var runtimeState: Session.State
     private var storage: String
@@ -265,13 +362,20 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
     private var utf8Decoder = UTF8StreamDecoder()
     private var changeHandler: (@Sendable () -> Void)?
 
-    init(executable: String, workspace: Workspace) throws {
+    init(
+        executable: String,
+        arguments: [String],
+        workingDirectory: String?,
+        initialTranscript: String,
+        stopHandler: (() throws -> Void)? = nil
+    ) throws {
         self.runtimeState = .ready
-        self.storage = "Launching \(workspace.name) with Claude…\n"
+        self.storage = initialTranscript
         self.terminalOutputStorage = ""
         self.pendingTerminalOutput = ""
         self.columns = 80
         self.rows = 24
+        self.stopHandler = stopHandler
 
         var masterFileDescriptor: Int32 = -1
         var initialWindowSize = winsize(ws_row: 24, ws_col: 80, ws_xpixel: 0, ws_ypixel: 0)
@@ -281,11 +385,14 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
         }
 
         if pid == 0 {
-            chdir(workspace.folderPath)
+            if let workingDirectory {
+                chdir(workingDirectory)
+            }
             setenv("TERM", "xterm-256color", 1)
+            var processArguments: [UnsafeMutablePointer<CChar>?] = ([executable] + arguments).map { strdup($0) }
+            processArguments.append(nil)
             executable.withCString { executablePath in
-                var arguments: [UnsafeMutablePointer<CChar>?] = [UnsafeMutablePointer(mutating: executablePath), nil]
-                execv(executablePath, &arguments)
+                execv(executablePath, &processArguments)
             }
             _exit(127)
         }
@@ -389,6 +496,8 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
         guard state == .ready else {
             return
         }
+
+        try stopHandler?()
 
         guard kill(pid, SIGTERM) == 0 || errno == ESRCH else {
             throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno), userInfo: [NSLocalizedDescriptionKey: String(cString: strerror(errno))])
@@ -1195,7 +1304,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             try sessionRuntimeManager.launchOrResume(
                 session: session,
                 workspace: workspace,
-                executable: launchSnapshot.resolvedExecutable
+                launchConfiguration: try runtimeLaunchConfiguration(for: workspace, launchSnapshot: launchSnapshot)
             )
             let terminalSize = try metadataStore.sessionTerminalSize(id: session.id)
             _ = try sessionRuntimeManager.resize(
@@ -1211,6 +1320,25 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 failureMessage: error.localizedDescription
             )
         }
+    }
+
+    private func runtimeLaunchConfiguration(for workspace: Workspace, launchSnapshot: LaunchSnapshot) throws -> SessionRuntimeLaunchConfiguration {
+        let remoteHost: NexusDomain.Host?
+        if workspace.kind == .remote {
+            guard let hostID = workspace.remoteHostID,
+                  let host = try metadataStore.host(id: hostID) else {
+                throw NexusMetadataStoreError.hostNotFound
+            }
+            remoteHost = host
+        } else {
+            remoteHost = nil
+        }
+
+        return SessionRuntimeLaunchConfiguration(
+            executable: launchSnapshot.resolvedExecutable,
+            workingDirectory: launchSnapshot.resolvedWorkingDirectory,
+            remoteHost: remoteHost
+        )
     }
 
     private func staticSessionScreen(for session: Session, transcript: String) throws -> SessionScreen {

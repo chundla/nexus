@@ -692,6 +692,112 @@ struct nexusTests {
         #expect(claudeCard.defaultSession.sessionID == firstSession.id)
     }
 
+    @Test func remoteClaudeDefaultSessionLaunchesThroughWorkspaceAwareSSHTmuxRuntimeOverIPC() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let availabilityRunner = StubCommandRunner(results: [
+            StubCommandRunner.Invocation(
+                executable: "/usr/bin/ssh",
+                arguments: [
+                    "-o", "BatchMode=yes",
+                    "-o", "ConnectTimeout=5",
+                    "-p", "2222",
+                    "build-box",
+                    "cd '/srv/api' && pwd"
+                ]
+            ): .success(stdout: "/srv/api\n")
+        ])
+        let providerHealthRunner = StubCommandRunner(results: [
+            StubCommandRunner.Invocation(
+                executable: "/usr/bin/ssh",
+                arguments: [
+                    "-o", "BatchMode=yes",
+                    "-o", "ConnectTimeout=5",
+                    "-p", "2222",
+                    "build-box",
+                    "cd '/srv/api' && command -v tmux >/dev/null 2>&1 && CLAUDE_PATH=\"$(command -v claude)\" && printf '%s\\n' \"$CLAUDE_PATH\" && claude --version && claude --help >/dev/null 2>&1"
+                ]
+            ): .success(stdout: "/usr/local/bin/claude\n9.9.9 (Claude Code)\n")
+        ])
+        let runtimeManager = StubSessionRuntimeManager(
+            launchTranscriptForConfiguration: { configuration, session, _ in
+                let hostTarget = configuration.remoteHost.map { "\($0.sshTarget):\($0.port ?? 22)" } ?? "local"
+                return "ssh \(hostTarget) \(configuration.workingDirectory) \(configuration.executable) session:nexus-\(session.id.uuidString.lowercased())"
+            }
+        )
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+                commandRunner: providerHealthRunner
+            ),
+            hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
+                "build-box": HostValidationResult(
+                    state: .available,
+                    summary: "Host is available",
+                    diagnostics: []
+                )
+            ]),
+            workspaceAvailabilityEvaluator: WorkspaceAvailabilityEvaluator(commandRunner: availabilityRunner),
+            sessionRuntimeManager: runtimeManager
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+
+        let group = try await client.createWorkspaceGroup(name: "Remote")
+        let host = try await client.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
+        _ = try await client.validateHost(hostID: host.id)
+        let workspace = try await client.createRemoteWorkspace(
+            name: nil as String?,
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+
+        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let screen = try await client.getSessionScreen(sessionID: session.id)
+        let detail = try await client.getProviderDetail(workspaceID: workspace.id, providerID: .claude)
+
+        #expect(session.state == .ready)
+        #expect(screen.session.state == .ready)
+        #expect(screen.transcript == "ssh build-box:2222 /srv/api /usr/local/bin/claude session:nexus-\(session.id.uuidString.lowercased())")
+        #expect(detail.defaultSession?.id == session.id)
+        #expect(detail.defaultSession?.state == .ready)
+    }
+
+    @Test func remoteSessionCommandBuilderUsesPortPathAndDeterministicTmuxLane() {
+        let host = NexusDomain.Host(id: UUID(), name: "Build Server", sshTarget: "build-box", port: 2222)
+        let session = Session(
+            id: UUID(uuidString: "01234567-89AB-CDEF-0123-456789ABCDEF")!,
+            workspaceID: UUID(),
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let configuration = SessionRuntimeLaunchConfiguration(
+            executable: "/usr/local/bin/claude",
+            workingDirectory: "/srv/api",
+            remoteHost: host
+        )
+        let builder = RemoteSessionCommandBuilder()
+
+        #expect(builder.attachArguments(session: session, configuration: configuration) == [
+            "-tt",
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=5",
+            "-p", "2222",
+            "build-box",
+            "cd '/srv/api' && exec tmux new-session -A -s 'nexus-01234567-89ab-cdef-0123-456789abcdef' '/usr/local/bin/claude'"
+        ])
+        #expect(builder.stopArguments(session: session, host: host) == [
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=5",
+            "-p", "2222",
+            "build-box",
+            "tmux kill-session -t 'nexus-01234567-89ab-cdef-0123-456789abcdef'"
+        ])
+    }
+
     @Test func quickSwitchPrioritizesWorkspaceMatchesBeforeProviderAndSessionMatchesOverIPC() async throws {
         let workspaceFolderURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -5131,20 +5237,28 @@ private struct StubHostValidationEvaluator: HostValidationEvaluating {
 private final class StubSessionRuntimeManager: SessionRuntimeManaging {
     private let initialTranscript: String
     private let launchTranscriptForExecutable: ((String) -> String)?
+    private let launchTranscriptForConfiguration: ((SessionRuntimeLaunchConfiguration, Session, Workspace) -> String)?
     private var transcripts: [UUID: String] = [:]
     private var states: [UUID: Session.State] = [:]
     private var sizes: [UUID: (columns: Int, rows: Int)] = [:]
     private var updateObservers: [UUID: [UUID: @Sendable () -> Void]] = [:]
     private var observedSessionIDs: [UUID: UUID] = [:]
 
-    init(initialTranscript: String = "", launchTranscriptForExecutable: ((String) -> String)? = nil) {
+    init(
+        initialTranscript: String = "",
+        launchTranscriptForExecutable: ((String) -> String)? = nil,
+        launchTranscriptForConfiguration: ((SessionRuntimeLaunchConfiguration, Session, Workspace) -> String)? = nil
+    ) {
         self.initialTranscript = initialTranscript
         self.launchTranscriptForExecutable = launchTranscriptForExecutable
+        self.launchTranscriptForConfiguration = launchTranscriptForConfiguration
     }
 
-    func launchOrResume(session: Session, workspace: Workspace, executable: String) throws {
-        if let launchTranscriptForExecutable {
-            transcripts[session.id] = launchTranscriptForExecutable(executable)
+    func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) throws {
+        if let launchTranscriptForConfiguration {
+            transcripts[session.id] = launchTranscriptForConfiguration(launchConfiguration, session, workspace)
+        } else if let launchTranscriptForExecutable {
+            transcripts[session.id] = launchTranscriptForExecutable(launchConfiguration.executable)
         } else if transcripts[session.id] == nil {
             transcripts[session.id] = initialTranscript
         }
