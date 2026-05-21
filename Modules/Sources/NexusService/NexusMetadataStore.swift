@@ -68,6 +68,14 @@ final class NexusMetadataStore {
                 diagnostics_json TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS workspace_availability_snapshots (
+                workspace_id TEXT PRIMARY KEY NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                state TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                checked_at INTEGER NOT NULL,
+                diagnostics_json TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS sessions (
                 id TEXT PRIMARY KEY NOT NULL,
                 workspace_id TEXT NOT NULL REFERENCES workspaces(id),
@@ -338,6 +346,55 @@ final class NexusMetadataStore {
             try bind(snapshot.summary, at: 3, in: statement)
             try bind(checkedAtMilliseconds, at: 4, in: statement)
             try bind(try encodeHostValidationDiagnostics(snapshot.diagnostics), at: 5, in: statement)
+            try stepDone(statement)
+            return snapshot
+        }
+    }
+
+    func workspaceAvailability(workspaceID: UUID) throws -> WorkspaceAvailabilitySnapshot? {
+        try withLock {
+            let statement = try prepare(
+                "SELECT workspace_id, state, summary, checked_at, diagnostics_json FROM workspace_availability_snapshots WHERE workspace_id = ? LIMIT 1;"
+            )
+            defer { sqlite3_finalize(statement) }
+
+            try bind(workspaceID.uuidString, at: 1, in: statement)
+            guard sqlite3_step(statement) == SQLITE_ROW else {
+                return nil
+            }
+            return try readWorkspaceAvailabilitySnapshot(from: statement)
+        }
+    }
+
+    func saveWorkspaceAvailability(workspaceID: UUID, result: WorkspaceAvailabilityResult, checkedAt: Date) throws -> WorkspaceAvailabilitySnapshot {
+        try withLock {
+            let checkedAtMilliseconds = Int64(checkedAt.timeIntervalSince1970 * 1_000)
+            let normalizedCheckedAt = Date(timeIntervalSince1970: Double(checkedAtMilliseconds) / 1_000)
+            let snapshot = WorkspaceAvailabilitySnapshot(
+                workspaceID: workspaceID,
+                state: result.state,
+                summary: result.summary,
+                checkedAt: normalizedCheckedAt,
+                diagnostics: result.diagnostics
+            )
+            let statement = try prepare(
+                """
+                INSERT INTO workspace_availability_snapshots (workspace_id, state, summary, checked_at, diagnostics_json)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(workspace_id) DO UPDATE SET
+                    state = excluded.state,
+                    summary = excluded.summary,
+                    checked_at = excluded.checked_at,
+                    diagnostics_json = excluded.diagnostics_json;
+                """
+            )
+            defer { sqlite3_finalize(statement) }
+
+            try bind(snapshot.workspaceID.uuidString, at: 1, in: statement)
+            try bind(snapshot.state.rawValue, at: 2, in: statement)
+            try bind(snapshot.summary, at: 3, in: statement)
+            try bind(checkedAtMilliseconds, at: 4, in: statement)
+            try bind(try encodeWorkspaceAvailabilityDiagnostics(snapshot.diagnostics), at: 5, in: statement)
             try stepDone(statement)
             return snapshot
         }
@@ -1029,6 +1086,18 @@ final class NexusMetadataStore {
         return HostValidationSnapshot(hostID: hostID, state: state, summary: summary, checkedAt: checkedAt, diagnostics: diagnostics)
     }
 
+    private func readWorkspaceAvailabilitySnapshot(from statement: OpaquePointer?) throws -> WorkspaceAvailabilitySnapshot {
+        let workspaceID = try readUUID(column: 0, from: statement)
+        let stateRawValue = try readString(column: 1, from: statement)
+        guard let state = WorkspaceAvailabilitySnapshot.State(rawValue: stateRawValue) else {
+            throw NexusMetadataStoreError.sqlite("Unknown workspace availability state: \(stateRawValue)")
+        }
+        let summary = try readString(column: 2, from: statement)
+        let checkedAt = Date(timeIntervalSince1970: Double(sqlite3_column_int64(statement, 3)) / 1_000)
+        let diagnostics = try decodeWorkspaceAvailabilityDiagnostics(from: readString(column: 4, from: statement))
+        return WorkspaceAvailabilitySnapshot(workspaceID: workspaceID, state: state, summary: summary, checkedAt: checkedAt, diagnostics: diagnostics)
+    }
+
     private func readLaunchSnapshot(from statement: OpaquePointer?) throws -> LaunchSnapshot {
         let sessionID = try readUUID(column: 0, from: statement)
         let workspaceID = try readUUID(column: 1, from: statement)
@@ -1083,6 +1152,21 @@ final class NexusMetadataStore {
             throw NexusMetadataStoreError.sqlite("Could not decode host validation diagnostics")
         }
         return try JSONDecoder().decode([HostValidationDiagnostic].self, from: data)
+    }
+
+    private func encodeWorkspaceAvailabilityDiagnostics(_ diagnostics: [WorkspaceAvailabilityDiagnostic]) throws -> String {
+        let data = try JSONEncoder().encode(diagnostics)
+        guard let json = String(data: data, encoding: .utf8) else {
+            throw NexusMetadataStoreError.sqlite("Could not encode workspace availability diagnostics")
+        }
+        return json
+    }
+
+    private func decodeWorkspaceAvailabilityDiagnostics(from json: String) throws -> [WorkspaceAvailabilityDiagnostic] {
+        guard let data = json.data(using: .utf8) else {
+            throw NexusMetadataStoreError.sqlite("Could not decode workspace availability diagnostics")
+        }
+        return try JSONDecoder().decode([WorkspaceAvailabilityDiagnostic].self, from: data)
     }
 
     private func navigationTargetKey(_ target: NavigationTarget) -> String {

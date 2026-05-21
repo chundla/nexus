@@ -104,6 +104,65 @@ public struct HostDetail: Codable, Equatable, Sendable {
     }
 }
 
+public struct WorkspaceAvailabilityDiagnostic: Codable, Equatable, Sendable {
+    public let severity: Severity
+    public let code: String
+    public let message: String
+
+    public init(severity: Severity, code: String, message: String) {
+        self.severity = severity
+        self.code = code
+        self.message = message
+    }
+
+    public enum Severity: String, Codable, Sendable {
+        case info
+        case warning
+        case error
+    }
+}
+
+public struct WorkspaceAvailabilitySnapshot: Codable, Equatable, Sendable {
+    public let workspaceID: UUID
+    public let state: State
+    public let summary: String
+    public let checkedAt: Date
+    public let diagnostics: [WorkspaceAvailabilityDiagnostic]
+
+    public init(
+        workspaceID: UUID,
+        state: State,
+        summary: String,
+        checkedAt: Date,
+        diagnostics: [WorkspaceAvailabilityDiagnostic] = []
+    ) {
+        self.workspaceID = workspaceID
+        self.state = state
+        self.summary = summary
+        self.checkedAt = checkedAt
+        self.diagnostics = diagnostics
+    }
+
+    public enum State: String, Codable, Sendable {
+        case available
+        case unavailable
+        case broken
+        case blocked
+    }
+}
+
+public struct RemoteWorkspaceTargetOverview: Codable, Equatable, Sendable {
+    public let host: Host
+    public let hostValidation: HostValidationSnapshot?
+    public let workspaceAvailability: WorkspaceAvailabilitySnapshot
+
+    public init(host: Host, hostValidation: HostValidationSnapshot?, workspaceAvailability: WorkspaceAvailabilitySnapshot) {
+        self.host = host
+        self.hostValidation = hostValidation
+        self.workspaceAvailability = workspaceAvailability
+    }
+}
+
 public enum ProviderID: String, Codable, CaseIterable, Sendable {
     case codex
     case claude
@@ -181,6 +240,7 @@ public struct ProviderHealthSummary: Codable, Equatable, Sendable {
         case available
         case unavailable
         case misconfigured
+        case blocked
     }
 
     public enum Launchability: String, Codable, Sendable {
@@ -263,10 +323,12 @@ public struct ProviderDetail: Codable, Equatable, Sendable {
 public struct WorkspaceOverview: Codable, Equatable, Sendable {
     public let workspace: Workspace
     public let providerCards: [WorkspaceProviderCard]
+    public let remoteTarget: RemoteWorkspaceTargetOverview?
 
-    public init(workspace: Workspace, providerCards: [WorkspaceProviderCard]) {
+    public init(workspace: Workspace, providerCards: [WorkspaceProviderCard], remoteTarget: RemoteWorkspaceTargetOverview? = nil) {
         self.workspace = workspace
         self.providerCards = providerCards
+        self.remoteTarget = remoteTarget
     }
 }
 

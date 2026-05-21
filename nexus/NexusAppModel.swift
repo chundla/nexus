@@ -139,6 +139,14 @@ final class NexusAppModel {
         } else {
             hostDetails[hostID] = try await client.getHostDetail(hostID: hostID)
         }
+
+        let impactedWorkspaceIDs = workspaces
+            .filter { $0.remoteHostID == hostID }
+            .map(\.id)
+        for workspaceID in impactedWorkspaceIDs {
+            try await refreshWorkspaceOverview(for: workspaceID)
+        }
+
         return snapshot
     }
 

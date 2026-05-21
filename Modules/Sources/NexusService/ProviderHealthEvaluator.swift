@@ -23,9 +23,14 @@ struct ProviderCommandResult: Equatable {
     let stderr: String
 }
 
+struct RemoteWorkspaceHealthContext {
+    let hostValidation: HostValidationSnapshot?
+    let workspaceAvailability: WorkspaceAvailabilitySnapshot?
+}
+
 protocol ProviderHealthEvaluating {
-    func providerCards(for workspace: Workspace) -> [WorkspaceProviderCard]
-    func healthSummary(for providerID: ProviderID, workspace: Workspace) -> ProviderHealthSummary
+    func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) -> [WorkspaceProviderCard]
+    func healthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) -> ProviderHealthSummary
 }
 
 struct ProviderHealthEvaluator: ProviderHealthEvaluating {
@@ -40,11 +45,11 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
         self.commandRunner = commandRunner
     }
 
-    func providerCards(for workspace: Workspace) -> [WorkspaceProviderCard] {
+    func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext? = nil) -> [WorkspaceProviderCard] {
         ProviderID.allCases.map { providerID in
             WorkspaceProviderCard(
                 provider: Provider(id: providerID),
-                health: healthSummary(for: providerID, workspace: workspace),
+                health: healthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext),
                 defaultSession: ProviderDefaultSessionSummary(
                     state: .notCreated,
                     summary: "No default session yet",
@@ -54,9 +59,9 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
         }
     }
 
-    func healthSummary(for providerID: ProviderID, workspace: Workspace) -> ProviderHealthSummary {
+    func healthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext? = nil) -> ProviderHealthSummary {
         if workspace.kind == .remote {
-            return remoteHealthSummary(for: providerID)
+            return remoteHealthSummary(for: providerID, remoteContext: remoteContext)
         }
 
         switch providerID {
@@ -70,8 +75,17 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
         }
     }
 
-    private func remoteHealthSummary(for providerID: ProviderID) -> ProviderHealthSummary {
+    private func remoteHealthSummary(for providerID: ProviderID, remoteContext: RemoteWorkspaceHealthContext?) -> ProviderHealthSummary {
         let providerName = Provider(id: providerID).displayName
+
+        if let blockedByHostValidation = blockedByHostValidation(providerName: providerName, remoteContext: remoteContext) {
+            return blockedByHostValidation
+        }
+
+        if let blockedByWorkspaceAvailability = blockedByWorkspaceAvailability(providerName: providerName, remoteContext: remoteContext) {
+            return blockedByWorkspaceAvailability
+        }
+
         return ProviderHealthSummary(
             state: .notChecked,
             summary: "Remote \(providerName) health checks are not implemented yet",
@@ -80,6 +94,70 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
                     severity: .warning,
                     code: "remoteHealthNotImplemented",
                     message: "Nexus does not yet evaluate \(providerName) health for Remote Workspaces over SSH."
+                )
+            ]
+        )
+    }
+
+    private func blockedByHostValidation(providerName: String, remoteContext: RemoteWorkspaceHealthContext?) -> ProviderHealthSummary? {
+        guard let hostValidation = remoteContext?.hostValidation else {
+            return ProviderHealthSummary(
+                state: .blocked,
+                summary: "Provider Health is blocked by Host Validation",
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .warning,
+                        code: "hostValidationBlocked",
+                        message: "Provider Health for \(providerName) is blocked until Host Validation runs."
+                    )
+                ]
+            )
+        }
+
+        guard hostValidation.state != .available else {
+            return nil
+        }
+
+        return ProviderHealthSummary(
+            state: .blocked,
+            summary: "Provider Health is blocked by Host Validation",
+            diagnostics: [
+                ProviderHealthDiagnostic(
+                    severity: .warning,
+                    code: "hostValidationBlocked",
+                    message: "Provider Health for \(providerName) is blocked by Host Validation: \(hostValidation.summary)."
+                )
+            ]
+        )
+    }
+
+    private func blockedByWorkspaceAvailability(providerName: String, remoteContext: RemoteWorkspaceHealthContext?) -> ProviderHealthSummary? {
+        guard let workspaceAvailability = remoteContext?.workspaceAvailability else {
+            return ProviderHealthSummary(
+                state: .blocked,
+                summary: "Provider Health is blocked by Workspace Availability",
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .warning,
+                        code: "workspaceAvailabilityBlocked",
+                        message: "Provider Health for \(providerName) is blocked until Workspace Availability is checked."
+                    )
+                ]
+            )
+        }
+
+        guard workspaceAvailability.state != .available else {
+            return nil
+        }
+
+        return ProviderHealthSummary(
+            state: .blocked,
+            summary: "Provider Health is blocked by Workspace Availability",
+            diagnostics: [
+                ProviderHealthDiagnostic(
+                    severity: .warning,
+                    code: "workspaceAvailabilityBlocked",
+                    message: "Provider Health for \(providerName) is blocked by Workspace Availability: \(workspaceAvailability.summary)."
                 )
             ]
         )

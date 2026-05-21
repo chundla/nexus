@@ -255,7 +255,67 @@ struct nexusTests {
         }
     }
 
-    @Test func remoteWorkspaceOverviewDoesNotRunLocalClaudeHealthChecks() async throws {
+    @Test func remoteWorkspaceOverviewSurfacesWorkspaceAvailabilityAndHostValidationContext() async throws {
+        let sshRunner = StubCommandRunner(results: [
+            StubCommandRunner.Invocation(
+                executable: "/usr/bin/ssh",
+                arguments: [
+                    "-o", "BatchMode=yes",
+                    "-o", "ConnectTimeout=5",
+                    "build-box",
+                    "cd '/srv/api' && pwd"
+                ]
+            ): .success(stdout: "/srv/api\n")
+        ])
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            ),
+            hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
+                "build-box": HostValidationResult(
+                    state: .available,
+                    summary: "Host is available",
+                    diagnostics: [
+                        HostValidationDiagnostic(severity: .info, code: "sshTarget", message: "Validated build-box")
+                    ]
+                )
+            ]),
+            workspaceAvailabilityEvaluator: WorkspaceAvailabilityEvaluator(commandRunner: sshRunner)
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+
+        let group = try await client.createWorkspaceGroup(name: "Remote")
+        let host = try await client.createHost(name: "Build Server", sshTarget: "build-box", port: nil as Int?)
+        _ = try await client.validateHost(hostID: host.id)
+        let workspace = try await client.createRemoteWorkspace(
+            name: nil as String?,
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+
+        let overview = try await client.getWorkspaceOverview(workspaceID: workspace.id)
+        let remoteTarget = try #require(overview.remoteTarget)
+        let claudeCard = try #require(overview.providerCards.first(where: { $0.provider.id == .claude }))
+
+        #expect(remoteTarget.host == host)
+        #expect(remoteTarget.hostValidation?.state == .available)
+        #expect(remoteTarget.workspaceAvailability.state == .available)
+        #expect(remoteTarget.workspaceAvailability.summary == "Workspace is available")
+        let remotePathDiagnostic = remoteTarget.workspaceAvailability.diagnostics.first(where: { $0.code == "remotePath" })
+        #expect(remotePathDiagnostic?.message == "Validated remote path /srv/api on Build Server.")
+        #expect(claudeCard.health.state == .notChecked)
+        #expect(claudeCard.health.summary == "Remote Claude health checks are not implemented yet")
+    }
+
+    @Test func remoteWorkspaceOverviewBlocksProviderHealthBehindHostValidation() async throws {
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
@@ -280,18 +340,131 @@ struct nexusTests {
         )
 
         let overview = try await client.getWorkspaceOverview(workspaceID: workspace.id)
+        let remoteTarget = try #require(overview.remoteTarget)
         let claudeCard = try #require(overview.providerCards.first(where: { $0.provider.id == .claude }))
 
-        #expect(claudeCard.health.state == .notChecked)
-        #expect(claudeCard.health.summary == "Remote Claude health checks are not implemented yet")
-        #expect(claudeCard.health.launchability == .notChecked)
-        #expect(claudeCard.health.diagnostics.contains(where: {
-            $0 == ProviderHealthDiagnostic(
-                severity: .warning,
-                code: "remoteHealthNotImplemented",
-                message: "Nexus does not yet evaluate Claude health for Remote Workspaces over SSH."
-            )
-        }))
+        #expect(remoteTarget.hostValidation == nil)
+        #expect(remoteTarget.workspaceAvailability.state == .blocked)
+        #expect(remoteTarget.workspaceAvailability.summary == "Workspace Availability is blocked by Host Validation")
+        let availabilityDiagnostic = remoteTarget.workspaceAvailability.diagnostics.first(where: { $0.code == "hostValidationBlocked" })
+        #expect(availabilityDiagnostic?.message == "Workspace Availability is blocked until Host Validation runs for Build Server.")
+        #expect(claudeCard.health.state == .blocked)
+        #expect(claudeCard.health.summary == "Provider Health is blocked by Host Validation")
+        let healthDiagnostic = claudeCard.health.diagnostics.first(where: { $0.code == "hostValidationBlocked" })
+        #expect(healthDiagnostic?.message == "Provider Health for Claude is blocked until Host Validation runs.")
+    }
+
+    @Test func remoteWorkspaceOverviewBlocksProviderHealthBehindBrokenWorkspaceAvailability() async throws {
+        let sshRunner = StubCommandRunner(results: [
+            StubCommandRunner.Invocation(
+                executable: "/usr/bin/ssh",
+                arguments: [
+                    "-o", "BatchMode=yes",
+                    "-o", "ConnectTimeout=5",
+                    "build-box",
+                    "cd '/srv/missing' && pwd"
+                ]
+            ): .success(stdout: "", stderr: "bash: cd: /srv/missing: No such file or directory\n", exitStatus: 1)
+        ])
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            ),
+            hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
+                "build-box": HostValidationResult(
+                    state: .available,
+                    summary: "Host is available",
+                    diagnostics: []
+                )
+            ]),
+            workspaceAvailabilityEvaluator: WorkspaceAvailabilityEvaluator(commandRunner: sshRunner)
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+
+        let group = try await client.createWorkspaceGroup(name: "Remote")
+        let host = try await client.createHost(name: "Build Server", sshTarget: "build-box", port: nil as Int?)
+        _ = try await client.validateHost(hostID: host.id)
+        let workspace = try await client.createRemoteWorkspace(
+            name: nil as String?,
+            hostID: host.id,
+            remotePath: "/srv/missing",
+            primaryGroupID: group.id
+        )
+
+        let overview = try await client.getWorkspaceOverview(workspaceID: workspace.id)
+        let remoteTarget = try #require(overview.remoteTarget)
+        let claudeCard = try #require(overview.providerCards.first(where: { $0.provider.id == .claude }))
+
+        #expect(remoteTarget.workspaceAvailability.state == .broken)
+        #expect(remoteTarget.workspaceAvailability.summary == "Workspace requires repair")
+        let availabilityDiagnostic = remoteTarget.workspaceAvailability.diagnostics.first
+        #expect(availabilityDiagnostic?.code == "workspaceTargetBroken")
+        #expect(availabilityDiagnostic?.message == "bash: cd: /srv/missing: No such file or directory")
+        #expect(claudeCard.health.state == .blocked)
+        #expect(claudeCard.health.summary == "Provider Health is blocked by Workspace Availability")
+        let healthDiagnostic = claudeCard.health.diagnostics.first(where: { $0.code == "workspaceAvailabilityBlocked" })
+        #expect(healthDiagnostic?.message == "Provider Health for Claude is blocked by Workspace Availability: Workspace requires repair.")
+    }
+
+    @Test func remoteWorkspaceOverviewClassifiesTransientWorkspaceAvailabilityFailuresAsUnavailable() async throws {
+        let sshRunner = StubCommandRunner(results: [
+            StubCommandRunner.Invocation(
+                executable: "/usr/bin/ssh",
+                arguments: [
+                    "-o", "BatchMode=yes",
+                    "-o", "ConnectTimeout=5",
+                    "build-box",
+                    "cd '/srv/api' && pwd"
+                ]
+            ): .success(stdout: "", stderr: "ssh: connect to host build-box port 22: Operation timed out\n", exitStatus: 255)
+        ])
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            ),
+            hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
+                "build-box": HostValidationResult(
+                    state: .available,
+                    summary: "Host is available",
+                    diagnostics: []
+                )
+            ]),
+            workspaceAvailabilityEvaluator: WorkspaceAvailabilityEvaluator(commandRunner: sshRunner)
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+
+        let group = try await client.createWorkspaceGroup(name: "Remote")
+        let host = try await client.createHost(name: "Build Server", sshTarget: "build-box", port: nil as Int?)
+        _ = try await client.validateHost(hostID: host.id)
+        let workspace = try await client.createRemoteWorkspace(
+            name: nil as String?,
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+
+        let overview = try await client.getWorkspaceOverview(workspaceID: workspace.id)
+        let remoteTarget = try #require(overview.remoteTarget)
+
+        #expect(remoteTarget.workspaceAvailability.state == .unavailable)
+        #expect(remoteTarget.workspaceAvailability.summary == "Workspace is currently unavailable")
+        let availabilityDiagnostic = remoteTarget.workspaceAvailability.diagnostics.first
+        #expect(availabilityDiagnostic?.code == "workspaceUnavailable")
+        #expect(availabilityDiagnostic?.message == "ssh: connect to host build-box port 22: Operation timed out")
     }
 
     @Test func workspaceOverviewShowsAllSupportedProvidersOverIPC() async throws {
@@ -3693,6 +3866,61 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelValidateHostRefreshesRemoteWorkspaceOverview() async throws {
+        let sshRunner = StubCommandRunner(results: [
+            StubCommandRunner.Invocation(
+                executable: "/usr/bin/ssh",
+                arguments: [
+                    "-o", "BatchMode=yes",
+                    "-o", "ConnectTimeout=5",
+                    "build-box",
+                    "cd '/srv/api' && pwd"
+                ]
+            ): .success(stdout: "/srv/api\n")
+        ])
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            ),
+            hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
+                "build-box": HostValidationResult(
+                    state: .available,
+                    summary: "Host is available",
+                    diagnostics: []
+                )
+            ]),
+            workspaceAvailabilityEvaluator: WorkspaceAvailabilityEvaluator(commandRunner: sshRunner)
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+
+        let group = try await client.createWorkspaceGroup(name: "Remote")
+        let host = try await client.createHost(name: "Build Server", sshTarget: "build-box", port: nil as Int?)
+        let workspace = try await client.createRemoteWorkspace(
+            name: nil as String?,
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+
+        #expect(model.workspaceOverview(for: workspace.id)?.remoteTarget?.workspaceAvailability.state == .blocked)
+
+        _ = try await model.validateHost(hostID: host.id)
+
+        #expect(model.workspaceOverview(for: workspace.id)?.remoteTarget?.workspaceAvailability.state == .available)
+        #expect(model.workspaceOverview(for: workspace.id)?.remoteTarget?.hostValidation?.state == .available)
+    }
+
+    @MainActor
     @Test func appModelCreatesRemoteWorkspaceAndFormatsWorkspaceTargetSummary() async throws {
         let group = WorkspaceGroup(id: UUID(), name: "Remote")
         let host = NexusDomain.Host(id: UUID(), name: "Build Server", sshTarget: "build-box", port: 2222)
@@ -5162,7 +5390,11 @@ private final class TrackingServiceClient: NexusServiceClient {
                 defaultSession: card.defaultSession,
                 alternateSessionCount: card.alternateSessionCount + 1
             )
-            workspaceOverviewValue = WorkspaceOverview(workspace: workspaceOverviewValue.workspace, providerCards: providerCards)
+            workspaceOverviewValue = WorkspaceOverview(
+                workspace: workspaceOverviewValue.workspace,
+                providerCards: providerCards,
+                remoteTarget: workspaceOverviewValue.remoteTarget
+            )
         }
         return namedSession
     }
@@ -5212,7 +5444,11 @@ private final class TrackingServiceClient: NexusServiceClient {
                 defaultSession: card.defaultSession,
                 alternateSessionCount: max(0, card.alternateSessionCount - 1)
             )
-            workspaceOverviewValue = WorkspaceOverview(workspace: workspaceOverviewValue.workspace, providerCards: providerCards)
+            workspaceOverviewValue = WorkspaceOverview(
+                workspace: workspaceOverviewValue.workspace,
+                providerCards: providerCards,
+                remoteTarget: workspaceOverviewValue.remoteTarget
+            )
         }
         return true
     }

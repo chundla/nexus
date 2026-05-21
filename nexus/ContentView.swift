@@ -294,6 +294,40 @@ struct ContentView: View {
                     }
                     LabeledContent("Primary Group", value: appModel.workspaceGroupName(for: workspace.primaryGroupID) ?? workspace.primaryGroupID.uuidString)
 
+                    if let remoteTarget = overview?.remoteTarget {
+                        Divider()
+
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Remote Status")
+                                .font(.title3)
+                                .fontWeight(.semibold)
+
+                            Text("Last-known Host Validation and Workspace Availability for this Remote Workspace.")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+
+                            remoteStatusPanel(
+                                title: "Workspace Availability",
+                                stateTitle: workspaceAvailabilityStateTitle(remoteTarget.workspaceAvailability.state),
+                                stateSymbol: workspaceAvailabilityStateSymbol(remoteTarget.workspaceAvailability.state),
+                                stateColor: workspaceAvailabilityStateColor(remoteTarget.workspaceAvailability.state),
+                                summary: remoteTarget.workspaceAvailability.summary,
+                                checkedAt: remoteTarget.workspaceAvailability.checkedAt,
+                                diagnostics: remoteTarget.workspaceAvailability.diagnostics.map { ($0.code, $0.message) }
+                            )
+
+                            remoteStatusPanel(
+                                title: "Host Validation",
+                                stateTitle: hostValidationStateTitle(remoteTarget.hostValidation?.state),
+                                stateSymbol: hostValidationStateSymbol(remoteTarget.hostValidation?.state),
+                                stateColor: hostValidationStateColor(remoteTarget.hostValidation?.state),
+                                summary: remoteTarget.hostValidation?.summary ?? "Validate this Host to unblock deeper remote checks.",
+                                checkedAt: remoteTarget.hostValidation?.checkedAt,
+                                diagnostics: remoteTarget.hostValidation?.diagnostics.map { ($0.code, $0.message) } ?? []
+                            )
+                        }
+                    }
+
                     Divider()
 
                     Text("Providers")
@@ -626,6 +660,134 @@ struct ContentView: View {
         .padding()
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func remoteStatusPanel(
+        title: String,
+        stateTitle: String,
+        stateSymbol: String,
+        stateColor: Color,
+        summary: String,
+        checkedAt: Date?,
+        diagnostics: [(code: String, message: String)]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(title)
+                    .font(.headline)
+                Spacer()
+                Label(stateTitle, systemImage: stateSymbol)
+                    .foregroundStyle(stateColor)
+            }
+
+            Text(summary)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            LabeledContent("Last Checked", value: checkedAt?.formatted(date: .abbreviated, time: .shortened) ?? "Not checked")
+                .font(.caption)
+
+            if diagnostics.isEmpty == false {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Diagnostics")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+
+                    ForEach(Array(diagnostics.enumerated()), id: \.offset) { _, diagnostic in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(diagnostic.message)
+                                .font(.caption)
+                            Text(diagnostic.code)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: 10))
+                    }
+                }
+            }
+        }
+        .padding()
+        .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func hostValidationStateTitle(_ state: HostValidationSnapshot.State?) -> String {
+        switch state {
+        case .available:
+            "Available"
+        case .unavailable:
+            "Unavailable"
+        case .broken:
+            "Broken"
+        case .notChecked, .none:
+            "Not checked"
+        }
+    }
+
+    private func hostValidationStateSymbol(_ state: HostValidationSnapshot.State?) -> String {
+        switch state {
+        case .available:
+            "checkmark.circle"
+        case .unavailable:
+            "wifi.exclamationmark"
+        case .broken:
+            "exclamationmark.triangle"
+        case .notChecked, .none:
+            "clock"
+        }
+    }
+
+    private func hostValidationStateColor(_ state: HostValidationSnapshot.State?) -> Color {
+        switch state {
+        case .available:
+            .green
+        case .unavailable:
+            .orange
+        case .broken:
+            .red
+        case .notChecked, .none:
+            .secondary
+        }
+    }
+
+    private func workspaceAvailabilityStateTitle(_ state: WorkspaceAvailabilitySnapshot.State) -> String {
+        switch state {
+        case .available:
+            "Available"
+        case .unavailable:
+            "Unavailable"
+        case .broken:
+            "Broken"
+        case .blocked:
+            "Blocked"
+        }
+    }
+
+    private func workspaceAvailabilityStateSymbol(_ state: WorkspaceAvailabilitySnapshot.State) -> String {
+        switch state {
+        case .available:
+            "checkmark.circle"
+        case .unavailable:
+            "wifi.exclamationmark"
+        case .broken:
+            "exclamationmark.triangle"
+        case .blocked:
+            "pause.circle"
+        }
+    }
+
+    private func workspaceAvailabilityStateColor(_ state: WorkspaceAvailabilitySnapshot.State) -> Color {
+        switch state {
+        case .available:
+            .green
+        case .unavailable:
+            .orange
+        case .broken:
+            .red
+        case .blocked:
+            .secondary
+        }
     }
 
     private func providerSessionRow(

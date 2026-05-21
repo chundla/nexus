@@ -573,6 +573,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     private let metadataStore: NexusMetadataStore
     private let providerHealthEvaluator: any ProviderHealthEvaluating
     private let hostValidationEvaluator: any HostValidationEvaluating
+    private let workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating
     private let sessionRuntimeManager: any SessionRuntimeManaging
 
     private init(
@@ -581,6 +582,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         metadataStore: NexusMetadataStore,
         providerHealthEvaluator: any ProviderHealthEvaluating,
         hostValidationEvaluator: any HostValidationEvaluating,
+        workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating,
         sessionRuntimeManager: any SessionRuntimeManaging
     ) {
         self.listener = listener
@@ -588,6 +590,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         self.metadataStore = metadataStore
         self.providerHealthEvaluator = providerHealthEvaluator
         self.hostValidationEvaluator = hostValidationEvaluator
+        self.workspaceAvailabilityEvaluator = workspaceAvailabilityEvaluator
         self.sessionRuntimeManager = sessionRuntimeManager
         super.init()
         self.listener.delegate = self
@@ -618,12 +621,14 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         rootURL: URL,
         providerHealthEvaluator: any ProviderHealthEvaluating,
         hostValidationEvaluator: any HostValidationEvaluating = HostValidationEvaluator(),
+        workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating = WorkspaceAvailabilityEvaluator(),
         sessionRuntimeManager: any SessionRuntimeManaging = InMemorySessionRuntimeManager()
     ) throws -> NexusService {
         try bootstrap(
             rootURL: rootURL,
             providerHealthEvaluator: providerHealthEvaluator,
             hostValidationEvaluator: hostValidationEvaluator,
+            workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
             sessionRuntimeManager: sessionRuntimeManager
         )
     }
@@ -631,11 +636,13 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     static func bootstrapForTests(
         rootURL: URL,
         hostValidationEvaluator: any HostValidationEvaluating,
+        workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating = WorkspaceAvailabilityEvaluator(),
         sessionRuntimeManager: any SessionRuntimeManaging = InMemorySessionRuntimeManager()
     ) throws -> NexusService {
         try bootstrap(
             rootURL: rootURL,
             hostValidationEvaluator: hostValidationEvaluator,
+            workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
             sessionRuntimeManager: sessionRuntimeManager
         )
     }
@@ -644,6 +651,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         rootURL: URL,
         providerHealthEvaluator: any ProviderHealthEvaluating = ProviderHealthEvaluator(),
         hostValidationEvaluator: any HostValidationEvaluating = HostValidationEvaluator(),
+        workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating = WorkspaceAvailabilityEvaluator(),
         sessionRuntimeManager: any SessionRuntimeManaging = InMemorySessionRuntimeManager()
     ) throws -> NexusService {
         try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
@@ -660,6 +668,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             metadataStore: metadataStore,
             providerHealthEvaluator: providerHealthEvaluator,
             hostValidationEvaluator: hostValidationEvaluator,
+            workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
             sessionRuntimeManager: sessionRuntimeManager
         )
     }
@@ -785,10 +794,18 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             throw NexusMetadataStoreError.workspaceNotFound
         }
 
+        let remoteTarget = try remoteWorkspaceTargetOverview(for: workspace)
+        let remoteContext = remoteTarget.map {
+            RemoteWorkspaceHealthContext(
+                hostValidation: $0.hostValidation,
+                workspaceAvailability: $0.workspaceAvailability
+            )
+        }
+
         let providerCards = try ProviderID.allCases.map { providerID in
             WorkspaceProviderCard(
                 provider: Provider(id: providerID),
-                health: providerHealthEvaluator.healthSummary(for: providerID, workspace: workspace),
+                health: providerHealthEvaluator.healthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext),
                 defaultSession: try defaultSessionSummary(for: workspace, providerID: providerID),
                 alternateSessionCount: try metadataStore.listSessions(workspaceID: workspaceID, providerID: providerID)
                     .filter { $0.isDefault == false }
@@ -796,7 +813,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             )
         }
 
-        return WorkspaceOverview(workspace: workspace, providerCards: providerCards)
+        return WorkspaceOverview(workspace: workspace, providerCards: providerCards, remoteTarget: remoteTarget)
     }
 
     func getProviderDetail(workspaceID: UUID, providerID: ProviderID) throws -> ProviderDetail {
@@ -804,16 +821,48 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             throw NexusMetadataStoreError.workspaceNotFound
         }
 
+        let remoteTarget = try remoteWorkspaceTargetOverview(for: workspace)
+        let remoteContext = remoteTarget.map {
+            RemoteWorkspaceHealthContext(
+                hostValidation: $0.hostValidation,
+                workspaceAvailability: $0.workspaceAvailability
+            )
+        }
         let sessions = try metadataStore.listSessions(workspaceID: workspaceID, providerID: providerID)
             .map(reconcileSessionRuntimeState)
 
         return ProviderDetail(
             workspace: workspace,
             provider: Provider(id: providerID),
-            health: providerHealthEvaluator.healthSummary(for: providerID, workspace: workspace),
+            health: providerHealthEvaluator.healthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext),
             defaultSession: sessions.first(where: \.isDefault),
             alternateSessions: sessions.filter { $0.isDefault == false && $0.state != .failed },
             failedSessions: sessions.filter { $0.isDefault == false && $0.state == .failed }
+        )
+    }
+
+    private func remoteWorkspaceTargetOverview(for workspace: Workspace) throws -> RemoteWorkspaceTargetOverview? {
+        guard workspace.kind == .remote,
+              let hostID = workspace.remoteHostID,
+              let host = try metadataStore.host(id: hostID) else {
+            return nil
+        }
+
+        let hostValidation = try metadataStore.hostValidation(hostID: hostID)
+        let availabilityResult = workspaceAvailabilityEvaluator.evaluate(
+            workspace: workspace,
+            host: host,
+            hostValidation: hostValidation
+        )
+        let availability = try metadataStore.saveWorkspaceAvailability(
+            workspaceID: workspace.id,
+            result: availabilityResult,
+            checkedAt: Date()
+        )
+        return RemoteWorkspaceTargetOverview(
+            host: host,
+            hostValidation: hostValidation,
+            workspaceAvailability: availability
         )
     }
 
@@ -842,7 +891,13 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             return try launchSession(session, workspace: workspace, launchSnapshot: launchSnapshot)
         }
 
-        let health = providerHealthEvaluator.healthSummary(for: providerID, workspace: workspace)
+        let remoteContext = try remoteWorkspaceTargetOverview(for: workspace).map {
+            RemoteWorkspaceHealthContext(
+                hostValidation: $0.hostValidation,
+                workspaceAvailability: $0.workspaceAvailability
+            )
+        }
+        let health = providerHealthEvaluator.healthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
         guard health.launchability == .launchable, let executable = health.resolvedExecutable else {
             let failureMessage = health.diagnostics.first(where: { $0.severity == .error })?.message ?? health.summary
             if let session = try metadataStore.defaultSession(workspaceID: workspaceID, providerID: providerID) {
@@ -896,7 +951,13 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
 
         let existingSessions = try metadataStore.listSessions(workspaceID: workspaceID, providerID: providerID)
         let resolvedName = resolveNamedSessionName(name, existingSessions: existingSessions)
-        let health = providerHealthEvaluator.healthSummary(for: providerID, workspace: workspace)
+        let remoteContext = try remoteWorkspaceTargetOverview(for: workspace).map {
+            RemoteWorkspaceHealthContext(
+                hostValidation: $0.hostValidation,
+                workspaceAvailability: $0.workspaceAvailability
+            )
+        }
+        let health = providerHealthEvaluator.healthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
 
         guard health.launchability == .launchable, let executable = health.resolvedExecutable else {
             let failureMessage = health.diagnostics.first(where: { $0.severity == .error })?.message ?? health.summary
