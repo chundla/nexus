@@ -55,15 +55,34 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
     }
 
     func healthSummary(for providerID: ProviderID, workspace: Workspace) -> ProviderHealthSummary {
+        if workspace.kind == .remote {
+            return remoteHealthSummary(for: providerID)
+        }
+
         switch providerID {
         case .claude:
-            claudeHealthSummary(for: workspace)
+            return claudeHealthSummary(for: workspace)
         case .codex, .ibmBob, .pi:
-            ProviderHealthSummary(
+            return ProviderHealthSummary(
                 state: .notChecked,
                 summary: "Health checks coming soon"
             )
         }
+    }
+
+    private func remoteHealthSummary(for providerID: ProviderID) -> ProviderHealthSummary {
+        let providerName = Provider(id: providerID).displayName
+        return ProviderHealthSummary(
+            state: .notChecked,
+            summary: "Remote \(providerName) health checks are not implemented yet",
+            diagnostics: [
+                ProviderHealthDiagnostic(
+                    severity: .warning,
+                    code: "remoteHealthNotImplemented",
+                    message: "Nexus does not yet evaluate \(providerName) health for Remote Workspaces over SSH."
+                )
+            ]
+        )
     }
 
     private func claudeHealthSummary(for workspace: Workspace) -> ProviderHealthSummary {

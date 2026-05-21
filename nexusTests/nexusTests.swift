@@ -255,6 +255,45 @@ struct nexusTests {
         }
     }
 
+    @Test func remoteWorkspaceOverviewDoesNotRunLocalClaudeHealthChecks() async throws {
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            )
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+
+        let group = try await client.createWorkspaceGroup(name: "Remote")
+        let host = try await client.createHost(name: "Build Server", sshTarget: "build-box", port: nil as Int?)
+        let workspace = try await client.createRemoteWorkspace(
+            name: nil as String?,
+            hostID: host.id,
+            remotePath: "/home/chundla/.openclaw",
+            primaryGroupID: group.id
+        )
+
+        let overview = try await client.getWorkspaceOverview(workspaceID: workspace.id)
+        let claudeCard = try #require(overview.providerCards.first(where: { $0.provider.id == .claude }))
+
+        #expect(claudeCard.health.state == .notChecked)
+        #expect(claudeCard.health.summary == "Remote Claude health checks are not implemented yet")
+        #expect(claudeCard.health.launchability == .notChecked)
+        #expect(claudeCard.health.diagnostics.contains(where: {
+            $0 == ProviderHealthDiagnostic(
+                severity: .warning,
+                code: "remoteHealthNotImplemented",
+                message: "Nexus does not yet evaluate Claude health for Remote Workspaces over SSH."
+            )
+        }))
+    }
+
     @Test func workspaceOverviewShowsAllSupportedProvidersOverIPC() async throws {
         let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests()
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
