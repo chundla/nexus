@@ -36,6 +36,7 @@ public protocol SessionScreenObservation: Sendable {
     func getWorkspaceOverview(workspaceID: String, reply: @escaping (Data?, NSString?) -> Void)
     func getProviderDetail(workspaceID: String, providerID: String, reply: @escaping (Data?, NSString?) -> Void)
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: String?, reply: @escaping (Data?, NSString?) -> Void)
+    func createRemoteWorkspace(name: String?, hostID: String, remotePath: String, primaryGroupID: String?, reply: @escaping (Data?, NSString?) -> Void)
     func launchOrResumeDefaultSession(workspaceID: String, providerID: String, reply: @escaping (Data?, NSString?) -> Void)
     func createNamedSession(workspaceID: String, providerID: String, name: String?, reply: @escaping (Data?, NSString?) -> Void)
     func stopSession(sessionID: String, reply: @escaping (Data?, NSString?) -> Void)
@@ -66,6 +67,7 @@ public protocol NexusServiceClient {
     func getWorkspaceOverview(workspaceID: UUID) async throws -> WorkspaceOverview
     func getProviderDetail(workspaceID: UUID, providerID: ProviderID) async throws -> ProviderDetail
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: UUID?) async throws -> Workspace
+    func createRemoteWorkspace(name: String?, hostID: UUID, remotePath: String, primaryGroupID: UUID?) async throws -> Workspace
     func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) async throws -> Session
     func createNamedSession(workspaceID: UUID, providerID: ProviderID, name: String?) async throws -> Session
     func stopSession(sessionID: UUID) async throws -> Session
@@ -203,6 +205,18 @@ public final class NexusIPCClient: NexusServiceClient, @unchecked Sendable {
             proxy.createLocalWorkspace(
                 name: name,
                 folderPath: folderPath,
+                primaryGroupID: primaryGroupID?.uuidString,
+                reply: reply
+            )
+        }
+    }
+
+    nonisolated public func createRemoteWorkspace(name: String?, hostID: UUID, remotePath: String, primaryGroupID: UUID?) async throws -> Workspace {
+        try await requestDecodable { proxy, reply in
+            proxy.createRemoteWorkspace(
+                name: name,
+                hostID: hostID.uuidString,
+                remotePath: remotePath,
                 primaryGroupID: primaryGroupID?.uuidString,
                 reply: reply
             )

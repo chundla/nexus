@@ -57,6 +57,9 @@ final class NexusMetadataStore {
             CREATE INDEX IF NOT EXISTS idx_remote_workspace_targets_host_id
             ON remote_workspace_targets(host_id);
 
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_remote_workspace_targets_effective_target
+            ON remote_workspace_targets(host_id, remote_path);
+
             CREATE TABLE IF NOT EXISTS host_validation_snapshots (
                 host_id TEXT PRIMARY KEY NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
                 state TEXT NOT NULL,
@@ -152,7 +155,12 @@ final class NexusMetadataStore {
     func listWorkspaces() throws -> [Workspace] {
         try withLock {
             let statement = try prepare(
-                "SELECT id, name, kind, folder_path, primary_group_id FROM workspaces ORDER BY rowid ASC;"
+                """
+                SELECT workspaces.id, workspaces.name, workspaces.kind, workspaces.folder_path, workspaces.primary_group_id, remote_workspace_targets.host_id
+                FROM workspaces
+                LEFT JOIN remote_workspace_targets ON remote_workspace_targets.workspace_id = workspaces.id
+                ORDER BY workspaces.rowid ASC;
+                """
             )
             defer { sqlite3_finalize(statement) }
 
@@ -338,7 +346,13 @@ final class NexusMetadataStore {
     func workspace(id: UUID) throws -> Workspace? {
         try withLock {
             let statement = try prepare(
-                "SELECT id, name, kind, folder_path, primary_group_id FROM workspaces WHERE id = ? LIMIT 1;"
+                """
+                SELECT workspaces.id, workspaces.name, workspaces.kind, workspaces.folder_path, workspaces.primary_group_id, remote_workspace_targets.host_id
+                FROM workspaces
+                LEFT JOIN remote_workspace_targets ON remote_workspace_targets.workspace_id = workspaces.id
+                WHERE workspaces.id = ?
+                LIMIT 1;
+                """
             )
             defer { sqlite3_finalize(statement) }
 
@@ -436,6 +450,13 @@ final class NexusMetadataStore {
                 throw NexusMetadataStoreError.hostNotFound
             }
 
+            if try remoteWorkspaceTargetExistsWithoutLock(hostID: hostID, remotePath: resolvedRemotePath) {
+                throw NexusMetadataStoreError.remoteWorkspaceTargetAlreadyExists(
+                    hostName: try hostNameWithoutLock(id: hostID) ?? "Host",
+                    remotePath: resolvedRemotePath
+                )
+            }
+
             let groups = try listWorkspaceGroupsWithoutLock()
             let resolvedPrimaryGroupID = try resolvePrimaryGroupID(primaryGroupID, groups: groups)
             let resolvedName = resolveWorkspaceName(name: name, folderPath: resolvedRemotePath)
@@ -444,7 +465,8 @@ final class NexusMetadataStore {
                 name: resolvedName,
                 kind: .remote,
                 folderPath: resolvedRemotePath,
-                primaryGroupID: resolvedPrimaryGroupID
+                primaryGroupID: resolvedPrimaryGroupID,
+                remoteHostID: hostID
             )
 
             let workspaceStatement = try prepare(
@@ -695,6 +717,28 @@ final class NexusMetadataStore {
         return sqlite3_step(statement) == SQLITE_ROW
     }
 
+    private func hostNameWithoutLock(id: UUID) throws -> String? {
+        let statement = try prepare("SELECT name FROM hosts WHERE id = ? LIMIT 1;")
+        defer { sqlite3_finalize(statement) }
+
+        try bind(id.uuidString, at: 1, in: statement)
+        guard sqlite3_step(statement) == SQLITE_ROW else {
+            return nil
+        }
+        return try readString(column: 0, from: statement)
+    }
+
+    private func remoteWorkspaceTargetExistsWithoutLock(hostID: UUID, remotePath: String) throws -> Bool {
+        let statement = try prepare(
+            "SELECT 1 FROM remote_workspace_targets WHERE host_id = ? AND remote_path = ? LIMIT 1;"
+        )
+        defer { sqlite3_finalize(statement) }
+
+        try bind(hostID.uuidString, at: 1, in: statement)
+        try bind(remotePath, at: 2, in: statement)
+        return sqlite3_step(statement) == SQLITE_ROW
+    }
+
     private func remoteWorkspaceReferenceLabelsWithoutLock(hostID: UUID) throws -> [String] {
         let statement = try prepare(
             """
@@ -928,12 +972,14 @@ final class NexusMetadataStore {
         }
         let folderPath = try readString(column: 3, from: statement)
         let primaryGroupID = try readUUID(column: 4, from: statement)
+        let remoteHostID = try readOptionalUUID(column: 5, from: statement)
         return Workspace(
             id: id,
             name: name,
             kind: kind,
             folderPath: folderPath,
-            primaryGroupID: primaryGroupID
+            primaryGroupID: primaryGroupID,
+            remoteHostID: remoteHostID
         )
     }
 
@@ -1072,6 +1118,7 @@ enum NexusMetadataStoreError: LocalizedError {
     case workspaceNotFound
     case hostNotFound
     case hostDeletionBlockedByRemoteWorkspaces([String])
+    case remoteWorkspaceTargetAlreadyExists(hostName: String, remotePath: String)
     case sessionNotFound
     case providerNotSupported
     case sessionNotReady
@@ -1107,6 +1154,8 @@ enum NexusMetadataStoreError: LocalizedError {
             "Host not found"
         case .hostDeletionBlockedByRemoteWorkspaces(let labels):
             "Host is still referenced by Remote Workspaces: \(labels.joined(separator: ", "))"
+        case .remoteWorkspaceTargetAlreadyExists(let hostName, let remotePath):
+            "A Remote Workspace already exists for \(hostName) at \(remotePath)"
         case .sessionNotFound:
             "Session not found"
         case .providerNotSupported:

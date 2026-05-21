@@ -8,6 +8,7 @@ struct ContentView: View {
     @State private var selection: SidebarSelection?
     @State private var isShowingCreateWorkspaceGroupSheet = false
     @State private var isShowingQuickSwitchSheet = false
+    @State private var isShowingCreateRemoteWorkspaceSheet = false
     @State private var newWorkspaceGroupName = ""
     @State private var isShowingHostsSheet = false
     @State private var quickSwitchQuery = ""
@@ -51,8 +52,15 @@ struct ContentView: View {
 
                 Section("Workspaces") {
                     ForEach(appModel.workspaces) { workspace in
-                        Label(workspace.name, systemImage: "folder")
-                            .tag(SidebarSelection.workspace(workspace.id))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Label(workspace.name, systemImage: workspace.kind == .remote ? "externaldrive.connected.to.line.below" : "folder")
+                            if workspace.kind == .remote {
+                                Text(appModel.workspaceTargetSummary(for: workspace))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .tag(SidebarSelection.workspace(workspace.id))
                     }
                 }
             }
@@ -79,6 +87,10 @@ struct ContentView: View {
 
                     Button("Add Local Workspace") {
                         addLocalWorkspace()
+                    }
+
+                    Button("Add Remote Workspace") {
+                        isShowingCreateRemoteWorkspaceSheet = true
                     }
                 }
             }
@@ -118,6 +130,9 @@ struct ContentView: View {
         }
         .sheet(isPresented: $isShowingQuickSwitchSheet) {
             quickSwitchSheet
+        }
+        .sheet(isPresented: $isShowingCreateRemoteWorkspaceSheet) {
+            remoteWorkspaceSheet
         }
         .sheet(isPresented: $isShowingWorkspaceGroupPicker) {
             workspaceGroupPickerSheet
@@ -247,7 +262,7 @@ struct ContentView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(workspace.name)
                             .fontWeight(.medium)
-                        Text(workspace.folderPath)
+                        Text(appModel.workspaceTargetSummary(for: workspace))
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     }
@@ -271,7 +286,12 @@ struct ContentView: View {
 
                 if let workspace {
                     LabeledContent("Kind", value: workspace.kind.rawValue)
-                    LabeledContent("Folder", value: workspace.folderPath)
+                    if let hostName = appModel.workspaceHostName(for: workspace) {
+                        LabeledContent("Host", value: hostName)
+                        LabeledContent("Remote Path", value: workspace.folderPath)
+                    } else {
+                        LabeledContent("Folder", value: workspace.folderPath)
+                    }
                     LabeledContent("Primary Group", value: appModel.workspaceGroupName(for: workspace.primaryGroupID) ?? workspace.primaryGroupID.uuidString)
 
                     Divider()
@@ -746,6 +766,19 @@ struct ContentView: View {
         .frame(minWidth: 360)
     }
 
+    private var remoteWorkspaceSheet: some View {
+        RemoteWorkspaceCreationSheet(
+            appModel: appModel,
+            isPresented: $isShowingCreateRemoteWorkspaceSheet,
+            onCreated: { workspace in
+                selection = .workspace(workspace.id)
+            },
+            onError: { message in
+                presentedError = PresentedError(message: message)
+            }
+        )
+    }
+
     private var workspaceGroupPickerSheet: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Choose Primary Workspace Group")
@@ -1017,6 +1050,204 @@ struct ContentView: View {
         }
     }
 
+}
+
+private struct RemoteWorkspaceCreationSheet: View {
+    @Bindable var appModel: NexusAppModel
+    @Binding var isPresented: Bool
+    let onCreated: (Workspace) -> Void
+    let onError: (String) -> Void
+
+    @State private var hostSource: HostSource = .existing
+    @State private var selectedHostID: UUID?
+    @State private var workspaceName = ""
+    @State private var remotePath = ""
+    @State private var selectedGroupID: UUID?
+    @State private var newHostName = ""
+    @State private var newHostTarget = ""
+    @State private var newHostPort = ""
+    @State private var isSaving = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("New Remote Workspace")
+                .font(.title3)
+                .fontWeight(.semibold)
+
+            if appModel.workspaceGroups.isEmpty {
+                ContentUnavailableView(
+                    "No Workspace Groups",
+                    systemImage: "folder.badge.questionmark",
+                    description: Text("Create a Workspace Group before adding a Remote Workspace.")
+                )
+            } else {
+                if appModel.hosts.isEmpty == false {
+                    Picker("Host", selection: $hostSource) {
+                        Text("Existing Host").tag(HostSource.existing)
+                        Text("New Host").tag(HostSource.new)
+                    }
+                    .pickerStyle(.segmented)
+                }
+
+                if hostSource == .existing, appModel.hosts.isEmpty == false {
+                    Picker("Existing Host", selection: Binding(get: {
+                        selectedHostID ?? appModel.hosts.first?.id ?? UUID()
+                    }, set: { selectedHostID = $0 })) {
+                        ForEach(appModel.hosts) { host in
+                            Text(host.name).tag(host.id)
+                        }
+                    }
+
+                    if let detail = selectedHostDetail,
+                       let snapshot = detail.latestValidation,
+                       snapshot.state == .unavailable || snapshot.state == .broken {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Label(snapshot.summary, systemImage: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                            Text("You can still create this Remote Workspace, but the Host is not currently validated.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } else {
+                    TextField("Host Name", text: $newHostName)
+                    TextField("SSH Target or Alias", text: $newHostTarget)
+                    TextField("Port (optional)", text: $newHostPort)
+                }
+
+                TextField("Workspace Name (optional)", text: $workspaceName)
+                TextField("Absolute Remote Path", text: $remotePath)
+
+                Picker("Primary Workspace Group", selection: Binding(get: {
+                    selectedGroupID ?? appModel.workspaceGroups.first?.id ?? UUID()
+                }, set: { selectedGroupID = $0 })) {
+                    ForEach(appModel.workspaceGroups) { group in
+                        Text(group.name).tag(group.id)
+                    }
+                }
+            }
+
+            HStack {
+                Spacer()
+
+                Button("Cancel") {
+                    isPresented = false
+                }
+
+                Button("Create") {
+                    createRemoteWorkspace()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(canCreate == false || isSaving)
+            }
+        }
+        .padding()
+        .frame(minWidth: 420)
+        .task {
+            if appModel.hosts.isEmpty {
+                hostSource = .new
+            }
+            if selectedGroupID == nil {
+                selectedGroupID = appModel.workspaceGroups.first?.id
+            }
+            if selectedHostID == nil {
+                selectedHostID = appModel.hosts.first?.id
+            }
+            await loadSelectedHostDetail()
+        }
+        .task(id: selectedHostID) {
+            await loadSelectedHostDetail()
+        }
+    }
+
+    private var selectedHostDetail: HostDetail? {
+        guard let selectedHostID else {
+            return nil
+        }
+        return appModel.hostDetail(for: selectedHostID)
+    }
+
+    private var canCreate: Bool {
+        guard appModel.workspaceGroups.isEmpty == false,
+              remotePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
+            return false
+        }
+
+        switch hostSource {
+        case .existing:
+            return selectedHostID != nil
+        case .new:
+            return newHostName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                && newHostTarget.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        }
+    }
+
+    private func createRemoteWorkspace() {
+        isSaving = true
+        let resolvedName = workspaceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedPath = remotePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedGroupID = selectedGroupID
+
+        Task {
+            do {
+                let hostID: UUID
+                switch hostSource {
+                case .existing:
+                    guard let selectedHostID else {
+                        return
+                    }
+                    hostID = selectedHostID
+                case .new:
+                    let port = try resolveNewHostPort()
+                    let host = try await appModel.createHost(name: newHostName, sshTarget: newHostTarget, port: port)
+                    hostID = host.id
+                }
+
+                let workspace = try await appModel.createRemoteWorkspace(
+                    name: resolvedName.isEmpty ? nil : resolvedName,
+                    hostID: hostID,
+                    remotePath: resolvedPath,
+                    primaryGroupID: resolvedGroupID
+                )
+                onCreated(workspace)
+                isPresented = false
+            } catch {
+                onError(error.localizedDescription)
+            }
+            isSaving = false
+        }
+    }
+
+    private func resolveNewHostPort() throws -> Int? {
+        let trimmedPort = newHostPort.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedPort.isEmpty == false else {
+            return nil
+        }
+        guard let port = Int(trimmedPort) else {
+            throw NSError(domain: "RemoteWorkspaceCreation", code: 1, userInfo: [NSLocalizedDescriptionKey: "Host port must be a number"])
+        }
+        return port
+    }
+
+    @MainActor
+    private func loadSelectedHostDetail() async {
+        guard hostSource == .existing,
+              let selectedHostID,
+              appModel.hostDetail(for: selectedHostID) == nil else {
+            return
+        }
+
+        do {
+            try await appModel.loadHostDetail(hostID: selectedHostID)
+        } catch {
+            onError(error.localizedDescription)
+        }
+    }
+
+    private enum HostSource: Hashable {
+        case existing
+        case new
+    }
 }
 
 struct TerminalViewportLayout {

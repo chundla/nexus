@@ -742,23 +742,23 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             .map(String.init)
 
         let workspaces = try metadataStore.listWorkspaces()
-        let workspaceItems = workspaces.compactMap { workspace -> NavigationItem? in
+        let workspaceItems = try workspaces.compactMap { workspace -> NavigationItem? in
             let item = NavigationItem(
                 target: .workspace(workspace.id),
                 title: workspace.name,
-                subtitle: workspace.folderPath
+                subtitle: try workspaceNavigationSubtitle(workspace)
             )
-            return itemMatchesAllTokens(tokens, fields: [workspace.name.lowercased(), workspace.folderPath.lowercased()]) ? item : nil
+            return try itemMatchesAllTokens(tokens, fields: workspaceSearchFields(workspace)) ? item : nil
         }
 
         let providerItems = try workspaces.flatMap { workspace in
-            ProviderID.allCases.compactMap { providerID -> NavigationItem? in
+            try ProviderID.allCases.compactMap { providerID -> NavigationItem? in
                 let item = NavigationItem(
                     target: .provider(workspaceID: workspace.id, providerID: providerID),
                     title: providerID.displayName,
-                    subtitle: workspace.name
+                    subtitle: try providerNavigationSubtitle(workspace: workspace)
                 )
-                return providerMatchesQuery(tokens: tokens, normalizedQuery: normalizedQuery, providerID: providerID, workspace: workspace) ? item : nil
+                return try providerMatchesQuery(tokens: tokens, normalizedQuery: normalizedQuery, providerID: providerID, workspace: workspace) ? item : nil
             }
         }
 
@@ -770,9 +770,9 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             let item = NavigationItem(
                 target: .session(session.id),
                 title: sessionNavigationTitle(session),
-                subtitle: "\(workspace.name) • \(session.providerID.displayName)"
+                subtitle: try sessionNavigationSubtitle(session: session, workspace: workspace)
             )
-            return sessionMatchesQuery(tokens: tokens, normalizedQuery: normalizedQuery, session: session, workspace: workspace) ? item : nil
+            return try sessionMatchesQuery(tokens: tokens, normalizedQuery: normalizedQuery, session: session, workspace: workspace) ? item : nil
         }
 
         return workspaceItems.sorted(by: navigationItemSort)
@@ -819,6 +819,10 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
 
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: UUID?) throws -> Workspace {
         try metadataStore.createLocalWorkspace(name: name, folderPath: folderPath, primaryGroupID: primaryGroupID)
+    }
+
+    func createRemoteWorkspace(name: String?, hostID: UUID, remotePath: String, primaryGroupID: UUID?) throws -> Workspace {
+        try metadataStore.createRemoteWorkspace(name: name, hostID: hostID, remotePath: remotePath, primaryGroupID: primaryGroupID)
     }
 
     func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) throws -> Session {
@@ -1126,7 +1130,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             return NavigationItem(
                 target: .workspace(workspace.id),
                 title: workspace.name,
-                subtitle: workspace.folderPath
+                subtitle: try workspaceNavigationSubtitle(workspace)
             )
         case .provider:
             guard let workspaceID = target.workspaceID,
@@ -1138,7 +1142,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             return NavigationItem(
                 target: .provider(workspaceID: workspace.id, providerID: providerID),
                 title: providerID.displayName,
-                subtitle: workspace.name
+                subtitle: try providerNavigationSubtitle(workspace: workspace)
             )
         case .session:
             guard let sessionID = target.sessionID,
@@ -1150,7 +1154,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             return NavigationItem(
                 target: .session(session.id),
                 title: sessionNavigationTitle(session),
-                subtitle: "\(workspace.name) • \(session.providerID.displayName)"
+                subtitle: try sessionNavigationSubtitle(session: session, workspace: workspace)
             )
         }
     }
@@ -1163,29 +1167,67 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         return session.name ?? "Session"
     }
 
+    private func workspaceNavigationSubtitle(_ workspace: Workspace) throws -> String {
+        guard workspace.kind == .remote,
+              let hostID = workspace.remoteHostID,
+              let host = try metadataStore.host(id: hostID) else {
+            return workspace.folderPath
+        }
+
+        return "\(host.name) • \(workspace.folderPath)"
+    }
+
+    private func providerNavigationSubtitle(workspace: Workspace) throws -> String {
+        guard workspace.kind == .remote else {
+            return workspace.name
+        }
+
+        return "\(workspace.name) • \(try workspaceNavigationSubtitle(workspace))"
+    }
+
+    private func sessionNavigationSubtitle(session: Session, workspace: Workspace) throws -> String {
+        let base = "\(workspace.name) • \(session.providerID.displayName)"
+        guard workspace.kind == .remote else {
+            return base
+        }
+
+        return "\(base) • \(try workspaceNavigationSubtitle(workspace))"
+    }
+
+    private func workspaceSearchFields(_ workspace: Workspace) throws -> [String] {
+        var fields = [workspace.name.lowercased(), workspace.folderPath.lowercased()]
+        if workspace.kind == .remote,
+           let hostID = workspace.remoteHostID,
+           let host = try metadataStore.host(id: hostID) {
+            fields.append(host.name.lowercased())
+            fields.append(host.sshTarget.lowercased())
+        }
+        return fields
+    }
+
     private func itemMatchesAllTokens(_ tokens: [String], fields: [String]) -> Bool {
         tokens.allSatisfy { token in
             fields.contains { $0.contains(token) }
         }
     }
 
-    private func providerMatchesQuery(tokens: [String], normalizedQuery: String, providerID: ProviderID, workspace: Workspace) -> Bool {
+    private func providerMatchesQuery(tokens: [String], normalizedQuery: String, providerID: ProviderID, workspace: Workspace) throws -> Bool {
         let providerName = providerID.displayName.lowercased()
         if tokens.count == 1 {
             return providerName.contains(normalizedQuery)
         }
 
-        return itemMatchesAllTokens(tokens, fields: [providerName, workspace.name.lowercased()])
+        return try itemMatchesAllTokens(tokens, fields: [providerName] + workspaceSearchFields(workspace))
     }
 
-    private func sessionMatchesQuery(tokens: [String], normalizedQuery: String, session: Session, workspace: Workspace) -> Bool {
+    private func sessionMatchesQuery(tokens: [String], normalizedQuery: String, session: Session, workspace: Workspace) throws -> Bool {
         let sessionName = sessionNavigationTitle(session).lowercased()
         let providerName = session.providerID.displayName.lowercased()
         if tokens.count == 1 {
             return sessionName.contains(normalizedQuery) || providerName.contains(normalizedQuery)
         }
 
-        return itemMatchesAllTokens(tokens, fields: [sessionName, providerName, workspace.name.lowercased()])
+        return try itemMatchesAllTokens(tokens, fields: [sessionName, providerName] + workspaceSearchFields(workspace))
     }
 
     private func navigationItemSort(_ lhs: NavigationItem, _ rhs: NavigationItem) -> Bool {
@@ -2196,6 +2238,20 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
                 try service.createLocalWorkspace(
                     name: name,
                     folderPath: folderPath,
+                    primaryGroupID: try primaryGroupID.map(resolveUUID)
+                )
+            },
+            reply: reply
+        )
+    }
+
+    func createRemoteWorkspace(name: String?, hostID: String, remotePath: String, primaryGroupID: String?, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(
+            with: {
+                try service.createRemoteWorkspace(
+                    name: name,
+                    hostID: resolveUUID(hostID),
+                    remotePath: remotePath,
                     primaryGroupID: try primaryGroupID.map(resolveUUID)
                 )
             },

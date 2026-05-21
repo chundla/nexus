@@ -93,6 +93,19 @@ final class NexusAppModel {
         return workspace
     }
 
+    func createRemoteWorkspace(name: String?, hostID: UUID, remotePath: String, primaryGroupID: UUID?) async throws -> Workspace {
+        let workspace = try await client.createRemoteWorkspace(
+            name: name,
+            hostID: hostID,
+            remotePath: remotePath,
+            primaryGroupID: primaryGroupID
+        )
+        let overview = try await client.getWorkspaceOverview(workspaceID: workspace.id)
+        workspaces.append(workspace)
+        workspaceOverviews[workspace.id] = overview
+        return workspace
+    }
+
     func refreshHosts() async throws {
         syncHosts(try await client.listHosts())
     }
@@ -290,6 +303,23 @@ final class NexusAppModel {
 
     func workspaceOverview(for workspaceID: UUID) -> WorkspaceOverview? {
         workspaceOverviews[workspaceID]
+    }
+
+    func workspaceTargetSummary(for workspace: Workspace) -> String {
+        guard let hostName = workspaceHostName(for: workspace) else {
+            return workspace.folderPath
+        }
+
+        return "\(hostName) • \(workspace.folderPath)"
+    }
+
+    func workspaceHostName(for workspace: Workspace) -> String? {
+        guard workspace.kind == .remote,
+              let hostID = workspace.remoteHostID else {
+            return nil
+        }
+
+        return hosts.first(where: { $0.id == hostID })?.name
     }
 
     func hostDetail(for hostID: UUID) -> HostDetail? {

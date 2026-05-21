@@ -180,6 +180,81 @@ struct nexusTests {
         }
     }
 
+    @Test func remoteWorkspaceCreatesAndPersistsHostTargetOverIPC() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let firstService = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let firstClient = try NexusIPCClient.connect(to: firstService.listenerEndpoint)
+
+        let group = try await firstClient.createWorkspaceGroup(name: "Remote")
+        let host = try await firstClient.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
+        let workspace = try await firstClient.createRemoteWorkspace(
+            name: nil,
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+
+        let secondService = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let secondClient = try NexusIPCClient.connect(to: secondService.listenerEndpoint)
+        let persistedWorkspaces = try await secondClient.listWorkspaces()
+
+        #expect(workspace.name == "api")
+        #expect(workspace.kind == .remote)
+        #expect(workspace.folderPath == "/srv/api")
+        #expect(workspace.remoteHostID == host.id)
+        #expect(workspace.primaryGroupID == group.id)
+        #expect(persistedWorkspaces == [workspace])
+    }
+
+    @Test func remoteWorkspaceTargetUniquenessIsGlobalAndDoesNotBlockFailingHostValidation() async throws {
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
+                "build-box": HostValidationResult(
+                    state: .unavailable,
+                    summary: "SSH connection timed out",
+                    diagnostics: [
+                        HostValidationDiagnostic(
+                            severity: .error,
+                            code: "sshTimedOut",
+                            message: "ssh build-box timed out while validating the Host."
+                        )
+                    ]
+                )
+            ])
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+
+        let primaryGroup = try await client.createWorkspaceGroup(name: "Primary")
+        let secondaryGroup = try await client.createWorkspaceGroup(name: "Secondary")
+        let host = try await client.createHost(name: "Build Server", sshTarget: "build-box", port: nil as Int?)
+        let validation = try await client.validateHost(hostID: host.id)
+
+        let workspace = try await client.createRemoteWorkspace(
+            name: nil as String?,
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: primaryGroup.id
+        )
+
+        #expect(validation.state == .unavailable)
+        #expect(workspace.remoteHostID == host.id)
+
+        await #expect(throws: (any Error).self) {
+            _ = try await client.createRemoteWorkspace(
+                name: "Duplicate API",
+                hostID: host.id,
+                remotePath: "/srv/api",
+                primaryGroupID: secondaryGroup.id
+            )
+        }
+    }
+
     @Test func workspaceOverviewShowsAllSupportedProvidersOverIPC() async throws {
         let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests()
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -398,6 +473,30 @@ struct nexusTests {
         #expect(persistedRecents.map(\.kind).prefix(2).elementsEqual([.session, .workspace]))
         #expect(persistedRecents.first?.subtitle.contains("Recents Workspace") == true)
         #expect(persistedRecents.dropFirst().first?.title == "Recents Workspace")
+    }
+
+    @Test func remoteWorkspaceNavigationUsesHostAndRemotePathMetadataOverIPC() async throws {
+        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests()
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+
+        let group = try await client.createWorkspaceGroup(name: "Remote")
+        let host = try await client.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
+        let workspace = try await client.createRemoteWorkspace(
+            name: "Remote API",
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+
+        try await client.recordNavigation(target: .workspace(workspace.id))
+
+        let recents = try await client.listRecentNavigation(limit: 10)
+        let results = try await client.searchNavigation(query: "build server")
+
+        #expect(recents.first?.title == "Remote API")
+        #expect(recents.first?.subtitle == "Build Server • /srv/api")
+        #expect(results.first?.title == "Remote API")
+        #expect(results.first?.subtitle == "Build Server • /srv/api")
     }
 
     @Test func createNamedSessionAddsAlternateSessionToProviderDetailOverIPC() async throws {
@@ -3555,6 +3654,48 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelCreatesRemoteWorkspaceAndFormatsWorkspaceTargetSummary() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Remote")
+        let host = NexusDomain.Host(id: UUID(), name: "Build Server", sshTarget: "build-box", port: 2222)
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Remote API",
+            kind: .remote,
+            folderPath: "/srv/api",
+            primaryGroupID: group.id,
+            remoteHostID: host.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []),
+            session: session,
+            screen: SessionScreen(session: session, transcript: "Claude ready"),
+            hosts: [host]
+        )
+        let model = NexusAppModel(client: client)
+
+        try await model.refreshHosts()
+
+        let createdWorkspace = try await model.createRemoteWorkspace(
+            name: nil,
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+
+        #expect(createdWorkspace == workspace)
+        #expect(model.workspaces == [workspace])
+        #expect(model.workspaceOverview(for: workspace.id)?.workspace == workspace)
+        #expect(model.workspaceTargetSummary(for: workspace) == "Build Server • /srv/api")
+    }
+
+    @MainActor
     @Test func appModelDeleteHostRemovesCachedHostState() async throws {
         let group = WorkspaceGroup(id: UUID(), name: "Group")
         let workspace = Workspace(
@@ -4946,6 +5087,10 @@ private final class TrackingServiceClient: NexusServiceClient {
         workspaceOverviewValue.workspace
     }
 
+    func createRemoteWorkspace(name: String?, hostID: UUID, remotePath: String, primaryGroupID: UUID?) async throws -> Workspace {
+        workspaceOverviewValue.workspace
+    }
+
     func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) async throws -> Session {
         sessionValue
     }
@@ -5146,6 +5291,10 @@ private struct FailingServiceClient: NexusServiceClient {
     }
 
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: UUID?) async throws -> Workspace {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func createRemoteWorkspace(name: String?, hostID: UUID, remotePath: String, primaryGroupID: UUID?) async throws -> Workspace {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 

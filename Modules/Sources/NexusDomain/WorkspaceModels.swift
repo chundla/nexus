@@ -16,13 +16,15 @@ public struct Workspace: Codable, Equatable, Identifiable, Sendable {
     public let kind: Kind
     public let folderPath: String
     public let primaryGroupID: UUID
+    public let remoteHostID: UUID?
 
-    public init(id: UUID, name: String, kind: Kind, folderPath: String, primaryGroupID: UUID) {
+    public init(id: UUID, name: String, kind: Kind, folderPath: String, primaryGroupID: UUID, remoteHostID: UUID? = nil) {
         self.id = id
         self.name = name
         self.kind = kind
         self.folderPath = folderPath
         self.primaryGroupID = primaryGroupID
+        self.remoteHostID = remoteHostID
     }
 
     public enum Kind: String, Codable, Sendable {
