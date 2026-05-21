@@ -502,10 +502,12 @@ struct ContentView: View {
 
     private func sessionDetail(sessionID: UUID) -> some View {
         let screen = appModel.focusedSessionScreen?.session.id == sessionID ? appModel.focusedSessionScreen : nil
+        let context = appModel.focusedSessionPresentationContext
 
         return VStack(alignment: .leading, spacing: 16) {
             if let screen {
                 let isReady = screen.session.state == .ready
+                let isRemote = context?.isRemote == true
 
                 Text("\(screen.session.providerID.displayName) Session")
                     .font(.title2)
@@ -515,9 +517,40 @@ struct ContentView: View {
                     .font(.subheadline)
                     .foregroundStyle(isReady ? Color.secondary : Color.orange)
 
-                Text("Terminal: \(screen.terminalColumns) × \(screen.terminalRows)")
+                if let context {
+                    VStack(alignment: .leading, spacing: 6) {
+                        LabeledContent("Workspace", value: context.workspace.name)
+                        if context.isRemote {
+                            LabeledContent("Host", value: context.hostName ?? "Unavailable Host")
+                            LabeledContent("Remote Path", value: context.remotePath ?? context.workspace.folderPath)
+                        } else {
+                            LabeledContent("Path", value: context.targetSummary)
+                        }
+                    }
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                }
+
+                HStack {
+                    Text("Terminal: \(screen.terminalColumns) × \(screen.terminalRows)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if isReady {
+                        if isRemote {
+                            Button("Detach") {
+                                detachSession(screen.session)
+                            }
+                        }
+                        Button("Stop Session", role: .destructive) {
+                            stopSession(
+                                screen.session,
+                                workspaceID: screen.session.workspaceID,
+                                providerID: screen.session.providerID
+                            )
+                        }
+                    }
+                }
 
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
@@ -563,6 +596,12 @@ struct ContentView: View {
                 }
                 .onTapGesture {
                     terminalFocusToken = UUID()
+                }
+
+                if isRemote {
+                    Text("Detach leaves the tmux-backed remote runtime alive. Stop Session terminates the remote runtime and keeps the Session record.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 if isReady == false {
@@ -827,6 +866,13 @@ struct ContentView: View {
             } catch {
                 presentedError = PresentedError(message: error.localizedDescription)
             }
+        }
+    }
+
+    private func detachSession(_ session: Session) {
+        Task {
+            _ = await appModel.detachFocusedSession()
+            selection = .provider(session.workspaceID, session.providerID)
         }
     }
 

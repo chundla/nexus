@@ -4154,6 +4154,82 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelFocusedRemoteSessionContextShowsHostAndRemotePath() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let host = NexusDomain.Host(id: UUID(), name: "Build Server", sshTarget: "build-box", port: 2222)
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Remote API",
+            kind: .remote,
+            folderPath: "/srv/api",
+            primaryGroupID: group.id,
+            remoteHostID: host.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []),
+            session: session,
+            screen: SessionScreen(session: session, transcript: "Claude ready"),
+            hosts: [host]
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+        try await model.focusSession(sessionID: session.id)
+
+        let context = try #require(model.focusedSessionPresentationContext)
+        #expect(context.workspace == workspace)
+        #expect(context.host == host)
+        #expect(context.remotePath == "/srv/api")
+        #expect(context.targetSummary == "Build Server • /srv/api")
+    }
+
+    @MainActor
+    @Test func appModelDetachFocusedSessionClearsScreenAndStopsObservation() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []),
+            session: session,
+            screen: SessionScreen(session: session, transcript: "Claude ready")
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+        try await model.focusSession(sessionID: session.id)
+        #expect(model.focusedSessionScreen?.session.id == session.id)
+        #expect(client.observedScreenHandlerCount == 1)
+
+        let detachedSession = await model.detachFocusedSession()
+
+        #expect(detachedSession?.id == session.id)
+        #expect(model.focusedSessionScreen == nil)
+        #expect(client.observedScreenHandlerCount == 0)
+
+        await client.emitObservedScreen(SessionScreen(session: session, transcript: "Detached update"))
+        #expect(model.focusedSessionScreen == nil)
+    }
+
+    @MainActor
     @Test func appModelDeleteHostRemovesCachedHostState() async throws {
         let group = WorkspaceGroup(id: UUID(), name: "Group")
         let workspace = Workspace(
@@ -5389,6 +5465,9 @@ private final class TrackingServiceClient: NexusServiceClient {
 
     var workspaceOverviewRequestCount = 0
     var recordedNavigationTargets: [NavigationTarget] = []
+    var observedScreenHandlerCount: Int {
+        observedScreenHandlers.count
+    }
 
     init(
         workspaceOverview: WorkspaceOverview,

@@ -4,6 +4,27 @@ import NexusIPC
 import NexusService
 import Observation
 
+struct SessionPresentationContext: Equatable {
+    let workspace: Workspace
+    let host: NexusDomain.Host?
+
+    var isRemote: Bool {
+        workspace.kind == .remote
+    }
+
+    var hostName: String? {
+        host?.name
+    }
+
+    var remotePath: String? {
+        isRemote ? workspace.folderPath : nil
+    }
+
+    var targetSummary: String {
+        host.map { "\($0.name) • \(workspace.folderPath)" } ?? workspace.folderPath
+    }
+}
+
 @MainActor
 @Observable
 final class NexusAppModel {
@@ -232,6 +253,13 @@ final class NexusAppModel {
         }
     }
 
+    func detachFocusedSession() async -> Session? {
+        let session = focusedSessionScreen?.session
+        await stopFocusingSession()
+        focusedSessionScreen = nil
+        return session
+    }
+
     func loadSessionScreen(sessionID: UUID) async throws {
         let screen = try await client.getSessionScreen(sessionID: sessionID)
         try await applyFocusedSessionScreen(screen)
@@ -336,6 +364,25 @@ final class NexusAppModel {
 
     func providerDetail(for workspaceID: UUID, providerID: ProviderID) -> ProviderDetail? {
         providerDetails[ProviderDetailKey(workspaceID: workspaceID, providerID: providerID)]
+    }
+
+    var focusedSessionPresentationContext: SessionPresentationContext? {
+        guard let session = focusedSessionScreen?.session else {
+            return nil
+        }
+
+        return sessionPresentationContext(for: session)
+    }
+
+    func sessionPresentationContext(for session: Session) -> SessionPresentationContext? {
+        guard let workspace = workspaces.first(where: { $0.id == session.workspaceID }) else {
+            return nil
+        }
+
+        let host = workspace.remoteHostID.flatMap { hostID in
+            hosts.first(where: { $0.id == hostID })
+        }
+        return SessionPresentationContext(workspace: workspace, host: host)
     }
 
     private func refreshWorkspaceOverview(for workspaceID: UUID) async throws {
