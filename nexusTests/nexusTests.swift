@@ -4442,6 +4442,32 @@ struct nexusTests {
             _ = try await secondClient.getHostDetail(hostID: host.id)
         }
     }
+
+    @Test func hostDeletionShowsBlockingRemoteWorkspaceDependenciesOverIPC() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+
+        let storeURL = rootURL.appendingPathComponent("Nexus.sqlite", isDirectory: false)
+        FileManager.default.createFile(atPath: storeURL.path, contents: Data())
+        let store = try NexusMetadataStore(storeURL: storeURL)
+        let group = try store.createWorkspaceGroup(name: "Remote")
+        let host = try store.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
+        _ = try store.createRemoteWorkspace(name: "Remote API", hostID: host.id, remotePath: "/srv/api", primaryGroupID: group.id)
+
+        let service = try NexusService.bootstrapForTests(rootURL: rootURL)
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+
+        do {
+            _ = try await client.deleteHost(hostID: host.id)
+            Issue.record("Expected Host deletion to be blocked by a Remote Workspace reference")
+        } catch {
+            #expect(error.localizedDescription == "Host is still referenced by Remote Workspaces: Remote API (/srv/api)")
+        }
+
+        #expect(try await client.listHosts() == [host])
+    }
 }
 
 private func waitForSessionScreen(

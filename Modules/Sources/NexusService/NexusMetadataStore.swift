@@ -48,6 +48,15 @@ final class NexusMetadataStore {
                 port INTEGER
             );
 
+            CREATE TABLE IF NOT EXISTS remote_workspace_targets (
+                workspace_id TEXT PRIMARY KEY NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                host_id TEXT NOT NULL REFERENCES hosts(id),
+                remote_path TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_remote_workspace_targets_host_id
+            ON remote_workspace_targets(host_id);
+
             CREATE TABLE IF NOT EXISTS host_validation_snapshots (
                 host_id TEXT PRIMARY KEY NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
                 state TEXT NOT NULL,
@@ -243,6 +252,11 @@ final class NexusMetadataStore {
 
     func deleteHost(id: UUID) throws -> Bool {
         try withLock {
+            let remoteWorkspaceReferences = try remoteWorkspaceReferenceLabelsWithoutLock(hostID: id)
+            guard remoteWorkspaceReferences.isEmpty else {
+                throw NexusMetadataStoreError.hostDeletionBlockedByRemoteWorkspaces(remoteWorkspaceReferences)
+            }
+
             let statement = try prepare("DELETE FROM hosts WHERE id = ?;")
             defer { sqlite3_finalize(statement) }
 
@@ -407,6 +421,53 @@ final class NexusMetadataStore {
             try bind(workspace.folderPath, at: 4, in: statement)
             try bind(workspace.primaryGroupID.uuidString, at: 5, in: statement)
             try stepDone(statement)
+            return workspace
+        }
+    }
+
+    func createRemoteWorkspace(name: String?, hostID: UUID, remotePath: String, primaryGroupID: UUID?) throws -> Workspace {
+        let resolvedRemotePath = remotePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard resolvedRemotePath.isEmpty == false, resolvedRemotePath.hasPrefix("/") else {
+            throw NexusMetadataStoreError.invalidRemoteWorkspacePath
+        }
+
+        return try withLock {
+            guard try hostExistsWithoutLock(id: hostID) else {
+                throw NexusMetadataStoreError.hostNotFound
+            }
+
+            let groups = try listWorkspaceGroupsWithoutLock()
+            let resolvedPrimaryGroupID = try resolvePrimaryGroupID(primaryGroupID, groups: groups)
+            let resolvedName = resolveWorkspaceName(name: name, folderPath: resolvedRemotePath)
+            let workspace = Workspace(
+                id: UUID(),
+                name: resolvedName,
+                kind: .remote,
+                folderPath: resolvedRemotePath,
+                primaryGroupID: resolvedPrimaryGroupID
+            )
+
+            let workspaceStatement = try prepare(
+                "INSERT INTO workspaces (id, name, kind, folder_path, primary_group_id) VALUES (?, ?, ?, ?, ?);"
+            )
+            defer { sqlite3_finalize(workspaceStatement) }
+
+            try bind(workspace.id.uuidString, at: 1, in: workspaceStatement)
+            try bind(workspace.name, at: 2, in: workspaceStatement)
+            try bind(workspace.kind.rawValue, at: 3, in: workspaceStatement)
+            try bind(workspace.folderPath, at: 4, in: workspaceStatement)
+            try bind(workspace.primaryGroupID.uuidString, at: 5, in: workspaceStatement)
+            try stepDone(workspaceStatement)
+
+            let targetStatement = try prepare(
+                "INSERT INTO remote_workspace_targets (workspace_id, host_id, remote_path) VALUES (?, ?, ?);"
+            )
+            defer { sqlite3_finalize(targetStatement) }
+
+            try bind(workspace.id.uuidString, at: 1, in: targetStatement)
+            try bind(hostID.uuidString, at: 2, in: targetStatement)
+            try bind(resolvedRemotePath, at: 3, in: targetStatement)
+            try stepDone(targetStatement)
             return workspace
         }
     }
@@ -624,6 +685,37 @@ final class NexusMetadataStore {
 
         let candidate = URL(fileURLWithPath: folderPath).lastPathComponent
         return candidate.isEmpty ? folderPath : candidate
+    }
+
+    private func hostExistsWithoutLock(id: UUID) throws -> Bool {
+        let statement = try prepare("SELECT 1 FROM hosts WHERE id = ? LIMIT 1;")
+        defer { sqlite3_finalize(statement) }
+
+        try bind(id.uuidString, at: 1, in: statement)
+        return sqlite3_step(statement) == SQLITE_ROW
+    }
+
+    private func remoteWorkspaceReferenceLabelsWithoutLock(hostID: UUID) throws -> [String] {
+        let statement = try prepare(
+            """
+            SELECT workspaces.name, remote_workspace_targets.remote_path
+            FROM remote_workspace_targets
+            INNER JOIN workspaces ON workspaces.id = remote_workspace_targets.workspace_id
+            WHERE remote_workspace_targets.host_id = ?
+            ORDER BY workspaces.rowid ASC;
+            """
+        )
+        defer { sqlite3_finalize(statement) }
+
+        try bind(hostID.uuidString, at: 1, in: statement)
+
+        var labels: [String] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            let name = try readString(column: 0, from: statement)
+            let remotePath = try readString(column: 1, from: statement)
+            labels.append("\(name) (\(remotePath))")
+        }
+        return labels
     }
 
     func updateSessionTerminalSize(id: UUID, columns: Int, rows: Int) throws {
@@ -972,12 +1064,14 @@ enum NexusMetadataStoreError: LocalizedError {
     case invalidHostName
     case invalidHostTarget
     case invalidHostPort
+    case invalidRemoteWorkspacePath
     case invalidSessionName
     case workspaceGroupRequired
     case primaryWorkspaceGroupSelectionRequired
     case workspaceGroupNotFound
     case workspaceNotFound
     case hostNotFound
+    case hostDeletionBlockedByRemoteWorkspaces([String])
     case sessionNotFound
     case providerNotSupported
     case sessionNotReady
@@ -997,6 +1091,8 @@ enum NexusMetadataStoreError: LocalizedError {
             "SSH target or alias is required"
         case .invalidHostPort:
             "Host port must be between 1 and 65535"
+        case .invalidRemoteWorkspacePath:
+            "Remote Workspace path must be absolute"
         case .invalidSessionName:
             "Session name is required"
         case .workspaceGroupRequired:
@@ -1009,6 +1105,8 @@ enum NexusMetadataStoreError: LocalizedError {
             "Workspace not found"
         case .hostNotFound:
             "Host not found"
+        case .hostDeletionBlockedByRemoteWorkspaces(let labels):
+            "Host is still referenced by Remote Workspaces: \(labels.joined(separator: ", "))"
         case .sessionNotFound:
             "Session not found"
         case .providerNotSupported:

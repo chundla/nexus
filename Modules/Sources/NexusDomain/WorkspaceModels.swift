@@ -27,6 +27,7 @@ public struct Workspace: Codable, Equatable, Identifiable, Sendable {
 
     public enum Kind: String, Codable, Sendable {
         case local
+        case remote
     }
 }
 
