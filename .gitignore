@@ -1,2 +1,17 @@
+# Xcode / Swift user-local state
 *.xcuserdatad/
+*.xcuserstate
+DerivedData/
+
+# SwiftPM / local build products
 .swiftpm/
+.build/
+
+# macOS Finder metadata
+.DS_Store
+
+# Local secrets / machine-specific config
+.env
+.env.*
+!.env.example
+!.env.sample
