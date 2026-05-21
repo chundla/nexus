@@ -24,6 +24,7 @@ struct ProviderCommandResult: Equatable {
 }
 
 struct RemoteWorkspaceHealthContext {
+    let host: NexusDomain.Host
     let hostValidation: HostValidationSnapshot?
     let workspaceAvailability: WorkspaceAvailabilitySnapshot?
 }
@@ -61,7 +62,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
 
     func healthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext? = nil) -> ProviderHealthSummary {
         if workspace.kind == .remote {
-            return remoteHealthSummary(for: providerID, remoteContext: remoteContext)
+            return remoteHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
         }
 
         switch providerID {
@@ -75,7 +76,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
         }
     }
 
-    private func remoteHealthSummary(for providerID: ProviderID, remoteContext: RemoteWorkspaceHealthContext?) -> ProviderHealthSummary {
+    private func remoteHealthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) -> ProviderHealthSummary {
         let providerName = Provider(id: providerID).displayName
 
         if let blockedByHostValidation = blockedByHostValidation(providerName: providerName, remoteContext: remoteContext) {
@@ -86,17 +87,36 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
             return blockedByWorkspaceAvailability
         }
 
-        return ProviderHealthSummary(
-            state: .notChecked,
-            summary: "Remote \(providerName) health checks are not implemented yet",
-            diagnostics: [
-                ProviderHealthDiagnostic(
-                    severity: .warning,
-                    code: "remoteHealthNotImplemented",
-                    message: "Nexus does not yet evaluate \(providerName) health for Remote Workspaces over SSH."
-                )
-            ]
-        )
+        guard let remoteContext else {
+            return ProviderHealthSummary(
+                state: .blocked,
+                summary: "Provider Health is blocked by Workspace Availability",
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .warning,
+                        code: "workspaceAvailabilityBlocked",
+                        message: "Provider Health for \(providerName) is blocked until Workspace Availability is checked."
+                    )
+                ]
+            )
+        }
+
+        switch providerID {
+        case .claude:
+            return remoteClaudeHealthSummary(for: workspace, host: remoteContext.host)
+        case .codex, .ibmBob, .pi:
+            return ProviderHealthSummary(
+                state: .notChecked,
+                summary: "Remote \(providerName) execution is not implemented yet",
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .warning,
+                        code: "remoteExecutionNotImplemented",
+                        message: "Nexus shows \(providerName) on Remote Workspaces, but remote execution for this Provider is not implemented in this milestone."
+                    )
+                ]
+            )
+        }
     }
 
     private func blockedByHostValidation(providerName: String, remoteContext: RemoteWorkspaceHealthContext?) -> ProviderHealthSummary? {
@@ -161,6 +181,69 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
                 )
             ]
         )
+    }
+
+    private func remoteClaudeHealthSummary(for workspace: Workspace, host: NexusDomain.Host) -> ProviderHealthSummary {
+        do {
+            let result = try commandRunner.run(
+                executable: "/usr/bin/ssh",
+                arguments: remoteClaudeHealthProbeArguments(for: workspace, host: host),
+                currentDirectoryURL: nil
+            )
+
+            guard result.exitStatus == 0 else {
+                let detail = firstDiagnosticLine(stdout: result.stdout, stderr: result.stderr)
+                let classification = classifyRemoteClaudeFailure(detail: detail)
+                return ProviderHealthSummary(
+                    state: classification.state,
+                    summary: classification.summary,
+                    launchability: .notLaunchable,
+                    diagnostics: [
+                        ProviderHealthDiagnostic(
+                            severity: .error,
+                            code: classification.code,
+                            message: detail.isEmpty ? classification.summary : detail
+                        )
+                    ]
+                )
+            }
+
+            let outputLines = result.stdout
+                .split(whereSeparator: \.isNewline)
+                .map(String.init)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { $0.isEmpty == false }
+            let executable = outputLines.first
+            let version = outputLines.dropFirst().first
+
+            return ProviderHealthSummary(
+                state: .available,
+                summary: version.map { "Claude \($0) is available" } ?? "Claude is available",
+                resolvedExecutable: executable,
+                version: version,
+                launchability: .launchable,
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .info,
+                        code: "remoteProbe",
+                        message: "Validated remote Claude launch prerequisites on \(host.name) for \(workspace.folderPath)."
+                    )
+                ]
+            )
+        } catch {
+            return ProviderHealthSummary(
+                state: .unavailable,
+                summary: "Remote Claude health check failed before the SSH probe completed",
+                launchability: .notLaunchable,
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .error,
+                        code: "sshLaunchFailed",
+                        message: error.localizedDescription
+                    )
+                ]
+            )
+        }
     }
 
     private func claudeHealthSummary(for workspace: Workspace) -> ProviderHealthSummary {
@@ -292,19 +375,67 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
         }
     }
 
-    private func launchProbeFailureMessage(stdout: String, stderr: String) -> String {
-        let detail = [stderr, stdout]
+    private func remoteClaudeHealthProbeArguments(for workspace: Workspace, host: NexusDomain.Host) -> [String] {
+        var arguments = [
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=5"
+        ]
+        if let port = host.port {
+            arguments += ["-p", String(port)]
+        }
+        arguments += [host.sshTarget, remoteClaudeHealthProbeScript(for: workspace)]
+        return arguments
+    }
+
+    private func remoteClaudeHealthProbeScript(for workspace: Workspace) -> String {
+        "cd \(shellQuoted(workspace.folderPath)) && command -v tmux >/dev/null 2>&1 && CLAUDE_PATH=\"$(command -v claude)\" && printf '%s\\n' \"$CLAUDE_PATH\" && claude --version && claude --help >/dev/null 2>&1"
+    }
+
+    private func firstDiagnosticLine(stdout: String, stderr: String) -> String {
+        [stderr, stdout]
             .joined(separator: "\n")
             .split(whereSeparator: \.isNewline)
             .map(String.init)
-            .first?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first(where: { $0.isEmpty == false }) ?? ""
+    }
 
-        if let detail, detail.isEmpty == false {
+    private func classifyRemoteClaudeFailure(detail: String) -> (state: ProviderHealthSummary.State, summary: String, code: String) {
+        let normalized = detail.lowercased()
+
+        if normalized.contains("command not found") || normalized.contains("no such file") {
+            return (.unavailable, "Claude is unavailable on the Remote Workspace", "remoteExecutableNotFound")
+        }
+
+        if normalized.contains("permission denied")
+            || normalized.contains("bad configuration option")
+            || normalized.contains("tmux") {
+            return (.misconfigured, "Remote Claude launch prerequisites are misconfigured", "remoteLaunchMisconfigured")
+        }
+
+        if normalized.contains("connection timed out")
+            || normalized.contains("operation timed out")
+            || normalized.contains("connection refused")
+            || normalized.contains("network is unreachable")
+            || normalized.contains("no route to host") {
+            return (.unavailable, "Remote Claude is currently unavailable", "remoteUnavailable")
+        }
+
+        return (.misconfigured, "Claude is installed but failed the remote launch probe", "remoteLaunchProbeFailed")
+    }
+
+    private func launchProbeFailureMessage(stdout: String, stderr: String) -> String {
+        let detail = firstDiagnosticLine(stdout: stdout, stderr: stderr)
+
+        if detail.isEmpty == false {
             return detail
         }
 
         return "Claude could not complete a basic launch probe."
+    }
+
+    private func shellQuoted(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
 }
 

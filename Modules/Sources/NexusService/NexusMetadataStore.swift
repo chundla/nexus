@@ -76,6 +76,19 @@ final class NexusMetadataStore {
                 diagnostics_json TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS provider_health_snapshots (
+                workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                provider_id TEXT NOT NULL,
+                state TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                resolved_executable TEXT,
+                version TEXT,
+                launchability TEXT NOT NULL,
+                checked_at INTEGER NOT NULL,
+                diagnostics_json TEXT NOT NULL,
+                PRIMARY KEY (workspace_id, provider_id)
+            );
+
             CREATE TABLE IF NOT EXISTS sessions (
                 id TEXT PRIMARY KEY NOT NULL,
                 workspace_id TEXT NOT NULL REFERENCES workspaces(id),
@@ -395,6 +408,65 @@ final class NexusMetadataStore {
             try bind(snapshot.summary, at: 3, in: statement)
             try bind(checkedAtMilliseconds, at: 4, in: statement)
             try bind(try encodeWorkspaceAvailabilityDiagnostics(snapshot.diagnostics), at: 5, in: statement)
+            try stepDone(statement)
+            return snapshot
+        }
+    }
+
+    func providerHealth(workspaceID: UUID, providerID: ProviderID) throws -> ProviderHealthSummary? {
+        try withLock {
+            let statement = try prepare(
+                "SELECT state, summary, resolved_executable, version, launchability, checked_at, diagnostics_json FROM provider_health_snapshots WHERE workspace_id = ? AND provider_id = ? LIMIT 1;"
+            )
+            defer { sqlite3_finalize(statement) }
+
+            try bind(workspaceID.uuidString, at: 1, in: statement)
+            try bind(providerID.rawValue, at: 2, in: statement)
+            guard sqlite3_step(statement) == SQLITE_ROW else {
+                return nil
+            }
+            return try readProviderHealthSnapshot(from: statement)
+        }
+    }
+
+    func saveProviderHealth(workspaceID: UUID, providerID: ProviderID, summary: ProviderHealthSummary, checkedAt: Date) throws -> ProviderHealthSummary {
+        try withLock {
+            let checkedAtMilliseconds = Int64(checkedAt.timeIntervalSince1970 * 1_000)
+            let normalizedCheckedAt = Date(timeIntervalSince1970: Double(checkedAtMilliseconds) / 1_000)
+            let snapshot = ProviderHealthSummary(
+                state: summary.state,
+                summary: summary.summary,
+                resolvedExecutable: summary.resolvedExecutable,
+                version: summary.version,
+                launchability: summary.launchability,
+                checkedAt: normalizedCheckedAt,
+                diagnostics: summary.diagnostics
+            )
+            let statement = try prepare(
+                """
+                INSERT INTO provider_health_snapshots (workspace_id, provider_id, state, summary, resolved_executable, version, launchability, checked_at, diagnostics_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(workspace_id, provider_id) DO UPDATE SET
+                    state = excluded.state,
+                    summary = excluded.summary,
+                    resolved_executable = excluded.resolved_executable,
+                    version = excluded.version,
+                    launchability = excluded.launchability,
+                    checked_at = excluded.checked_at,
+                    diagnostics_json = excluded.diagnostics_json;
+                """
+            )
+            defer { sqlite3_finalize(statement) }
+
+            try bind(workspaceID.uuidString, at: 1, in: statement)
+            try bind(providerID.rawValue, at: 2, in: statement)
+            try bind(snapshot.state.rawValue, at: 3, in: statement)
+            try bind(snapshot.summary, at: 4, in: statement)
+            try bind(snapshot.resolvedExecutable, at: 5, in: statement)
+            try bind(snapshot.version, at: 6, in: statement)
+            try bind(snapshot.launchability.rawValue, at: 7, in: statement)
+            try bind(checkedAtMilliseconds, at: 8, in: statement)
+            try bind(try encodeProviderHealthDiagnostics(snapshot.diagnostics), at: 9, in: statement)
             try stepDone(statement)
             return snapshot
         }
@@ -1098,6 +1170,31 @@ final class NexusMetadataStore {
         return WorkspaceAvailabilitySnapshot(workspaceID: workspaceID, state: state, summary: summary, checkedAt: checkedAt, diagnostics: diagnostics)
     }
 
+    private func readProviderHealthSnapshot(from statement: OpaquePointer?) throws -> ProviderHealthSummary {
+        let stateRawValue = try readString(column: 0, from: statement)
+        guard let state = ProviderHealthSummary.State(rawValue: stateRawValue) else {
+            throw NexusMetadataStoreError.sqlite("Unknown provider health state: \(stateRawValue)")
+        }
+        let summary = try readString(column: 1, from: statement)
+        let resolvedExecutable = readOptionalString(column: 2, from: statement)
+        let version = readOptionalString(column: 3, from: statement)
+        let launchabilityRawValue = try readString(column: 4, from: statement)
+        guard let launchability = ProviderHealthSummary.Launchability(rawValue: launchabilityRawValue) else {
+            throw NexusMetadataStoreError.sqlite("Unknown provider launchability: \(launchabilityRawValue)")
+        }
+        let checkedAt = Date(timeIntervalSince1970: Double(sqlite3_column_int64(statement, 5)) / 1_000)
+        let diagnostics = try decodeProviderHealthDiagnostics(from: readString(column: 6, from: statement))
+        return ProviderHealthSummary(
+            state: state,
+            summary: summary,
+            resolvedExecutable: resolvedExecutable,
+            version: version,
+            launchability: launchability,
+            checkedAt: checkedAt,
+            diagnostics: diagnostics
+        )
+    }
+
     private func readLaunchSnapshot(from statement: OpaquePointer?) throws -> LaunchSnapshot {
         let sessionID = try readUUID(column: 0, from: statement)
         let workspaceID = try readUUID(column: 1, from: statement)
@@ -1167,6 +1264,21 @@ final class NexusMetadataStore {
             throw NexusMetadataStoreError.sqlite("Could not decode workspace availability diagnostics")
         }
         return try JSONDecoder().decode([WorkspaceAvailabilityDiagnostic].self, from: data)
+    }
+
+    private func encodeProviderHealthDiagnostics(_ diagnostics: [ProviderHealthDiagnostic]) throws -> String {
+        let data = try JSONEncoder().encode(diagnostics)
+        guard let json = String(data: data, encoding: .utf8) else {
+            throw NexusMetadataStoreError.sqlite("Could not encode provider health diagnostics")
+        }
+        return json
+    }
+
+    private func decodeProviderHealthDiagnostics(from json: String) throws -> [ProviderHealthDiagnostic] {
+        guard let data = json.data(using: .utf8) else {
+            throw NexusMetadataStoreError.sqlite("Could not decode provider health diagnostics")
+        }
+        return try JSONDecoder().decode([ProviderHealthDiagnostic].self, from: data)
     }
 
     private func navigationTargetKey(_ target: NavigationTarget) -> String {

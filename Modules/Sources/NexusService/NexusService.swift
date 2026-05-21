@@ -797,6 +797,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         let remoteTarget = try remoteWorkspaceTargetOverview(for: workspace)
         let remoteContext = remoteTarget.map {
             RemoteWorkspaceHealthContext(
+                host: $0.host,
                 hostValidation: $0.hostValidation,
                 workspaceAvailability: $0.workspaceAvailability
             )
@@ -805,7 +806,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         let providerCards = try ProviderID.allCases.map { providerID in
             WorkspaceProviderCard(
                 provider: Provider(id: providerID),
-                health: providerHealthEvaluator.healthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext),
+                health: try providerHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext),
                 defaultSession: try defaultSessionSummary(for: workspace, providerID: providerID),
                 alternateSessionCount: try metadataStore.listSessions(workspaceID: workspaceID, providerID: providerID)
                     .filter { $0.isDefault == false }
@@ -824,6 +825,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         let remoteTarget = try remoteWorkspaceTargetOverview(for: workspace)
         let remoteContext = remoteTarget.map {
             RemoteWorkspaceHealthContext(
+                host: $0.host,
                 hostValidation: $0.hostValidation,
                 workspaceAvailability: $0.workspaceAvailability
             )
@@ -834,7 +836,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         return ProviderDetail(
             workspace: workspace,
             provider: Provider(id: providerID),
-            health: providerHealthEvaluator.healthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext),
+            health: try providerHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext),
             defaultSession: sessions.first(where: \.isDefault),
             alternateSessions: sessions.filter { $0.isDefault == false && $0.state != .failed },
             failedSessions: sessions.filter { $0.isDefault == false && $0.state == .failed }
@@ -866,6 +868,47 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         )
     }
 
+    private func providerHealthSummary(
+        for providerID: ProviderID,
+        workspace: Workspace,
+        remoteContext: RemoteWorkspaceHealthContext?
+    ) throws -> ProviderHealthSummary {
+        guard workspace.kind == .remote, providerID == .claude else {
+            return providerHealthEvaluator.healthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
+        }
+
+        if let snapshot = try metadataStore.providerHealth(workspaceID: workspace.id, providerID: providerID),
+           shouldReuseRemoteProviderHealthSnapshot(snapshot, remoteContext: remoteContext) {
+            return snapshot
+        }
+
+        let evaluated = providerHealthEvaluator.healthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
+        return try metadataStore.saveProviderHealth(
+            workspaceID: workspace.id,
+            providerID: providerID,
+            summary: evaluated,
+            checkedAt: Date()
+        )
+    }
+
+    private func shouldReuseRemoteProviderHealthSnapshot(
+        _ snapshot: ProviderHealthSummary,
+        remoteContext: RemoteWorkspaceHealthContext?
+    ) -> Bool {
+        guard snapshot.checkedAt != nil else {
+            return false
+        }
+
+        let hostValidationAvailable = remoteContext?.hostValidation?.state == .available
+        let workspaceAvailabilityAvailable = remoteContext?.workspaceAvailability?.state == .available
+
+        if snapshot.state == .blocked {
+            return hostValidationAvailable == false || workspaceAvailabilityAvailable == false
+        }
+
+        return hostValidationAvailable && workspaceAvailabilityAvailable
+    }
+
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: UUID?) throws -> Workspace {
         try metadataStore.createLocalWorkspace(name: name, folderPath: folderPath, primaryGroupID: primaryGroupID)
     }
@@ -893,11 +936,12 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
 
         let remoteContext = try remoteWorkspaceTargetOverview(for: workspace).map {
             RemoteWorkspaceHealthContext(
+                host: $0.host,
                 hostValidation: $0.hostValidation,
                 workspaceAvailability: $0.workspaceAvailability
             )
         }
-        let health = providerHealthEvaluator.healthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
+        let health = try providerHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
         guard health.launchability == .launchable, let executable = health.resolvedExecutable else {
             let failureMessage = health.diagnostics.first(where: { $0.severity == .error })?.message ?? health.summary
             if let session = try metadataStore.defaultSession(workspaceID: workspaceID, providerID: providerID) {
@@ -953,11 +997,12 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         let resolvedName = resolveNamedSessionName(name, existingSessions: existingSessions)
         let remoteContext = try remoteWorkspaceTargetOverview(for: workspace).map {
             RemoteWorkspaceHealthContext(
+                host: $0.host,
                 hostValidation: $0.hostValidation,
                 workspaceAvailability: $0.workspaceAvailability
             )
         }
-        let health = providerHealthEvaluator.healthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
+        let health = try providerHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
 
         guard health.launchability == .launchable, let executable = health.resolvedExecutable else {
             let failureMessage = health.diagnostics.first(where: { $0.severity == .error })?.message ?? health.summary

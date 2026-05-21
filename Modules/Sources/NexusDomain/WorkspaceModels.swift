@@ -217,6 +217,7 @@ public struct ProviderHealthSummary: Codable, Equatable, Sendable {
     public let resolvedExecutable: String?
     public let version: String?
     public let launchability: Launchability
+    public let checkedAt: Date?
     public let diagnostics: [ProviderHealthDiagnostic]
 
     public init(
@@ -225,6 +226,7 @@ public struct ProviderHealthSummary: Codable, Equatable, Sendable {
         resolvedExecutable: String? = nil,
         version: String? = nil,
         launchability: Launchability = .notChecked,
+        checkedAt: Date? = nil,
         diagnostics: [ProviderHealthDiagnostic] = []
     ) {
         self.state = state
@@ -232,6 +234,7 @@ public struct ProviderHealthSummary: Codable, Equatable, Sendable {
         self.resolvedExecutable = resolvedExecutable
         self.version = version
         self.launchability = launchability
+        self.checkedAt = checkedAt
         self.diagnostics = diagnostics
     }
 
