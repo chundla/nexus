@@ -8,6 +8,9 @@ protocol RemotePairingClient {
     func completePairing(host: String, port: Int, pairingCode: String, deviceName: String) async throws -> PairedMac
     func fetchCatalog(for pairedMac: PairedMac) async throws -> RemoteWorkspaceCatalog
     func fetchProviderDetail(for pairedMac: PairedMac, workspaceID: UUID, providerID: ProviderID) async throws -> ProviderDetail
+    func launchOrResumeDefaultSession(for pairedMac: PairedMac, workspaceID: UUID, providerID: ProviderID) async throws -> Session
+    func launchOrResumeSession(for pairedMac: PairedMac, sessionID: UUID) async throws -> Session
+    func stopSession(for pairedMac: PairedMac, sessionID: UUID) async throws -> Session
     func fetchSessionScreen(for pairedMac: PairedMac, sessionID: UUID) async throws -> SessionScreen
     func takeSessionControl(for pairedMac: PairedMac, sessionID: UUID, columns: Int, rows: Int) async throws -> SessionScreen
     func releaseSessionControl(for pairedMac: PairedMac, sessionID: UUID) async throws -> SessionScreen
@@ -201,6 +204,48 @@ final class RemoteClientPairingModel {
             providerDetails[key] = nil
             providerDetailErrorMessages[key] = error.localizedDescription
         }
+    }
+
+    func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) async throws -> Session {
+        guard let pairedMac = activePairedMac else {
+            throw RemoteClientPairingModelError.pairedMacNotFound
+        }
+
+        let session = try await client.launchOrResumeDefaultSession(
+            for: pairedMac,
+            workspaceID: workspaceID,
+            providerID: providerID
+        )
+        await focusRemoteSession(sessionID: session.id)
+        await refreshActivePairedMacCatalog()
+        await loadProviderDetail(workspaceID: workspaceID, providerID: providerID)
+        return session
+    }
+
+    func launchOrResumeSession(sessionID: UUID, workspaceID: UUID, providerID: ProviderID) async throws -> Session {
+        guard let pairedMac = activePairedMac else {
+            throw RemoteClientPairingModelError.pairedMacNotFound
+        }
+
+        let session = try await client.launchOrResumeSession(for: pairedMac, sessionID: sessionID)
+        await focusRemoteSession(sessionID: session.id)
+        await refreshActivePairedMacCatalog()
+        await loadProviderDetail(workspaceID: workspaceID, providerID: providerID)
+        return session
+    }
+
+    func stopSession(sessionID: UUID, workspaceID: UUID, providerID: ProviderID) async throws -> Session {
+        guard let pairedMac = activePairedMac else {
+            throw RemoteClientPairingModelError.pairedMacNotFound
+        }
+
+        let session = try await client.stopSession(for: pairedMac, sessionID: sessionID)
+        if focusedSessionID == sessionID {
+            await refreshFocusedSessionScreen()
+        }
+        await refreshActivePairedMacCatalog()
+        await loadProviderDetail(workspaceID: workspaceID, providerID: providerID)
+        return session
     }
 
     func focusRemoteSession(sessionID: UUID) async {

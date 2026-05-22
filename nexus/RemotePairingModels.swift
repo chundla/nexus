@@ -105,6 +105,20 @@ struct RemotePairingHTTPClient {
         return try JSONDecoder().decode(ProviderDetail.self, from: data)
     }
 
+    func launchOrResumeDefaultSession(
+        for pairedMac: PairedMac,
+        workspaceID: UUID,
+        providerID: ProviderID
+    ) async throws -> Session {
+        var request = try authenticatedRequest(
+            for: pairedMac,
+            path: "/remote-client/workspaces/\(workspaceID.uuidString)/providers/\(providerID.rawValue)/default-session/launch"
+        )
+        request.httpMethod = "POST"
+        let data = try await send(request)
+        return try JSONDecoder().decode(Session.self, from: data)
+    }
+
     func fetchSessionScreen(for pairedMac: PairedMac, sessionID: UUID) async throws -> SessionScreen {
         let request = try authenticatedRequest(
             for: pairedMac,
@@ -112,6 +126,26 @@ struct RemotePairingHTTPClient {
         )
         let data = try await send(request)
         return try JSONDecoder().decode(SessionScreen.self, from: data)
+    }
+
+    func launchOrResumeSession(for pairedMac: PairedMac, sessionID: UUID) async throws -> Session {
+        var request = try authenticatedRequest(
+            for: pairedMac,
+            path: "/remote-client/sessions/\(sessionID.uuidString)/launch"
+        )
+        request.httpMethod = "POST"
+        let data = try await send(request)
+        return try JSONDecoder().decode(Session.self, from: data)
+    }
+
+    func stopSession(for pairedMac: PairedMac, sessionID: UUID) async throws -> Session {
+        var request = try authenticatedRequest(
+            for: pairedMac,
+            path: "/remote-client/sessions/\(sessionID.uuidString)/stop"
+        )
+        request.httpMethod = "POST"
+        let data = try await send(request)
+        return try JSONDecoder().decode(Session.self, from: data)
     }
 
     func takeSessionControl(for pairedMac: PairedMac, sessionID: UUID, columns: Int, rows: Int) async throws -> SessionScreen {

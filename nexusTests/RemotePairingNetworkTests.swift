@@ -96,6 +96,137 @@ struct RemotePairingNetworkTests {
         #expect(detail.failedSessions.isEmpty)
     }
 
+    @Test func launchesRemoteDefaultSessionOverDedicatedNetworkAPI() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
+
+        _ = try await client.setRemoteAccessEnabled(true)
+        let pairing = try await client.startPairing()
+        let group = try await client.createWorkspaceGroup(name: "Client Work")
+        let workspace = try await client.createLocalWorkspace(
+            name: "Nexus",
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+
+        let remoteClient = RemotePairingHTTPClient()
+        let pairedMac = try await remoteClient.completePairing(
+            host: server.displayHost,
+            port: server.port,
+            pairingCode: pairing.code,
+            deviceName: "Chris’s iPhone"
+        )
+        let session = try await remoteClient.launchOrResumeDefaultSession(
+            for: pairedMac,
+            workspaceID: workspace.id,
+            providerID: .claude
+        )
+        let detail = try await remoteClient.fetchProviderDetail(
+            for: pairedMac,
+            workspaceID: workspace.id,
+            providerID: .claude
+        )
+
+        #expect(session.workspaceID == workspace.id)
+        #expect(session.providerID == .claude)
+        #expect(session.isDefault)
+        #expect(detail.defaultSession?.id == session.id)
+        #expect(detail.defaultSession?.state == .ready)
+    }
+
+    @Test func stopsRemoteSessionOverDedicatedNetworkAPI() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
+
+        _ = try await client.setRemoteAccessEnabled(true)
+        let pairing = try await client.startPairing()
+        let group = try await client.createWorkspaceGroup(name: "Client Work")
+        let workspace = try await client.createLocalWorkspace(
+            name: "Nexus",
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+
+        let remoteClient = RemotePairingHTTPClient()
+        let pairedMac = try await remoteClient.completePairing(
+            host: server.displayHost,
+            port: server.port,
+            pairingCode: pairing.code,
+            deviceName: "Chris’s iPhone"
+        )
+        let stoppedSession = try await remoteClient.stopSession(for: pairedMac, sessionID: session.id)
+        let detail = try await remoteClient.fetchProviderDetail(
+            for: pairedMac,
+            workspaceID: workspace.id,
+            providerID: .claude
+        )
+
+        #expect(stoppedSession.id == session.id)
+        #expect(stoppedSession.state == .exited)
+        #expect(detail.defaultSession?.id == session.id)
+        #expect(detail.defaultSession?.state == .exited)
+    }
+
+    @Test func relaunchesRemoteSessionRecordOverDedicatedNetworkAPI() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
+
+        _ = try await client.setRemoteAccessEnabled(true)
+        let pairing = try await client.startPairing()
+        let group = try await client.createWorkspaceGroup(name: "Client Work")
+        let workspace = try await client.createLocalWorkspace(
+            name: "Nexus",
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        _ = try await client.stopSession(sessionID: session.id)
+
+        let remoteClient = RemotePairingHTTPClient()
+        let pairedMac = try await remoteClient.completePairing(
+            host: server.displayHost,
+            port: server.port,
+            pairingCode: pairing.code,
+            deviceName: "Chris’s iPhone"
+        )
+        let relaunchedSession = try await remoteClient.launchOrResumeSession(for: pairedMac, sessionID: session.id)
+        let detail = try await remoteClient.fetchProviderDetail(
+            for: pairedMac,
+            workspaceID: workspace.id,
+            providerID: .claude
+        )
+
+        #expect(relaunchedSession.id == session.id)
+        #expect(relaunchedSession.state == .ready)
+        #expect(detail.defaultSession?.id == session.id)
+        #expect(detail.defaultSession?.state == .ready)
+    }
+
     @Test func fetchesRemoteSessionScreenOverDedicatedNetworkAPI() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)
@@ -132,6 +263,9 @@ struct RemotePairingNetworkTests {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
         let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -142,7 +276,7 @@ struct RemotePairingNetworkTests {
         let group = try await client.createWorkspaceGroup(name: "Client Work")
         let workspace = try await client.createLocalWorkspace(
             name: "Nexus",
-            folderPath: "/tmp/nexus",
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
             primaryGroupID: group.id
         )
         let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
@@ -174,6 +308,9 @@ struct RemotePairingNetworkTests {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
         let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -184,7 +321,7 @@ struct RemotePairingNetworkTests {
         let group = try await client.createWorkspaceGroup(name: "Client Work")
         let workspace = try await client.createLocalWorkspace(
             name: "Nexus",
-            folderPath: "/tmp/nexus",
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
             primaryGroupID: group.id
         )
         let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
@@ -209,6 +346,9 @@ struct RemotePairingNetworkTests {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
         let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -219,7 +359,7 @@ struct RemotePairingNetworkTests {
         let group = try await client.createWorkspaceGroup(name: "Client Work")
         let workspace = try await client.createLocalWorkspace(
             name: "Nexus",
-            folderPath: "/tmp/nexus",
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
             primaryGroupID: group.id
         )
         let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)

@@ -229,6 +229,11 @@ struct RemoteClientHomeView: View {
             Text(workspaceTargetSummary(for: overview))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            if let workspaceAvailability = overview.remoteTarget?.workspaceAvailability {
+                Text(workspaceAvailability.summary)
+                    .font(.caption)
+                    .foregroundStyle(workspaceAvailabilityColor(for: workspaceAvailability.state))
+            }
 
             ForEach(overview.providerCards) { providerCard in
                 NavigationLink {
@@ -286,6 +291,15 @@ struct RemoteClientHomeView: View {
             .secondary
         }
     }
+
+    private func workspaceAvailabilityColor(for state: WorkspaceAvailabilitySnapshot.State) -> Color {
+        switch state {
+        case .available:
+            .green
+        case .unavailable, .broken, .blocked:
+            .orange
+        }
+    }
 }
 
 private struct RemoteProviderDetailView: View {
@@ -293,12 +307,24 @@ private struct RemoteProviderDetailView: View {
     let overview: WorkspaceOverview
     let providerCard: WorkspaceProviderCard
 
+    @State private var launchedSession: Session?
+    @State private var isLaunchingDefaultSession = false
+    @State private var presentedError: RemoteClientHomePresentedError?
+
     private var detail: ProviderDetail? {
         model.providerDetail(for: overview.workspace.id, providerID: providerCard.provider.id)
     }
 
     private var errorMessage: String? {
         model.providerDetailErrorMessage(for: overview.workspace.id, providerID: providerCard.provider.id)
+    }
+
+    private var defaultSessionActionTitle: String {
+        if let session = detail?.defaultSession {
+            return session.state == .ready ? "Resume Default Session" : "Relaunch Default Session"
+        }
+
+        return "\(providerCard.defaultSession.actionTitle) Default Session"
     }
 
     var body: some View {
@@ -312,6 +338,19 @@ private struct RemoteProviderDetailView: View {
                     Text(overview.remoteTarget.map { "\($0.host.name) • \(overview.workspace.folderPath)" } ?? overview.workspace.folderPath)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+            }
+
+            if let workspaceAvailability = overview.remoteTarget?.workspaceAvailability {
+                Section("Workspace Availability") {
+                    Text(workspaceAvailability.summary)
+                    if workspaceAvailability.diagnostics.isEmpty == false {
+                        ForEach(Array(workspaceAvailability.diagnostics.enumerated()), id: \.offset) { entry in
+                            Text(entry.element.message)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
             }
 
@@ -337,6 +376,11 @@ private struct RemoteProviderDetailView: View {
                     Text(detail == nil && errorMessage == nil ? "Loading Session details…" : providerCard.defaultSession.summary)
                         .foregroundStyle(.secondary)
                 }
+
+                Button(isLaunchingDefaultSession ? "Working…" : defaultSessionActionTitle) {
+                    launchDefaultSession()
+                }
+                .disabled(isLaunchingDefaultSession || providerCard.provider.id != .claude)
             }
 
             if let detail {
@@ -377,6 +421,31 @@ private struct RemoteProviderDetailView: View {
         .task(id: providerCard.id) {
             await model.loadProviderDetail(workspaceID: overview.workspace.id, providerID: providerCard.provider.id)
         }
+        .refreshable {
+            await model.loadProviderDetail(workspaceID: overview.workspace.id, providerID: providerCard.provider.id)
+        }
+        .navigationDestination(item: $launchedSession) { session in
+            RemoteSessionScreenView(model: model, session: session)
+        }
+        .alert(item: $presentedError) { error in
+            Alert(title: Text("Nexus Remote"), message: Text(error.message))
+        }
+    }
+
+    private func launchDefaultSession() {
+        isLaunchingDefaultSession = true
+        Task {
+            defer { isLaunchingDefaultSession = false }
+
+            do {
+                launchedSession = try await model.launchOrResumeDefaultSession(
+                    workspaceID: overview.workspace.id,
+                    providerID: providerCard.provider.id
+                )
+            } catch {
+                presentedError = RemoteClientHomePresentedError(message: error.localizedDescription)
+            }
+        }
     }
 }
 
@@ -387,6 +456,9 @@ private struct RemoteSessionScreenView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var terminalDraft = ""
     @State private var terminalViewportSize: CGSize = .zero
+    @State private var isShowingStopConfirmation = false
+    @State private var isPerformingAction = false
+    @State private var presentedError: RemoteClientHomePresentedError?
 
     private var screen: SessionScreen? {
         guard model.focusedSessionID == session.id else {
@@ -395,18 +467,52 @@ private struct RemoteSessionScreenView: View {
         return model.focusedSessionScreen
     }
 
+    private var currentSession: Session {
+        screen?.session ?? session
+    }
+
+    private var isReady: Bool {
+        currentSession.state == .ready
+    }
+
     var body: some View {
         List {
-            Section("Attachment") {
-                LabeledContent("Mode", value: model.focusedSessionIsController ? "Controller" : "Viewer")
-                Text(model.focusedSessionIsController
-                     ? "This iPhone is the Controller for terminal input and terminal size."
-                     : "Take Controller to send terminal input from this iPhone.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+            Section("Session") {
+                LabeledContent("State", value: currentSession.state.rawValue.capitalized)
+                if let failureMessage = currentSession.failureMessage {
+                    Text(failureMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
 
-                Button(model.focusedSessionIsController ? "Return to Viewer" : "Take Controller") {
-                    toggleControllerState()
+            Section("Actions") {
+                if isReady {
+                    Button(isPerformingAction ? "Stopping…" : "Stop Session", role: .destructive) {
+                        isShowingStopConfirmation = true
+                    }
+                    .disabled(isPerformingAction)
+                } else {
+                    Button(isPerformingAction ? "Relaunching…" : "Relaunch Session") {
+                        relaunchSession()
+                    }
+                    .disabled(isPerformingAction)
+                }
+            }
+
+            if isReady {
+                Section("Attachment") {
+                    LabeledContent("Mode", value: model.focusedSessionIsController ? "Controller" : "Viewer")
+                    Text(model.focusedSessionIsController
+                         ? "This iPhone is the Controller for terminal input and terminal size."
+                         : "Take Controller to send terminal input from this iPhone.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    Button(model.focusedSessionIsController ? "Return to Viewer" : "Take Controller") {
+                        toggleControllerState()
+                    }
+                    .disabled(isPerformingAction)
                 }
             }
 
@@ -452,20 +558,22 @@ private struct RemoteSessionScreenView: View {
                 }
             }
 
-            Section("Input") {
-                TextField("Type into the terminal", text: $terminalDraft)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
+            if isReady {
+                Section("Input") {
+                    TextField("Type into the terminal", text: $terminalDraft)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
 
-                Button("Send Text") {
-                    sendDraftText()
-                }
-                .disabled(model.focusedSessionIsController == false || terminalDraft.isEmpty)
+                    Button("Send Text") {
+                        sendDraftText()
+                    }
+                    .disabled(model.focusedSessionIsController == false || terminalDraft.isEmpty || isPerformingAction)
 
-                HStack {
-                    quickKeyButton("Return", key: .enter)
-                    quickKeyButton("Backspace", key: .backspace)
-                    quickKeyButton("Ctrl-C", key: .interrupt)
+                    HStack {
+                        quickKeyButton("Return", key: .enter)
+                        quickKeyButton("Backspace", key: .backspace)
+                        quickKeyButton("Ctrl-C", key: .interrupt)
+                    }
                 }
             }
         }
@@ -476,8 +584,22 @@ private struct RemoteSessionScreenView: View {
         .refreshable {
             await model.refreshFocusedSessionScreen()
         }
+        .confirmationDialog(
+            "Stop this Session?",
+            isPresented: $isShowingStopConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Stop Session", role: .destructive) {
+                stopSession()
+            }
+        } message: {
+            Text("Stop terminates the live Session runtime and keeps the Session record for inspection or relaunch.")
+        }
+        .alert(item: $presentedError) { error in
+            Alert(title: Text("Nexus Remote"), message: Text(error.message))
+        }
         .onChange(of: terminalViewportSize) { _, _ in
-            guard model.focusedSessionIsController else {
+            guard isReady, model.focusedSessionIsController else {
                 return
             }
 
@@ -503,13 +625,51 @@ private struct RemoteSessionScreenView: View {
         }
     }
 
+    private func relaunchSession() {
+        isPerformingAction = true
+        Task {
+            defer { isPerformingAction = false }
+
+            do {
+                _ = try await model.launchOrResumeSession(
+                    sessionID: currentSession.id,
+                    workspaceID: currentSession.workspaceID,
+                    providerID: currentSession.providerID
+                )
+            } catch {
+                presentedError = RemoteClientHomePresentedError(message: error.localizedDescription)
+            }
+        }
+    }
+
+    private func stopSession() {
+        isPerformingAction = true
+        Task {
+            defer { isPerformingAction = false }
+
+            do {
+                _ = try await model.stopSession(
+                    sessionID: currentSession.id,
+                    workspaceID: currentSession.workspaceID,
+                    providerID: currentSession.providerID
+                )
+            } catch {
+                presentedError = RemoteClientHomePresentedError(message: error.localizedDescription)
+            }
+        }
+    }
+
     private func toggleControllerState() {
         Task {
-            if model.focusedSessionIsController {
-                await model.releaseFocusedRemoteSessionControl()
-            } else {
-                let viewport = terminalViewport()
-                try? await model.takeFocusedRemoteSessionControl(columns: viewport.columns, rows: viewport.rows)
+            do {
+                if model.focusedSessionIsController {
+                    await model.releaseFocusedRemoteSessionControl()
+                } else {
+                    let viewport = terminalViewport()
+                    try await model.takeFocusedRemoteSessionControl(columns: viewport.columns, rows: viewport.rows)
+                }
+            } catch {
+                presentedError = RemoteClientHomePresentedError(message: error.localizedDescription)
             }
         }
     }
@@ -522,7 +682,12 @@ private struct RemoteSessionScreenView: View {
 
         terminalDraft = ""
         Task {
-            try? await model.sendTextToFocusedRemoteSession(text)
+            do {
+                try await model.sendTextToFocusedRemoteSession(text)
+            } catch {
+                presentedError = RemoteClientHomePresentedError(message: error.localizedDescription)
+                terminalDraft = text
+            }
         }
     }
 
@@ -530,10 +695,14 @@ private struct RemoteSessionScreenView: View {
     private func quickKeyButton(_ title: String, key: SessionInputKey) -> some View {
         Button(title) {
             Task {
-                try? await model.sendInputKeyToFocusedRemoteSession(key)
+                do {
+                    try await model.sendInputKeyToFocusedRemoteSession(key)
+                } catch {
+                    presentedError = RemoteClientHomePresentedError(message: error.localizedDescription)
+                }
             }
         }
-        .disabled(model.focusedSessionIsController == false)
+        .disabled(model.focusedSessionIsController == false || isPerformingAction)
     }
 
     private func terminalViewport() -> (columns: Int, rows: Int) {
