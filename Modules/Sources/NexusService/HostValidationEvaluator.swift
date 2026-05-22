@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import NexusDomain
 
@@ -104,3 +105,4 @@ struct HostValidationEvaluator: HostValidationEvaluating {
         return (.broken, "Host validation failed", "sshValidationFailed")
     }
 }
+#endif

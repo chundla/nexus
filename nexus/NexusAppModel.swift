@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import NexusDomain
 import NexusIPC
@@ -492,3 +493,4 @@ struct ProviderDetailKey: Hashable {
     let workspaceID: UUID
     let providerID: ProviderID
 }
+#endif

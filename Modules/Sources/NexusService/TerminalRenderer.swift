@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import NexusDomain
 
@@ -1036,3 +1037,4 @@ enum TerminalRenderer {
         )
     }
 }
+#endif

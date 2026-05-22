@@ -70,6 +70,11 @@ final class RemoteClientPairingModel {
         pairedMacs.append(pairedMac)
         try store.savePairedMacs(pairedMacs)
     }
+
+    func forgetPairedMac(id: PairedMac.ID) throws {
+        pairedMacs.removeAll { $0.id == id }
+        try store.savePairedMacs(pairedMacs)
+    }
 }
 
 enum RemoteClientPairingModelError: LocalizedError {

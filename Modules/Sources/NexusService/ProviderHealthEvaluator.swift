@@ -1,3 +1,4 @@
+#if os(macOS)
 import Darwin
 import Foundation
 import NexusDomain
@@ -567,3 +568,4 @@ struct SystemProviderCommandRunner: ProviderCommandRunning {
         return ProviderCommandResult(exitStatus: process.terminationStatus, stdout: stdout, stderr: stderr)
     }
 }
+#endif

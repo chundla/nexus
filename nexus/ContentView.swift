@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import NexusDomain
 import SwiftUI
@@ -1695,3 +1696,4 @@ private final class SessionTerminalKeyCaptureNSView: NSView {
 #Preview {
     ContentView(appModel: try! .live())
 }
+#endif

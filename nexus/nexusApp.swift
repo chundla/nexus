@@ -9,6 +9,7 @@ import SwiftUI
 
 @main
 struct nexusApp: App {
+#if os(macOS)
     @State private var appModel = {
         do {
             return try NexusAppModel.live()
@@ -16,10 +17,20 @@ struct nexusApp: App {
             fatalError("Could not bootstrap Nexus background service: \(error)")
         }
     }()
+#else
+    @State private var pairingModel = RemoteClientPairingModel(
+        client: RemotePairingHTTPClient(),
+        store: UserDefaultsPairedMacStore()
+    )
+#endif
 
     var body: some Scene {
         WindowGroup {
+#if os(macOS)
             ContentView(appModel: appModel)
+#else
+            RemoteClientHomeView(model: pairingModel)
+#endif
         }
     }
 }

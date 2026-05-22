@@ -1,3 +1,4 @@
+#if os(macOS)
 import Darwin
 import Foundation
 import NexusDomain
@@ -2987,3 +2988,25 @@ private final class SessionScreenObserverProxy: @unchecked Sendable {
         observer.sessionScreenDidUpdate(observationID: observationID.uuidString, payload: payload)
     }
 }
+#else
+import Foundation
+
+public protocol NexusEmbeddedServiceSession: AnyObject {}
+
+public enum NexusEmbeddedServiceBootstrap {
+    public static func bootstrap() throws -> any NexusEmbeddedServiceSession {
+        throw NSError(domain: "NexusService", code: 1, userInfo: [NSLocalizedDescriptionKey: "Nexus embedded services are only available on macOS"])
+    }
+
+    public static func bootstrapForTests() throws -> any NexusEmbeddedServiceSession {
+        throw NSError(domain: "NexusService", code: 1, userInfo: [NSLocalizedDescriptionKey: "Nexus embedded services are only available on macOS"])
+    }
+
+    public static func bootstrapForTests(rootURL: URL) throws -> any NexusEmbeddedServiceSession {
+        throw NSError(domain: "NexusService", code: 1, userInfo: [NSLocalizedDescriptionKey: "Nexus embedded services are only available on macOS"])
+    }
+}
+
+@available(iOS, unavailable, message: "NexusService is only available on macOS")
+public final class NexusService: NSObject {}
+#endif

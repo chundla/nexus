@@ -36,6 +36,42 @@ struct RemoteClientPairingModelTests {
         )
         #expect(reloadedModel.pairedMacs == [pairedMac])
     }
+
+    @Test func forgetsPairedMacFromDurableStore() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let firstMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600)
+        )
+        let secondMac = PairedMac(
+            name: "Travel Mac",
+            host: "travel.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 900)
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([firstMac, secondMac])
+
+        let model = RemoteClientPairingModel(
+            client: StubRemotePairingClient(result: firstMac),
+            store: store
+        )
+
+        try model.forgetPairedMac(id: firstMac.id)
+
+        #expect(model.pairedMacs == [secondMac])
+
+        let reloadedModel = RemoteClientPairingModel(
+            client: StubRemotePairingClient(result: firstMac),
+            store: store
+        )
+        #expect(reloadedModel.pairedMacs == [secondMac])
+    }
 }
 
 private struct StubRemotePairingClient: RemotePairingClient {

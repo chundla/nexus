@@ -1,3 +1,4 @@
+#if os(macOS)
 import NexusDomain
 import SwiftUI
 
@@ -415,3 +416,4 @@ private struct HostManagementPresentedError: Identifiable {
     let id = UUID()
     let message: String
 }
+#endif

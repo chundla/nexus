@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import NexusDomain
 import SQLite3
@@ -1475,3 +1476,4 @@ enum NexusMetadataStoreError: LocalizedError {
         }
     }
 }
+#endif

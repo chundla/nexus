@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import NexusDomain
 
@@ -133,3 +134,4 @@ struct WorkspaceAvailabilityEvaluator: WorkspaceAvailabilityEvaluating {
         "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
 }
+#endif

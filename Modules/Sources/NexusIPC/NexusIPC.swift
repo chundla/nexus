@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import NexusDomain
 
@@ -488,3 +489,18 @@ private actor ObservationCancellationState {
         return true
     }
 }
+#else
+import Foundation
+import NexusDomain
+
+public protocol SessionScreenObservation: Sendable {
+    func cancel() async
+}
+
+public protocol NexusServiceClient {}
+
+public typealias NexusServiceStatusClient = NexusServiceClient
+
+@available(iOS, unavailable, message: "Nexus IPC is only available on macOS")
+public final class NexusIPCClient: @unchecked Sendable {}
+#endif

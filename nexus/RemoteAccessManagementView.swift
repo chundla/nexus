@@ -1,3 +1,4 @@
+#if os(macOS)
 import SwiftUI
 
 struct RemoteAccessManagementSheet: View {
@@ -189,3 +190,4 @@ private struct RemoteAccessPresentedError: Identifiable {
     let id = UUID()
     let message: String
 }
+#endif
