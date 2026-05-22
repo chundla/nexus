@@ -14,16 +14,31 @@ struct RemoteClientHomeView: View {
                 if model.pairedMacs.isEmpty == false {
                     Section("Paired Macs") {
                         ForEach(model.pairedMacs) { pairedMac in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(pairedMac.name)
-                                    .fontWeight(.medium)
-                                Text("\(pairedMac.host):\(pairedMac.port)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Text("Paired \(pairedMac.pairedAt.formatted(date: .abbreviated, time: .shortened))")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                            Button {
+                                selectActivePairedMac(pairedMac)
+                            } label: {
+                                HStack(alignment: .top, spacing: 12) {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(pairedMac.name)
+                                            .fontWeight(.medium)
+                                        Text("\(pairedMac.host):\(pairedMac.port)")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        Text("Paired \(pairedMac.pairedAt.formatted(date: .abbreviated, time: .shortened))")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+
+                                    Spacer(minLength: 12)
+
+                                    if model.activePairedMac?.id == pairedMac.id {
+                                        Label("Current", systemImage: "checkmark.circle.fill")
+                                            .font(.caption)
+                                            .foregroundStyle(.tint)
+                                    }
+                                }
                             }
+                            .buttonStyle(.plain)
                             .swipeActions {
                                 Button("Forget", role: .destructive) {
                                     forgetPairedMac(pairedMac)
@@ -60,7 +75,7 @@ struct RemoteClientHomeView: View {
                 }
 
                 Section("What’s Next") {
-                    Text("Pairing stores durable trust for later reconnect work. Workspace browsing and Session control arrive in follow-on issues.")
+                    Text("Pairing now stores durable trust and the default reconnect Mac. Discovery, workspace browsing, and Session control arrive in follow-on issues.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -98,6 +113,14 @@ struct RemoteClientHomeView: View {
             } catch {
                 presentedError = RemoteClientHomePresentedError(message: error.localizedDescription)
             }
+        }
+    }
+
+    private func selectActivePairedMac(_ pairedMac: PairedMac) {
+        do {
+            try model.selectActivePairedMac(id: pairedMac.id)
+        } catch {
+            presentedError = RemoteClientHomePresentedError(message: error.localizedDescription)
         }
     }
 

@@ -32,6 +32,30 @@ _Avoid_: generic path, folder field
 The mechanism used to keep a remote Session durable across attachment and detachment.
 _Avoid_: workspace type
 
+**Remote Client**:
+A Nexus client, such as the iOS app, that attaches to Mac-managed Sessions over the network without becoming the execution host.
+_Avoid_: remote workspace, execution host
+
+**Controller**:
+The one attached client currently allowed to send input to a Session.
+_Avoid_: owner, active viewer
+
+**Pairing**:
+The trust-establishment flow that allows a **Remote Client** to reconnect to Nexus over the local network without repeating setup each time.
+_Avoid_: login, sign-in
+
+**Paired Mac**:
+A Mac running Nexus that a **Remote Client** has already trusted and may reconnect to later.
+_Avoid_: account, host
+
+**Paired Device**:
+A trusted **Remote Client** that a **Paired Mac** recognizes and may allow to reconnect later.
+_Avoid_: account, user
+
+**Remote Access**:
+The Mac capability that allows **Remote Clients** to discover, pair with, and connect to Nexus over the local network while Nexus is running.
+_Avoid_: host mode, cloud sync
+
 **Host Validation**:
 The status of whether Nexus can reach and authenticate to a Host and verify required remote execution capabilities.
 _Avoid_: provider health, remote health
@@ -74,6 +98,13 @@ _Avoid_: stop, close
 - A **Provider** can be used in many **Workspaces**
 - A **Session** belongs to exactly one **Workspace** and one **Provider**
 - A **Session** may be **Detached** without being stopped
+- A **Session** has at most one **Controller** at a time
+- A **Session** may have many viewers at the same time
+- A **Remote Client** may attach to a **Session** as its **Controller** or as a viewer
+- A successful **Pairing** allows a **Remote Client** to reconnect without repeating the first-time trust ceremony
+- A **Remote Client** may trust many **Paired Macs** over time
+- A **Paired Mac** may trust many **Paired Devices** over time
+- **Remote Access** may be enabled or disabled on a **Paired Mac**
 - A **Workspace** has exactly one **Workspace Target**
 - Changing a **Remote Workspace** target creates a new **Remote Workspace** rather than mutating the existing one
 - A **Host** can be referenced by many **Remote Workspaces**
@@ -93,7 +124,9 @@ _Avoid_: stop, close
 
 ## Flagged ambiguities
 
-- "remote" was being used to mean both a **Remote Workspace** and remote control from iOS — resolved: a **Remote Workspace** is an execution target; iOS remote control is a separate client capability.
+- "remote" was being used to mean both a **Remote Workspace** and remote control from iOS — resolved: a **Remote Workspace** is an execution target; a **Remote Client** is a separate client capability.
+- "handoff" could imply bilateral approval between devices — resolved: a viewer may take **Controller** status without approval from the current controller, and local Mac input automatically reclaims **Controller** status.
+- "remote access" could sound always-on — resolved: **Remote Access** is an explicit opt-in capability on a Mac and only works while Nexus is running.
 - "tmux" could sound like a workspace type — resolved: it is a **Remote Session Strategy**.
 - "remote health" was too vague — resolved: split into **Host Validation** and **Provider Health**.
 - User-installed provider CLIs may appear in one Host shell environment but not another, and may not appear in the raw SSH command PATH at all — resolved: remote **Provider Health** resolves executables across the Host user's shell environments and standard per-user install locations, then remote launch uses that absolute path.

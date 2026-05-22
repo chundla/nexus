@@ -32,3 +32,4 @@ Initial set:
 24. SSH authentication reuses the user’s existing SSH configuration and agent; Nexus does not manage SSH secrets in V1
 25. Provider authentication remains provider-native; Nexus only performs light auth-readiness detection
 26. Remote provider executable resolution uses shell-aware discovery on the Host
+27. Remote clients use a dedicated network API that reuses Nexus domain concepts rather than exposing local IPC directly

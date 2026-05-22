@@ -1,0 +1,3 @@
+# ADR 0027: Remote clients use a dedicated network API that reuses Nexus domain concepts rather than exposing local IPC directly
+
+Nexus already committed to a real local IPC boundary so the macOS app would not call service internals directly. For Remote Clients such as the iPhone app, Nexus will expose a separate authenticated network API over the local network that preserves the same Workspace, Provider, Session, attachment, and control concepts, rather than proxying the local XPC surface itself. This keeps the service boundary honest for remote access without coupling network clients to local transport details.
