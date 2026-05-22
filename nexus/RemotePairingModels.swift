@@ -1,5 +1,14 @@
 import Foundation
 
+struct RemotePairingEndpoint: Equatable, Sendable {
+    let host: String
+    let port: Int
+
+    var displayAddress: String {
+        "\(host):\(port)"
+    }
+}
+
 struct PairedMac: Codable, Equatable, Identifiable, Sendable {
     let name: String
     let host: String

@@ -62,6 +62,11 @@ struct RemoteAccessManagementSheet: View {
                         Text(pairing.code)
                             .font(.system(size: 28, weight: .semibold, design: .monospaced))
 
+                        if let remotePairingEndpoint = appModel.remotePairingEndpoint {
+                            LabeledContent("Mac Address", value: remotePairingEndpoint.displayAddress)
+                                .font(.caption)
+                        }
+
                         LabeledContent("Expires", value: pairing.expiresAt.formatted(date: .omitted, time: .shortened))
                             .font(.caption)
 

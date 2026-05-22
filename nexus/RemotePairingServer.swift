@@ -7,6 +7,10 @@ final class RemotePairingServer {
     let displayHost: String
     let macName: String
 
+    var endpoint: RemotePairingEndpoint {
+        RemotePairingEndpoint(host: displayHost, port: port)
+    }
+
     private let client: any NexusServiceClient
     private let listener: NWListener
     private let queue = DispatchQueue(label: "RemotePairingServer")

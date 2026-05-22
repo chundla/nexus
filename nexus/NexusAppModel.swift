@@ -40,20 +40,29 @@ final class NexusAppModel {
     var remoteAccessState: RemoteAccessState?
     var pairedDevices: [PairedDevice] = []
     var focusedSessionScreen: SessionScreen?
+    let remotePairingEndpoint: RemotePairingEndpoint?
 
     private let client: NexusServiceClient
     private let embeddedService: (any NexusEmbeddedServiceSession)?
+    private let remotePairingServer: RemotePairingServer?
     private var focusedSessionObservation: (any SessionScreenObservation)?
 
-    init(client: NexusServiceClient, embeddedService: (any NexusEmbeddedServiceSession)? = nil) {
+    init(
+        client: NexusServiceClient,
+        embeddedService: (any NexusEmbeddedServiceSession)? = nil,
+        remotePairingServer: RemotePairingServer? = nil
+    ) {
         self.client = client
         self.embeddedService = embeddedService
+        self.remotePairingServer = remotePairingServer
+        self.remotePairingEndpoint = remotePairingServer?.endpoint
     }
 
     static func live() throws -> NexusAppModel {
         let service = try NexusEmbeddedServiceBootstrap.bootstrap()
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
-        return NexusAppModel(client: client, embeddedService: service)
+        let remotePairingServer = try RemotePairingServer(client: client)
+        return NexusAppModel(client: client, embeddedService: service, remotePairingServer: remotePairingServer)
     }
 
     func refresh() async {
