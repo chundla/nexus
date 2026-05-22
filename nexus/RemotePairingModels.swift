@@ -114,6 +114,52 @@ struct RemotePairingHTTPClient {
         return try JSONDecoder().decode(SessionScreen.self, from: data)
     }
 
+    func takeSessionControl(for pairedMac: PairedMac, sessionID: UUID, columns: Int, rows: Int) async throws -> SessionScreen {
+        var request = try authenticatedRequest(
+            for: pairedMac,
+            path: "/remote-client/sessions/\(sessionID.uuidString)/controller/take"
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(RemoteSessionControlRequest(columns: columns, rows: rows))
+        let data = try await send(request)
+        return try JSONDecoder().decode(SessionScreen.self, from: data)
+    }
+
+    func releaseSessionControl(for pairedMac: PairedMac, sessionID: UUID) async throws -> SessionScreen {
+        var request = try authenticatedRequest(
+            for: pairedMac,
+            path: "/remote-client/sessions/\(sessionID.uuidString)/controller/release"
+        )
+        request.httpMethod = "POST"
+        let data = try await send(request)
+        return try JSONDecoder().decode(SessionScreen.self, from: data)
+    }
+
+    func sendSessionText(for pairedMac: PairedMac, sessionID: UUID, text: String) async throws -> SessionScreen {
+        var request = try authenticatedRequest(
+            for: pairedMac,
+            path: "/remote-client/sessions/\(sessionID.uuidString)/text"
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(RemoteSessionTextRequest(text: text))
+        let data = try await send(request)
+        return try JSONDecoder().decode(SessionScreen.self, from: data)
+    }
+
+    func sendSessionInputKey(for pairedMac: PairedMac, sessionID: UUID, key: SessionInputKey) async throws -> SessionScreen {
+        var request = try authenticatedRequest(
+            for: pairedMac,
+            path: "/remote-client/sessions/\(sessionID.uuidString)/keys"
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(RemoteSessionKeyRequest(key: key))
+        let data = try await send(request)
+        return try JSONDecoder().decode(SessionScreen.self, from: data)
+    }
+
     func observeSessionScreen(
         for pairedMac: PairedMac,
         sessionID: UUID,
@@ -264,6 +310,19 @@ struct RemotePairingCompletionResponse: Codable, Sendable {
     let macName: String
     let pairedAt: Date
     let pairedDeviceID: UUID
+}
+
+struct RemoteSessionControlRequest: Codable, Sendable {
+    let columns: Int
+    let rows: Int
+}
+
+struct RemoteSessionTextRequest: Codable, Sendable {
+    let text: String
+}
+
+struct RemoteSessionKeyRequest: Codable, Sendable {
+    let key: SessionInputKey
 }
 
 struct RemotePairingErrorResponse: Codable, Sendable {

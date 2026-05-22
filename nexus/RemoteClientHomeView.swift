@@ -129,7 +129,7 @@ struct RemoteClientHomeView: View {
                 }
 
                 Section("What’s Next") {
-                    Text("Session viewing now stays viewer-only. Taking Controller status and terminal input arrive in follow-on issues.")
+                    Text("Take Controller from a Session to send terminal input from this iPhone.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -384,6 +384,10 @@ private struct RemoteSessionScreenView: View {
     @Bindable var model: RemoteClientPairingModel
     let session: Session
 
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var terminalDraft = ""
+    @State private var terminalViewportSize: CGSize = .zero
+
     private var screen: SessionScreen? {
         guard model.focusedSessionID == session.id else {
             return nil
@@ -394,10 +398,16 @@ private struct RemoteSessionScreenView: View {
     var body: some View {
         List {
             Section("Attachment") {
-                LabeledContent("Mode", value: "Viewer")
-                Text("This iPhone is attached read-only and does not change Controller status.")
+                LabeledContent("Mode", value: model.focusedSessionIsController ? "Controller" : "Viewer")
+                Text(model.focusedSessionIsController
+                     ? "This iPhone is the Controller for terminal input and terminal size."
+                     : "Take Controller to send terminal input from this iPhone.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+
+                Button(model.focusedSessionIsController ? "Return to Viewer" : "Take Controller") {
+                    toggleControllerState()
+                }
             }
 
             if model.focusedSessionIsStale, screen != nil {
@@ -422,12 +432,40 @@ private struct RemoteSessionScreenView: View {
                     .frame(minHeight: 260)
                     .background(Color.black.opacity(0.92))
                     .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .background {
+                        GeometryReader { proxy in
+                            Color.clear
+                                .onAppear {
+                                    terminalViewportSize = proxy.size
+                                }
+                                .onChange(of: proxy.size) { _, newSize in
+                                    terminalViewportSize = newSize
+                                }
+                        }
+                    }
                 } else if let errorMessage = model.focusedSessionErrorMessage {
                     Text(errorMessage)
                         .foregroundStyle(.orange)
                 } else {
                     Text("Loading Session screen…")
                         .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Input") {
+                TextField("Type into the terminal", text: $terminalDraft)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+
+                Button("Send Text") {
+                    sendDraftText()
+                }
+                .disabled(model.focusedSessionIsController == false || terminalDraft.isEmpty)
+
+                HStack {
+                    quickKeyButton("Return", key: .enter)
+                    quickKeyButton("Backspace", key: .backspace)
+                    quickKeyButton("Ctrl-C", key: .interrupt)
                 }
             }
         }
@@ -438,11 +476,64 @@ private struct RemoteSessionScreenView: View {
         .refreshable {
             await model.refreshFocusedSessionScreen()
         }
-        .onDisappear {
-            if model.focusedSessionID == session.id {
-                model.stopFocusingRemoteSession()
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .background {
+                Task {
+                    await model.releaseFocusedRemoteSessionControl()
+                }
             }
         }
+        .onDisappear {
+            if model.focusedSessionID == session.id {
+                Task {
+                    await model.releaseFocusedRemoteSessionControl()
+                    model.stopFocusingRemoteSession()
+                }
+            }
+        }
+    }
+
+    private func toggleControllerState() {
+        Task {
+            if model.focusedSessionIsController {
+                await model.releaseFocusedRemoteSessionControl()
+            } else {
+                let viewport = terminalViewport()
+                try? await model.takeFocusedRemoteSessionControl(columns: viewport.columns, rows: viewport.rows)
+            }
+        }
+    }
+
+    private func sendDraftText() {
+        let text = terminalDraft
+        guard text.isEmpty == false else {
+            return
+        }
+
+        terminalDraft = ""
+        Task {
+            try? await model.sendTextToFocusedRemoteSession(text)
+        }
+    }
+
+    @ViewBuilder
+    private func quickKeyButton(_ title: String, key: SessionInputKey) -> some View {
+        Button(title) {
+            Task {
+                try? await model.sendInputKeyToFocusedRemoteSession(key)
+            }
+        }
+        .disabled(model.focusedSessionIsController == false)
+    }
+
+    private func terminalViewport() -> (columns: Int, rows: Int) {
+        if terminalViewportSize != .zero {
+            let columns = max(20, Int((terminalViewportSize.width - 24) / 8.5))
+            let rows = max(8, Int((terminalViewportSize.height - 24) / 20))
+            return (columns, rows)
+        }
+
+        return (screen?.terminalColumns ?? 80, screen?.terminalRows ?? 24)
     }
 
     @ViewBuilder

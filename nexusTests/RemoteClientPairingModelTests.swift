@@ -499,6 +499,46 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
         return defaultSessionScreen
     }
 
+    func takeSessionControl(for pairedMac: PairedMac, sessionID: UUID, columns: Int, rows: Int) async throws -> SessionScreen {
+        SessionScreen(
+            session: defaultSessionScreen.session,
+            controller: .pairedDevice(pairedMac.pairedDeviceID ?? UUID()),
+            transcript: defaultSessionScreen.transcript,
+            terminalColumns: columns,
+            terminalRows: rows
+        )
+    }
+
+    func releaseSessionControl(for pairedMac: PairedMac, sessionID: UUID) async throws -> SessionScreen {
+        SessionScreen(
+            session: defaultSessionScreen.session,
+            controller: .mac,
+            transcript: defaultSessionScreen.transcript,
+            terminalColumns: defaultSessionScreen.terminalColumns,
+            terminalRows: defaultSessionScreen.terminalRows
+        )
+    }
+
+    func sendSessionText(for pairedMac: PairedMac, sessionID: UUID, text: String) async throws -> SessionScreen {
+        SessionScreen(
+            session: defaultSessionScreen.session,
+            controller: .pairedDevice(pairedMac.pairedDeviceID ?? UUID()),
+            transcript: defaultSessionScreen.transcript + text,
+            terminalColumns: defaultSessionScreen.terminalColumns,
+            terminalRows: defaultSessionScreen.terminalRows
+        )
+    }
+
+    func sendSessionInputKey(for pairedMac: PairedMac, sessionID: UUID, key: SessionInputKey) async throws -> SessionScreen {
+        SessionScreen(
+            session: defaultSessionScreen.session,
+            controller: .pairedDevice(pairedMac.pairedDeviceID ?? UUID()),
+            transcript: defaultSessionScreen.transcript + "[key: \(key.rawValue)]",
+            terminalColumns: defaultSessionScreen.terminalColumns,
+            terminalRows: defaultSessionScreen.terminalRows
+        )
+    }
+
     func observeSessionScreen(
         for pairedMac: PairedMac,
         sessionID: UUID,

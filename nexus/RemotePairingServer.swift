@@ -204,6 +204,85 @@ final class RemotePairingServer {
             return
         }
 
+        if request.method == "POST",
+           let takeControlRequest = takeControlRequest(from: request) {
+            do {
+                let pairedDeviceID = try pairedDeviceID(from: request)
+                try await authorize(request)
+                let body = try JSONDecoder().decode(RemoteSessionControlRequest.self, from: request.body)
+                let screen = try await client.takeRemoteSessionControl(
+                    sessionID: takeControlRequest.sessionID,
+                    pairedDeviceID: pairedDeviceID,
+                    columns: body.columns,
+                    rows: body.rows
+                )
+                send(statusCode: 200, body: screen, over: connection)
+            } catch RemotePairingServerError.unauthorized {
+                send(statusCode: 401, body: RemotePairingErrorResponse(message: "Pair this iPhone again to browse this Paired Mac"), over: connection)
+            } catch {
+                send(statusCode: 400, body: RemotePairingErrorResponse(message: error.localizedDescription), over: connection)
+            }
+            return
+        }
+
+        if request.method == "POST",
+           let releaseControlRequest = releaseControlRequest(from: request) {
+            do {
+                let pairedDeviceID = try pairedDeviceID(from: request)
+                try await authorize(request)
+                let screen = try await client.releaseRemoteSessionControl(
+                    sessionID: releaseControlRequest.sessionID,
+                    pairedDeviceID: pairedDeviceID
+                )
+                send(statusCode: 200, body: screen, over: connection)
+            } catch RemotePairingServerError.unauthorized {
+                send(statusCode: 401, body: RemotePairingErrorResponse(message: "Pair this iPhone again to browse this Paired Mac"), over: connection)
+            } catch {
+                send(statusCode: 400, body: RemotePairingErrorResponse(message: error.localizedDescription), over: connection)
+            }
+            return
+        }
+
+        if request.method == "POST",
+           let sessionTextRequest = sessionTextRequest(from: request) {
+            do {
+                let pairedDeviceID = try pairedDeviceID(from: request)
+                try await authorize(request)
+                let body = try JSONDecoder().decode(RemoteSessionTextRequest.self, from: request.body)
+                let screen = try await client.sendRemoteSessionText(
+                    sessionID: sessionTextRequest.sessionID,
+                    pairedDeviceID: pairedDeviceID,
+                    text: body.text
+                )
+                send(statusCode: 200, body: screen, over: connection)
+            } catch RemotePairingServerError.unauthorized {
+                send(statusCode: 401, body: RemotePairingErrorResponse(message: "Pair this iPhone again to browse this Paired Mac"), over: connection)
+            } catch {
+                send(statusCode: 400, body: RemotePairingErrorResponse(message: error.localizedDescription), over: connection)
+            }
+            return
+        }
+
+        if request.method == "POST",
+           let sessionKeyRequest = sessionKeyRequest(from: request) {
+            do {
+                let pairedDeviceID = try pairedDeviceID(from: request)
+                try await authorize(request)
+                let body = try JSONDecoder().decode(RemoteSessionKeyRequest.self, from: request.body)
+                let screen = try await client.sendRemoteSessionInputKey(
+                    sessionID: sessionKeyRequest.sessionID,
+                    pairedDeviceID: pairedDeviceID,
+                    key: body.key
+                )
+                send(statusCode: 200, body: screen, over: connection)
+            } catch RemotePairingServerError.unauthorized {
+                send(statusCode: 401, body: RemotePairingErrorResponse(message: "Pair this iPhone again to browse this Paired Mac"), over: connection)
+            } catch {
+                send(statusCode: 400, body: RemotePairingErrorResponse(message: error.localizedDescription), over: connection)
+            }
+            return
+        }
+
         guard request.method == "POST", request.path == "/pairings/complete" else {
             send(statusCode: 404, body: RemotePairingErrorResponse(message: "Not found"), over: connection)
             return
@@ -277,6 +356,60 @@ final class RemotePairingServer {
               components[1] == "sessions",
               let sessionID = UUID(uuidString: String(components[2])),
               components[3] == "screen" else {
+            return nil
+        }
+
+        return SessionScreenRequest(sessionID: sessionID)
+    }
+
+    private func takeControlRequest(from request: ParsedRequest) -> SessionScreenControlRequest? {
+        let components = request.path.split(separator: "/")
+        guard components.count == 5,
+              components[0] == "remote-client",
+              components[1] == "sessions",
+              let sessionID = UUID(uuidString: String(components[2])),
+              components[3] == "controller",
+              components[4] == "take" else {
+            return nil
+        }
+
+        return SessionScreenControlRequest(sessionID: sessionID)
+    }
+
+    private func releaseControlRequest(from request: ParsedRequest) -> SessionScreenControlRequest? {
+        let components = request.path.split(separator: "/")
+        guard components.count == 5,
+              components[0] == "remote-client",
+              components[1] == "sessions",
+              let sessionID = UUID(uuidString: String(components[2])),
+              components[3] == "controller",
+              components[4] == "release" else {
+            return nil
+        }
+
+        return SessionScreenControlRequest(sessionID: sessionID)
+    }
+
+    private func sessionTextRequest(from request: ParsedRequest) -> SessionScreenRequest? {
+        let components = request.path.split(separator: "/")
+        guard components.count == 4,
+              components[0] == "remote-client",
+              components[1] == "sessions",
+              let sessionID = UUID(uuidString: String(components[2])),
+              components[3] == "text" else {
+            return nil
+        }
+
+        return SessionScreenRequest(sessionID: sessionID)
+    }
+
+    private func sessionKeyRequest(from request: ParsedRequest) -> SessionScreenRequest? {
+        let components = request.path.split(separator: "/")
+        guard components.count == 4,
+              components[0] == "remote-client",
+              components[1] == "sessions",
+              let sessionID = UUID(uuidString: String(components[2])),
+              components[3] == "keys" else {
             return nil
         }
 
@@ -482,6 +615,10 @@ private struct SessionScreenObservationRequest {
 }
 
 private struct SessionScreenRequest {
+    let sessionID: UUID
+}
+
+private struct SessionScreenControlRequest {
     let sessionID: UUID
 }
 

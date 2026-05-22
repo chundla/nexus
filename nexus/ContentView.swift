@@ -612,6 +612,7 @@ struct ContentView: View {
                 }
                 .onTapGesture {
                     terminalFocusToken = UUID()
+                    reportTerminalSize(terminalViewportSize)
                 }
 
                 if isRemote {

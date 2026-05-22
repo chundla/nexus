@@ -9,6 +9,10 @@ protocol RemotePairingClient {
     func fetchCatalog(for pairedMac: PairedMac) async throws -> RemoteWorkspaceCatalog
     func fetchProviderDetail(for pairedMac: PairedMac, workspaceID: UUID, providerID: ProviderID) async throws -> ProviderDetail
     func fetchSessionScreen(for pairedMac: PairedMac, sessionID: UUID) async throws -> SessionScreen
+    func takeSessionControl(for pairedMac: PairedMac, sessionID: UUID, columns: Int, rows: Int) async throws -> SessionScreen
+    func releaseSessionControl(for pairedMac: PairedMac, sessionID: UUID) async throws -> SessionScreen
+    func sendSessionText(for pairedMac: PairedMac, sessionID: UUID, text: String) async throws -> SessionScreen
+    func sendSessionInputKey(for pairedMac: PairedMac, sessionID: UUID, key: SessionInputKey) async throws -> SessionScreen
     func observeSessionScreen(
         for pairedMac: PairedMac,
         sessionID: UUID,
@@ -113,6 +117,14 @@ final class RemoteClientPairingModel {
         return pairedMacs.first(where: { $0.id == activePairedMacID })
     }
 
+    var focusedSessionIsController: Bool {
+        guard let pairedDeviceID = activePairedMac?.pairedDeviceID else {
+            return false
+        }
+
+        return focusedSessionScreen?.controller == .pairedDevice(pairedDeviceID)
+    }
+
     init(client: any RemotePairingClient, store: any PairedMacStore) {
         self.client = client
         self.store = store
@@ -198,6 +210,66 @@ final class RemoteClientPairingModel {
 
     func refreshFocusedSessionScreen() async {
         await startFocusedSessionObservation(forceRestart: true)
+    }
+
+    func takeFocusedRemoteSessionControl(columns: Int, rows: Int) async throws {
+        guard let pairedMac = activePairedMac,
+              let sessionID = focusedSessionID else {
+            throw RemoteClientPairingModelError.focusedSessionUnavailable
+        }
+
+        focusedSessionScreen = try await client.takeSessionControl(
+            for: pairedMac,
+            sessionID: sessionID,
+            columns: columns,
+            rows: rows
+        )
+        focusedSessionIsStale = false
+        focusedSessionErrorMessage = nil
+    }
+
+    func releaseFocusedRemoteSessionControl() async {
+        guard let pairedMac = activePairedMac,
+              let sessionID = focusedSessionID,
+              focusedSessionIsController else {
+            return
+        }
+
+        do {
+            focusedSessionScreen = try await client.releaseSessionControl(for: pairedMac, sessionID: sessionID)
+            focusedSessionIsStale = false
+            focusedSessionErrorMessage = nil
+        } catch {
+            focusedSessionErrorMessage = error.localizedDescription
+        }
+    }
+
+    func sendTextToFocusedRemoteSession(_ text: String) async throws {
+        guard let pairedMac = activePairedMac,
+              let sessionID = focusedSessionID else {
+            throw RemoteClientPairingModelError.focusedSessionUnavailable
+        }
+        guard focusedSessionIsController else {
+            throw RemoteClientPairingModelError.controllerRequired
+        }
+
+        focusedSessionScreen = try await client.sendSessionText(for: pairedMac, sessionID: sessionID, text: text)
+        focusedSessionIsStale = false
+        focusedSessionErrorMessage = nil
+    }
+
+    func sendInputKeyToFocusedRemoteSession(_ key: SessionInputKey) async throws {
+        guard let pairedMac = activePairedMac,
+              let sessionID = focusedSessionID else {
+            throw RemoteClientPairingModelError.focusedSessionUnavailable
+        }
+        guard focusedSessionIsController else {
+            throw RemoteClientPairingModelError.controllerRequired
+        }
+
+        focusedSessionScreen = try await client.sendSessionInputKey(for: pairedMac, sessionID: sessionID, key: key)
+        focusedSessionIsStale = false
+        focusedSessionErrorMessage = nil
     }
 
     func stopFocusingRemoteSession() {
@@ -416,6 +488,8 @@ struct RemoteProviderDetailKey: Hashable {
 enum RemoteClientPairingModelError: LocalizedError {
     case invalidPort
     case pairedMacNotFound
+    case focusedSessionUnavailable
+    case controllerRequired
 
     var errorDescription: String? {
         switch self {
@@ -423,6 +497,10 @@ enum RemoteClientPairingModelError: LocalizedError {
             "Enter a valid Mac port"
         case .pairedMacNotFound:
             "Select a Paired Mac that is still stored on this iPhone"
+        case .focusedSessionUnavailable:
+            "Open a Session before trying to control it"
+        case .controllerRequired:
+            "Take Controller on this iPhone before sending terminal input"
         }
     }
 }

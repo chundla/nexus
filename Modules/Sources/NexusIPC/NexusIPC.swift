@@ -56,6 +56,10 @@ public protocol SessionScreenObservation: Sendable {
     func sendSessionText(sessionID: String, text: String, reply: @escaping (Data?, NSString?) -> Void)
     func sendSessionInputKey(sessionID: String, key: String, reply: @escaping (Data?, NSString?) -> Void)
     func resizeSession(sessionID: String, columns: Int, rows: Int, reply: @escaping (Data?, NSString?) -> Void)
+    func takeRemoteSessionControl(sessionID: String, pairedDeviceID: String, columns: Int, rows: Int, reply: @escaping (Data?, NSString?) -> Void)
+    func releaseRemoteSessionControl(sessionID: String, pairedDeviceID: String, reply: @escaping (Data?, NSString?) -> Void)
+    func sendRemoteSessionText(sessionID: String, pairedDeviceID: String, text: String, reply: @escaping (Data?, NSString?) -> Void)
+    func sendRemoteSessionInputKey(sessionID: String, pairedDeviceID: String, key: String, reply: @escaping (Data?, NSString?) -> Void)
 }
 
 public protocol NexusServiceClient {
@@ -93,6 +97,10 @@ public protocol NexusServiceClient {
     func sendSessionText(sessionID: UUID, text: String) async throws -> SessionScreen
     func sendSessionInputKey(sessionID: UUID, key: SessionInputKey) async throws -> SessionScreen
     func resizeSession(sessionID: UUID, columns: Int, rows: Int) async throws -> SessionScreen
+    func takeRemoteSessionControl(sessionID: UUID, pairedDeviceID: UUID, columns: Int, rows: Int) async throws -> SessionScreen
+    func releaseRemoteSessionControl(sessionID: UUID, pairedDeviceID: UUID) async throws -> SessionScreen
+    func sendRemoteSessionText(sessionID: UUID, pairedDeviceID: UUID, text: String) async throws -> SessionScreen
+    func sendRemoteSessionInputKey(sessionID: UUID, pairedDeviceID: UUID, key: SessionInputKey) async throws -> SessionScreen
 }
 
 public typealias NexusServiceStatusClient = NexusServiceClient
@@ -367,6 +375,50 @@ public final class NexusIPCClient: NexusServiceClient, @unchecked Sendable {
     nonisolated public func resizeSession(sessionID: UUID, columns: Int, rows: Int) async throws -> SessionScreen {
         try await requestDecodable { proxy, reply in
             proxy.resizeSession(sessionID: sessionID.uuidString, columns: columns, rows: rows, reply: reply)
+        }
+    }
+
+    nonisolated public func takeRemoteSessionControl(sessionID: UUID, pairedDeviceID: UUID, columns: Int, rows: Int) async throws -> SessionScreen {
+        try await requestDecodable { proxy, reply in
+            proxy.takeRemoteSessionControl(
+                sessionID: sessionID.uuidString,
+                pairedDeviceID: pairedDeviceID.uuidString,
+                columns: columns,
+                rows: rows,
+                reply: reply
+            )
+        }
+    }
+
+    nonisolated public func releaseRemoteSessionControl(sessionID: UUID, pairedDeviceID: UUID) async throws -> SessionScreen {
+        try await requestDecodable { proxy, reply in
+            proxy.releaseRemoteSessionControl(
+                sessionID: sessionID.uuidString,
+                pairedDeviceID: pairedDeviceID.uuidString,
+                reply: reply
+            )
+        }
+    }
+
+    nonisolated public func sendRemoteSessionText(sessionID: UUID, pairedDeviceID: UUID, text: String) async throws -> SessionScreen {
+        try await requestDecodable { proxy, reply in
+            proxy.sendRemoteSessionText(
+                sessionID: sessionID.uuidString,
+                pairedDeviceID: pairedDeviceID.uuidString,
+                text: text,
+                reply: reply
+            )
+        }
+    }
+
+    nonisolated public func sendRemoteSessionInputKey(sessionID: UUID, pairedDeviceID: UUID, key: SessionInputKey) async throws -> SessionScreen {
+        try await requestDecodable { proxy, reply in
+            proxy.sendRemoteSessionInputKey(
+                sessionID: sessionID.uuidString,
+                pairedDeviceID: pairedDeviceID.uuidString,
+                key: key.rawValue,
+                reply: reply
+            )
         }
     }
 

@@ -6635,9 +6635,54 @@ private final class TrackingServiceClient: NexusServiceClient {
     func resizeSession(sessionID: UUID, columns: Int, rows: Int) async throws -> SessionScreen {
         screenValue = SessionScreen(
             session: sessionValue,
+            controller: screenValue.controller,
             transcript: screenValue.transcript,
             terminalColumns: columns,
             terminalRows: rows
+        )
+        return screenValue
+    }
+
+    func takeRemoteSessionControl(sessionID: UUID, pairedDeviceID: UUID, columns: Int, rows: Int) async throws -> SessionScreen {
+        screenValue = SessionScreen(
+            session: sessionValue,
+            controller: .pairedDevice(pairedDeviceID),
+            transcript: screenValue.transcript,
+            terminalColumns: columns,
+            terminalRows: rows
+        )
+        return screenValue
+    }
+
+    func releaseRemoteSessionControl(sessionID: UUID, pairedDeviceID: UUID) async throws -> SessionScreen {
+        screenValue = SessionScreen(
+            session: sessionValue,
+            controller: .mac,
+            transcript: screenValue.transcript,
+            terminalColumns: 80,
+            terminalRows: 24
+        )
+        return screenValue
+    }
+
+    func sendRemoteSessionText(sessionID: UUID, pairedDeviceID: UUID, text: String) async throws -> SessionScreen {
+        screenValue = SessionScreen(
+            session: sessionValue,
+            controller: .pairedDevice(pairedDeviceID),
+            transcript: screenValue.transcript + "[typed: \(text)]",
+            terminalColumns: screenValue.terminalColumns,
+            terminalRows: screenValue.terminalRows
+        )
+        return screenValue
+    }
+
+    func sendRemoteSessionInputKey(sessionID: UUID, pairedDeviceID: UUID, key: SessionInputKey) async throws -> SessionScreen {
+        screenValue = SessionScreen(
+            session: sessionValue,
+            controller: .pairedDevice(pairedDeviceID),
+            transcript: screenValue.transcript + "[key: \(key.rawValue)]",
+            terminalColumns: screenValue.terminalColumns,
+            terminalRows: screenValue.terminalRows
         )
         return screenValue
     }
@@ -6786,6 +6831,22 @@ private struct FailingServiceClient: NexusServiceClient {
     }
 
     func resizeSession(sessionID: UUID, columns: Int, rows: Int) async throws -> SessionScreen {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func takeRemoteSessionControl(sessionID: UUID, pairedDeviceID: UUID, columns: Int, rows: Int) async throws -> SessionScreen {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func releaseRemoteSessionControl(sessionID: UUID, pairedDeviceID: UUID) async throws -> SessionScreen {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func sendRemoteSessionText(sessionID: UUID, pairedDeviceID: UUID, text: String) async throws -> SessionScreen {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func sendRemoteSessionInputKey(sessionID: UUID, pairedDeviceID: UUID, key: SessionInputKey) async throws -> SessionScreen {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 }

@@ -149,8 +149,14 @@ public struct TerminalLine: Codable, Equatable, Sendable {
     }
 }
 
+public enum SessionController: Codable, Equatable, Sendable {
+    case mac
+    case pairedDevice(UUID)
+}
+
 public struct SessionScreen: Codable, Equatable, Sendable {
     public let session: Session
+    public let controller: SessionController
     public let transcript: String
     public let terminalColumns: Int
     public let terminalRows: Int
@@ -162,6 +168,7 @@ public struct SessionScreen: Codable, Equatable, Sendable {
 
     public init(
         session: Session,
+        controller: SessionController = .mac,
         transcript: String,
         terminalColumns: Int = 80,
         terminalRows: Int = 24,
@@ -179,6 +186,7 @@ public struct SessionScreen: Codable, Equatable, Sendable {
         let resolvedVisibleLines = visibleLines ?? viewport.visibleLines
 
         self.session = session
+        self.controller = controller
         self.transcript = transcript
         self.terminalColumns = terminalColumns
         self.terminalRows = terminalRows

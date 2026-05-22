@@ -82,6 +82,75 @@ protocol SessionRuntime: AnyObject {
     func resize(columns: Int, rows: Int) throws
 }
 
+final class SessionControllerRegistry: @unchecked Sendable {
+    private struct Record {
+        var controller: SessionController = .mac
+        var lastKnownMacSize: (columns: Int, rows: Int)?
+    }
+
+    private let lock = NSLock()
+    private var records: [UUID: Record] = [:]
+
+    func controller(for sessionID: UUID) -> SessionController {
+        lock.lock()
+        defer { lock.unlock() }
+        return records[sessionID]?.controller ?? .mac
+    }
+
+    func takeRemoteControl(sessionID: UUID, pairedDeviceID: UUID, currentMacSize: (columns: Int, rows: Int)) {
+        lock.lock()
+        var record = records[sessionID] ?? Record()
+        if record.lastKnownMacSize == nil {
+            record.lastKnownMacSize = currentMacSize
+        }
+        record.controller = .pairedDevice(pairedDeviceID)
+        records[sessionID] = record
+        lock.unlock()
+    }
+
+    func isRemoteController(sessionID: UUID, pairedDeviceID: UUID) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return records[sessionID]?.controller == .pairedDevice(pairedDeviceID)
+    }
+
+    func releaseRemoteControl(sessionID: UUID, pairedDeviceID: UUID) -> (columns: Int, rows: Int)? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard records[sessionID]?.controller == .pairedDevice(pairedDeviceID) else {
+            return nil
+        }
+
+        var record = records[sessionID] ?? Record()
+        record.controller = .mac
+        records[sessionID] = record
+        return record.lastKnownMacSize
+    }
+
+    func claimMacControl(sessionID: UUID, preferredSize: (columns: Int, rows: Int)? = nil) -> (columns: Int, rows: Int)? {
+        lock.lock()
+        defer { lock.unlock() }
+        var record = records[sessionID] ?? Record()
+        if let preferredSize {
+            record.lastKnownMacSize = preferredSize
+        }
+        record.controller = .mac
+        records[sessionID] = record
+        return record.lastKnownMacSize
+    }
+}
+
+enum NexusSessionControlError: LocalizedError {
+    case remoteControllerRequired
+
+    var errorDescription: String? {
+        switch self {
+        case .remoteControllerRequired:
+            "Take Controller on this iPhone before sending terminal input."
+        }
+    }
+}
+
 final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Sendable {
     private let launcher: any SessionRuntimeLaunching
     private let lock = NSLock()
@@ -737,6 +806,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     private let workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating
     private let sessionRuntimeManager: any SessionRuntimeManaging
     private let remoteAccessRuntime: RemoteAccessRuntime
+    private let sessionControllerRegistry = SessionControllerRegistry()
 
     private init(
         listener: NSXPCListener,
@@ -1341,6 +1411,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             throw NexusMetadataStoreError.sessionNotReady
         }
 
+        _ = try claimMacController(for: resolvedSession)
         return normalizedSessionScreen(try sessionRuntimeManager.sendInput(text, to: resolvedSession))
     }
 
@@ -1354,6 +1425,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             throw NexusMetadataStoreError.sessionNotReady
         }
 
+        _ = try claimMacController(for: resolvedSession)
         return normalizedSessionScreen(try sessionRuntimeManager.sendText(text, to: resolvedSession))
     }
 
@@ -1367,7 +1439,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             throw NexusMetadataStoreError.sessionNotReady
         }
 
-        let currentScreen = try sessionRuntimeManager.sessionScreen(for: resolvedSession)
+        let currentScreen = try claimMacController(for: resolvedSession)
         let renderState = TerminalRenderer.renderState(
             from: currentScreen.transcript,
             terminalColumns: currentScreen.terminalColumns,
@@ -1393,6 +1465,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             throw NexusMetadataStoreError.sessionNotReady
         }
 
+        _ = sessionControllerRegistry.claimMacControl(sessionID: resolvedSession.id, preferredSize: (columns, rows))
         let screen = try sessionRuntimeManager.resize(session: resolvedSession, columns: columns, rows: rows)
         try metadataStore.updateSessionTerminalSize(
             id: resolvedSession.id,
@@ -1400,6 +1473,108 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             rows: screen.terminalRows
         )
         return normalizedSessionScreen(screen)
+    }
+
+    func takeRemoteSessionControl(sessionID: UUID, pairedDeviceID: UUID, columns: Int, rows: Int) throws -> SessionScreen {
+        guard let session = try metadataStore.session(id: sessionID) else {
+            throw NexusMetadataStoreError.sessionNotFound
+        }
+
+        let resolvedSession = try reconcileSessionRuntimeState(session)
+        guard resolvedSession.state == .ready else {
+            throw NexusMetadataStoreError.sessionNotReady
+        }
+
+        let currentScreen = try sessionRuntimeManager.sessionScreen(for: resolvedSession)
+        sessionControllerRegistry.takeRemoteControl(
+            sessionID: resolvedSession.id,
+            pairedDeviceID: pairedDeviceID,
+            currentMacSize: (currentScreen.terminalColumns, currentScreen.terminalRows)
+        )
+
+        let resizedScreen = try sessionRuntimeManager.resize(session: resolvedSession, columns: columns, rows: rows)
+        try metadataStore.updateSessionTerminalSize(
+            id: resolvedSession.id,
+            columns: resizedScreen.terminalColumns,
+            rows: resizedScreen.terminalRows
+        )
+        return normalizedSessionScreen(resizedScreen)
+    }
+
+    func sendRemoteSessionText(sessionID: UUID, pairedDeviceID: UUID, text: String) throws -> SessionScreen {
+        let resolvedSession = try readyRemoteControlledSession(sessionID: sessionID, pairedDeviceID: pairedDeviceID)
+        return normalizedSessionScreen(try sessionRuntimeManager.sendText(text, to: resolvedSession))
+    }
+
+    func sendRemoteSessionInputKey(sessionID: UUID, pairedDeviceID: UUID, key: SessionInputKey) throws -> SessionScreen {
+        let resolvedSession = try readyRemoteControlledSession(sessionID: sessionID, pairedDeviceID: pairedDeviceID)
+        let currentScreen = try sessionRuntimeManager.sessionScreen(for: resolvedSession)
+        let renderState = TerminalRenderer.renderState(
+            from: currentScreen.transcript,
+            terminalColumns: currentScreen.terminalColumns,
+            terminalRows: currentScreen.terminalRows
+        )
+
+        return normalizedSessionScreen(
+            try sessionRuntimeManager.sendInputKey(
+                key,
+                applicationCursorMode: renderState.applicationCursorMode,
+                to: resolvedSession
+            )
+        )
+    }
+
+    func releaseRemoteSessionControl(sessionID: UUID, pairedDeviceID: UUID) throws -> SessionScreen {
+        guard let session = try metadataStore.session(id: sessionID) else {
+            throw NexusMetadataStoreError.sessionNotFound
+        }
+
+        let resolvedSession = try reconcileSessionRuntimeState(session)
+        guard resolvedSession.state == .ready else {
+            throw NexusMetadataStoreError.sessionNotReady
+        }
+        guard let macSize = sessionControllerRegistry.releaseRemoteControl(sessionID: resolvedSession.id, pairedDeviceID: pairedDeviceID) else {
+            throw NexusSessionControlError.remoteControllerRequired
+        }
+
+        let resizedScreen = try sessionRuntimeManager.resize(session: resolvedSession, columns: macSize.columns, rows: macSize.rows)
+        try metadataStore.updateSessionTerminalSize(
+            id: resolvedSession.id,
+            columns: resizedScreen.terminalColumns,
+            rows: resizedScreen.terminalRows
+        )
+        return normalizedSessionScreen(resizedScreen)
+    }
+
+    private func claimMacController(for session: Session) throws -> SessionScreen {
+        let currentScreen = try sessionRuntimeManager.sessionScreen(for: session)
+        guard let macSize = sessionControllerRegistry.claimMacControl(sessionID: session.id),
+              currentScreen.terminalColumns != macSize.columns || currentScreen.terminalRows != macSize.rows else {
+            return currentScreen
+        }
+
+        let resizedScreen = try sessionRuntimeManager.resize(session: session, columns: macSize.columns, rows: macSize.rows)
+        try metadataStore.updateSessionTerminalSize(
+            id: session.id,
+            columns: resizedScreen.terminalColumns,
+            rows: resizedScreen.terminalRows
+        )
+        return resizedScreen
+    }
+
+    private func readyRemoteControlledSession(sessionID: UUID, pairedDeviceID: UUID) throws -> Session {
+        guard let session = try metadataStore.session(id: sessionID) else {
+            throw NexusMetadataStoreError.sessionNotFound
+        }
+
+        let resolvedSession = try reconcileSessionRuntimeState(session)
+        guard resolvedSession.state == .ready else {
+            throw NexusMetadataStoreError.sessionNotReady
+        }
+        guard sessionControllerRegistry.isRemoteController(sessionID: resolvedSession.id, pairedDeviceID: pairedDeviceID) else {
+            throw NexusSessionControlError.remoteControllerRequired
+        }
+        return resolvedSession
     }
 
     private func launchOrResumeSession(_ existingSession: Session, workspace: Workspace) throws -> Session {
@@ -1795,6 +1970,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
 
         return SessionScreen(
             session: screen.session,
+            controller: sessionControllerRegistry.controller(for: screen.session.id),
             transcript: renderState.transcript,
             terminalColumns: screen.terminalColumns,
             terminalRows: screen.terminalRows,
@@ -2950,6 +3126,62 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
     func resizeSession(sessionID: String, columns: Int, rows: Int, reply: @escaping (Data?, NSString?) -> Void) {
         sendReply(
             with: { try service.resizeSession(sessionID: resolveUUID(sessionID), columns: columns, rows: rows) },
+            reply: reply
+        )
+    }
+
+    func takeRemoteSessionControl(sessionID: String, pairedDeviceID: String, columns: Int, rows: Int, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(
+            with: {
+                try service.takeRemoteSessionControl(
+                    sessionID: resolveUUID(sessionID),
+                    pairedDeviceID: resolveUUID(pairedDeviceID),
+                    columns: columns,
+                    rows: rows
+                )
+            },
+            reply: reply
+        )
+    }
+
+    func releaseRemoteSessionControl(sessionID: String, pairedDeviceID: String, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(
+            with: {
+                try service.releaseRemoteSessionControl(
+                    sessionID: resolveUUID(sessionID),
+                    pairedDeviceID: resolveUUID(pairedDeviceID)
+                )
+            },
+            reply: reply
+        )
+    }
+
+    func sendRemoteSessionText(sessionID: String, pairedDeviceID: String, text: String, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(
+            with: {
+                try service.sendRemoteSessionText(
+                    sessionID: resolveUUID(sessionID),
+                    pairedDeviceID: resolveUUID(pairedDeviceID),
+                    text: text
+                )
+            },
+            reply: reply
+        )
+    }
+
+    func sendRemoteSessionInputKey(sessionID: String, pairedDeviceID: String, key: String, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(
+            with: {
+                guard let resolvedKey = SessionInputKey(rawValue: key) else {
+                    throw CocoaError(.coderInvalidValue)
+                }
+
+                return try service.sendRemoteSessionInputKey(
+                    sessionID: resolveUUID(sessionID),
+                    pairedDeviceID: resolveUUID(pairedDeviceID),
+                    key: resolvedKey
+                )
+            },
             reply: reply
         )
     }
