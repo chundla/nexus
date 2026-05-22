@@ -462,7 +462,7 @@ final class RemoteClientPairingModel {
                         }
                     } else {
                         Task { @MainActor in
-                            await applyUpdate()
+                            applyUpdate()
                         }
                     }
                 },

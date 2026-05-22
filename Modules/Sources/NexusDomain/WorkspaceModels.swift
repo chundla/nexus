@@ -163,7 +163,7 @@ public struct RemoteWorkspaceTargetOverview: Codable, Equatable, Sendable {
     }
 }
 
-public enum ProviderID: String, Codable, CaseIterable, Sendable {
+public enum ProviderID: String, Codable, CaseIterable, Hashable, Sendable {
     case codex
     case claude
     case ibmBob

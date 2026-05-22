@@ -54,7 +54,7 @@ struct RemotePairingHTTPClient {
         let (data, response) = try await session.data(for: request)
         let httpResponse = response as? HTTPURLResponse
         guard httpResponse?.statusCode == 200 else {
-            throw decodeRequestFailure(from: data, statusCode: httpResponse?.statusCode ?? 500)
+            throw Self.decodeRequestFailure(from: data, statusCode: httpResponse?.statusCode ?? 500)
         }
 
         return try JSONDecoder().decode(RemotePairedMacStatus.self, from: data)
@@ -70,7 +70,7 @@ struct RemotePairingHTTPClient {
         let (data, response) = try await session.data(for: request)
         let httpResponse = response as? HTTPURLResponse
         guard httpResponse?.statusCode == 200 else {
-            throw decodeRequestFailure(from: data, statusCode: httpResponse?.statusCode ?? 500)
+            throw Self.decodeRequestFailure(from: data, statusCode: httpResponse?.statusCode ?? 500)
         }
 
         let completion = try JSONDecoder().decode(RemotePairingCompletionResponse.self, from: data)
@@ -204,6 +204,7 @@ struct RemotePairingHTTPClient {
             for: pairedMac,
             path: "/remote-client/sessions/\(sessionID.uuidString)/observe"
         )
+        let session = self.session
         let task = Task.detached(priority: nil) {
             do {
                 let (bytes, response) = try await session.bytes(for: request)
@@ -216,7 +217,7 @@ struct RemotePairingHTTPClient {
                     for try await byte in bytes {
                         responseBody.append(byte)
                     }
-                    throw decodeRequestFailure(from: responseBody, statusCode: httpResponse.statusCode)
+                    throw Self.decodeRequestFailure(from: responseBody, statusCode: httpResponse.statusCode)
                 }
 
                 var eventLines: [String] = []
@@ -226,7 +227,7 @@ struct RemotePairingHTTPClient {
                     }
 
                     if line.isEmpty {
-                        try emitObservedScreen(from: eventLines, onUpdate: onUpdate)
+                        try Self.emitObservedScreen(from: eventLines, onUpdate: onUpdate)
                         eventLines = []
                         continue
                     }
@@ -239,7 +240,7 @@ struct RemotePairingHTTPClient {
                     eventLines.append(value)
                 }
 
-                try emitObservedScreen(from: eventLines, onUpdate: onUpdate)
+                try Self.emitObservedScreen(from: eventLines, onUpdate: onUpdate)
 
                 if Task.isCancelled == false {
                     onDisconnect(RemotePairingHTTPObservationError.connectionClosed)
@@ -269,13 +270,13 @@ struct RemotePairingHTTPClient {
         let (data, response) = try await session.data(for: request)
         let httpResponse = response as? HTTPURLResponse
         guard httpResponse?.statusCode == 200 else {
-            throw decodeRequestFailure(from: data, statusCode: httpResponse?.statusCode ?? 500)
+            throw Self.decodeRequestFailure(from: data, statusCode: httpResponse?.statusCode ?? 500)
         }
 
         return data
     }
 
-    private func emitObservedScreen(
+    private nonisolated static func emitObservedScreen(
         from eventLines: [String],
         onUpdate: @escaping @Sendable (SessionScreen) -> Void
     ) throws {
@@ -288,8 +289,8 @@ struct RemotePairingHTTPClient {
         onUpdate(screen)
     }
 
-    private func decodeRequestFailure(from data: Data, statusCode: Int) -> RemotePairingHTTPError {
-        let message = (try? JSONDecoder().decode(RemotePairingErrorResponse.self, from: data).message)
+    private nonisolated static func decodeRequestFailure(from data: Data, statusCode: Int) -> RemotePairingHTTPError {
+        let message = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["message"] as? String
             ?? HTTPURLResponse.localizedString(forStatusCode: statusCode)
         return .requestFailed(message)
     }

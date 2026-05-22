@@ -1,6 +1,7 @@
 # Xcode / Swift user-local state
 *.xcuserdatad/
 *.xcuserstate
+nexus.xcodeproj/xcuserdata/
 DerivedData/
 
 # SwiftPM / local build products

@@ -16,7 +16,7 @@ public enum SessionInputKey: String, Codable, CaseIterable, Sendable {
     case rightArrow
 }
 
-public struct Session: Codable, Equatable, Identifiable, Sendable {
+public struct Session: Codable, Equatable, Hashable, Identifiable, Sendable {
     public let id: UUID
     public let workspaceID: UUID
     public let providerID: ProviderID
@@ -43,7 +43,7 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
         self.failureMessage = failureMessage
     }
 
-    public enum State: String, Codable, Sendable {
+    public enum State: String, Codable, Hashable, Sendable {
         case ready
         case interrupted
         case exited

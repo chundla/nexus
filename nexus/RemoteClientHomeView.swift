@@ -98,7 +98,7 @@ struct RemoteClientHomeView: View {
                     Section("Workspace Catalog") {
                         Text(model.catalogErrorMessage ?? "Loading Workspaces…")
                             .font(.footnote)
-                            .foregroundStyle(model.catalogErrorMessage == nil ? .secondary : .orange)
+                            .foregroundStyle(model.catalogErrorMessage == nil ? Color.secondary : .orange)
                     }
                 }
 
