@@ -87,13 +87,38 @@ struct RemotePairingHTTPClient {
     }
 
     func fetchCatalog(for pairedMac: PairedMac) async throws -> RemoteWorkspaceCatalog {
+        let request = try authenticatedRequest(
+            for: pairedMac,
+            path: "/remote-client/catalog"
+        )
+        let data = try await send(request)
+        return try JSONDecoder().decode(RemoteWorkspaceCatalog.self, from: data)
+    }
+
+    func fetchProviderDetail(
+        for pairedMac: PairedMac,
+        workspaceID: UUID,
+        providerID: ProviderID
+    ) async throws -> ProviderDetail {
+        let request = try authenticatedRequest(
+            for: pairedMac,
+            path: "/remote-client/workspaces/\(workspaceID.uuidString)/providers/\(providerID.rawValue)"
+        )
+        let data = try await send(request)
+        return try JSONDecoder().decode(ProviderDetail.self, from: data)
+    }
+
+    private func authenticatedRequest(for pairedMac: PairedMac, path: String) throws -> URLRequest {
         guard let pairedDeviceID = pairedMac.pairedDeviceID else {
             throw RemotePairingHTTPError.missingPairedDeviceIdentity
         }
 
-        var request = URLRequest(url: URL(string: "http://\(pairedMac.host):\(pairedMac.port)/remote-client/catalog")!)
+        var request = URLRequest(url: URL(string: "http://\(pairedMac.host):\(pairedMac.port)\(path)")!)
         request.setValue(pairedDeviceID.uuidString, forHTTPHeaderField: "X-Nexus-Paired-Device-ID")
+        return request
+    }
 
+    private func send(_ request: URLRequest) async throws -> Data {
         let (data, response) = try await session.data(for: request)
         let httpResponse = response as? HTTPURLResponse
         guard httpResponse?.statusCode == 200 else {
@@ -102,7 +127,7 @@ struct RemotePairingHTTPClient {
             throw RemotePairingHTTPError.requestFailed(message)
         }
 
-        return try JSONDecoder().decode(RemoteWorkspaceCatalog.self, from: data)
+        return data
     }
 }
 

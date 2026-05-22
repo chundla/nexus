@@ -1,10 +1,12 @@
 import Foundation
+import NexusDomain
 import Observation
 
 protocol RemotePairingClient {
     func fetchStatus(host: String, port: Int) async throws -> RemotePairedMacStatus
     func completePairing(host: String, port: Int, pairingCode: String, deviceName: String) async throws -> PairedMac
     func fetchCatalog(for pairedMac: PairedMac) async throws -> RemoteWorkspaceCatalog
+    func fetchProviderDetail(for pairedMac: PairedMac, workspaceID: UUID, providerID: ProviderID) async throws -> ProviderDetail
 }
 
 extension RemotePairingHTTPClient: RemotePairingClient {}
@@ -79,6 +81,8 @@ final class RemoteClientPairingModel {
     var activePairedMacID: PairedMac.ID?
     var catalog: RemoteWorkspaceCatalog?
     var catalogErrorMessage: String?
+    var providerDetails: [RemoteProviderDetailKey: ProviderDetail] = [:]
+    var providerDetailErrorMessages: [RemoteProviderDetailKey: String] = [:]
     var macHost = ""
     var macPort = "9234"
     var pairingCode = ""
@@ -144,6 +148,35 @@ final class RemoteClientPairingModel {
         }
     }
 
+    func providerDetail(for workspaceID: UUID, providerID: ProviderID) -> ProviderDetail? {
+        providerDetails[RemoteProviderDetailKey(workspaceID: workspaceID, providerID: providerID)]
+    }
+
+    func providerDetailErrorMessage(for workspaceID: UUID, providerID: ProviderID) -> String? {
+        providerDetailErrorMessages[RemoteProviderDetailKey(workspaceID: workspaceID, providerID: providerID)]
+    }
+
+    func loadProviderDetail(workspaceID: UUID, providerID: ProviderID) async {
+        let key = RemoteProviderDetailKey(workspaceID: workspaceID, providerID: providerID)
+        guard let pairedMac = activePairedMac else {
+            providerDetails[key] = nil
+            providerDetailErrorMessages[key] = nil
+            return
+        }
+
+        do {
+            providerDetails[key] = try await client.fetchProviderDetail(
+                for: pairedMac,
+                workspaceID: workspaceID,
+                providerID: providerID
+            )
+            providerDetailErrorMessages[key] = nil
+        } catch {
+            providerDetails[key] = nil
+            providerDetailErrorMessages[key] = error.localizedDescription
+        }
+    }
+
     func completePairing() async throws {
         guard let port = Int(macPort.trimmingCharacters(in: .whitespacesAndNewlines)) else {
             throw RemoteClientPairingModelError.invalidPort
@@ -161,8 +194,7 @@ final class RemoteClientPairingModel {
         pairedMacAvailability[pairedMac.id] = .unknown
         try store.savePairedMacs(pairedMacs)
         activePairedMacID = pairedMac.id
-        catalog = nil
-        catalogErrorMessage = nil
+        clearRemoteBrowseState()
         store.saveActivePairedMacID(activePairedMacID)
     }
 
@@ -172,8 +204,7 @@ final class RemoteClientPairingModel {
         }
 
         activePairedMacID = id
-        catalog = nil
-        catalogErrorMessage = nil
+        clearRemoteBrowseState()
         store.saveActivePairedMacID(activePairedMacID)
     }
 
@@ -181,10 +212,16 @@ final class RemoteClientPairingModel {
         pairedMacs.removeAll { $0.id == id }
         pairedMacAvailability[id] = nil
         activePairedMacID = Self.resolveActivePairedMacID(preferredID: activePairedMacID, pairedMacs: pairedMacs)
-        catalog = nil
-        catalogErrorMessage = nil
+        clearRemoteBrowseState()
         try store.savePairedMacs(pairedMacs)
         store.saveActivePairedMacID(activePairedMacID)
+    }
+
+    private func clearRemoteBrowseState() {
+        catalog = nil
+        catalogErrorMessage = nil
+        providerDetails = [:]
+        providerDetailErrorMessages = [:]
     }
 
     private static func resolveActivePairedMacID(
@@ -198,6 +235,11 @@ final class RemoteClientPairingModel {
 
         return pairedMacs.first?.id
     }
+}
+
+struct RemoteProviderDetailKey: Hashable {
+    let workspaceID: UUID
+    let providerID: ProviderID
 }
 
 enum RemoteClientPairingModelError: LocalizedError {

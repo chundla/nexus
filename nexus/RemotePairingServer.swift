@@ -1,6 +1,7 @@
 #if os(macOS)
 import Foundation
 import Network
+import NexusDomain
 import NexusIPC
 
 final class RemotePairingServer {
@@ -117,11 +118,7 @@ final class RemotePairingServer {
 
         if request.method == "GET", request.path == "/remote-client/catalog" {
             do {
-                let pairedDeviceID = try pairedDeviceID(from: request)
-                let pairedDevices = try await client.listPairedDevices()
-                guard pairedDevices.contains(where: { $0.id == pairedDeviceID }) else {
-                    throw RemotePairingServerError.unauthorized
-                }
+                try await authorize(request)
 
                 let workspaceGroups = try await client.listWorkspaceGroups()
                 let recentNavigation = try await client.listRecentNavigation(limit: 10)
@@ -140,6 +137,23 @@ final class RemotePairingServer {
                     ),
                     over: connection
                 )
+            } catch RemotePairingServerError.unauthorized {
+                send(statusCode: 401, body: RemotePairingErrorResponse(message: "Pair this iPhone again to browse this Paired Mac"), over: connection)
+            } catch {
+                send(statusCode: 400, body: RemotePairingErrorResponse(message: error.localizedDescription), over: connection)
+            }
+            return
+        }
+
+        if request.method == "GET",
+           let providerDetailRequest = providerDetailRequest(from: request) {
+            do {
+                try await authorize(request)
+                let detail = try await client.getProviderDetail(
+                    workspaceID: providerDetailRequest.workspaceID,
+                    providerID: providerDetailRequest.providerID
+                )
+                send(statusCode: 200, body: detail, over: connection)
             } catch RemotePairingServerError.unauthorized {
                 send(statusCode: 401, body: RemotePairingErrorResponse(message: "Pair this iPhone again to browse this Paired Mac"), over: connection)
             } catch {
@@ -170,6 +184,14 @@ final class RemotePairingServer {
         }
     }
 
+    private func authorize(_ request: ParsedRequest) async throws {
+        let pairedDeviceID = try pairedDeviceID(from: request)
+        let pairedDevices = try await client.listPairedDevices()
+        guard pairedDevices.contains(where: { $0.id == pairedDeviceID }) else {
+            throw RemotePairingServerError.unauthorized
+        }
+    }
+
     private func pairedDeviceID(from request: ParsedRequest) throws -> UUID {
         guard let rawValue = request.headers["x-nexus-paired-device-id"],
               let pairedDeviceID = UUID(uuidString: rawValue) else {
@@ -177,6 +199,20 @@ final class RemotePairingServer {
         }
 
         return pairedDeviceID
+    }
+
+    private func providerDetailRequest(from request: ParsedRequest) -> ProviderDetailRequest? {
+        let components = request.path.split(separator: "/")
+        guard components.count == 5,
+              components[0] == "remote-client",
+              components[1] == "workspaces",
+              let workspaceID = UUID(uuidString: String(components[2])),
+              components[3] == "providers",
+              let providerID = ProviderID(rawValue: String(components[4])) else {
+            return nil
+        }
+
+        return ProviderDetailRequest(workspaceID: workspaceID, providerID: providerID)
     }
 
     private func send<T: Encodable>(statusCode: Int, body: T, over connection: NWConnection) {
@@ -270,6 +306,11 @@ private struct ParsedRequest {
     let path: String
     let headers: [String: String]
     let body: Data
+}
+
+private struct ProviderDetailRequest {
+    let workspaceID: UUID
+    let providerID: ProviderID
 }
 
 private enum RemotePairingServerError: LocalizedError {

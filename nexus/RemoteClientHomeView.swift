@@ -231,28 +231,41 @@ struct RemoteClientHomeView: View {
                 .foregroundStyle(.secondary)
 
             ForEach(overview.providerCards) { providerCard in
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack {
-                        Text(providerCard.provider.displayName)
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                        Spacer()
-                        if providerCard.alternateSessionCount > 0 {
-                            Text("\(providerCard.alternateSessionCount) named")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    Text(providerCard.health.summary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(providerCard.defaultSession.summary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                NavigationLink {
+                    RemoteProviderDetailView(
+                        model: model,
+                        overview: overview,
+                        providerCard: providerCard
+                    )
+                } label: {
+                    providerCardRow(providerCard)
                 }
+                .buttonStyle(.plain)
             }
         }
         .padding(.vertical, 4)
+    }
+
+    private func providerCardRow(_ providerCard: WorkspaceProviderCard) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text(providerCard.provider.displayName)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                Spacer()
+                if providerCard.alternateSessionCount > 0 {
+                    Text("\(providerCard.alternateSessionCount) named")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Text(providerCard.health.summary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(providerCard.defaultSession.summary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 
     private func workspaceOverviews(in group: WorkspaceGroup, catalog: RemoteWorkspaceCatalog) -> [WorkspaceOverview] {
@@ -271,6 +284,100 @@ struct RemoteClientHomeView: View {
             .orange
         case .unknown:
             .secondary
+        }
+    }
+}
+
+private struct RemoteProviderDetailView: View {
+    @Bindable var model: RemoteClientPairingModel
+    let overview: WorkspaceOverview
+    let providerCard: WorkspaceProviderCard
+
+    private var detail: ProviderDetail? {
+        model.providerDetail(for: overview.workspace.id, providerID: providerCard.provider.id)
+    }
+
+    private var errorMessage: String? {
+        model.providerDetailErrorMessage(for: overview.workspace.id, providerID: providerCard.provider.id)
+    }
+
+    var body: some View {
+        List {
+            Section("Provider") {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(providerCard.provider.displayName)
+                        .font(.headline)
+                    Text(overview.workspace.name)
+                        .font(.subheadline)
+                    Text(overview.remoteTarget.map { "\($0.host.name) • \(overview.workspace.folderPath)" } ?? overview.workspace.folderPath)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Health") {
+                Text(detail?.health.summary ?? providerCard.health.summary)
+                if let detail, detail.health.diagnostics.isEmpty == false {
+                    ForEach(Array(detail.health.diagnostics.enumerated()), id: \.offset) { entry in
+                        Text(entry.element.message)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            Section("Default Session") {
+                if let session = detail?.defaultSession {
+                    RemoteProviderSessionSummaryRow(session: session)
+                } else {
+                    Text(detail == nil && errorMessage == nil ? "Loading Session details…" : providerCard.defaultSession.summary)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if let detail {
+                if detail.alternateSessions.isEmpty == false {
+                    Section("Named Sessions") {
+                        ForEach(detail.alternateSessions) { session in
+                            RemoteProviderSessionSummaryRow(session: session)
+                        }
+                    }
+                }
+
+                if detail.failedSessions.isEmpty == false {
+                    Section("Failed Sessions") {
+                        ForEach(detail.failedSessions) { session in
+                            RemoteProviderSessionSummaryRow(session: session)
+                        }
+                    }
+                }
+            }
+
+            if let errorMessage {
+                Section {
+                    Text(errorMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                }
+            }
+        }
+        .navigationTitle(providerCard.provider.displayName)
+        .task(id: providerCard.id) {
+            await model.loadProviderDetail(workspaceID: overview.workspace.id, providerID: providerCard.provider.id)
+        }
+    }
+}
+
+private struct RemoteProviderSessionSummaryRow: View {
+    let session: Session
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(session.isDefault ? "Default Session" : (session.name ?? "Session"))
+                .fontWeight(.medium)
+            Text(session.failureMessage ?? session.state.rawValue.capitalized)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 }

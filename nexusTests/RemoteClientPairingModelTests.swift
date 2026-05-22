@@ -226,12 +226,55 @@ struct RemoteClientPairingModelTests {
         )
         #expect(reloadedModel.activePairedMac == secondMac)
     }
+
+    @Test func loadsActivePairedMacProviderDetailOnDemand() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: UUID()
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let detail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+            defaultSession: nil,
+            alternateSessions: [],
+            failedSessions: []
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let model = RemoteClientPairingModel(
+            client: StubRemotePairingClient(result: pairedMac, providerDetail: detail),
+            store: store
+        )
+
+        await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
+
+        #expect(model.providerDetail(for: workspace.id, providerID: .claude) == detail)
+        #expect(model.providerDetailErrorMessage(for: workspace.id, providerID: .claude) == nil)
+    }
 }
 
 private struct StubRemotePairingClient: RemotePairingClient {
     let result: PairedMac
     let status: Result<RemotePairedMacStatus, any Error>
     let catalog: RemoteWorkspaceCatalog
+    let providerDetail: ProviderDetail
 
     init(
         result: PairedMac,
@@ -242,11 +285,26 @@ private struct StubRemotePairingClient: RemotePairingClient {
             workspaceGroups: [],
             recentNavigation: [],
             workspaceOverviews: []
+        ),
+        providerDetail: ProviderDetail = ProviderDetail(
+            workspace: Workspace(
+                id: UUID(),
+                name: "Nexus",
+                kind: .local,
+                folderPath: "/tmp/nexus",
+                primaryGroupID: UUID()
+            ),
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+            defaultSession: nil,
+            alternateSessions: [],
+            failedSessions: []
         )
     ) {
         self.result = result
         self.status = status
         self.catalog = catalog
+        self.providerDetail = providerDetail
     }
 
     func fetchStatus(host: String, port: Int) async throws -> RemotePairedMacStatus {
@@ -259,6 +317,10 @@ private struct StubRemotePairingClient: RemotePairingClient {
 
     func fetchCatalog(for pairedMac: PairedMac) async throws -> RemoteWorkspaceCatalog {
         catalog
+    }
+
+    func fetchProviderDetail(for pairedMac: PairedMac, workspaceID: UUID, providerID: ProviderID) async throws -> ProviderDetail {
+        providerDetail
     }
 }
 
