@@ -444,7 +444,7 @@ struct ContentView: View {
 
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
-                            Text("Alternate Sessions")
+                            Text("Named Sessions")
                                 .font(.headline)
                             Spacer()
                             Button("New Session") {
@@ -461,7 +461,7 @@ struct ContentView: View {
                         }
 
                         if detail.alternateSessions.isEmpty {
-                            Text("No alternate sessions yet.")
+                            Text("No Named Sessions yet.")
                                 .foregroundStyle(.secondary)
                         } else {
                             ForEach(detail.alternateSessions) { session in
@@ -697,8 +697,8 @@ struct ContentView: View {
                 Text(card.defaultSession.summary)
                     .font(.callout)
                     .foregroundStyle(.secondary)
-                if card.alternateSessionCount > 0 {
-                    Text("\(card.alternateSessionCount) alternate session\(card.alternateSessionCount == 1 ? "" : "s")")
+                if let namedSessionSummary = card.namedSessionSummary {
+                    Text(namedSessionSummary)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

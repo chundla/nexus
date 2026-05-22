@@ -296,6 +296,11 @@ public struct WorkspaceProviderCard: Codable, Equatable, Identifiable, Sendable 
     public var id: ProviderID {
         provider.id
     }
+
+    public var namedSessionSummary: String? {
+        guard alternateSessionCount > 0 else { return nil }
+        return "\(alternateSessionCount) named session\(alternateSessionCount == 1 ? "" : "s")"
+    }
 }
 
 public struct ProviderDetail: Codable, Equatable, Sendable {

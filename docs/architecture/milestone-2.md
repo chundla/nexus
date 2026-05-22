@@ -104,7 +104,7 @@ Prove the Nexus remote-workspace architecture with a useful macOS-only remote sl
 
 - same structural shape as milestone one
 - default Session
-- alternate Sessions
+- named Sessions
 - failed Session records
 - launch/new session actions
 - remote Provider Health and diagnostics

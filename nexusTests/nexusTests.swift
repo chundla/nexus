@@ -115,6 +115,30 @@ struct nexusTests {
         #expect(gridSize.rows == 20)
     }
 
+    @Test func workspaceProviderCardNamedSessionSummaryUsesNamedSessionCopy() {
+        let zero = WorkspaceProviderCard(
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .available, summary: "Ready"),
+            defaultSession: ProviderDefaultSessionSummary(state: .ready, summary: "Running", actionTitle: "Open")
+        )
+        let singular = WorkspaceProviderCard(
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .available, summary: "Ready"),
+            defaultSession: ProviderDefaultSessionSummary(state: .ready, summary: "Running", actionTitle: "Open"),
+            alternateSessionCount: 1
+        )
+        let plural = WorkspaceProviderCard(
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .available, summary: "Ready"),
+            defaultSession: ProviderDefaultSessionSummary(state: .ready, summary: "Running", actionTitle: "Open"),
+            alternateSessionCount: 2
+        )
+
+        #expect(zero.namedSessionSummary == nil)
+        #expect(singular.namedSessionSummary == "1 named session")
+        #expect(plural.namedSessionSummary == "2 named sessions")
+    }
+
     @Test func embeddedServiceBootstrapStartsBackgroundServiceReachableOverIPC() async throws {
         let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests()
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)

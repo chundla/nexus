@@ -65,7 +65,7 @@ Prove the Nexus architecture with a useful macOS-only local-workspace slice cent
 ### Provider detail
 
 - default session
-- alternate sessions
+- named sessions
 - failed session records
 - launch/new session actions
 - provider health/diagnostics

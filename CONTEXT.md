@@ -16,6 +16,14 @@ _Avoid_: tool, backend
 An app-owned workstream for one Provider in one Workspace.
 _Avoid_: process, tab
 
+**Default Session**:
+The implicit reusable Session lane for one Provider in one Workspace.
+_Avoid_: primary tab, main process
+
+**Named Session**:
+An additional explicitly created Session lane for one Provider in one Workspace.
+_Avoid_: tab, branch session
+
 **Host**:
 A saved remote machine profile that remote Workspaces can use for execution defaults and validation.
 _Avoid_: server config, SSH target
@@ -97,6 +105,10 @@ _Avoid_: stop, close
 - A **Workspace** contains one or more **Sessions**
 - A **Provider** can be used in many **Workspaces**
 - A **Session** belongs to exactly one **Workspace** and one **Provider**
+- A **Default Session** is a **Session**
+- A **Named Session** is a **Session**
+- A **Workspace** and **Provider** pair has exactly one **Default Session**
+- A **Workspace** and **Provider** pair may have many **Named Sessions**
 - A **Session** may be **Detached** without being stopped
 - A **Session** has at most one **Controller** at a time
 - A **Session** may have many viewers at the same time
@@ -138,3 +150,4 @@ _Avoid_: stop, close
 - The same unavailable/broken distinction applies to a **Host** — resolved: unavailable means transient reachability/auth environment failure; broken means the saved Host target/configuration needs repair.
 - A **Workspace** target is not always a folder path — resolved: use **Workspace Target** for the local-folder vs Host-plus-remote-path distinction.
 - Changing a **Remote Workspace** Host or remote path is not a small edit — resolved: it creates a new **Remote Workspace** because the **Workspace Target** changed.
+- "alternate session" is vague product language — resolved: use **Named Session** for additional explicitly created Session lanes distinct from the **Default Session**.

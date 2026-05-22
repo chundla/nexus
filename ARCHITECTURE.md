@@ -136,7 +136,7 @@ If the Background Service restarts, live local sessions are treated as lost and 
 
 - Top level: workspace groups and workspaces
 - Workspace screen: **provider-first** overview
-- Provider detail: default session, alternate sessions, failed sessions, actions
+- Provider detail: default session, named sessions, failed sessions, actions
 - Focused session screen: terminal-first, but still owned by workspace/provider
 - Quick switch: workspace-first, with provider/session results secondary
 
@@ -179,4 +179,5 @@ Milestone one proves the service-centered architecture with local-only execution
 - `docs/architecture/milestone-1.md`
 - `docs/architecture/milestone-2.md`
 - `docs/architecture/milestone-3.md`
+- `docs/architecture/milestone-4.md`
 - `docs/adr/`
