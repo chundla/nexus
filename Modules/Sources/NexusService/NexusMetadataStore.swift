@@ -98,7 +98,8 @@ final class NexusMetadataStore {
                 state TEXT NOT NULL,
                 failure_message TEXT,
                 terminal_columns INTEGER NOT NULL DEFAULT 80,
-                terminal_rows INTEGER NOT NULL DEFAULT 24
+                terminal_rows INTEGER NOT NULL DEFAULT 24,
+                remote_runtime_generation INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS launch_snapshots (
@@ -133,6 +134,11 @@ final class NexusMetadataStore {
             table: "sessions",
             column: "terminal_rows",
             definition: "INTEGER NOT NULL DEFAULT 24"
+        )
+        try ensureColumnExists(
+            table: "sessions",
+            column: "remote_runtime_generation",
+            definition: "INTEGER NOT NULL DEFAULT 0"
         )
     }
 
@@ -921,6 +927,46 @@ final class NexusMetadataStore {
                 columns: Int(sqlite3_column_int(statement, 0)),
                 rows: Int(sqlite3_column_int(statement, 1))
             )
+        }
+    }
+
+    func remoteRuntimeGeneration(sessionID: UUID) throws -> Int {
+        try withLock {
+            let statement = try prepare(
+                "SELECT remote_runtime_generation FROM sessions WHERE id = ? LIMIT 1;"
+            )
+            defer { sqlite3_finalize(statement) }
+
+            try bind(sessionID.uuidString, at: 1, in: statement)
+            guard sqlite3_step(statement) == SQLITE_ROW else {
+                throw NexusMetadataStoreError.sessionNotFound
+            }
+
+            return Int(sqlite3_column_int(statement, 0))
+        }
+    }
+
+    func advanceRemoteRuntimeGeneration(sessionID: UUID) throws -> Int {
+        try withLock {
+            let statement = try prepare(
+                "UPDATE sessions SET remote_runtime_generation = remote_runtime_generation + 1 WHERE id = ?;"
+            )
+            defer { sqlite3_finalize(statement) }
+
+            try bind(sessionID.uuidString, at: 1, in: statement)
+            try stepDone(statement)
+
+            let query = try prepare(
+                "SELECT remote_runtime_generation FROM sessions WHERE id = ? LIMIT 1;"
+            )
+            defer { sqlite3_finalize(query) }
+
+            try bind(sessionID.uuidString, at: 1, in: query)
+            guard sqlite3_step(query) == SQLITE_ROW else {
+                throw NexusMetadataStoreError.sessionNotFound
+            }
+
+            return Int(sqlite3_column_int(query, 0))
         }
     }
 

@@ -38,6 +38,7 @@ public protocol SessionScreenObservation: Sendable {
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: String?, reply: @escaping (Data?, NSString?) -> Void)
     func createRemoteWorkspace(name: String?, hostID: String, remotePath: String, primaryGroupID: String?, reply: @escaping (Data?, NSString?) -> Void)
     func launchOrResumeDefaultSession(workspaceID: String, providerID: String, reply: @escaping (Data?, NSString?) -> Void)
+    func launchOrResumeSession(sessionID: String, reply: @escaping (Data?, NSString?) -> Void)
     func createNamedSession(workspaceID: String, providerID: String, name: String?, reply: @escaping (Data?, NSString?) -> Void)
     func stopSession(sessionID: String, reply: @escaping (Data?, NSString?) -> Void)
     func deleteSessionRecord(sessionID: String, reply: @escaping (Data?, NSString?) -> Void)
@@ -69,6 +70,7 @@ public protocol NexusServiceClient {
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: UUID?) async throws -> Workspace
     func createRemoteWorkspace(name: String?, hostID: UUID, remotePath: String, primaryGroupID: UUID?) async throws -> Workspace
     func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) async throws -> Session
+    func launchOrResumeSession(sessionID: UUID) async throws -> Session
     func createNamedSession(workspaceID: UUID, providerID: ProviderID, name: String?) async throws -> Session
     func stopSession(sessionID: UUID) async throws -> Session
     func deleteSessionRecord(sessionID: UUID) async throws -> Bool
@@ -230,6 +232,12 @@ public final class NexusIPCClient: NexusServiceClient, @unchecked Sendable {
                 providerID: providerID.rawValue,
                 reply: reply
             )
+        }
+    }
+
+    nonisolated public func launchOrResumeSession(sessionID: UUID) async throws -> Session {
+        try await requestDecodable { proxy, reply in
+            proxy.launchOrResumeSession(sessionID: sessionID.uuidString, reply: reply)
         }
     }
 

@@ -41,6 +41,19 @@ struct SessionRuntimeLaunchConfiguration {
     let executable: String
     let workingDirectory: String
     let remoteHost: NexusDomain.Host?
+    let remoteRuntimeIdentifier: String?
+
+    init(
+        executable: String,
+        workingDirectory: String,
+        remoteHost: NexusDomain.Host?,
+        remoteRuntimeIdentifier: String? = nil
+    ) {
+        self.executable = executable
+        self.workingDirectory = workingDirectory
+        self.remoteHost = remoteHost
+        self.remoteRuntimeIdentifier = remoteRuntimeIdentifier
+    }
 }
 
 protocol SessionRuntimeLaunching {
@@ -250,8 +263,9 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Se
 }
 
 struct RemoteSessionCommandBuilder {
-    func attachArguments(session: Session, configuration: SessionRuntimeLaunchConfiguration) -> [String] {
-        guard let host = configuration.remoteHost else {
+    func attachArguments(configuration: SessionRuntimeLaunchConfiguration) -> [String] {
+        guard let host = configuration.remoteHost,
+              let runtimeIdentifier = configuration.remoteRuntimeIdentifier else {
             return []
         }
 
@@ -265,12 +279,12 @@ struct RemoteSessionCommandBuilder {
         }
         arguments += [
             host.sshTarget,
-            "cd \(shellQuoted(configuration.workingDirectory)) && exec tmux new-session -A -s \(shellQuoted(sessionName(for: session))) \(shellQuoted(configuration.executable))"
+            "cd \(shellQuoted(configuration.workingDirectory)) && exec tmux new-session -A -s \(shellQuoted(runtimeIdentifier)) \(shellQuoted(configuration.executable))"
         ]
         return arguments
     }
 
-    func stopArguments(session: Session, host: NexusDomain.Host) -> [String] {
+    func stopArguments(runtimeIdentifier: String, host: NexusDomain.Host) -> [String] {
         var arguments = [
             "-o", "BatchMode=yes",
             "-o", "ConnectTimeout=5"
@@ -280,13 +294,9 @@ struct RemoteSessionCommandBuilder {
         }
         arguments += [
             host.sshTarget,
-            "tmux kill-session -t \(shellQuoted(sessionName(for: session)))"
+            "tmux kill-session -t \(shellQuoted(runtimeIdentifier))"
         ]
         return arguments
-    }
-
-    func sessionName(for session: Session) -> String {
-        "nexus-\(session.id.uuidString.lowercased())"
     }
 
     private func shellQuoted(_ value: String) -> String {
@@ -298,16 +308,17 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
     private let remoteSessionCommandBuilder = RemoteSessionCommandBuilder()
 
     func makeRuntime(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) throws -> any SessionRuntime {
-        if let remoteHost = launchConfiguration.remoteHost {
+        if let remoteHost = launchConfiguration.remoteHost,
+           let runtimeIdentifier = launchConfiguration.remoteRuntimeIdentifier {
             return try ProcessSessionRuntime(
                 executable: "/usr/bin/ssh",
-                arguments: remoteSessionCommandBuilder.attachArguments(session: session, configuration: launchConfiguration),
+                arguments: remoteSessionCommandBuilder.attachArguments(configuration: launchConfiguration),
                 workingDirectory: nil,
                 initialTranscript: "Connecting to \(workspace.name) on \(remoteHost.name) with Claude…\n",
                 stopHandler: {
                     try Self.runCommand(
                         executable: "/usr/bin/ssh",
-                        arguments: self.remoteSessionCommandBuilder.stopArguments(session: session, host: remoteHost)
+                        arguments: self.remoteSessionCommandBuilder.stopArguments(runtimeIdentifier: runtimeIdentifier, host: remoteHost)
                     )
                 }
             )
@@ -1051,12 +1062,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             throw NexusMetadataStoreError.providerNotSupported
         }
 
-        if let existingSession = try metadataStore.defaultSession(workspaceID: workspaceID, providerID: providerID),
-           let launchSnapshot = try metadataStore.launchSnapshot(sessionID: existingSession.id) {
-            let session = existingSession.state == .ready && existingSession.failureMessage == nil
-                ? existingSession
-                : try metadataStore.updateSession(id: existingSession.id, state: .ready, failureMessage: nil)
-            return try launchSession(session, workspace: workspace, launchSnapshot: launchSnapshot)
+        if let existingSession = try metadataStore.defaultSession(workspaceID: workspaceID, providerID: providerID) {
+            return try launchOrResumeSession(existingSession, workspace: workspace)
         }
 
         let remoteContext = try remoteWorkspaceTargetOverview(for: workspace, refreshHostValidation: true).map {
@@ -1074,14 +1081,6 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         )
         guard health.launchability == .launchable, let executable = health.resolvedExecutable else {
             let failureMessage = health.diagnostics.first(where: { $0.severity == .error })?.message ?? health.summary
-            if let session = try metadataStore.defaultSession(workspaceID: workspaceID, providerID: providerID) {
-                return try metadataStore.updateSession(
-                    id: session.id,
-                    state: .failed,
-                    failureMessage: failureMessage
-                )
-            }
-
             return try metadataStore.createDefaultSession(
                 workspaceID: workspaceID,
                 providerID: providerID,
@@ -1090,20 +1089,12 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             )
         }
 
-        let session: Session
-        if let existingSession = try metadataStore.defaultSession(workspaceID: workspaceID, providerID: providerID) {
-            session = existingSession.state == .ready && existingSession.failureMessage == nil
-                ? existingSession
-                : try metadataStore.updateSession(id: existingSession.id, state: .ready, failureMessage: nil)
-        } else {
-            session = try metadataStore.createDefaultSession(
-                workspaceID: workspaceID,
-                providerID: providerID,
-                state: .ready,
-                failureMessage: nil
-            )
-        }
-
+        let session = try metadataStore.createDefaultSession(
+            workspaceID: workspaceID,
+            providerID: providerID,
+            state: .ready,
+            failureMessage: nil
+        )
         let launchSnapshot = try metadataStore.ensureLaunchSnapshot(
             sessionID: session.id,
             workspaceID: session.workspaceID,
@@ -1111,7 +1102,18 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             resolvedExecutable: executable,
             resolvedWorkingDirectory: workspace.folderPath
         )
-        return try launchSession(session, workspace: workspace, launchSnapshot: launchSnapshot)
+        return try launchSession(session, workspace: workspace, launchSnapshot: launchSnapshot, forceFreshRemoteRuntime: true)
+    }
+
+    func launchOrResumeSession(sessionID: UUID) throws -> Session {
+        guard let session = try metadataStore.session(id: sessionID) else {
+            throw NexusMetadataStoreError.sessionNotFound
+        }
+        guard let workspace = try metadataStore.workspace(id: session.workspaceID) else {
+            throw NexusMetadataStoreError.workspaceNotFound
+        }
+
+        return try launchOrResumeSession(session, workspace: workspace)
     }
 
     func createNamedSession(workspaceID: UUID, providerID: ProviderID, name: String?) throws -> Session {
@@ -1164,7 +1166,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             resolvedExecutable: executable,
             resolvedWorkingDirectory: workspace.folderPath
         )
-        return try launchSession(session, workspace: workspace, launchSnapshot: launchSnapshot)
+        return try launchSession(session, workspace: workspace, launchSnapshot: launchSnapshot, forceFreshRemoteRuntime: true)
     }
 
     func stopSession(sessionID: UUID) throws -> Session {
@@ -1325,12 +1327,109 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         return normalizedSessionScreen(screen)
     }
 
-    private func launchSession(_ session: Session, workspace: Workspace, launchSnapshot: LaunchSnapshot) throws -> Session {
+    private func launchOrResumeSession(_ existingSession: Session, workspace: Workspace) throws -> Session {
+        guard existingSession.providerID == .claude else {
+            throw NexusMetadataStoreError.providerNotSupported
+        }
+
+        if let launchSnapshot = try metadataStore.launchSnapshot(sessionID: existingSession.id) {
+            let session = existingSession.state == .ready && existingSession.failureMessage == nil
+                ? existingSession
+                : try metadataStore.updateSession(id: existingSession.id, state: .ready, failureMessage: nil)
+            return try launchSession(
+                session,
+                workspace: workspace,
+                launchSnapshot: launchSnapshot,
+                forceFreshRemoteRuntime: shouldCreateFreshRemoteRuntime(for: existingSession, workspace: workspace)
+            )
+        }
+
+        let remoteContext = try remoteWorkspaceTargetOverview(for: workspace, refreshHostValidation: true).map {
+            RemoteWorkspaceHealthContext(
+                host: $0.host,
+                hostValidation: $0.hostValidation,
+                workspaceAvailability: $0.workspaceAvailability
+            )
+        }
+        let health = try providerHealthSummary(
+            for: existingSession.providerID,
+            workspace: workspace,
+            remoteContext: remoteContext,
+            preferFreshRemoteCheck: true
+        )
+        guard health.launchability == .launchable, let executable = health.resolvedExecutable else {
+            let failureMessage = health.diagnostics.first(where: { $0.severity == .error })?.message ?? health.summary
+            return try metadataStore.updateSession(
+                id: existingSession.id,
+                state: .failed,
+                failureMessage: failureMessage
+            )
+        }
+
+        let session = existingSession.state == .ready && existingSession.failureMessage == nil
+            ? existingSession
+            : try metadataStore.updateSession(id: existingSession.id, state: .ready, failureMessage: nil)
+        let launchSnapshot = try metadataStore.ensureLaunchSnapshot(
+            sessionID: session.id,
+            workspaceID: session.workspaceID,
+            providerID: session.providerID,
+            resolvedExecutable: executable,
+            resolvedWorkingDirectory: workspace.folderPath
+        )
+        return try launchSession(
+            session,
+            workspace: workspace,
+            launchSnapshot: launchSnapshot,
+            forceFreshRemoteRuntime: shouldCreateFreshRemoteRuntime(for: existingSession, workspace: workspace)
+        )
+    }
+
+    private func shouldCreateFreshRemoteRuntime(for session: Session, workspace: Workspace) -> Bool {
+        guard workspace.kind == .remote else {
+            return false
+        }
+
+        return sessionRuntimeManager.runtimeState(for: session) != .ready
+    }
+
+    private func remoteRuntimeIdentifier(for session: Session, forceNew: Bool) throws -> String {
+        let currentGeneration = try metadataStore.remoteRuntimeGeneration(sessionID: session.id)
+        if forceNew {
+            let nextGeneration = try metadataStore.advanceRemoteRuntimeGeneration(sessionID: session.id)
+            return remoteRuntimeIdentifier(sessionID: session.id, generation: nextGeneration)
+        }
+
+        if currentGeneration == 0 {
+            return legacyRemoteRuntimeIdentifier(for: session)
+        }
+
+        return remoteRuntimeIdentifier(sessionID: session.id, generation: currentGeneration)
+    }
+
+    private func legacyRemoteRuntimeIdentifier(for session: Session) -> String {
+        "nexus-\(session.id.uuidString.lowercased())"
+    }
+
+    private func remoteRuntimeIdentifier(sessionID: UUID, generation: Int) -> String {
+        "nexus-\(sessionID.uuidString.lowercased())-runtime-\(generation)"
+    }
+
+    private func launchSession(
+        _ session: Session,
+        workspace: Workspace,
+        launchSnapshot: LaunchSnapshot,
+        forceFreshRemoteRuntime: Bool = false
+    ) throws -> Session {
         do {
             try sessionRuntimeManager.launchOrResume(
                 session: session,
                 workspace: workspace,
-                launchConfiguration: try runtimeLaunchConfiguration(for: workspace, launchSnapshot: launchSnapshot)
+                launchConfiguration: try runtimeLaunchConfiguration(
+                    for: session,
+                    workspace: workspace,
+                    launchSnapshot: launchSnapshot,
+                    forceFreshRemoteRuntime: forceFreshRemoteRuntime
+                )
             )
             let terminalSize = try metadataStore.sessionTerminalSize(id: session.id)
             _ = try sessionRuntimeManager.resize(
@@ -1348,22 +1447,31 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         }
     }
 
-    private func runtimeLaunchConfiguration(for workspace: Workspace, launchSnapshot: LaunchSnapshot) throws -> SessionRuntimeLaunchConfiguration {
+    private func runtimeLaunchConfiguration(
+        for session: Session,
+        workspace: Workspace,
+        launchSnapshot: LaunchSnapshot,
+        forceFreshRemoteRuntime: Bool
+    ) throws -> SessionRuntimeLaunchConfiguration {
         let remoteHost: NexusDomain.Host?
+        let resolvedRemoteRuntimeIdentifier: String?
         if workspace.kind == .remote {
             guard let hostID = workspace.remoteHostID,
                   let host = try metadataStore.host(id: hostID) else {
                 throw NexusMetadataStoreError.hostNotFound
             }
             remoteHost = host
+            resolvedRemoteRuntimeIdentifier = try remoteRuntimeIdentifier(for: session, forceNew: forceFreshRemoteRuntime)
         } else {
             remoteHost = nil
+            resolvedRemoteRuntimeIdentifier = nil
         }
 
         return SessionRuntimeLaunchConfiguration(
             executable: launchSnapshot.resolvedExecutable,
             workingDirectory: launchSnapshot.resolvedWorkingDirectory,
-            remoteHost: remoteHost
+            remoteHost: remoteHost,
+            remoteRuntimeIdentifier: resolvedRemoteRuntimeIdentifier
         )
     }
 
@@ -2533,6 +2641,10 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
             },
             reply: reply
         )
+    }
+
+    func launchOrResumeSession(sessionID: String, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(with: { try service.launchOrResumeSession(sessionID: resolveUUID(sessionID)) }, reply: reply)
     }
 
     func createNamedSession(workspaceID: String, providerID: String, name: String?, reply: @escaping (Data?, NSString?) -> Void) {

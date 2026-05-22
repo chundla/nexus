@@ -198,6 +198,14 @@ final class NexusAppModel {
         return session
     }
 
+    func launchOrResumeSession(sessionID: UUID, workspaceID: UUID, providerID: ProviderID) async throws -> Session {
+        let session = try await client.launchOrResumeSession(sessionID: sessionID)
+        try await focusSession(sessionID: session.id)
+        try await refreshWorkspaceOverview(for: workspaceID)
+        try await refreshProviderDetailIfLoaded(workspaceID: workspaceID, providerID: providerID)
+        return session
+    }
+
     func stopSession(sessionID: UUID, workspaceID: UUID, providerID: ProviderID) async throws -> Session {
         let session = try await client.stopSession(sessionID: sessionID)
         if focusedSessionScreen?.session.id == sessionID {
@@ -278,7 +286,8 @@ final class NexusAppModel {
             throw NSError(domain: "NexusAppModel", code: 1, userInfo: [NSLocalizedDescriptionKey: "No focused session to relaunch"])
         }
 
-        return try await launchOrResumeDefaultSession(
+        return try await launchOrResumeSession(
+            sessionID: screen.session.id,
             workspaceID: screen.session.workspaceID,
             providerID: screen.session.providerID
         )
