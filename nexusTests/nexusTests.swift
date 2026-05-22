@@ -138,6 +138,57 @@ struct nexusTests {
         #expect(groups == [createdGroup])
     }
 
+    @Test func remoteAccessStartsDisabledAndCanBeEnabledOverIPC() async throws {
+        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests()
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+
+        let initialState = try await client.getRemoteAccessState()
+
+        #expect(initialState.isEnabled == false)
+        #expect(initialState.activePairing == nil)
+
+        await #expect(throws: (any Error).self) {
+            _ = try await client.startPairing()
+        }
+
+        let enabledState = try await client.setRemoteAccessEnabled(true)
+        let pairing = try await client.startPairing()
+
+        #expect(enabledState.isEnabled)
+        #expect(enabledState.activePairing == nil)
+        #expect(pairing.code.isEmpty == false)
+        #expect(pairing.qrPayload.contains(pairing.code))
+    }
+
+    @Test func remoteAccessPairingPersistsPairedDevicesAndAllowsRevokeOverIPC() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let firstService = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let firstClient = try NexusIPCClient.connect(to: firstService.listenerEndpoint)
+
+        _ = try await firstClient.setRemoteAccessEnabled(true)
+        let pairing = try await firstClient.startPairing()
+        let pairedDevice = try await firstClient.completePairing(pairingCode: pairing.code, deviceName: "Chris’s iPhone")
+        let firstDevices = try await firstClient.listPairedDevices()
+
+        #expect(firstDevices == [pairedDevice])
+
+        let secondService = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let secondClient = try NexusIPCClient.connect(to: secondService.listenerEndpoint)
+        let secondState = try await secondClient.getRemoteAccessState()
+        let persistedDevices = try await secondClient.listPairedDevices()
+
+        #expect(secondState.isEnabled == false)
+        #expect(persistedDevices == [pairedDevice])
+
+        _ = try await secondClient.revokePairedDevice(deviceID: pairedDevice.id)
+        let remainingDevices = try await secondClient.listPairedDevices()
+
+        #expect(remainingDevices.isEmpty)
+    }
+
     @Test func localWorkspaceInheritsOnlyWorkspaceGroupAndPersistsAcrossServiceBootstrap() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)
@@ -4582,6 +4633,46 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelLoadsRemoteAccessStateAndPairedDevices() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let pairing = PairingCeremony(
+            id: UUID(),
+            code: "123456",
+            qrPayload: "nexus://pair?code=123456",
+            createdAt: Date(timeIntervalSince1970: 10),
+            expiresAt: Date(timeIntervalSince1970: 610)
+        )
+        let pairedDevice = PairedDevice(id: UUID(), name: "Chris’s iPhone", pairedAt: Date(timeIntervalSince1970: 20))
+        let client = TrackingServiceClient(
+            workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []),
+            session: session,
+            screen: SessionScreen(session: session, transcript: "Claude ready"),
+            remoteAccessState: RemoteAccessState(isEnabled: true, activePairing: pairing),
+            pairedDevices: [pairedDevice]
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+
+        #expect(model.remoteAccessState == RemoteAccessState(isEnabled: true, activePairing: pairing))
+        #expect(model.pairedDevices == [pairedDevice])
+    }
+
+    @MainActor
     @Test func appModelLoadsHostsAndCachesHostDetailOnDemand() async throws {
         let group = WorkspaceGroup(id: UUID(), name: "Group")
         let workspace = Workspace(
@@ -6170,6 +6261,8 @@ private final class TrackingServiceClient: NexusServiceClient {
     private var hostDetailsValue: [UUID: HostDetail]
     private var recentNavigationValue: [NavigationItem]
     private var searchResultsValue: [NavigationItem]
+    private var remoteAccessStateValue: RemoteAccessState
+    private var pairedDevicesValue: [PairedDevice]
     private var observedScreenHandlers: [UUID: @Sendable (SessionScreen) -> Void] = [:]
 
     var workspaceOverviewRequestCount = 0
@@ -6186,7 +6279,9 @@ private final class TrackingServiceClient: NexusServiceClient {
         hosts: [NexusDomain.Host] = [],
         hostDetails: [UUID: HostDetail] = [:],
         recentNavigation: [NavigationItem] = [],
-        searchResults: [NavigationItem] = []
+        searchResults: [NavigationItem] = [],
+        remoteAccessState: RemoteAccessState = RemoteAccessState(isEnabled: false, activePairing: nil),
+        pairedDevices: [PairedDevice] = []
     ) {
         self.workspaceOverviewValue = workspaceOverview
         self.providerDetailValue = providerDetail ?? ProviderDetail(
@@ -6204,6 +6299,8 @@ private final class TrackingServiceClient: NexusServiceClient {
         self.hostDetailsValue = hostDetails
         self.recentNavigationValue = recentNavigation
         self.searchResultsValue = searchResults
+        self.remoteAccessStateValue = remoteAccessState
+        self.pairedDevicesValue = pairedDevices
     }
 
     func getServiceStatus() async throws -> NexusServiceStatus {
@@ -6326,6 +6423,44 @@ private final class TrackingServiceClient: NexusServiceClient {
 
     func searchNavigation(query: String) async throws -> [NavigationItem] {
         searchResultsValue
+    }
+
+    func getRemoteAccessState() async throws -> RemoteAccessState {
+        remoteAccessStateValue
+    }
+
+    func setRemoteAccessEnabled(_ isEnabled: Bool) async throws -> RemoteAccessState {
+        remoteAccessStateValue = RemoteAccessState(isEnabled: isEnabled, activePairing: isEnabled ? remoteAccessStateValue.activePairing : nil)
+        return remoteAccessStateValue
+    }
+
+    func startPairing() async throws -> PairingCeremony {
+        let pairing = PairingCeremony(
+            id: UUID(),
+            code: "123456",
+            qrPayload: "nexus://pair?code=123456",
+            createdAt: Date(timeIntervalSince1970: 0),
+            expiresAt: Date(timeIntervalSince1970: 600)
+        )
+        remoteAccessStateValue = RemoteAccessState(isEnabled: remoteAccessStateValue.isEnabled, activePairing: pairing)
+        return pairing
+    }
+
+    func completePairing(pairingCode: String, deviceName: String) async throws -> PairedDevice {
+        let device = PairedDevice(id: UUID(), name: deviceName, pairedAt: Date(timeIntervalSince1970: 600))
+        pairedDevicesValue.append(device)
+        remoteAccessStateValue = RemoteAccessState(isEnabled: remoteAccessStateValue.isEnabled, activePairing: nil)
+        return device
+    }
+
+    func listPairedDevices() async throws -> [PairedDevice] {
+        pairedDevicesValue
+    }
+
+    func revokePairedDevice(deviceID: UUID) async throws -> Bool {
+        let priorCount = pairedDevicesValue.count
+        pairedDevicesValue.removeAll { $0.id == deviceID }
+        return pairedDevicesValue.count != priorCount
     }
 
     func getWorkspaceOverview(workspaceID: UUID) async throws -> WorkspaceOverview {
@@ -6567,6 +6702,30 @@ private struct FailingServiceClient: NexusServiceClient {
     }
 
     func searchNavigation(query: String) async throws -> [NavigationItem] {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func getRemoteAccessState() async throws -> RemoteAccessState {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func setRemoteAccessEnabled(_ isEnabled: Bool) async throws -> RemoteAccessState {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func startPairing() async throws -> PairingCeremony {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func completePairing(pairingCode: String, deviceName: String) async throws -> PairedDevice {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func listPairedDevices() async throws -> [PairedDevice] {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func revokePairedDevice(deviceID: UUID) async throws -> Bool {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 

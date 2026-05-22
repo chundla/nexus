@@ -37,6 +37,8 @@ final class NexusAppModel {
     var hostDetails: [UUID: HostDetail] = [:]
     var providerDetails: [ProviderDetailKey: ProviderDetail] = [:]
     var recentNavigation: [NavigationItem] = []
+    var remoteAccessState: RemoteAccessState?
+    var pairedDevices: [PairedDevice] = []
     var focusedSessionScreen: SessionScreen?
 
     private let client: NexusServiceClient
@@ -61,12 +63,16 @@ final class NexusAppModel {
             async let workspaces = client.listWorkspaces()
             async let hosts = client.listHosts()
             async let recentNavigation = client.listRecentNavigation(limit: 10)
+            async let remoteAccessState = client.getRemoteAccessState()
+            async let pairedDevices = client.listPairedDevices()
 
             let loadedServiceStatus = try await serviceStatus
             let loadedWorkspaceGroups = try await workspaceGroups
             let loadedWorkspaces = try await workspaces
             let loadedHosts = try await hosts
             let loadedRecentNavigation = try await recentNavigation
+            let loadedRemoteAccessState = try await remoteAccessState
+            let loadedPairedDevices = try await pairedDevices
 
             var loadedWorkspaceOverviews: [UUID: WorkspaceOverview] = [:]
             for workspace in loadedWorkspaces {
@@ -80,6 +86,8 @@ final class NexusAppModel {
             self.workspaceOverviews = loadedWorkspaceOverviews
             self.providerDetails = [:]
             self.recentNavigation = loadedRecentNavigation
+            self.remoteAccessState = loadedRemoteAccessState
+            self.pairedDevices = loadedPairedDevices
             self.serviceErrorMessage = nil
         } catch {
             await stopFocusingSession()
@@ -91,6 +99,8 @@ final class NexusAppModel {
             hostDetails = [:]
             providerDetails = [:]
             recentNavigation = []
+            remoteAccessState = nil
+            pairedDevices = []
             focusedSessionScreen = nil
             serviceErrorMessage = error.localizedDescription
         }
@@ -98,6 +108,35 @@ final class NexusAppModel {
 
     func refreshServiceStatus() async {
         await refresh()
+    }
+
+    func refreshRemoteAccess() async throws {
+        async let remoteAccessState = client.getRemoteAccessState()
+        async let pairedDevices = client.listPairedDevices()
+        self.remoteAccessState = try await remoteAccessState
+        self.pairedDevices = try await pairedDevices
+    }
+
+    func setRemoteAccessEnabled(_ isEnabled: Bool) async throws -> RemoteAccessState {
+        let state = try await client.setRemoteAccessEnabled(isEnabled)
+        remoteAccessState = state
+        return state
+    }
+
+    func startPairing() async throws -> PairingCeremony {
+        let pairing = try await client.startPairing()
+        remoteAccessState = RemoteAccessState(isEnabled: remoteAccessState?.isEnabled ?? true, activePairing: pairing)
+        return pairing
+    }
+
+    func revokePairedDevice(deviceID: UUID) async throws -> Bool {
+        let revoked = try await client.revokePairedDevice(deviceID: deviceID)
+        guard revoked else {
+            return false
+        }
+
+        pairedDevices.removeAll { $0.id == deviceID }
+        return true
     }
 
     func createWorkspaceGroup(name: String) async throws -> WorkspaceGroup {

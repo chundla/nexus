@@ -11,6 +11,7 @@ struct ContentView: View {
     @State private var isShowingCreateRemoteWorkspaceSheet = false
     @State private var newWorkspaceGroupName = ""
     @State private var isShowingHostsSheet = false
+    @State private var isShowingRemoteAccessSheet = false
     @State private var quickSwitchQuery = ""
     @State private var quickSwitchResults: [NavigationItem] = []
     @State private var pendingWorkspaceFolderPath: String?
@@ -85,6 +86,10 @@ struct ContentView: View {
                         isShowingHostsSheet = true
                     }
 
+                    Button("Remote Access") {
+                        isShowingRemoteAccessSheet = true
+                    }
+
                     Button("Add Local Workspace") {
                         addLocalWorkspace()
                     }
@@ -127,6 +132,9 @@ struct ContentView: View {
         }
         .sheet(isPresented: $isShowingHostsSheet) {
             HostManagementSheet(appModel: appModel, isPresented: $isShowingHostsSheet)
+        }
+        .sheet(isPresented: $isShowingRemoteAccessSheet) {
+            RemoteAccessManagementSheet(appModel: appModel, isPresented: $isShowingRemoteAccessSheet)
         }
         .sheet(isPresented: $isShowingQuickSwitchSheet) {
             quickSwitchSheet
@@ -172,9 +180,16 @@ struct ContentView: View {
                 LabeledContent("Workspace Groups", value: "\(appModel.workspaceGroups.count)")
                 LabeledContent("Workspaces", value: "\(appModel.workspaces.count)")
                 LabeledContent("Hosts", value: "\(appModel.hosts.count)")
+                LabeledContent("Remote Access", value: appModel.remoteAccessState?.isEnabled == true ? "Enabled" : "Disabled")
 
-                Button("Manage Hosts") {
-                    isShowingHostsSheet = true
+                HStack {
+                    Button("Manage Hosts") {
+                        isShowingHostsSheet = true
+                    }
+
+                    Button("Manage Remote Access") {
+                        isShowingRemoteAccessSheet = true
+                    }
                 }
             } else if let serviceErrorMessage = appModel.serviceErrorMessage {
                 ContentUnavailableView(

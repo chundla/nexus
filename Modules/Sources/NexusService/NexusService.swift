@@ -735,6 +735,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     private let hostValidationEvaluator: any HostValidationEvaluating
     private let workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating
     private let sessionRuntimeManager: any SessionRuntimeManaging
+    private let remoteAccessRuntime: RemoteAccessRuntime
 
     private init(
         listener: NSXPCListener,
@@ -743,7 +744,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         providerHealthEvaluator: any ProviderHealthEvaluating,
         hostValidationEvaluator: any HostValidationEvaluating,
         workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating,
-        sessionRuntimeManager: any SessionRuntimeManaging
+        sessionRuntimeManager: any SessionRuntimeManaging,
+        remoteAccessRuntime: RemoteAccessRuntime
     ) {
         self.listener = listener
         self.storeURL = storeURL
@@ -752,6 +754,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         self.hostValidationEvaluator = hostValidationEvaluator
         self.workspaceAvailabilityEvaluator = workspaceAvailabilityEvaluator
         self.sessionRuntimeManager = sessionRuntimeManager
+        self.remoteAccessRuntime = remoteAccessRuntime
         super.init()
         self.listener.delegate = self
         self.listener.resume()
@@ -782,14 +785,16 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         providerHealthEvaluator: any ProviderHealthEvaluating,
         hostValidationEvaluator: any HostValidationEvaluating = HostValidationEvaluator(),
         workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating = WorkspaceAvailabilityEvaluator(),
-        sessionRuntimeManager: any SessionRuntimeManaging = InMemorySessionRuntimeManager()
+        sessionRuntimeManager: any SessionRuntimeManaging = InMemorySessionRuntimeManager(),
+        remoteAccessRuntime: RemoteAccessRuntime = RemoteAccessRuntime()
     ) throws -> NexusService {
         try bootstrap(
             rootURL: rootURL,
             providerHealthEvaluator: providerHealthEvaluator,
             hostValidationEvaluator: hostValidationEvaluator,
             workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
-            sessionRuntimeManager: sessionRuntimeManager
+            sessionRuntimeManager: sessionRuntimeManager,
+            remoteAccessRuntime: remoteAccessRuntime
         )
     }
 
@@ -797,13 +802,15 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         rootURL: URL,
         hostValidationEvaluator: any HostValidationEvaluating,
         workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating = WorkspaceAvailabilityEvaluator(),
-        sessionRuntimeManager: any SessionRuntimeManaging = InMemorySessionRuntimeManager()
+        sessionRuntimeManager: any SessionRuntimeManaging = InMemorySessionRuntimeManager(),
+        remoteAccessRuntime: RemoteAccessRuntime = RemoteAccessRuntime()
     ) throws -> NexusService {
         try bootstrap(
             rootURL: rootURL,
             hostValidationEvaluator: hostValidationEvaluator,
             workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
-            sessionRuntimeManager: sessionRuntimeManager
+            sessionRuntimeManager: sessionRuntimeManager,
+            remoteAccessRuntime: remoteAccessRuntime
         )
     }
 
@@ -812,7 +819,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         providerHealthEvaluator: any ProviderHealthEvaluating = ProviderHealthEvaluator(),
         hostValidationEvaluator: any HostValidationEvaluating = HostValidationEvaluator(),
         workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating = WorkspaceAvailabilityEvaluator(),
-        sessionRuntimeManager: any SessionRuntimeManaging = InMemorySessionRuntimeManager()
+        sessionRuntimeManager: any SessionRuntimeManaging = InMemorySessionRuntimeManager(),
+        remoteAccessRuntime: RemoteAccessRuntime = RemoteAccessRuntime()
     ) throws -> NexusService {
         try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
 
@@ -829,7 +837,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             providerHealthEvaluator: providerHealthEvaluator,
             hostValidationEvaluator: hostValidationEvaluator,
             workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
-            sessionRuntimeManager: sessionRuntimeManager
+            sessionRuntimeManager: sessionRuntimeManager,
+            remoteAccessRuntime: remoteAccessRuntime
         )
     }
 
@@ -894,6 +903,31 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
 
     func listRecentNavigation(limit: Int) throws -> [NavigationItem] {
         try metadataStore.listRecentNavigation(limit: limit).compactMap(navigationItem)
+    }
+
+    func remoteAccessState() -> RemoteAccessState {
+        remoteAccessRuntime.state()
+    }
+
+    func setRemoteAccessEnabled(_ isEnabled: Bool) -> RemoteAccessState {
+        remoteAccessRuntime.setEnabled(isEnabled)
+    }
+
+    func startPairing() throws -> PairingCeremony {
+        try remoteAccessRuntime.startPairing()
+    }
+
+    func completePairing(pairingCode: String, deviceName: String) throws -> PairedDevice {
+        try remoteAccessRuntime.completePairing(code: pairingCode)
+        return try metadataStore.createPairedDevice(name: deviceName, pairedAt: Date())
+    }
+
+    func listPairedDevices() throws -> [PairedDevice] {
+        try metadataStore.listPairedDevices()
+    }
+
+    func revokePairedDevice(deviceID: UUID) throws -> Bool {
+        try metadataStore.deletePairedDevice(id: deviceID)
     }
 
     func recordNavigation(target: NavigationTarget) throws {
@@ -2712,6 +2746,30 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
 
     func listRecentNavigation(limit: Int, reply: @escaping (Data?, NSString?) -> Void) {
         sendReply(with: { try service.listRecentNavigation(limit: limit) }, reply: reply)
+    }
+
+    func getRemoteAccessState(_ reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(with: service.remoteAccessState, reply: reply)
+    }
+
+    func setRemoteAccessEnabled(isEnabled: Bool, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(with: { service.setRemoteAccessEnabled(isEnabled) }, reply: reply)
+    }
+
+    func startPairing(_ reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(with: service.startPairing, reply: reply)
+    }
+
+    func completePairing(pairingCode: String, deviceName: String, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(with: { try service.completePairing(pairingCode: pairingCode, deviceName: deviceName) }, reply: reply)
+    }
+
+    func listPairedDevices(_ reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(with: service.listPairedDevices, reply: reply)
+    }
+
+    func revokePairedDevice(deviceID: String, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(with: { try service.revokePairedDevice(deviceID: resolveUUID(deviceID)) }, reply: reply)
     }
 
     func recordNavigation(targetPayload: Data, reply: @escaping (Data?, NSString?) -> Void) {

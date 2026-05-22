@@ -33,6 +33,12 @@ public protocol SessionScreenObservation: Sendable {
     func listRecentNavigation(limit: Int, reply: @escaping (Data?, NSString?) -> Void)
     func recordNavigation(targetPayload: Data, reply: @escaping (Data?, NSString?) -> Void)
     func searchNavigation(query: String, reply: @escaping (Data?, NSString?) -> Void)
+    func getRemoteAccessState(_ reply: @escaping (Data?, NSString?) -> Void)
+    func setRemoteAccessEnabled(isEnabled: Bool, reply: @escaping (Data?, NSString?) -> Void)
+    func startPairing(_ reply: @escaping (Data?, NSString?) -> Void)
+    func completePairing(pairingCode: String, deviceName: String, reply: @escaping (Data?, NSString?) -> Void)
+    func listPairedDevices(_ reply: @escaping (Data?, NSString?) -> Void)
+    func revokePairedDevice(deviceID: String, reply: @escaping (Data?, NSString?) -> Void)
     func getWorkspaceOverview(workspaceID: String, reply: @escaping (Data?, NSString?) -> Void)
     func getProviderDetail(workspaceID: String, providerID: String, reply: @escaping (Data?, NSString?) -> Void)
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: String?, reply: @escaping (Data?, NSString?) -> Void)
@@ -65,6 +71,12 @@ public protocol NexusServiceClient {
     func listRecentNavigation(limit: Int) async throws -> [NavigationItem]
     func recordNavigation(target: NavigationTarget) async throws
     func searchNavigation(query: String) async throws -> [NavigationItem]
+    func getRemoteAccessState() async throws -> RemoteAccessState
+    func setRemoteAccessEnabled(_ isEnabled: Bool) async throws -> RemoteAccessState
+    func startPairing() async throws -> PairingCeremony
+    func completePairing(pairingCode: String, deviceName: String) async throws -> PairedDevice
+    func listPairedDevices() async throws -> [PairedDevice]
+    func revokePairedDevice(deviceID: UUID) async throws -> Bool
     func getWorkspaceOverview(workspaceID: UUID) async throws -> WorkspaceOverview
     func getProviderDetail(workspaceID: UUID, providerID: ProviderID) async throws -> ProviderDetail
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: UUID?) async throws -> Workspace
@@ -183,6 +195,42 @@ public final class NexusIPCClient: NexusServiceClient, @unchecked Sendable {
     nonisolated public func searchNavigation(query: String) async throws -> [NavigationItem] {
         try await requestDecodable { proxy, reply in
             proxy.searchNavigation(query: query, reply: reply)
+        }
+    }
+
+    nonisolated public func getRemoteAccessState() async throws -> RemoteAccessState {
+        try await requestDecodable { proxy, reply in
+            proxy.getRemoteAccessState(reply)
+        }
+    }
+
+    nonisolated public func setRemoteAccessEnabled(_ isEnabled: Bool) async throws -> RemoteAccessState {
+        try await requestDecodable { proxy, reply in
+            proxy.setRemoteAccessEnabled(isEnabled: isEnabled, reply: reply)
+        }
+    }
+
+    nonisolated public func startPairing() async throws -> PairingCeremony {
+        try await requestDecodable { proxy, reply in
+            proxy.startPairing(reply)
+        }
+    }
+
+    nonisolated public func completePairing(pairingCode: String, deviceName: String) async throws -> PairedDevice {
+        try await requestDecodable { proxy, reply in
+            proxy.completePairing(pairingCode: pairingCode, deviceName: deviceName, reply: reply)
+        }
+    }
+
+    nonisolated public func listPairedDevices() async throws -> [PairedDevice] {
+        try await requestDecodable { proxy, reply in
+            proxy.listPairedDevices(reply)
+        }
+    }
+
+    nonisolated public func revokePairedDevice(deviceID: UUID) async throws -> Bool {
+        try await requestDecodable { proxy, reply in
+            proxy.revokePairedDevice(deviceID: deviceID.uuidString, reply: reply)
         }
     }
 

@@ -118,6 +118,12 @@ final class NexusMetadataStore {
                 session_id TEXT,
                 last_accessed_at INTEGER NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS paired_devices (
+                id TEXT PRIMARY KEY NOT NULL,
+                name TEXT NOT NULL,
+                paired_at INTEGER NOT NULL
+            );
             """
         )
         try ensureColumnExists(
@@ -211,6 +217,55 @@ final class NexusMetadataStore {
                 hosts.append(try readHost(from: statement))
             }
             return hosts
+        }
+    }
+
+    func listPairedDevices() throws -> [PairedDevice] {
+        try withLock {
+            let statement = try prepare(
+                "SELECT id, name, paired_at FROM paired_devices ORDER BY rowid ASC;"
+            )
+            defer { sqlite3_finalize(statement) }
+
+            var devices: [PairedDevice] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                devices.append(try readPairedDevice(from: statement))
+            }
+            return devices
+        }
+    }
+
+    func createPairedDevice(name: String, pairedAt: Date) throws -> PairedDevice {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedName.isEmpty == false else {
+            throw NexusMetadataStoreError.invalidPairedDeviceName
+        }
+
+        return try withLock {
+            let pairedAtMilliseconds = Int64(pairedAt.timeIntervalSince1970 * 1_000)
+            let normalizedPairedAt = Date(timeIntervalSince1970: Double(pairedAtMilliseconds) / 1_000)
+            let device = PairedDevice(id: UUID(), name: trimmedName, pairedAt: normalizedPairedAt)
+            let statement = try prepare(
+                "INSERT INTO paired_devices (id, name, paired_at) VALUES (?, ?, ?);"
+            )
+            defer { sqlite3_finalize(statement) }
+
+            try bind(device.id.uuidString, at: 1, in: statement)
+            try bind(device.name, at: 2, in: statement)
+            try bind(pairedAtMilliseconds, at: 3, in: statement)
+            try stepDone(statement)
+            return device
+        }
+    }
+
+    func deletePairedDevice(id: UUID) throws -> Bool {
+        try withLock {
+            let statement = try prepare("DELETE FROM paired_devices WHERE id = ?;")
+            defer { sqlite3_finalize(statement) }
+
+            try bind(id.uuidString, at: 1, in: statement)
+            try stepDone(statement)
+            return sqlite3_changes(database) > 0
         }
     }
 
@@ -1167,6 +1222,14 @@ final class NexusMetadataStore {
         )
     }
 
+    private func readPairedDevice(from statement: OpaquePointer?) throws -> PairedDevice {
+        PairedDevice(
+            id: try readUUID(column: 0, from: statement),
+            name: try readString(column: 1, from: statement),
+            pairedAt: Date(timeIntervalSince1970: Double(sqlite3_column_int64(statement, 2)) / 1_000)
+        )
+    }
+
     private func readSession(from statement: OpaquePointer?) throws -> Session {
         let id = try readUUID(column: 0, from: statement)
         let workspaceID = try readUUID(column: 1, from: statement)
@@ -1353,6 +1416,7 @@ enum NexusMetadataStoreError: LocalizedError {
     case invalidHostTarget
     case invalidHostPort
     case invalidRemoteWorkspacePath
+    case invalidPairedDeviceName
     case invalidSessionName
     case workspaceGroupRequired
     case primaryWorkspaceGroupSelectionRequired
@@ -1382,6 +1446,8 @@ enum NexusMetadataStoreError: LocalizedError {
             "Host port must be between 1 and 65535"
         case .invalidRemoteWorkspacePath:
             "Remote Workspace path must be absolute"
+        case .invalidPairedDeviceName:
+            "Paired Device name is required"
         case .invalidSessionName:
             "Session name is required"
         case .workspaceGroupRequired:
