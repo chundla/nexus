@@ -1,4 +1,5 @@
 import Foundation
+import NexusDomain
 
 struct RemotePairingEndpoint: Equatable, Sendable {
     let host: String
@@ -19,10 +20,25 @@ struct PairedMac: Codable, Equatable, Identifiable, Sendable {
     let host: String
     let port: Int
     let pairedAt: Date
+    let pairedDeviceID: UUID?
+
+    init(name: String, host: String, port: Int, pairedAt: Date, pairedDeviceID: UUID? = nil) {
+        self.name = name
+        self.host = host
+        self.port = port
+        self.pairedAt = pairedAt
+        self.pairedDeviceID = pairedDeviceID
+    }
 
     var id: String {
         "\(host.lowercased()):\(port)"
     }
+}
+
+struct RemoteWorkspaceCatalog: Codable, Equatable, Sendable {
+    let workspaceGroups: [WorkspaceGroup]
+    let recentNavigation: [NavigationItem]
+    let workspaceOverviews: [WorkspaceOverview]
 }
 
 struct RemotePairingHTTPClient {
@@ -61,17 +77,45 @@ struct RemotePairingHTTPClient {
         }
 
         let completion = try JSONDecoder().decode(RemotePairingCompletionResponse.self, from: data)
-        return PairedMac(name: completion.macName, host: host, port: port, pairedAt: completion.pairedAt)
+        return PairedMac(
+            name: completion.macName,
+            host: host,
+            port: port,
+            pairedAt: completion.pairedAt,
+            pairedDeviceID: completion.pairedDeviceID
+        )
+    }
+
+    func fetchCatalog(for pairedMac: PairedMac) async throws -> RemoteWorkspaceCatalog {
+        guard let pairedDeviceID = pairedMac.pairedDeviceID else {
+            throw RemotePairingHTTPError.missingPairedDeviceIdentity
+        }
+
+        var request = URLRequest(url: URL(string: "http://\(pairedMac.host):\(pairedMac.port)/remote-client/catalog")!)
+        request.setValue(pairedDeviceID.uuidString, forHTTPHeaderField: "X-Nexus-Paired-Device-ID")
+
+        let (data, response) = try await session.data(for: request)
+        let httpResponse = response as? HTTPURLResponse
+        guard httpResponse?.statusCode == 200 else {
+            let message = (try? JSONDecoder().decode(RemotePairingErrorResponse.self, from: data).message)
+                ?? HTTPURLResponse.localizedString(forStatusCode: httpResponse?.statusCode ?? 500)
+            throw RemotePairingHTTPError.requestFailed(message)
+        }
+
+        return try JSONDecoder().decode(RemoteWorkspaceCatalog.self, from: data)
     }
 }
 
 enum RemotePairingHTTPError: LocalizedError {
     case requestFailed(String)
+    case missingPairedDeviceIdentity
 
     var errorDescription: String? {
         switch self {
         case .requestFailed(let message):
             message
+        case .missingPairedDeviceIdentity:
+            "Pair this Mac again to browse its Workspace catalog"
         }
     }
 }
@@ -84,6 +128,7 @@ struct RemotePairingCompletionRequest: Codable, Sendable {
 struct RemotePairingCompletionResponse: Codable, Sendable {
     let macName: String
     let pairedAt: Date
+    let pairedDeviceID: UUID
 }
 
 struct RemotePairingErrorResponse: Codable, Sendable {

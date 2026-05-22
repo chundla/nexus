@@ -115,6 +115,39 @@ final class RemotePairingServer {
             return
         }
 
+        if request.method == "GET", request.path == "/remote-client/catalog" {
+            do {
+                let pairedDeviceID = try pairedDeviceID(from: request)
+                let pairedDevices = try await client.listPairedDevices()
+                guard pairedDevices.contains(where: { $0.id == pairedDeviceID }) else {
+                    throw RemotePairingServerError.unauthorized
+                }
+
+                let workspaceGroups = try await client.listWorkspaceGroups()
+                let recentNavigation = try await client.listRecentNavigation(limit: 10)
+                let workspaces = try await client.listWorkspaces()
+                var workspaceOverviews: [WorkspaceOverview] = []
+                for workspace in workspaces {
+                    workspaceOverviews.append(try await client.getWorkspaceOverview(workspaceID: workspace.id))
+                }
+
+                send(
+                    statusCode: 200,
+                    body: RemoteWorkspaceCatalog(
+                        workspaceGroups: workspaceGroups,
+                        recentNavigation: recentNavigation,
+                        workspaceOverviews: workspaceOverviews
+                    ),
+                    over: connection
+                )
+            } catch RemotePairingServerError.unauthorized {
+                send(statusCode: 401, body: RemotePairingErrorResponse(message: "Pair this iPhone again to browse this Paired Mac"), over: connection)
+            } catch {
+                send(statusCode: 400, body: RemotePairingErrorResponse(message: error.localizedDescription), over: connection)
+            }
+            return
+        }
+
         guard request.method == "POST", request.path == "/pairings/complete" else {
             send(statusCode: 404, body: RemotePairingErrorResponse(message: "Not found"), over: connection)
             return
@@ -125,12 +158,25 @@ final class RemotePairingServer {
             let pairedDevice = try await client.completePairing(pairingCode: pairingRequest.pairingCode, deviceName: pairingRequest.deviceName)
             send(
                 statusCode: 200,
-                body: RemotePairingCompletionResponse(macName: macName, pairedAt: pairedDevice.pairedAt),
+                body: RemotePairingCompletionResponse(
+                    macName: macName,
+                    pairedAt: pairedDevice.pairedAt,
+                    pairedDeviceID: pairedDevice.id
+                ),
                 over: connection
             )
         } catch {
             send(statusCode: 400, body: RemotePairingErrorResponse(message: error.localizedDescription), over: connection)
         }
+    }
+
+    private func pairedDeviceID(from request: ParsedRequest) throws -> UUID {
+        guard let rawValue = request.headers["x-nexus-paired-device-id"],
+              let pairedDeviceID = UUID(uuidString: rawValue) else {
+            throw RemotePairingServerError.unauthorized
+        }
+
+        return pairedDeviceID
     }
 
     private func send<T: Encodable>(statusCode: Int, body: T, over connection: NWConnection) {
@@ -173,14 +219,19 @@ final class RemotePairingServer {
         }
 
         var contentLength = 0
+        var headers: [String: String] = [:]
         for headerLine in headerLines.dropFirst() {
             let parts = headerLine.split(separator: ":", maxSplits: 1).map(String.init)
             guard parts.count == 2 else {
                 continue
             }
 
-            if parts[0].caseInsensitiveCompare("Content-Length") == .orderedSame {
-                contentLength = Int(parts[1].trimmingCharacters(in: .whitespaces)) ?? 0
+            let name = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            headers[name.lowercased()] = value
+
+            if name.caseInsensitiveCompare("Content-Length") == .orderedSame {
+                contentLength = Int(value) ?? 0
             }
         }
 
@@ -193,6 +244,7 @@ final class RemotePairingServer {
         return ParsedRequest(
             method: String(requestParts[0]),
             path: String(requestParts[1]),
+            headers: headers,
             body: Data(data[bodyStart..<bodyEnd])
         )
     }
@@ -203,6 +255,8 @@ final class RemotePairingServer {
             "OK"
         case 400:
             "Bad Request"
+        case 401:
+            "Unauthorized"
         case 404:
             "Not Found"
         default:
@@ -214,16 +268,20 @@ final class RemotePairingServer {
 private struct ParsedRequest {
     let method: String
     let path: String
+    let headers: [String: String]
     let body: Data
 }
 
 private enum RemotePairingServerError: LocalizedError {
     case invalidRequest
+    case unauthorized
 
     var errorDescription: String? {
         switch self {
         case .invalidRequest:
             "Invalid request"
+        case .unauthorized:
+            "Unauthorized"
         }
     }
 }

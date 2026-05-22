@@ -4,6 +4,7 @@ import Observation
 protocol RemotePairingClient {
     func fetchStatus(host: String, port: Int) async throws -> RemotePairedMacStatus
     func completePairing(host: String, port: Int, pairingCode: String, deviceName: String) async throws -> PairedMac
+    func fetchCatalog(for pairedMac: PairedMac) async throws -> RemoteWorkspaceCatalog
 }
 
 extension RemotePairingHTTPClient: RemotePairingClient {}
@@ -76,6 +77,8 @@ final class RemoteClientPairingModel {
     var pairedMacs: [PairedMac]
     var pairedMacAvailability: [PairedMac.ID: PairedMacAvailability] = [:]
     var activePairedMacID: PairedMac.ID?
+    var catalog: RemoteWorkspaceCatalog?
+    var catalogErrorMessage: String?
     var macHost = ""
     var macPort = "9234"
     var pairingCode = ""
@@ -125,6 +128,22 @@ final class RemoteClientPairingModel {
         pairedMacAvailability = nextAvailability
     }
 
+    func refreshActivePairedMacCatalog() async {
+        guard let pairedMac = activePairedMac else {
+            catalog = nil
+            catalogErrorMessage = nil
+            return
+        }
+
+        do {
+            catalog = try await client.fetchCatalog(for: pairedMac)
+            catalogErrorMessage = nil
+        } catch {
+            catalog = nil
+            catalogErrorMessage = error.localizedDescription
+        }
+    }
+
     func completePairing() async throws {
         guard let port = Int(macPort.trimmingCharacters(in: .whitespacesAndNewlines)) else {
             throw RemoteClientPairingModelError.invalidPort
@@ -142,6 +161,8 @@ final class RemoteClientPairingModel {
         pairedMacAvailability[pairedMac.id] = .unknown
         try store.savePairedMacs(pairedMacs)
         activePairedMacID = pairedMac.id
+        catalog = nil
+        catalogErrorMessage = nil
         store.saveActivePairedMacID(activePairedMacID)
     }
 
@@ -151,6 +172,8 @@ final class RemoteClientPairingModel {
         }
 
         activePairedMacID = id
+        catalog = nil
+        catalogErrorMessage = nil
         store.saveActivePairedMacID(activePairedMacID)
     }
 
@@ -158,6 +181,8 @@ final class RemoteClientPairingModel {
         pairedMacs.removeAll { $0.id == id }
         pairedMacAvailability[id] = nil
         activePairedMacID = Self.resolveActivePairedMacID(preferredID: activePairedMacID, pairedMacs: pairedMacs)
+        catalog = nil
+        catalogErrorMessage = nil
         try store.savePairedMacs(pairedMacs)
         store.saveActivePairedMacID(activePairedMacID)
     }
