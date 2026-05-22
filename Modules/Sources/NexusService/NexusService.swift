@@ -37,22 +37,30 @@ protocol SessionRuntimeManaging: AnyObject {
     func resize(session: Session, columns: Int, rows: Int) throws -> SessionScreen
 }
 
+enum RemoteRuntimeLaunchMode {
+    case launchNew
+    case attachExisting
+}
+
 struct SessionRuntimeLaunchConfiguration {
     let executable: String
     let workingDirectory: String
     let remoteHost: NexusDomain.Host?
     let remoteRuntimeIdentifier: String?
+    let remoteRuntimeLaunchMode: RemoteRuntimeLaunchMode
 
     init(
         executable: String,
         workingDirectory: String,
         remoteHost: NexusDomain.Host?,
-        remoteRuntimeIdentifier: String? = nil
+        remoteRuntimeIdentifier: String? = nil,
+        remoteRuntimeLaunchMode: RemoteRuntimeLaunchMode = .launchNew
     ) {
         self.executable = executable
         self.workingDirectory = workingDirectory
         self.remoteHost = remoteHost
         self.remoteRuntimeIdentifier = remoteRuntimeIdentifier
+        self.remoteRuntimeLaunchMode = remoteRuntimeLaunchMode
     }
 }
 
@@ -263,7 +271,7 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Se
 }
 
 struct RemoteSessionCommandBuilder {
-    func attachArguments(configuration: SessionRuntimeLaunchConfiguration) -> [String] {
+    func launchArguments(configuration: SessionRuntimeLaunchConfiguration) -> [String] {
         guard let host = configuration.remoteHost,
               let runtimeIdentifier = configuration.remoteRuntimeIdentifier else {
             return []
@@ -279,7 +287,28 @@ struct RemoteSessionCommandBuilder {
         }
         arguments += [
             host.sshTarget,
-            "cd \(shellQuoted(configuration.workingDirectory)) && exec tmux new-session -A -s \(shellQuoted(runtimeIdentifier)) \(shellQuoted(configuration.executable))"
+            "cd \(shellQuoted(configuration.workingDirectory)) && exec tmux new-session -s \(shellQuoted(runtimeIdentifier)) \(shellQuoted(configuration.executable))"
+        ]
+        return arguments
+    }
+
+    func recoverArguments(configuration: SessionRuntimeLaunchConfiguration) -> [String] {
+        guard let host = configuration.remoteHost,
+              let runtimeIdentifier = configuration.remoteRuntimeIdentifier else {
+            return []
+        }
+
+        var arguments = [
+            "-tt",
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=5"
+        ]
+        if let port = host.port {
+            arguments += ["-p", String(port)]
+        }
+        arguments += [
+            host.sshTarget,
+            "tmux has-session -t \(shellQuoted(runtimeIdentifier)) 2>/dev/null || { echo 'NEXUS_REMOTE_RUNTIME_NOT_FOUND' >&2; exit 1; }; exec tmux attach-session -t \(shellQuoted(runtimeIdentifier))"
         ]
         return arguments
     }
@@ -310,11 +339,22 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
     func makeRuntime(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) throws -> any SessionRuntime {
         if let remoteHost = launchConfiguration.remoteHost,
            let runtimeIdentifier = launchConfiguration.remoteRuntimeIdentifier {
+            let arguments: [String]
+            let initialTranscript: String
+            switch launchConfiguration.remoteRuntimeLaunchMode {
+            case .launchNew:
+                arguments = remoteSessionCommandBuilder.launchArguments(configuration: launchConfiguration)
+                initialTranscript = "Connecting to \(workspace.name) on \(remoteHost.name) with Claude…\n"
+            case .attachExisting:
+                arguments = remoteSessionCommandBuilder.recoverArguments(configuration: launchConfiguration)
+                initialTranscript = "Reconnecting to \(workspace.name) on \(remoteHost.name) with Claude…\n"
+            }
+
             return try ProcessSessionRuntime(
                 executable: "/usr/bin/ssh",
-                arguments: remoteSessionCommandBuilder.attachArguments(configuration: launchConfiguration),
+                arguments: arguments,
                 workingDirectory: nil,
-                initialTranscript: "Connecting to \(workspace.name) on \(remoteHost.name) with Claude…\n",
+                initialTranscript: initialTranscript,
                 stopHandler: {
                     try Self.runCommand(
                         executable: "/usr/bin/ssh",
@@ -1332,15 +1372,25 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             throw NexusMetadataStoreError.providerNotSupported
         }
 
-        if let launchSnapshot = try metadataStore.launchSnapshot(sessionID: existingSession.id) {
-            let session = existingSession.state == .ready && existingSession.failureMessage == nil
-                ? existingSession
-                : try metadataStore.updateSession(id: existingSession.id, state: .ready, failureMessage: nil)
+        let reconciledSession = try reconcileSessionRuntimeState(existingSession)
+
+        if let launchSnapshot = try metadataStore.launchSnapshot(sessionID: reconciledSession.id) {
+            if shouldAttemptRemoteRuntimeRecovery(for: reconciledSession, workspace: workspace) {
+                return try recoverRemoteSession(
+                    reconciledSession,
+                    workspace: workspace,
+                    launchSnapshot: launchSnapshot
+                )
+            }
+
+            let session = reconciledSession.state == .ready && reconciledSession.failureMessage == nil
+                ? reconciledSession
+                : try metadataStore.updateSession(id: reconciledSession.id, state: .ready, failureMessage: nil)
             return try launchSession(
                 session,
                 workspace: workspace,
                 launchSnapshot: launchSnapshot,
-                forceFreshRemoteRuntime: shouldCreateFreshRemoteRuntime(for: existingSession, workspace: workspace)
+                forceFreshRemoteRuntime: shouldCreateFreshRemoteRuntime(for: reconciledSession, workspace: workspace)
             )
         }
 
@@ -1352,7 +1402,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             )
         }
         let health = try providerHealthSummary(
-            for: existingSession.providerID,
+            for: reconciledSession.providerID,
             workspace: workspace,
             remoteContext: remoteContext,
             preferFreshRemoteCheck: true
@@ -1360,15 +1410,15 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         guard health.launchability == .launchable, let executable = health.resolvedExecutable else {
             let failureMessage = health.diagnostics.first(where: { $0.severity == .error })?.message ?? health.summary
             return try metadataStore.updateSession(
-                id: existingSession.id,
+                id: reconciledSession.id,
                 state: .failed,
                 failureMessage: failureMessage
             )
         }
 
-        let session = existingSession.state == .ready && existingSession.failureMessage == nil
-            ? existingSession
-            : try metadataStore.updateSession(id: existingSession.id, state: .ready, failureMessage: nil)
+        let session = reconciledSession.state == .ready && reconciledSession.failureMessage == nil
+            ? reconciledSession
+            : try metadataStore.updateSession(id: reconciledSession.id, state: .ready, failureMessage: nil)
         let launchSnapshot = try metadataStore.ensureLaunchSnapshot(
             sessionID: session.id,
             workspaceID: session.workspaceID,
@@ -1380,12 +1430,33 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             session,
             workspace: workspace,
             launchSnapshot: launchSnapshot,
-            forceFreshRemoteRuntime: shouldCreateFreshRemoteRuntime(for: existingSession, workspace: workspace)
+            forceFreshRemoteRuntime: shouldCreateFreshRemoteRuntime(for: reconciledSession, workspace: workspace)
         )
+    }
+
+    private func shouldAttemptRemoteRuntimeRecovery(for session: Session, workspace: Workspace) -> Bool {
+        guard workspace.kind == .remote else {
+            return false
+        }
+
+        guard sessionRuntimeManager.hasRuntime(for: session) == false else {
+            return false
+        }
+
+        switch session.state {
+        case .ready, .interrupted:
+            return true
+        case .exited, .failed:
+            return false
+        }
     }
 
     private func shouldCreateFreshRemoteRuntime(for session: Session, workspace: Workspace) -> Bool {
         guard workspace.kind == .remote else {
+            return false
+        }
+
+        guard shouldAttemptRemoteRuntimeRecovery(for: session, workspace: workspace) == false else {
             return false
         }
 
@@ -1414,6 +1485,44 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         "nexus-\(sessionID.uuidString.lowercased())-runtime-\(generation)"
     }
 
+    private func recoverRemoteSession(
+        _ session: Session,
+        workspace: Workspace,
+        launchSnapshot: LaunchSnapshot
+    ) throws -> Session {
+        let readySession = session.state == .ready && session.failureMessage == nil
+            ? session
+            : try metadataStore.updateSession(id: session.id, state: .ready, failureMessage: nil)
+
+        do {
+            try sessionRuntimeManager.launchOrResume(
+                session: readySession,
+                workspace: workspace,
+                launchConfiguration: try runtimeLaunchConfiguration(
+                    for: readySession,
+                    workspace: workspace,
+                    launchSnapshot: launchSnapshot,
+                    forceFreshRemoteRuntime: false,
+                    remoteRuntimeLaunchMode: .attachExisting
+                )
+            )
+            let terminalSize = try metadataStore.sessionTerminalSize(id: readySession.id)
+            _ = try sessionRuntimeManager.resize(
+                session: readySession,
+                columns: terminalSize.columns,
+                rows: terminalSize.rows
+            )
+            return readySession
+        } catch {
+            let failure = try remoteRuntimeRecoveryFailure(for: error, session: readySession, workspace: workspace)
+            return try metadataStore.updateSession(
+                id: readySession.id,
+                state: failure.state,
+                failureMessage: failure.message
+            )
+        }
+    }
+
     private func launchSession(
         _ session: Session,
         workspace: Workspace,
@@ -1428,7 +1537,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                     for: session,
                     workspace: workspace,
                     launchSnapshot: launchSnapshot,
-                    forceFreshRemoteRuntime: forceFreshRemoteRuntime
+                    forceFreshRemoteRuntime: forceFreshRemoteRuntime,
+                    remoteRuntimeLaunchMode: .launchNew
                 )
             )
             let terminalSize = try metadataStore.sessionTerminalSize(id: session.id)
@@ -1447,11 +1557,49 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         }
     }
 
+    private func remoteRuntimeRecoveryFailure(
+        for error: Error,
+        session: Session,
+        workspace: Workspace
+    ) throws -> (state: Session.State, message: String) {
+        let detail = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = detail.lowercased()
+        let runtimeIdentifier = try remoteRuntimeIdentifier(for: session, forceNew: false)
+        let hostName = try workspace.remoteHostID.flatMap { try metadataStore.host(id: $0)?.name } ?? workspace.name
+
+        if normalized.contains("nexus_remote_runtime_not_found") || normalized.contains("can't find session") {
+            return (
+                state: .failed,
+                message: "Known remote runtime '\(runtimeIdentifier)' is no longer available on \(hostName). Relaunch to create a new remote runtime."
+            )
+        }
+
+        if normalized.contains("could not resolve hostname")
+            || normalized.contains("operation timed out")
+            || normalized.contains("connection refused")
+            || normalized.contains("no route to host")
+            || normalized.contains("connection closed by remote host")
+            || normalized.contains("permission denied") {
+            let suffix = detail.isEmpty ? "" : " \(detail)"
+            return (
+                state: .interrupted,
+                message: "Could not reach \(hostName) to recover remote runtime '\(runtimeIdentifier)'.\(suffix)"
+            )
+        }
+
+        let suffix = detail.isEmpty ? "" : " \(detail)"
+        return (
+            state: .interrupted,
+            message: "Could not recover remote runtime '\(runtimeIdentifier)' on \(hostName).\(suffix)"
+        )
+    }
+
     private func runtimeLaunchConfiguration(
         for session: Session,
         workspace: Workspace,
         launchSnapshot: LaunchSnapshot,
-        forceFreshRemoteRuntime: Bool
+        forceFreshRemoteRuntime: Bool,
+        remoteRuntimeLaunchMode: RemoteRuntimeLaunchMode
     ) throws -> SessionRuntimeLaunchConfiguration {
         let remoteHost: NexusDomain.Host?
         let resolvedRemoteRuntimeIdentifier: String?
@@ -1471,7 +1619,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             executable: launchSnapshot.resolvedExecutable,
             workingDirectory: launchSnapshot.resolvedWorkingDirectory,
             remoteHost: remoteHost,
-            remoteRuntimeIdentifier: resolvedRemoteRuntimeIdentifier
+            remoteRuntimeIdentifier: resolvedRemoteRuntimeIdentifier,
+            remoteRuntimeLaunchMode: remoteRuntimeLaunchMode
         )
     }
 

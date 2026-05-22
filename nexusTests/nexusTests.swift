@@ -1017,13 +1017,21 @@ struct nexusTests {
         )
         let builder = RemoteSessionCommandBuilder()
 
-        #expect(builder.attachArguments(configuration: configuration) == [
+        #expect(builder.launchArguments(configuration: configuration) == [
             "-tt",
             "-o", "BatchMode=yes",
             "-o", "ConnectTimeout=5",
             "-p", "2222",
             "build-box",
-            "cd '/srv/api' && exec tmux new-session -A -s 'nexus-01234567-89ab-cdef-0123-456789abcdef-runtime-2' '/usr/local/bin/claude'"
+            "cd '/srv/api' && exec tmux new-session -s 'nexus-01234567-89ab-cdef-0123-456789abcdef-runtime-2' '/usr/local/bin/claude'"
+        ])
+        #expect(builder.recoverArguments(configuration: configuration) == [
+            "-tt",
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=5",
+            "-p", "2222",
+            "build-box",
+            "tmux has-session -t 'nexus-01234567-89ab-cdef-0123-456789abcdef-runtime-2' 2>/dev/null || { echo 'NEXUS_REMOTE_RUNTIME_NOT_FOUND' >&2; exit 1; }; exec tmux attach-session -t 'nexus-01234567-89ab-cdef-0123-456789abcdef-runtime-2'"
         ])
         #expect(builder.stopArguments(runtimeIdentifier: "nexus-01234567-89ab-cdef-0123-456789abcdef-runtime-2", host: host) == [
             "-o", "BatchMode=yes",
@@ -1103,6 +1111,198 @@ struct nexusTests {
         #expect(firstSession.id == relaunchedSession.id)
         #expect(firstScreen.transcript == "runtime:nexus-\(firstSession.id.uuidString.lowercased())-runtime-1")
         #expect(relaunchedScreen.transcript == "runtime:nexus-\(firstSession.id.uuidString.lowercased())-runtime-2")
+    }
+
+    @Test func remoteDefaultSessionRecoversPersistedRuntimeAfterServiceRestart() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let availabilityRunner = StubCommandRunner(results: [
+            StubCommandRunner.Invocation(
+                executable: "/usr/bin/ssh",
+                arguments: [
+                    "-o", "BatchMode=yes",
+                    "-o", "ConnectTimeout=5",
+                    "build-box",
+                    "cd '/srv/api' && pwd"
+                ]
+            ): .success(stdout: "/srv/api\n")
+        ])
+        let providerHealthRunner = StubCommandRunner(results: [
+            StubCommandRunner.Invocation(
+                executable: "/usr/bin/ssh",
+                arguments: [
+                    "-o", "BatchMode=yes",
+                    "-o", "ConnectTimeout=5",
+                    "build-box",
+                    remoteClaudeProbeScript("/srv/api")
+                ]
+            ): .success(stdout: "/usr/local/bin/claude\n9.9.9 (Claude Code)\n")
+        ])
+        let firstService = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+                commandRunner: providerHealthRunner
+            ),
+            hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
+                "build-box": HostValidationResult(
+                    state: .available,
+                    summary: "Host is available",
+                    diagnostics: []
+                )
+            ]),
+            workspaceAvailabilityEvaluator: WorkspaceAvailabilityEvaluator(commandRunner: availabilityRunner),
+            sessionRuntimeManager: StubSessionRuntimeManager(
+                launchTranscriptForConfiguration: { configuration, _, _ in
+                    "runtime:\(configuration.remoteRuntimeIdentifier ?? "missing")"
+                }
+            )
+        )
+        let firstClient = try NexusIPCClient.connect(to: firstService.listenerEndpoint)
+
+        let group = try await firstClient.createWorkspaceGroup(name: "Remote")
+        let host = try await firstClient.createHost(name: "Build Server", sshTarget: "build-box", port: nil as Int?)
+        _ = try await firstClient.validateHost(hostID: host.id)
+        let workspace = try await firstClient.createRemoteWorkspace(
+            name: nil as String?,
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+
+        let launchedSession = try await firstClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let restartedService = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+                commandRunner: providerHealthRunner
+            ),
+            hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
+                "build-box": HostValidationResult(
+                    state: .available,
+                    summary: "Host is available",
+                    diagnostics: []
+                )
+            ]),
+            workspaceAvailabilityEvaluator: WorkspaceAvailabilityEvaluator(commandRunner: availabilityRunner),
+            sessionRuntimeManager: StubSessionRuntimeManager(
+                launchTranscriptForConfiguration: { configuration, _, _ in
+                    "runtime:\(configuration.remoteRuntimeIdentifier ?? "missing")"
+                }
+            )
+        )
+        let restartedClient = try NexusIPCClient.connect(to: restartedService.listenerEndpoint)
+
+        let interruptedScreen = try await restartedClient.getSessionScreen(sessionID: launchedSession.id)
+        let recoveredSession = try await restartedClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let recoveredScreen = try await restartedClient.getSessionScreen(sessionID: launchedSession.id)
+
+        #expect(interruptedScreen.session.state == .interrupted)
+        #expect(recoveredSession.id == launchedSession.id)
+        #expect(recoveredSession.state == .ready)
+        #expect(recoveredScreen.session.state == .ready)
+        #expect(recoveredScreen.transcript == "runtime:nexus-\(launchedSession.id.uuidString.lowercased())-runtime-1")
+    }
+
+    @Test func missingRecoveredRemoteRuntimeStaysInspectableAndRelaunchesFresh() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let availabilityRunner = StubCommandRunner(results: [
+            StubCommandRunner.Invocation(
+                executable: "/usr/bin/ssh",
+                arguments: [
+                    "-o", "BatchMode=yes",
+                    "-o", "ConnectTimeout=5",
+                    "build-box",
+                    "cd '/srv/api' && pwd"
+                ]
+            ): .success(stdout: "/srv/api\n")
+        ])
+        let providerHealthRunner = StubCommandRunner(results: [
+            StubCommandRunner.Invocation(
+                executable: "/usr/bin/ssh",
+                arguments: [
+                    "-o", "BatchMode=yes",
+                    "-o", "ConnectTimeout=5",
+                    "build-box",
+                    remoteClaudeProbeScript("/srv/api")
+                ]
+            ): .success(stdout: "/usr/local/bin/claude\n9.9.9 (Claude Code)\n")
+        ])
+        let firstService = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+                commandRunner: providerHealthRunner
+            ),
+            hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
+                "build-box": HostValidationResult(
+                    state: .available,
+                    summary: "Host is available",
+                    diagnostics: []
+                )
+            ]),
+            workspaceAvailabilityEvaluator: WorkspaceAvailabilityEvaluator(commandRunner: availabilityRunner),
+            sessionRuntimeManager: StubSessionRuntimeManager(
+                launchTranscriptForConfiguration: { configuration, _, _ in
+                    "runtime:\(configuration.remoteRuntimeIdentifier ?? "missing")"
+                }
+            )
+        )
+        let firstClient = try NexusIPCClient.connect(to: firstService.listenerEndpoint)
+
+        let group = try await firstClient.createWorkspaceGroup(name: "Remote")
+        let host = try await firstClient.createHost(name: "Build Server", sshTarget: "build-box", port: nil as Int?)
+        _ = try await firstClient.validateHost(hostID: host.id)
+        let workspace = try await firstClient.createRemoteWorkspace(
+            name: nil as String?,
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+
+        let launchedSession = try await firstClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let restartedService = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+                commandRunner: providerHealthRunner
+            ),
+            hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
+                "build-box": HostValidationResult(
+                    state: .available,
+                    summary: "Host is available",
+                    diagnostics: []
+                )
+            ]),
+            workspaceAvailabilityEvaluator: WorkspaceAvailabilityEvaluator(commandRunner: availabilityRunner),
+            sessionRuntimeManager: StubSessionRuntimeManager(
+                launchBehavior: { configuration, _, _ in
+                    if configuration.remoteRuntimeLaunchMode == .attachExisting {
+                        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "NEXUS_REMOTE_RUNTIME_NOT_FOUND"])
+                    }
+                },
+                launchTranscriptForConfiguration: { configuration, _, _ in
+                    "runtime:\(configuration.remoteRuntimeIdentifier ?? "missing")"
+                }
+            )
+        )
+        let restartedClient = try NexusIPCClient.connect(to: restartedService.listenerEndpoint)
+
+        let recoveryAttempt = try await restartedClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let failedScreen = try await restartedClient.getSessionScreen(sessionID: launchedSession.id)
+        let relaunchedSession = try await restartedClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let relaunchedScreen = try await restartedClient.getSessionScreen(sessionID: launchedSession.id)
+
+        #expect(recoveryAttempt.id == launchedSession.id)
+        #expect(recoveryAttempt.state == .failed)
+        #expect(recoveryAttempt.failureMessage == "Known remote runtime 'nexus-\(launchedSession.id.uuidString.lowercased())-runtime-1' is no longer available on Build Server. Relaunch to create a new remote runtime.")
+        #expect(failedScreen.session.state == .failed)
+        #expect(relaunchedSession.id == launchedSession.id)
+        #expect(relaunchedSession.state == .ready)
+        #expect(relaunchedScreen.transcript == "runtime:nexus-\(launchedSession.id.uuidString.lowercased())-runtime-2")
     }
 
     @Test func failedNamedRemoteSessionRemainsInspectableAndCanBeRelaunched() async throws {
@@ -5817,6 +6017,7 @@ private struct StubHostValidationEvaluator: HostValidationEvaluating {
 
 private final class StubSessionRuntimeManager: SessionRuntimeManaging {
     private let initialTranscript: String
+    private let launchBehavior: ((SessionRuntimeLaunchConfiguration, Session, Workspace) throws -> Void)?
     private let launchTranscriptForExecutable: ((String) -> String)?
     private let launchTranscriptForConfiguration: ((SessionRuntimeLaunchConfiguration, Session, Workspace) -> String)?
     private var transcripts: [UUID: String] = [:]
@@ -5827,15 +6028,18 @@ private final class StubSessionRuntimeManager: SessionRuntimeManaging {
 
     init(
         initialTranscript: String = "",
+        launchBehavior: ((SessionRuntimeLaunchConfiguration, Session, Workspace) throws -> Void)? = nil,
         launchTranscriptForExecutable: ((String) -> String)? = nil,
         launchTranscriptForConfiguration: ((SessionRuntimeLaunchConfiguration, Session, Workspace) -> String)? = nil
     ) {
         self.initialTranscript = initialTranscript
+        self.launchBehavior = launchBehavior
         self.launchTranscriptForExecutable = launchTranscriptForExecutable
         self.launchTranscriptForConfiguration = launchTranscriptForConfiguration
     }
 
     func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) throws {
+        try launchBehavior?(launchConfiguration, session, workspace)
         if let launchTranscriptForConfiguration {
             transcripts[session.id] = launchTranscriptForConfiguration(launchConfiguration, session, workspace)
         } else if let launchTranscriptForExecutable {
