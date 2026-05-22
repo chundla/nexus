@@ -180,6 +180,7 @@ struct RemotePairingNetworkTests {
             workspaceID: workspace.id,
             providerID: .claude
         )
+        let screen = try await remoteClient.fetchSessionScreen(for: pairedMac, sessionID: session.id)
 
         #expect(session.workspaceID == workspace.id)
         #expect(session.providerID == .claude)
@@ -188,6 +189,7 @@ struct RemotePairingNetworkTests {
         #expect(detail.defaultSession == nil)
         #expect(detail.alternateSessions.map(\.id) == [session.id])
         #expect(detail.alternateSessions.first?.name == "Session 1")
+        #expect(screen.controller == .mac)
     }
 
     @Test func stopsRemoteSessionOverDedicatedNetworkAPI() async throws {

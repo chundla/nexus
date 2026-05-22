@@ -728,6 +728,125 @@ struct RemoteClientPairingModelTests {
         #expect(model.providerDetail(for: workspace.id, providerID: .claude)?.alternateSessions.map { $0.id } == [session.id])
     }
 
+    @Test func creatingNamedRemoteSessionReturnsBeforeBrowseRefreshCompletesAndStaysViewerByDefault() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let groupID = UUID()
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: groupID
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            name: "Session 1",
+            isDefault: false,
+            state: .ready
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let refreshedCatalog = RemoteWorkspaceCatalog(
+            workspaceGroups: [WorkspaceGroup(id: groupID, name: "Client Work")],
+            recentNavigation: [],
+            workspaceOverviews: [
+                WorkspaceOverview(
+                    workspace: workspace,
+                    providerCards: [
+                        WorkspaceProviderCard(
+                            provider: Provider(id: .claude),
+                            health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+                            defaultSession: ProviderDefaultSessionSummary(
+                                state: .notCreated,
+                                summary: "No default session yet",
+                                actionTitle: "Launch"
+                            ),
+                            alternateSessionCount: 1
+                        )
+                    ]
+                )
+            ]
+        )
+        let refreshedDetail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+            defaultSession: nil,
+            alternateSessions: [session],
+            failedSessions: []
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let catalogGate = AsyncGate()
+        let providerDetailGate = AsyncGate()
+        let client = StubRemotePairingClient(
+            result: pairedMac,
+            catalog: refreshedCatalog,
+            providerDetail: refreshedDetail,
+            sessionScreen: SessionScreen(session: session, controller: .mac, transcript: "Claude ready"),
+            createdNamedSession: session,
+            catalogFetchGate: catalogGate,
+            providerDetailFetchGate: providerDetailGate
+        )
+        let model = RemoteClientPairingModel(client: client, store: store)
+        let capture = SessionCapture()
+
+        let createTask = Task {
+            let createdSession = try await model.createNamedSession(workspaceID: workspace.id, providerID: .claude)
+            await capture.store(createdSession)
+        }
+
+        for _ in 0..<20 where client.catalogFetchStarted == false {
+            await Task.yield()
+        }
+        await Task.yield()
+
+        #expect(await capture.value()?.id == session.id)
+        #expect(model.focusedSessionID == session.id)
+        #expect(client.requestLog == [
+            "createNamedSession",
+            "observeSessionScreen",
+            "fetchSessionScreen",
+            "fetchCatalog"
+        ])
+
+        await catalogGate.open()
+
+        for _ in 0..<20 where client.providerDetailFetchStarted == false {
+            await Task.yield()
+        }
+
+        #expect(client.requestLog == [
+            "createNamedSession",
+            "observeSessionScreen",
+            "fetchSessionScreen",
+            "fetchCatalog",
+            "fetchProviderDetail"
+        ])
+
+        await providerDetailGate.open()
+        try await createTask.value
+        await Task.yield()
+
+        #expect(model.catalog == refreshedCatalog)
+        #expect(model.focusedSessionScreen?.session.id == session.id)
+        #expect(model.focusedSessionScreen?.controller == .mac)
+        #expect(model.focusedSessionIsController == false)
+        #expect(model.providerDetail(for: workspace.id, providerID: .claude)?.alternateSessions.map(\.id) == [session.id])
+    }
+
     @Test func stoppingRemoteSessionRefreshesProviderDetailAndFocusedScreen() async throws {
         let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -970,12 +1089,17 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
     let createdNamedSession: Session
     let launchedSession: Session
     let stoppedSession: Session
+    let catalogFetchGate: AsyncGate?
+    let providerDetailFetchGate: AsyncGate?
     private let defaultSessionScreen: SessionScreen
     private var providerDetailResults: [ProviderDetail]
     private var sessionScreenResults: [Result<SessionScreen, any Error>]
     private var observationRegistration: ObservationRegistration?
     private(set) var takeSessionControlRequests: [TakeSessionControlRequest] = []
     private(set) var releaseSessionControlRequests: [UUID] = []
+    private(set) var requestLog: [String] = []
+    private(set) var catalogFetchStarted = false
+    private(set) var providerDetailFetchStarted = false
 
     init(
         result: PairedMac,
@@ -1017,7 +1141,9 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
         launchedDefaultSession: Session? = nil,
         createdNamedSession: Session? = nil,
         launchedSession: Session? = nil,
-        stoppedSession: Session? = nil
+        stoppedSession: Session? = nil,
+        catalogFetchGate: AsyncGate? = nil,
+        providerDetailFetchGate: AsyncGate? = nil
     ) {
         self.result = result
         self.status = status
@@ -1028,6 +1154,8 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
         self.createdNamedSession = createdNamedSession ?? sessionScreen.session
         self.launchedSession = launchedSession ?? sessionScreen.session
         self.stoppedSession = stoppedSession ?? sessionScreen.session
+        self.catalogFetchGate = catalogFetchGate
+        self.providerDetailFetchGate = providerDetailFetchGate
         self.providerDetailResults = providerDetailResults
         self.defaultSessionScreen = sessionScreen
         self.sessionScreenResults = sessionScreenResults
@@ -1042,6 +1170,10 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
     }
 
     func fetchCatalog(for pairedMac: PairedMac) async throws -> RemoteWorkspaceCatalog {
+        requestLog.append("fetchCatalog")
+        catalogFetchStarted = true
+        await catalogFetchGate?.wait()
+
         if let catalogResult {
             return try catalogResult.get()
         }
@@ -1050,6 +1182,10 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
     }
 
     func fetchProviderDetail(for pairedMac: PairedMac, workspaceID: UUID, providerID: ProviderID) async throws -> ProviderDetail {
+        requestLog.append("fetchProviderDetail")
+        providerDetailFetchStarted = true
+        await providerDetailFetchGate?.wait()
+
         if providerDetailResults.isEmpty == false {
             return providerDetailResults.removeFirst()
         }
@@ -1058,22 +1194,28 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
     }
 
     func launchOrResumeDefaultSession(for pairedMac: PairedMac, workspaceID: UUID, providerID: ProviderID) async throws -> Session {
-        launchedDefaultSession
+        requestLog.append("launchOrResumeDefaultSession")
+        return launchedDefaultSession
     }
 
     func createNamedSession(for pairedMac: PairedMac, workspaceID: UUID, providerID: ProviderID) async throws -> Session {
-        createdNamedSession
+        requestLog.append("createNamedSession")
+        return createdNamedSession
     }
 
     func launchOrResumeSession(for pairedMac: PairedMac, sessionID: UUID) async throws -> Session {
-        launchedSession
+        requestLog.append("launchOrResumeSession")
+        return launchedSession
     }
 
     func stopSession(for pairedMac: PairedMac, sessionID: UUID) async throws -> Session {
-        stoppedSession
+        requestLog.append("stopSession")
+        return stoppedSession
     }
 
     func fetchSessionScreen(for pairedMac: PairedMac, sessionID: UUID) async throws -> SessionScreen {
+        requestLog.append("fetchSessionScreen")
+
         if sessionScreenResults.isEmpty == false {
             return try sessionScreenResults.removeFirst().get()
         }
@@ -1129,6 +1271,7 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
         onUpdate: @escaping @Sendable (SessionScreen) -> Void,
         onDisconnect: @escaping @Sendable (any Error) -> Void
     ) async throws -> any SessionScreenObservation {
+        requestLog.append("observeSessionScreen")
         observationRegistration = ObservationRegistration(onUpdate: onUpdate, onDisconnect: onDisconnect)
         onUpdate(try await fetchSessionScreen(for: pairedMac, sessionID: sessionID))
         return TestRemoteSessionScreenObservation { [weak self] in
@@ -1142,6 +1285,46 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
 
     func disconnectObservedSession(_ error: any Error) async {
         observationRegistration?.onDisconnect(error)
+    }
+}
+
+private actor AsyncGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        guard isOpen == false else {
+            return
+        }
+
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func open() {
+        guard isOpen == false else {
+            return
+        }
+
+        isOpen = true
+        let continuations = waiters
+        waiters.removeAll()
+        for continuation in continuations {
+            continuation.resume()
+        }
+    }
+}
+
+private actor SessionCapture {
+    private var session: Session?
+
+    func store(_ session: Session) {
+        self.session = session
+    }
+
+    func value() -> Session? {
+        session
     }
 }
 

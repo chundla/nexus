@@ -223,9 +223,11 @@ final class RemoteClientPairingModel {
             workspaceID: workspaceID,
             providerID: providerID
         )
-        await focusRemoteSession(sessionID: session.id)
-        await refreshActivePairedMacCatalog()
-        await loadProviderDetail(workspaceID: workspaceID, providerID: providerID)
+        openRemoteSessionAndRefreshBrowseState(
+            sessionID: session.id,
+            workspaceID: workspaceID,
+            providerID: providerID
+        )
         return session
     }
 
@@ -239,9 +241,11 @@ final class RemoteClientPairingModel {
             workspaceID: workspaceID,
             providerID: providerID
         )
-        await focusRemoteSession(sessionID: session.id)
-        await refreshActivePairedMacCatalog()
-        await loadProviderDetail(workspaceID: workspaceID, providerID: providerID)
+        openRemoteSessionAndRefreshBrowseState(
+            sessionID: session.id,
+            workspaceID: workspaceID,
+            providerID: providerID
+        )
         return session
     }
 
@@ -251,9 +255,11 @@ final class RemoteClientPairingModel {
         }
 
         let session = try await client.launchOrResumeSession(for: pairedMac, sessionID: sessionID)
-        await focusRemoteSession(sessionID: session.id)
-        await refreshActivePairedMacCatalog()
-        await loadProviderDetail(workspaceID: workspaceID, providerID: providerID)
+        openRemoteSessionAndRefreshBrowseState(
+            sessionID: session.id,
+            workspaceID: workspaceID,
+            providerID: providerID
+        )
         return session
     }
 
@@ -433,6 +439,24 @@ final class RemoteClientPairingModel {
         providerDetails = [:]
         providerDetailErrorMessages = [:]
         stopFocusingRemoteSession()
+    }
+
+    private func openRemoteSessionAndRefreshBrowseState(
+        sessionID: UUID,
+        workspaceID: UUID,
+        providerID: ProviderID
+    ) {
+        focusedSessionID = sessionID
+
+        Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+
+            await self.focusRemoteSession(sessionID: sessionID)
+            await self.refreshActivePairedMacCatalog()
+            await self.loadProviderDetail(workspaceID: workspaceID, providerID: providerID)
+        }
     }
 
     private func startFocusedSessionObservation(forceRestart: Bool) async {
