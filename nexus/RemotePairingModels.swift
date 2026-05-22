@@ -119,6 +119,20 @@ struct RemotePairingHTTPClient {
         return try JSONDecoder().decode(Session.self, from: data)
     }
 
+    func createNamedSession(
+        for pairedMac: PairedMac,
+        workspaceID: UUID,
+        providerID: ProviderID
+    ) async throws -> Session {
+        var request = try authenticatedRequest(
+            for: pairedMac,
+            path: "/remote-client/workspaces/\(workspaceID.uuidString)/providers/\(providerID.rawValue)/named-sessions"
+        )
+        request.httpMethod = "POST"
+        let data = try await send(request)
+        return try JSONDecoder().decode(Session.self, from: data)
+    }
+
     func fetchSessionScreen(for pairedMac: PairedMac, sessionID: UUID) async throws -> SessionScreen {
         let request = try authenticatedRequest(
             for: pairedMac,

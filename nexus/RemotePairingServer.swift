@@ -179,6 +179,24 @@ final class RemotePairingServer {
             return
         }
 
+        if request.method == "POST",
+           let namedSessionCreateRequest = namedSessionCreateRequest(from: request) {
+            do {
+                try await authorize(request)
+                let session = try await client.createNamedSession(
+                    workspaceID: namedSessionCreateRequest.workspaceID,
+                    providerID: namedSessionCreateRequest.providerID,
+                    name: nil
+                )
+                send(statusCode: 200, body: session, over: connection)
+            } catch RemotePairingServerError.unauthorized {
+                send(statusCode: 401, body: RemotePairingErrorResponse(message: "Pair this iPhone again to browse this Paired Mac"), over: connection)
+            } catch {
+                send(statusCode: 400, body: RemotePairingErrorResponse(message: error.localizedDescription), over: connection)
+            }
+            return
+        }
+
         if request.method == "GET",
            let sessionScreenObservationRequest = sessionScreenObservationRequest(from: request) {
             do {
@@ -391,6 +409,21 @@ final class RemotePairingServer {
               let providerID = ProviderID(rawValue: String(components[4])),
               components[5] == "default-session",
               components[6] == "launch" else {
+            return nil
+        }
+
+        return ProviderDetailRequest(workspaceID: workspaceID, providerID: providerID)
+    }
+
+    private func namedSessionCreateRequest(from request: ParsedRequest) -> ProviderDetailRequest? {
+        let components = request.path.split(separator: "/")
+        guard components.count == 6,
+              components[0] == "remote-client",
+              components[1] == "workspaces",
+              let workspaceID = UUID(uuidString: String(components[2])),
+              components[3] == "providers",
+              let providerID = ProviderID(rawValue: String(components[4])),
+              components[5] == "named-sessions" else {
             return nil
         }
 

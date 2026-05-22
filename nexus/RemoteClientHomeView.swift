@@ -315,8 +315,9 @@ private struct RemoteProviderDetailView: View {
     let overview: WorkspaceOverview
     let providerCard: WorkspaceProviderCard
 
-    @State private var launchedSession: Session?
+    @State private var openedSession: Session?
     @State private var isLaunchingDefaultSession = false
+    @State private var isCreatingNamedSession = false
     @State private var presentedError: RemoteClientHomePresentedError?
 
     private var detail: ProviderDetail? {
@@ -333,6 +334,27 @@ private struct RemoteProviderDetailView: View {
         }
 
         return "\(providerCard.defaultSession.actionTitle) Default Session"
+    }
+
+    private var providerHealth: ProviderHealthSummary {
+        detail?.health ?? providerCard.health
+    }
+
+    private var canCreateNamedSession: Bool {
+        providerCard.provider.id == .claude && providerHealth.launchability == .launchable
+    }
+
+    private var createNamedSessionDisabledReason: String? {
+        guard providerCard.provider.id == .claude else {
+            return "This Provider is not supported on iPhone yet."
+        }
+        guard providerHealth.launchability != .launchable else {
+            return nil
+        }
+        if detail == nil, errorMessage == nil, providerHealth.launchability == .notChecked {
+            return "Loading Provider detail…"
+        }
+        return providerHealth.summary
     }
 
     var body: some View {
@@ -391,9 +413,12 @@ private struct RemoteProviderDetailView: View {
                 .disabled(isLaunchingDefaultSession || providerCard.provider.id != .claude)
             }
 
-            if let detail {
-                if detail.alternateSessions.isEmpty == false {
-                    Section("Named Sessions") {
+            Section("Named Sessions") {
+                if let detail {
+                    if detail.alternateSessions.isEmpty {
+                        Text("No Named Sessions yet.")
+                            .foregroundStyle(.secondary)
+                    } else {
                         ForEach(detail.alternateSessions) { session in
                             NavigationLink {
                                 RemoteSessionScreenView(model: model, session: session)
@@ -402,16 +427,31 @@ private struct RemoteProviderDetailView: View {
                             }
                         }
                     }
+                } else if errorMessage == nil {
+                    Text("Loading Named Sessions…")
+                        .foregroundStyle(.secondary)
                 }
 
-                if detail.failedSessions.isEmpty == false {
-                    Section("Failed Sessions") {
-                        ForEach(detail.failedSessions) { session in
-                            NavigationLink {
-                                RemoteSessionScreenView(model: model, session: session)
-                            } label: {
-                                RemoteProviderSessionSummaryRow(session: session)
-                            }
+                Button(isCreatingNamedSession ? "Creating…" : "Create Session") {
+                    createNamedSession()
+                }
+                .disabled(isCreatingNamedSession || canCreateNamedSession == false)
+
+                if let disabledReason = createNamedSessionDisabledReason,
+                   canCreateNamedSession == false {
+                    Text(disabledReason)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if let detail, detail.failedSessions.isEmpty == false {
+                Section("Failed Sessions") {
+                    ForEach(detail.failedSessions) { session in
+                        NavigationLink {
+                            RemoteSessionScreenView(model: model, session: session)
+                        } label: {
+                            RemoteProviderSessionSummaryRow(session: session)
                         }
                     }
                 }
@@ -432,7 +472,7 @@ private struct RemoteProviderDetailView: View {
         .refreshable {
             await model.loadProviderDetail(workspaceID: overview.workspace.id, providerID: providerCard.provider.id)
         }
-        .navigationDestination(item: $launchedSession) { session in
+        .navigationDestination(item: $openedSession) { session in
             RemoteSessionScreenView(model: model, session: session)
         }
         .alert(item: $presentedError) { error in
@@ -446,7 +486,23 @@ private struct RemoteProviderDetailView: View {
             defer { isLaunchingDefaultSession = false }
 
             do {
-                launchedSession = try await model.launchOrResumeDefaultSession(
+                openedSession = try await model.launchOrResumeDefaultSession(
+                    workspaceID: overview.workspace.id,
+                    providerID: providerCard.provider.id
+                )
+            } catch {
+                presentedError = RemoteClientHomePresentedError(message: error.localizedDescription)
+            }
+        }
+    }
+
+    private func createNamedSession() {
+        isCreatingNamedSession = true
+        Task {
+            defer { isCreatingNamedSession = false }
+
+            do {
+                openedSession = try await model.createNamedSession(
                     workspaceID: overview.workspace.id,
                     providerID: providerCard.provider.id
                 )
