@@ -37,7 +37,7 @@ The status of whether Nexus can reach and authenticate to a Host and verify requ
 _Avoid_: provider health, remote health
 
 **Provider Health**:
-The status of whether a Provider is available and launchable for a specific Workspace target. For a **Remote Workspace**, this resolves the Provider from the Host user's login-shell environment and then launches by absolute path.
+The status of whether a Provider is available and launchable for a specific Workspace target. For a **Remote Workspace**, this resolves the Provider from the Host user's shell environments, records an absolute executable path, and then launches by absolute path.
 _Avoid_: host status, remote health
 
 **Workspace Availability**:
@@ -84,7 +84,7 @@ _Avoid_: stop, close
 - A **Workspace Availability** check or **Provider Health** check may end in a **Blocked Check** when an upstream dependency fails
 - A **Remote Workspace** uses one **Remote Session Strategy** when launched remotely
 - A **Provider** has a separate **Provider Health** state for each Workspace target
-- A remote **Provider Health** check resolves the **Provider** from the **Host** user's login-shell environment and records an absolute executable path for launch
+- A remote **Provider Health** check resolves the **Provider** from the **Host** user's shell environments and records an absolute executable path for launch
 
 ## Example dialogue
 
@@ -96,7 +96,7 @@ _Avoid_: stop, close
 - "remote" was being used to mean both a **Remote Workspace** and remote control from iOS — resolved: a **Remote Workspace** is an execution target; iOS remote control is a separate client capability.
 - "tmux" could sound like a workspace type — resolved: it is a **Remote Session Strategy**.
 - "remote health" was too vague — resolved: split into **Host Validation** and **Provider Health**.
-- User-installed provider CLIs may appear in the Host user's login shell but not the raw SSH command PATH — resolved: remote **Provider Health** resolves executables from the Host user's login-shell environment and remote launch uses that absolute path.
+- User-installed provider CLIs may appear in one Host shell environment but not another, and may not appear in the raw SSH command PATH at all — resolved: remote **Provider Health** resolves executables across the Host user's shell environments and standard per-user install locations, then remote launch uses that absolute path.
 - Remote path accessibility is not **Host Validation** — resolved: it belongs under **Workspace Availability**.
 - Service restart semantics are not uniform across targets — resolved: local session runtime may be lost after service restart, while tmux-backed remote Sessions are recoverable.
 - A failed dependency is not the same as a failed check — resolved: use **Blocked Check** for checks that could not run because an upstream dependency failed.

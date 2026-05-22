@@ -400,7 +400,7 @@ struct nexusTests {
         #expect(persistedDetail.health == firstHealth)
     }
 
-    @Test func remoteClaudeProviderHealthExplainsMissingExecutableInRemoteLoginShell() async throws {
+    @Test func remoteClaudeProviderHealthExplainsMissingExecutableInCheckedRemoteShells() async throws {
         let availabilityRunner = StubCommandRunner(results: [
             StubCommandRunner.Invocation(
                 executable: "/usr/bin/ssh",
@@ -458,7 +458,7 @@ struct nexusTests {
         #expect(detail.health.state == .unavailable)
         #expect(detail.health.summary == "Claude is unavailable on the Remote Workspace")
         #expect(detail.health.launchability == .notLaunchable)
-        #expect(diagnostic.message == "Claude executable was not found in the remote login-shell PATH.")
+        #expect(diagnostic.message == "Claude executable was not found in the remote shell environments Nexus checked.")
     }
 
     @Test func remoteClaudeLaunchRefreshesStaleFailedProviderHealthSnapshot() async throws {
@@ -929,7 +929,7 @@ struct nexusTests {
         #expect(detail.defaultSession?.state == .ready)
     }
 
-    @Test func remoteClaudeDefaultSessionLaunchesWhenExecutableIsOnlyInHostLoginShellPath() async throws {
+    @Test func remoteClaudeDefaultSessionLaunchesWhenExecutableIsOnlyInFallbackRemoteShellPath() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -5477,7 +5477,7 @@ private func legacyRemoteClaudeProbeScript(_ workspacePath: String) -> String {
 }
 
 private func remoteClaudeProbeScript(_ workspacePath: String) -> String {
-    "cd \(testShellQuoted(workspacePath)) || { echo 'NEXUS_REMOTE_WORKSPACE_UNAVAILABLE' >&2; exit 1; }; command -v tmux >/dev/null 2>&1 || { echo 'NEXUS_REMOTE_TMUX_UNAVAILABLE' >&2; exit 1; }; LOGIN_SHELL=\"${SHELL:-/bin/bash}\"; CLAUDE_PATH=\"$(\"$LOGIN_SHELL\" -lc \(testShellQuoted("command -v claude")))\" || { echo 'NEXUS_REMOTE_CLAUDE_NOT_FOUND' >&2; exit 1; }; [ -n \"$CLAUDE_PATH\" ] || { echo 'NEXUS_REMOTE_CLAUDE_NOT_FOUND' >&2; exit 1; }; printf '%s\\n' \"$CLAUDE_PATH\"; \"$CLAUDE_PATH\" --version; \"$CLAUDE_PATH\" --help >/dev/null 2>&1"
+    "cd \(testShellQuoted(workspacePath)) || { echo 'NEXUS_REMOTE_WORKSPACE_UNAVAILABLE' >&2; exit 1; }; command -v tmux >/dev/null 2>&1 || { echo 'NEXUS_REMOTE_TMUX_UNAVAILABLE' >&2; exit 1; }; resolve_claude_path() { for shell in \"${SHELL:-}\" /bin/bash /usr/bin/bash /bin/sh /usr/bin/zsh /bin/zsh; do [ -n \"$shell\" ] || continue; [ -x \"$shell\" ] || continue; CANDIDATE=\"$(\"$shell\" -lc \(testShellQuoted("command -v claude")) 2>/dev/null)\" || continue; [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; for CANDIDATE in \"$HOME/.local/bin/claude\" \"$HOME/bin/claude\" /opt/homebrew/bin/claude /usr/local/bin/claude /usr/bin/claude /bin/claude; do [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; return 1; }; CLAUDE_PATH=\"$(resolve_claude_path)\" || { echo 'NEXUS_REMOTE_CLAUDE_NOT_FOUND' >&2; exit 1; }; [ -n \"$CLAUDE_PATH\" ] || { echo 'NEXUS_REMOTE_CLAUDE_NOT_FOUND' >&2; exit 1; }; printf '%s\\n' \"$CLAUDE_PATH\"; \"$CLAUDE_PATH\" --version; \"$CLAUDE_PATH\" --help >/dev/null 2>&1"
 }
 
 private func testShellQuoted(_ value: String) -> String {
