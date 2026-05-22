@@ -547,6 +547,15 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
                 }
 
+                if let controllerSummary = appModel.focusedSessionControllerSummary {
+                    VStack(alignment: .leading, spacing: 6) {
+                        LabeledContent("Controller", value: controllerSummary.label)
+                        Text(controllerSummary.message)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 HStack {
                     Text("Terminal: \(screen.terminalColumns) × \(screen.terminalRows)")
                         .font(.caption)

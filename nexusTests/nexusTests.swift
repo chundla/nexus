@@ -4933,6 +4933,41 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelFocusedSessionControllerSummaryNamesRemoteController() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let pairedDevice = PairedDevice(id: UUID(), name: "Chris’s iPhone", pairedAt: Date(timeIntervalSince1970: 600))
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []),
+            session: session,
+            screen: SessionScreen(session: session, controller: .pairedDevice(pairedDevice.id), transcript: "Claude ready"),
+            pairedDevices: [pairedDevice]
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+        try await model.focusSession(sessionID: session.id)
+
+        #expect(model.focusedSessionControllerSummary == SessionControllerSummary(
+            label: "Chris’s iPhone",
+            message: "Chris’s iPhone is the Controller. Input on this Mac reclaims Controller."
+        ))
+    }
+
+    @MainActor
     @Test func appModelDeleteHostRemovesCachedHostState() async throws {
         let group = WorkspaceGroup(id: UUID(), name: "Group")
         let workspace = Workspace(

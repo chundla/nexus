@@ -96,6 +96,7 @@ final class RemoteClientPairingModel {
     var activePairedMacID: PairedMac.ID?
     var catalog: RemoteWorkspaceCatalog?
     var catalogErrorMessage: String?
+    var pairingRecoveryMessage: String?
     var providerDetails: [RemoteProviderDetailKey: ProviderDetail] = [:]
     var providerDetailErrorMessages: [RemoteProviderDetailKey: String] = [:]
     var focusedSessionID: UUID?
@@ -171,7 +172,12 @@ final class RemoteClientPairingModel {
         do {
             catalog = try await client.fetchCatalog(for: pairedMac)
             catalogErrorMessage = nil
+            pairingRecoveryMessage = nil
         } catch {
+            if handleUnauthorizedPairedMac(error, pairedMacID: pairedMac.id) {
+                return
+            }
+
             catalog = nil
             catalogErrorMessage = error.localizedDescription
         }
@@ -379,6 +385,7 @@ final class RemoteClientPairingModel {
         try store.savePairedMacs(pairedMacs)
         activePairedMacID = pairedMac.id
         clearRemoteBrowseState()
+        pairingRecoveryMessage = nil
         store.saveActivePairedMacID(activePairedMacID)
     }
 
@@ -389,6 +396,7 @@ final class RemoteClientPairingModel {
 
         activePairedMacID = id
         clearRemoteBrowseState()
+        pairingRecoveryMessage = nil
         store.saveActivePairedMacID(activePairedMacID)
     }
 
@@ -397,6 +405,7 @@ final class RemoteClientPairingModel {
         pairedMacAvailability[id] = nil
         activePairedMacID = Self.resolveActivePairedMacID(preferredID: activePairedMacID, pairedMacs: pairedMacs)
         clearRemoteBrowseState()
+        pairingRecoveryMessage = nil
         try store.savePairedMacs(pairedMacs)
         store.saveActivePairedMacID(activePairedMacID)
     }
@@ -471,6 +480,10 @@ final class RemoteClientPairingModel {
             focusedSessionReconnectTask?.cancel()
             focusedSessionReconnectTask = nil
         } catch {
+            if handleUnauthorizedPairedMac(error, pairedMacID: pairedMac.id) {
+                return
+            }
+
             applyFocusedSessionObservationError(error, sessionID: sessionID)
             scheduleFocusedSessionReconnect(for: sessionID)
         }
@@ -493,6 +506,12 @@ final class RemoteClientPairingModel {
         }
 
         focusedSessionObservation = nil
+
+        if let pairedMac = activePairedMac,
+           handleUnauthorizedPairedMac(error, pairedMacID: pairedMac.id) {
+            return
+        }
+
         applyFocusedSessionObservationError(error, sessionID: sessionID)
         scheduleFocusedSessionReconnect(for: sessionID)
     }
@@ -539,6 +558,18 @@ final class RemoteClientPairingModel {
             }
         }
     }
+
+    private func handleUnauthorizedPairedMac(_ error: any Error, pairedMacID: PairedMac.ID) -> Bool {
+        guard error.localizedDescription == Self.unauthorizedPairedMacMessage else {
+            return false
+        }
+
+        try? forgetPairedMac(id: pairedMacID)
+        pairingRecoveryMessage = error.localizedDescription
+        return true
+    }
+
+    private static let unauthorizedPairedMacMessage = "Pair this iPhone again to browse this Paired Mac"
 
     private static func resolveActivePairedMacID(
         preferredID: PairedMac.ID?,

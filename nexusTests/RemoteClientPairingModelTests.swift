@@ -190,6 +190,36 @@ struct RemoteClientPairingModelTests {
         #expect(model.catalogErrorMessage == nil)
     }
 
+    @Test func forgetsRevokedPairedMacAfterUnauthorizedCatalogRefresh() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let model = RemoteClientPairingModel(
+            client: StubRemotePairingClient(
+                result: pairedMac,
+                catalogResult: .failure(RemotePairingHTTPError.requestFailed("Pair this iPhone again to browse this Paired Mac"))
+            ),
+            store: store
+        )
+
+        await model.refreshActivePairedMacCatalog()
+
+        #expect(model.pairedMacs.isEmpty)
+        #expect(model.activePairedMac == nil)
+    }
+
     @Test func switchesActivePairedMacForLaterReconnect() async throws {
         let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -269,6 +299,50 @@ struct RemoteClientPairingModelTests {
         #expect(model.focusedSessionScreen == screen)
         #expect(model.focusedSessionIsStale == false)
         #expect(model.focusedSessionErrorMessage == nil)
+    }
+
+    @Test func forgetsRevokedPairedMacAfterUnauthorizedObservedSessionDisconnect() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: UUID()
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let screen = SessionScreen(session: session, transcript: "Claude ready")
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let client = StubRemotePairingClient(result: pairedMac, sessionScreen: screen)
+        let model = RemoteClientPairingModel(client: client, store: store)
+
+        await model.focusRemoteSession(sessionID: session.id)
+        await client.disconnectObservedSession(RemotePairingHTTPError.requestFailed("Pair this iPhone again to browse this Paired Mac"))
+        await Task.yield()
+
+        #expect(model.pairedMacs.isEmpty)
+        #expect(model.activePairedMac == nil)
+        #expect(model.focusedSessionID == nil)
+        #expect(model.focusedSessionScreen == nil)
     }
 
     @Test func preservesStaleFocusedRemoteSessionScreenWhenRefreshFails() async throws {
@@ -744,6 +818,7 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
     let result: PairedMac
     let status: Result<RemotePairedMacStatus, any Error>
     let catalog: RemoteWorkspaceCatalog
+    let catalogResult: Result<RemoteWorkspaceCatalog, any Error>?
     let providerDetail: ProviderDetail
     let launchedDefaultSession: Session
     let launchedSession: Session
@@ -765,6 +840,7 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
             recentNavigation: [],
             workspaceOverviews: []
         ),
+        catalogResult: Result<RemoteWorkspaceCatalog, any Error>? = nil,
         providerDetail: ProviderDetail = ProviderDetail(
             workspace: Workspace(
                 id: UUID(),
@@ -798,6 +874,7 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
         self.result = result
         self.status = status
         self.catalog = catalog
+        self.catalogResult = catalogResult
         self.providerDetail = providerDetail
         self.launchedDefaultSession = launchedDefaultSession ?? sessionScreen.session
         self.launchedSession = launchedSession ?? sessionScreen.session
@@ -816,7 +893,11 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
     }
 
     func fetchCatalog(for pairedMac: PairedMac) async throws -> RemoteWorkspaceCatalog {
-        catalog
+        if let catalogResult {
+            return try catalogResult.get()
+        }
+
+        return catalog
     }
 
     func fetchProviderDetail(for pairedMac: PairedMac, workspaceID: UUID, providerID: ProviderID) async throws -> ProviderDetail {

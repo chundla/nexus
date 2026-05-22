@@ -102,6 +102,14 @@ struct RemoteClientHomeView: View {
                     }
                 }
 
+                if let pairingRecoveryMessage = model.pairingRecoveryMessage {
+                    Section("Pairing Required") {
+                        Text(pairingRecoveryMessage)
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                    }
+                }
+
                 if model.pairedMacs.isEmpty || isShowingPairingForm {
                     Section("Pair a Mac") {
                         TextField("Mac Address", text: $model.macHost)

@@ -26,6 +26,11 @@ struct SessionPresentationContext: Equatable {
     }
 }
 
+struct SessionControllerSummary: Equatable {
+    let label: String
+    let message: String
+}
+
 @MainActor
 @Observable
 final class NexusAppModel {
@@ -432,6 +437,14 @@ final class NexusAppModel {
         return sessionPresentationContext(for: session)
     }
 
+    var focusedSessionControllerSummary: SessionControllerSummary? {
+        guard let controller = focusedSessionScreen?.controller else {
+            return nil
+        }
+
+        return controllerSummary(for: controller)
+    }
+
     func sessionPresentationContext(for session: Session) -> SessionPresentationContext? {
         guard let workspace = workspaces.first(where: { $0.id == session.workspaceID }) else {
             return nil
@@ -441,6 +454,22 @@ final class NexusAppModel {
             hosts.first(where: { $0.id == hostID })
         }
         return SessionPresentationContext(workspace: workspace, host: host)
+    }
+
+    func controllerSummary(for controller: SessionController) -> SessionControllerSummary {
+        switch controller {
+        case .mac:
+            return SessionControllerSummary(
+                label: "This Mac",
+                message: "This Mac is the Controller. Remote Clients can view or take Controller."
+            )
+        case .pairedDevice(let pairedDeviceID):
+            let deviceName = pairedDevices.first(where: { $0.id == pairedDeviceID })?.name ?? "Paired Device"
+            return SessionControllerSummary(
+                label: deviceName,
+                message: "\(deviceName) is the Controller. Input on this Mac reclaims Controller."
+            )
+        }
     }
 
     private func refreshWorkspaceOverview(for workspaceID: UUID) async throws {
