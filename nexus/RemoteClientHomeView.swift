@@ -434,13 +434,6 @@ private struct RemoteSessionScreenView: View {
         .navigationTitle(session.isDefault ? "Default Session" : (session.name ?? "Session"))
         .task(id: session.id) {
             await model.focusRemoteSession(sessionID: session.id)
-            while Task.isCancelled == false, model.focusedSessionID == session.id {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-                if Task.isCancelled {
-                    break
-                }
-                await model.refreshFocusedSessionScreen()
-            }
         }
         .refreshable {
             await model.refreshFocusedSessionScreen()

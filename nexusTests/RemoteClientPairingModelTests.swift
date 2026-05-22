@@ -264,6 +264,7 @@ struct RemoteClientPairingModelTests {
         )
 
         await model.focusRemoteSession(sessionID: session.id)
+        await Task.yield()
 
         #expect(model.focusedSessionScreen == screen)
         #expect(model.focusedSessionIsStale == false)
@@ -318,6 +319,61 @@ struct RemoteClientPairingModelTests {
         #expect(model.focusedSessionErrorMessage == "The operation couldn’t be completed. (NSURLErrorDomain error -1004.)")
     }
 
+    @Test func recoversFocusedRemoteSessionFromStaleSnapshotAfterRefreshSucceeds() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: UUID()
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let initialScreen = SessionScreen(session: session, transcript: "Claude ready")
+        let recoveredScreen = SessionScreen(session: session, transcript: "Claude ready\nReconnected update")
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let client = StubRemotePairingClient(
+            result: pairedMac,
+            sessionScreenResults: [
+                .success(initialScreen),
+                .failure(NSError(domain: NSURLErrorDomain, code: NSURLErrorCannotConnectToHost)),
+                .success(recoveredScreen)
+            ]
+        )
+        let model = RemoteClientPairingModel(client: client, store: store)
+
+        await model.focusRemoteSession(sessionID: session.id)
+        await model.refreshFocusedSessionScreen()
+
+        #expect(model.focusedSessionScreen == initialScreen)
+        #expect(model.focusedSessionIsStale)
+
+        await model.refreshFocusedSessionScreen()
+
+        #expect(model.focusedSessionScreen == recoveredScreen)
+        #expect(model.focusedSessionIsStale == false)
+        #expect(model.focusedSessionErrorMessage == nil)
+    }
+
     @Test func loadsActivePairedMacProviderDetailOnDemand() async throws {
         let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -361,13 +417,19 @@ struct RemoteClientPairingModelTests {
     }
 }
 
-private final class StubRemotePairingClient: RemotePairingClient {
+private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sendable {
+    private struct ObservationRegistration {
+        let onUpdate: @Sendable (SessionScreen) -> Void
+        let onDisconnect: @Sendable (any Error) -> Void
+    }
+
     let result: PairedMac
     let status: Result<RemotePairedMacStatus, any Error>
     let catalog: RemoteWorkspaceCatalog
     let providerDetail: ProviderDetail
     private let defaultSessionScreen: SessionScreen
     private var sessionScreenResults: [Result<SessionScreen, any Error>]
+    private var observationRegistration: ObservationRegistration?
 
     init(
         result: PairedMac,
@@ -435,6 +497,39 @@ private final class StubRemotePairingClient: RemotePairingClient {
         }
 
         return defaultSessionScreen
+    }
+
+    func observeSessionScreen(
+        for pairedMac: PairedMac,
+        sessionID: UUID,
+        onUpdate: @escaping @Sendable (SessionScreen) -> Void,
+        onDisconnect: @escaping @Sendable (any Error) -> Void
+    ) async throws -> any SessionScreenObservation {
+        observationRegistration = ObservationRegistration(onUpdate: onUpdate, onDisconnect: onDisconnect)
+        onUpdate(try await fetchSessionScreen(for: pairedMac, sessionID: sessionID))
+        return TestRemoteSessionScreenObservation { [weak self] in
+            self?.observationRegistration = nil
+        }
+    }
+
+    func emitObservedScreen(_ screen: SessionScreen) async {
+        observationRegistration?.onUpdate(screen)
+    }
+
+    func disconnectObservedSession(_ error: any Error) async {
+        observationRegistration?.onDisconnect(error)
+    }
+}
+
+private final class TestRemoteSessionScreenObservation: SessionScreenObservation, @unchecked Sendable {
+    private let onCancel: @Sendable () -> Void
+
+    init(onCancel: @escaping @Sendable () -> Void) {
+        self.onCancel = onCancel
+    }
+
+    func cancel() async {
+        onCancel()
     }
 }
 

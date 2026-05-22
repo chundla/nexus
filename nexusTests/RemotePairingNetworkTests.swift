@@ -1,4 +1,5 @@
 import Foundation
+import NexusDomain
 import NexusIPC
 import NexusService
 import Testing

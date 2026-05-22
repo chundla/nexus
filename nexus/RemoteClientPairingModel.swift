@@ -1,5 +1,6 @@
 import Foundation
 import NexusDomain
+import NexusIPC
 import Observation
 
 protocol RemotePairingClient {
@@ -8,6 +9,12 @@ protocol RemotePairingClient {
     func fetchCatalog(for pairedMac: PairedMac) async throws -> RemoteWorkspaceCatalog
     func fetchProviderDetail(for pairedMac: PairedMac, workspaceID: UUID, providerID: ProviderID) async throws -> ProviderDetail
     func fetchSessionScreen(for pairedMac: PairedMac, sessionID: UUID) async throws -> SessionScreen
+    func observeSessionScreen(
+        for pairedMac: PairedMac,
+        sessionID: UUID,
+        onUpdate: @escaping @Sendable (SessionScreen) -> Void,
+        onDisconnect: @escaping @Sendable (any Error) -> Void
+    ) async throws -> any SessionScreenObservation
 }
 
 extension RemotePairingHTTPClient: RemotePairingClient {}
@@ -95,6 +102,8 @@ final class RemoteClientPairingModel {
 
     private let client: any RemotePairingClient
     private let store: any PairedMacStore
+    private var focusedSessionObservation: (any SessionScreenObservation)?
+    private var focusedSessionReconnectTask: Task<Void, Never>?
 
     var activePairedMac: PairedMac? {
         guard let activePairedMacID else {
@@ -184,39 +193,11 @@ final class RemoteClientPairingModel {
 
     func focusRemoteSession(sessionID: UUID) async {
         focusedSessionID = sessionID
-        await refreshFocusedSessionScreen()
+        await startFocusedSessionObservation(forceRestart: true)
     }
 
     func refreshFocusedSessionScreen() async {
-        guard let sessionID = focusedSessionID else {
-            focusedSessionScreen = nil
-            focusedSessionIsStale = false
-            focusedSessionErrorMessage = nil
-            return
-        }
-
-        guard let pairedMac = activePairedMac else {
-            focusedSessionScreen = nil
-            focusedSessionIsStale = false
-            focusedSessionErrorMessage = nil
-            return
-        }
-
-        let hasSnapshot = focusedSessionScreen?.session.id == sessionID
-
-        do {
-            focusedSessionScreen = try await client.fetchSessionScreen(for: pairedMac, sessionID: sessionID)
-            focusedSessionIsStale = false
-            focusedSessionErrorMessage = nil
-        } catch {
-            if hasSnapshot {
-                focusedSessionIsStale = true
-            } else {
-                focusedSessionScreen = nil
-                focusedSessionIsStale = false
-            }
-            focusedSessionErrorMessage = error.localizedDescription
-        }
+        await startFocusedSessionObservation(forceRestart: true)
     }
 
     func stopFocusingRemoteSession() {
@@ -224,6 +205,15 @@ final class RemoteClientPairingModel {
         focusedSessionScreen = nil
         focusedSessionIsStale = false
         focusedSessionErrorMessage = nil
+
+        focusedSessionReconnectTask?.cancel()
+        focusedSessionReconnectTask = nil
+
+        let observation = focusedSessionObservation
+        focusedSessionObservation = nil
+        Task {
+            await observation?.cancel()
+        }
     }
 
     func completePairing() async throws {
@@ -272,6 +262,137 @@ final class RemoteClientPairingModel {
         providerDetails = [:]
         providerDetailErrorMessages = [:]
         stopFocusingRemoteSession()
+    }
+
+    private func startFocusedSessionObservation(forceRestart: Bool) async {
+        guard let sessionID = focusedSessionID else {
+            focusedSessionScreen = nil
+            focusedSessionIsStale = false
+            focusedSessionErrorMessage = nil
+            await cancelFocusedSessionObservation()
+            return
+        }
+
+        guard let pairedMac = activePairedMac else {
+            focusedSessionScreen = nil
+            focusedSessionIsStale = false
+            focusedSessionErrorMessage = nil
+            await cancelFocusedSessionObservation()
+            return
+        }
+
+        if forceRestart {
+            await cancelFocusedSessionObservation()
+        } else if focusedSessionObservation != nil {
+            return
+        }
+
+        do {
+            let observation = try await client.observeSessionScreen(
+                for: pairedMac,
+                sessionID: sessionID,
+                onUpdate: { [weak self] screen in
+                    let applyUpdate = { @MainActor [weak self] in
+                        guard let self, self.focusedSessionID == sessionID else {
+                            return
+                        }
+
+                        self.focusedSessionScreen = screen
+                        self.focusedSessionIsStale = false
+                        self.focusedSessionErrorMessage = nil
+                    }
+
+                    if Thread.isMainThread {
+                        MainActor.assumeIsolated {
+                            applyUpdate()
+                        }
+                    } else {
+                        Task { @MainActor in
+                            await applyUpdate()
+                        }
+                    }
+                },
+                onDisconnect: { [weak self] error in
+                    let applyDisconnect = { @MainActor [weak self] in
+                        await self?.handleFocusedSessionDisconnect(error, sessionID: sessionID)
+                    }
+
+                    Task { @MainActor in
+                        await applyDisconnect()
+                    }
+                }
+            )
+            focusedSessionObservation = observation
+            focusedSessionReconnectTask?.cancel()
+            focusedSessionReconnectTask = nil
+        } catch {
+            applyFocusedSessionObservationError(error, sessionID: sessionID)
+            scheduleFocusedSessionReconnect(for: sessionID)
+        }
+    }
+
+    private func cancelFocusedSessionObservation() async {
+        focusedSessionReconnectTask?.cancel()
+        focusedSessionReconnectTask = nil
+
+        let observation = focusedSessionObservation
+        focusedSessionObservation = nil
+        if let observation {
+            await observation.cancel()
+        }
+    }
+
+    private func handleFocusedSessionDisconnect(_ error: any Error, sessionID: UUID) async {
+        guard focusedSessionID == sessionID else {
+            return
+        }
+
+        focusedSessionObservation = nil
+        applyFocusedSessionObservationError(error, sessionID: sessionID)
+        scheduleFocusedSessionReconnect(for: sessionID)
+    }
+
+    private func applyFocusedSessionObservationError(_ error: any Error, sessionID: UUID) {
+        let hasSnapshot = focusedSessionScreen?.session.id == sessionID
+
+        if hasSnapshot {
+            focusedSessionIsStale = true
+        } else {
+            focusedSessionScreen = nil
+            focusedSessionIsStale = false
+        }
+
+        focusedSessionErrorMessage = error.localizedDescription
+    }
+
+    private func scheduleFocusedSessionReconnect(for sessionID: UUID) {
+        guard focusedSessionReconnectTask == nil, focusedSessionID == sessionID else {
+            return
+        }
+
+        focusedSessionReconnectTask = Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+
+            defer {
+                self.focusedSessionReconnectTask = nil
+            }
+
+            while Task.isCancelled == false,
+                  self.focusedSessionID == sessionID,
+                  self.focusedSessionObservation == nil {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+
+                guard Task.isCancelled == false,
+                      self.focusedSessionID == sessionID,
+                      self.focusedSessionObservation == nil else {
+                    break
+                }
+
+                await self.startFocusedSessionObservation(forceRestart: false)
+            }
+        }
     }
 
     private static func resolveActivePairedMacID(

@@ -1,5 +1,6 @@
 import Foundation
 import NexusDomain
+import NexusIPC
 
 struct RemotePairingEndpoint: Equatable, Sendable {
     let host: String
@@ -53,9 +54,7 @@ struct RemotePairingHTTPClient {
         let (data, response) = try await session.data(for: request)
         let httpResponse = response as? HTTPURLResponse
         guard httpResponse?.statusCode == 200 else {
-            let message = (try? JSONDecoder().decode(RemotePairingErrorResponse.self, from: data).message)
-                ?? HTTPURLResponse.localizedString(forStatusCode: httpResponse?.statusCode ?? 500)
-            throw RemotePairingHTTPError.requestFailed(message)
+            throw decodeRequestFailure(from: data, statusCode: httpResponse?.statusCode ?? 500)
         }
 
         return try JSONDecoder().decode(RemotePairedMacStatus.self, from: data)
@@ -71,9 +70,7 @@ struct RemotePairingHTTPClient {
         let (data, response) = try await session.data(for: request)
         let httpResponse = response as? HTTPURLResponse
         guard httpResponse?.statusCode == 200 else {
-            let message = (try? JSONDecoder().decode(RemotePairingErrorResponse.self, from: data).message)
-                ?? HTTPURLResponse.localizedString(forStatusCode: httpResponse?.statusCode ?? 500)
-            throw RemotePairingHTTPError.requestFailed(message)
+            throw decodeRequestFailure(from: data, statusCode: httpResponse?.statusCode ?? 500)
         }
 
         let completion = try JSONDecoder().decode(RemotePairingCompletionResponse.self, from: data)
@@ -117,6 +114,67 @@ struct RemotePairingHTTPClient {
         return try JSONDecoder().decode(SessionScreen.self, from: data)
     }
 
+    func observeSessionScreen(
+        for pairedMac: PairedMac,
+        sessionID: UUID,
+        onUpdate: @escaping @Sendable (SessionScreen) -> Void,
+        onDisconnect: @escaping @Sendable (any Error) -> Void
+    ) async throws -> any SessionScreenObservation {
+        let request = try authenticatedRequest(
+            for: pairedMac,
+            path: "/remote-client/sessions/\(sessionID.uuidString)/observe"
+        )
+        let task = Task.detached(priority: nil) {
+            do {
+                let (bytes, response) = try await session.bytes(for: request)
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    throw RemotePairingHTTPObservationError.invalidResponse
+                }
+
+                guard httpResponse.statusCode == 200 else {
+                    var responseBody = Data()
+                    for try await byte in bytes {
+                        responseBody.append(byte)
+                    }
+                    throw decodeRequestFailure(from: responseBody, statusCode: httpResponse.statusCode)
+                }
+
+                var eventLines: [String] = []
+                for try await line in bytes.lines {
+                    if Task.isCancelled {
+                        return
+                    }
+
+                    if line.isEmpty {
+                        try emitObservedScreen(from: eventLines, onUpdate: onUpdate)
+                        eventLines = []
+                        continue
+                    }
+
+                    guard line.hasPrefix("data:") else {
+                        continue
+                    }
+
+                    let value = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+                    eventLines.append(value)
+                }
+
+                try emitObservedScreen(from: eventLines, onUpdate: onUpdate)
+
+                if Task.isCancelled == false {
+                    onDisconnect(RemotePairingHTTPObservationError.connectionClosed)
+                }
+            } catch is CancellationError {
+            } catch {
+                if Task.isCancelled == false {
+                    onDisconnect(error)
+                }
+            }
+        }
+
+        return RemoteSessionScreenHTTPObservation(task: task)
+    }
+
     private func authenticatedRequest(for pairedMac: PairedMac, path: String) throws -> URLRequest {
         guard let pairedDeviceID = pairedMac.pairedDeviceID else {
             throw RemotePairingHTTPError.missingPairedDeviceIdentity
@@ -131,12 +189,41 @@ struct RemotePairingHTTPClient {
         let (data, response) = try await session.data(for: request)
         let httpResponse = response as? HTTPURLResponse
         guard httpResponse?.statusCode == 200 else {
-            let message = (try? JSONDecoder().decode(RemotePairingErrorResponse.self, from: data).message)
-                ?? HTTPURLResponse.localizedString(forStatusCode: httpResponse?.statusCode ?? 500)
-            throw RemotePairingHTTPError.requestFailed(message)
+            throw decodeRequestFailure(from: data, statusCode: httpResponse?.statusCode ?? 500)
         }
 
         return data
+    }
+
+    private func emitObservedScreen(
+        from eventLines: [String],
+        onUpdate: @escaping @Sendable (SessionScreen) -> Void
+    ) throws {
+        guard eventLines.isEmpty == false else {
+            return
+        }
+
+        let payload = eventLines.joined(separator: "\n")
+        let screen = try JSONDecoder().decode(SessionScreen.self, from: Data(payload.utf8))
+        onUpdate(screen)
+    }
+
+    private func decodeRequestFailure(from data: Data, statusCode: Int) -> RemotePairingHTTPError {
+        let message = (try? JSONDecoder().decode(RemotePairingErrorResponse.self, from: data).message)
+            ?? HTTPURLResponse.localizedString(forStatusCode: statusCode)
+        return .requestFailed(message)
+    }
+}
+
+private final class RemoteSessionScreenHTTPObservation: SessionScreenObservation, @unchecked Sendable {
+    private let task: Task<Void, Never>
+
+    init(task: Task<Void, Never>) {
+        self.task = task
+    }
+
+    func cancel() async {
+        task.cancel()
     }
 }
 
@@ -150,6 +237,20 @@ enum RemotePairingHTTPError: LocalizedError {
             message
         case .missingPairedDeviceIdentity:
             "Pair this Mac again to browse its Workspace catalog"
+        }
+    }
+}
+
+private enum RemotePairingHTTPObservationError: LocalizedError {
+    case connectionClosed
+    case invalidResponse
+
+    var errorDescription: String? {
+        switch self {
+        case .connectionClosed:
+            "The connection to this Paired Mac was lost."
+        case .invalidResponse:
+            "The Paired Mac returned an invalid response."
         }
     }
 }

@@ -163,6 +163,34 @@ final class RemotePairingServer {
         }
 
         if request.method == "GET",
+           let sessionScreenObservationRequest = sessionScreenObservationRequest(from: request) {
+            do {
+                try await authorize(request)
+                let stream = RemoteSessionScreenStream(connection: connection, queue: queue)
+                let observation = try await client.observeSessionScreen(sessionID: sessionScreenObservationRequest.sessionID) { screen in
+                    stream.enqueue(screen)
+                }
+                stream.setOnClose {
+                    await observation.cancel()
+                }
+                connection.stateUpdateHandler = { state in
+                    switch state {
+                    case .failed, .cancelled:
+                        stream.close()
+                    default:
+                        break
+                    }
+                }
+                stream.start()
+            } catch RemotePairingServerError.unauthorized {
+                send(statusCode: 401, body: RemotePairingErrorResponse(message: "Pair this iPhone again to browse this Paired Mac"), over: connection)
+            } catch {
+                send(statusCode: 400, body: RemotePairingErrorResponse(message: error.localizedDescription), over: connection)
+            }
+            return
+        }
+
+        if request.method == "GET",
            let sessionScreenRequest = sessionScreenRequest(from: request) {
             do {
                 try await authorize(request)
@@ -227,6 +255,19 @@ final class RemotePairingServer {
         }
 
         return ProviderDetailRequest(workspaceID: workspaceID, providerID: providerID)
+    }
+
+    private func sessionScreenObservationRequest(from request: ParsedRequest) -> SessionScreenObservationRequest? {
+        let components = request.path.split(separator: "/")
+        guard components.count == 4,
+              components[0] == "remote-client",
+              components[1] == "sessions",
+              let sessionID = UUID(uuidString: String(components[2])),
+              components[3] == "observe" else {
+            return nil
+        }
+
+        return SessionScreenObservationRequest(sessionID: sessionID)
     }
 
     private func sessionScreenRequest(from request: ParsedRequest) -> SessionScreenRequest? {
@@ -328,6 +369,102 @@ final class RemotePairingServer {
     }
 }
 
+private final class RemoteSessionScreenStream: @unchecked Sendable {
+    private let connection: NWConnection
+    private let queue: DispatchQueue
+    private var didStart = false
+    private var isClosed = false
+    private var pendingScreens: [SessionScreen] = []
+    private var onClose: (@Sendable () async -> Void)?
+
+    init(connection: NWConnection, queue: DispatchQueue) {
+        self.connection = connection
+        self.queue = queue
+    }
+
+    func enqueue(_ screen: SessionScreen) {
+        queue.async { [weak self] in
+            guard let self, self.isClosed == false else {
+                return
+            }
+
+            if self.didStart {
+                self.sendEvent(screen)
+            } else {
+                self.pendingScreens.append(screen)
+            }
+        }
+    }
+
+    func setOnClose(_ onClose: @escaping @Sendable () async -> Void) {
+        queue.async { [weak self] in
+            self?.onClose = onClose
+        }
+    }
+
+    func start() {
+        queue.async { [weak self] in
+            guard let self, self.isClosed == false else {
+                return
+            }
+
+            self.didStart = true
+            self.sendHeaders()
+
+            let pendingScreens = self.pendingScreens
+            self.pendingScreens.removeAll()
+            for screen in pendingScreens {
+                self.sendEvent(screen)
+            }
+        }
+    }
+
+    func close() {
+        queue.async { [weak self] in
+            guard let self, self.isClosed == false else {
+                return
+            }
+
+            self.isClosed = true
+            let onClose = self.onClose
+            self.onClose = nil
+            self.connection.cancel()
+            if let onClose {
+                Task {
+                    await onClose()
+                }
+            }
+        }
+    }
+
+    private func sendHeaders() {
+        let responseHead = "HTTP/1.1 200 OK\r\n"
+            + "Content-Type: text/event-stream\r\n"
+            + "Cache-Control: no-cache\r\n"
+            + "Connection: keep-alive\r\n"
+            + "\r\n"
+        connection.send(content: Data(responseHead.utf8), completion: .contentProcessed { [weak self] error in
+            if error != nil {
+                self?.close()
+            }
+        })
+    }
+
+    private func sendEvent(_ screen: SessionScreen) {
+        guard let bodyData = try? JSONEncoder().encode(screen),
+              let body = String(data: bodyData, encoding: .utf8) else {
+            return
+        }
+
+        let payload = Data("data: \(body)\n\n".utf8)
+        connection.send(content: payload, completion: .contentProcessed { [weak self] error in
+            if error != nil {
+                self?.close()
+            }
+        })
+    }
+}
+
 private struct ParsedRequest {
     let method: String
     let path: String
@@ -338,6 +475,10 @@ private struct ParsedRequest {
 private struct ProviderDetailRequest {
     let workspaceID: UUID
     let providerID: ProviderID
+}
+
+private struct SessionScreenObservationRequest {
+    let sessionID: UUID
 }
 
 private struct SessionScreenRequest {
