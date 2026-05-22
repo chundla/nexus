@@ -476,10 +476,20 @@ private struct RemoteSessionScreenView: View {
         .refreshable {
             await model.refreshFocusedSessionScreen()
         }
+        .onChange(of: terminalViewportSize) { _, _ in
+            guard model.focusedSessionIsController else {
+                return
+            }
+
+            let viewport = terminalViewport()
+            Task {
+                await model.updateFocusedRemoteSessionViewport(columns: viewport.columns, rows: viewport.rows)
+            }
+        }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .background {
                 Task {
-                    await model.releaseFocusedRemoteSessionControl()
+                    await model.handleFocusedSessionBackgrounded()
                 }
             }
         }

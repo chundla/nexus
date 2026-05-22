@@ -205,6 +205,121 @@ struct RemotePairingNetworkTests {
         #expect(releasedScreen.terminalRows == 40)
     }
 
+    @Test func remoteControllerCanUpdateOwnedTerminalSizeOverDedicatedNetworkAPI() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
+
+        _ = try await client.setRemoteAccessEnabled(true)
+        let pairing = try await client.startPairing()
+        let group = try await client.createWorkspaceGroup(name: "Client Work")
+        let workspace = try await client.createLocalWorkspace(
+            name: "Nexus",
+            folderPath: "/tmp/nexus",
+            primaryGroupID: group.id
+        )
+        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        _ = try await client.resizeSession(sessionID: session.id, columns: 132, rows: 40)
+
+        let remoteClient = RemotePairingHTTPClient()
+        let pairedMac = try await remoteClient.completePairing(
+            host: server.displayHost,
+            port: server.port,
+            pairingCode: pairing.code,
+            deviceName: "Chris’s iPhone"
+        )
+        _ = try await remoteClient.takeSessionControl(for: pairedMac, sessionID: session.id, columns: 44, rows: 12)
+        let resizedScreen = try await remoteClient.takeSessionControl(for: pairedMac, sessionID: session.id, columns: 60, rows: 20)
+        let refreshedScreen = try await client.getSessionScreen(sessionID: session.id)
+
+        #expect(resizedScreen.controller == .pairedDevice(pairedMac.pairedDeviceID!))
+        #expect(resizedScreen.terminalColumns == 60)
+        #expect(resizedScreen.terminalRows == 20)
+        #expect(refreshedScreen.controller == .pairedDevice(pairedMac.pairedDeviceID!))
+        #expect(refreshedScreen.terminalColumns == 60)
+        #expect(refreshedScreen.terminalRows == 20)
+    }
+
+    @Test func macInteractionReclaimsControllerStatusAndBlocksRemoteTerminalInputOverDedicatedNetworkAPI() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let executableURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: false)
+        try #"""
+        #!/usr/bin/env python3
+        import sys
+
+        print("READY", flush=True)
+        first = sys.stdin.readline().rstrip("\r\n")
+        print(f"LOCAL:{first}", flush=True)
+        second = sys.stdin.readline().rstrip("\r\n")
+        print(f"REMOTE:{second}", flush=True)
+        """#.write(to: executableURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: RemotePairingTestExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
+                commandRunner: RemotePairingTestCommandRunner(results: [
+                    RemotePairingTestCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    RemotePairingTestCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            )
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
+
+        _ = try await client.setRemoteAccessEnabled(true)
+        let pairing = try await client.startPairing()
+        _ = try await client.createWorkspaceGroup(name: "Client Work")
+        let workspace = try await client.createLocalWorkspace(
+            name: "Nexus",
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        _ = try await waitForSessionScreen(client: client, sessionID: session.id) { screen in
+            screen.transcript.contains("READY")
+        }
+        _ = try await client.resizeSession(sessionID: session.id, columns: 132, rows: 40)
+
+        let remoteClient = RemotePairingHTTPClient()
+        let pairedMac = try await remoteClient.completePairing(
+            host: server.displayHost,
+            port: server.port,
+            pairingCode: pairing.code,
+            deviceName: "Chris’s iPhone"
+        )
+
+        _ = try await remoteClient.takeSessionControl(for: pairedMac, sessionID: session.id, columns: 44, rows: 12)
+        _ = try await client.sendSessionText(sessionID: session.id, text: "mac reclaim")
+        _ = try await client.sendSessionInputKey(sessionID: session.id, key: .enter)
+        let reclaimedScreen = try await waitForSessionScreen(client: client, sessionID: session.id) { screen in
+            screen.transcript.contains("LOCAL:mac reclaim")
+        }
+
+        #expect(reclaimedScreen.controller == .mac)
+        #expect(reclaimedScreen.terminalColumns == 132)
+        #expect(reclaimedScreen.terminalRows == 40)
+
+        do {
+            _ = try await remoteClient.sendSessionText(for: pairedMac, sessionID: session.id, text: "still remote")
+            Issue.record("Expected Mac interaction to reclaim Controller status before further remote terminal input")
+        } catch {
+            #expect(error.localizedDescription == "Take Controller on this iPhone before sending terminal input.")
+        }
+    }
+
     @Test func remoteControllerCanSendTerminalTextAndReturnOverDedicatedNetworkAPI() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)

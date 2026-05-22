@@ -244,6 +244,34 @@ final class RemoteClientPairingModel {
         }
     }
 
+    func updateFocusedRemoteSessionViewport(columns: Int, rows: Int) async {
+        guard let pairedMac = activePairedMac,
+              let sessionID = focusedSessionID,
+              focusedSessionIsController else {
+            return
+        }
+        guard focusedSessionScreen?.terminalColumns != columns || focusedSessionScreen?.terminalRows != rows else {
+            return
+        }
+
+        do {
+            focusedSessionScreen = try await client.takeSessionControl(
+                for: pairedMac,
+                sessionID: sessionID,
+                columns: columns,
+                rows: rows
+            )
+            focusedSessionIsStale = false
+            focusedSessionErrorMessage = nil
+        } catch {
+            focusedSessionErrorMessage = error.localizedDescription
+        }
+    }
+
+    func handleFocusedSessionBackgrounded() async {
+        await releaseFocusedRemoteSessionControl()
+    }
+
     func sendTextToFocusedRemoteSession(_ text: String) async throws {
         guard let pairedMac = activePairedMac,
               let sessionID = focusedSessionID else {
