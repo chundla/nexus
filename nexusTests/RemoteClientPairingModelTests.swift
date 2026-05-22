@@ -1066,6 +1066,108 @@ struct RemoteClientPairingModelTests {
         #expect(model.focusedSessionScreen?.session.state == .ready)
         #expect(model.providerDetail(for: workspace.id, providerID: .claude)?.alternateSessions.first?.state == .ready)
     }
+
+    @Test func namedSessionSectionShowsEmptyStateAndEnabledCreateActionForLaunchableClaudeProvider() {
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: UUID()
+        )
+        let health = ProviderHealthSummary(
+            state: .available,
+            summary: "Claude available",
+            launchability: .launchable
+        )
+        let detail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .claude),
+            health: health,
+            defaultSession: nil,
+            alternateSessions: [],
+            failedSessions: []
+        )
+
+        let section = RemoteNamedSessionsSectionState(
+            providerID: .claude,
+            providerHealth: health,
+            detail: detail,
+            errorMessage: nil
+        )
+
+        #expect(section.content == .empty)
+        #expect(section.canCreateSession)
+        #expect(section.createDisabledReason == nil)
+    }
+
+    @Test func namedSessionSectionUsesProviderHealthSummaryWhenCreateIsBlocked() {
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .remote,
+            folderPath: "/srv/nexus",
+            primaryGroupID: UUID()
+        )
+        let health = ProviderHealthSummary(
+            state: .blocked,
+            summary: "Claude blocked by Host Validation",
+            launchability: .notLaunchable
+        )
+        let detail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .claude),
+            health: health,
+            defaultSession: nil,
+            alternateSessions: [],
+            failedSessions: []
+        )
+
+        let section = RemoteNamedSessionsSectionState(
+            providerID: .claude,
+            providerHealth: health,
+            detail: detail,
+            errorMessage: nil
+        )
+
+        #expect(section.content == .empty)
+        #expect(section.canCreateSession == false)
+        #expect(section.createDisabledReason == "Claude blocked by Host Validation")
+    }
+
+    @Test func namedSessionSectionKeepsUnsupportedProvidersVisibleButDisabled() {
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: UUID()
+        )
+        let health = ProviderHealthSummary(
+            state: .available,
+            summary: "Codex available",
+            launchability: .launchable
+        )
+        let detail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .codex),
+            health: health,
+            defaultSession: nil,
+            alternateSessions: [],
+            failedSessions: []
+        )
+
+        let section = RemoteNamedSessionsSectionState(
+            providerID: .codex,
+            providerHealth: health,
+            detail: detail,
+            errorMessage: nil
+        )
+
+        #expect(section.content == .empty)
+        #expect(section.canCreateSession == false)
+        #expect(section.createDisabledReason == "This Provider is not supported on iPhone yet.")
+    }
 }
 
 private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sendable {

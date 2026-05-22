@@ -340,21 +340,13 @@ private struct RemoteProviderDetailView: View {
         detail?.health ?? providerCard.health
     }
 
-    private var canCreateNamedSession: Bool {
-        providerCard.provider.id == .claude && providerHealth.launchability == .launchable
-    }
-
-    private var createNamedSessionDisabledReason: String? {
-        guard providerCard.provider.id == .claude else {
-            return "This Provider is not supported on iPhone yet."
-        }
-        guard providerHealth.launchability != .launchable else {
-            return nil
-        }
-        if detail == nil, errorMessage == nil, providerHealth.launchability == .notChecked {
-            return "Loading Provider detail…"
-        }
-        return providerHealth.summary
+    private var namedSessionsSection: RemoteNamedSessionsSectionState {
+        RemoteNamedSessionsSectionState(
+            providerID: providerCard.provider.id,
+            providerHealth: providerHealth,
+            detail: detail,
+            errorMessage: errorMessage
+        )
     }
 
     var body: some View {
@@ -414,31 +406,32 @@ private struct RemoteProviderDetailView: View {
             }
 
             Section("Named Sessions") {
-                if let detail {
-                    if detail.alternateSessions.isEmpty {
-                        Text("No Named Sessions yet.")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(detail.alternateSessions) { session in
-                            NavigationLink {
-                                RemoteSessionScreenView(model: model, session: session)
-                            } label: {
-                                RemoteProviderSessionSummaryRow(session: session)
-                            }
+                switch namedSessionsSection.content {
+                case .empty:
+                    Text("No Named Sessions yet.")
+                        .foregroundStyle(.secondary)
+                case .sessions(let sessions):
+                    ForEach(sessions) { session in
+                        NavigationLink {
+                            RemoteSessionScreenView(model: model, session: session)
+                        } label: {
+                            RemoteProviderSessionSummaryRow(session: session)
                         }
                     }
-                } else if errorMessage == nil {
+                case .loading:
                     Text("Loading Named Sessions…")
                         .foregroundStyle(.secondary)
+                case .none:
+                    EmptyView()
                 }
 
                 Button(isCreatingNamedSession ? "Creating…" : "Create Session") {
                     createNamedSession()
                 }
-                .disabled(isCreatingNamedSession || canCreateNamedSession == false)
+                .disabled(isCreatingNamedSession || namedSessionsSection.canCreateSession == false)
 
-                if let disabledReason = createNamedSessionDisabledReason,
-                   canCreateNamedSession == false {
+                if let disabledReason = namedSessionsSection.createDisabledReason,
+                   namedSessionsSection.canCreateSession == false {
                     Text(disabledReason)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
