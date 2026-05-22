@@ -4,6 +4,62 @@ import Testing
 
 @MainActor
 struct RemoteClientPairingModelTests {
+    @Test func marksReachablePairedMacAsAvailableAfterRefresh() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600)
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let model = RemoteClientPairingModel(
+            client: StubRemotePairingClient(result: pairedMac, status: .success(RemotePairedMacStatus(macName: "Studio Mac", isRemoteAccessEnabled: true))),
+            store: store
+        )
+
+        await model.refreshPairedMacAvailability()
+
+        #expect(model.availability(for: pairedMac) == .available)
+    }
+
+    @Test func marksUnreachablePairedMacAsUnavailableAfterRefresh() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600)
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let model = RemoteClientPairingModel(
+            client: StubRemotePairingClient(
+                result: pairedMac,
+                status: .failure(NSError(domain: NSURLErrorDomain, code: NSURLErrorCannotConnectToHost))
+            ),
+            store: store
+        )
+
+        await model.refreshPairedMacAvailability()
+
+        #expect(
+            model.availability(for: pairedMac)
+                == .unavailable("Nexus is unavailable. Make sure this Mac is awake, on the same network, and Nexus Remote Access is running.")
+        )
+    }
+
     @Test func storesSuccessfulPairingAsLastUsedMacForLaterReconnect() async throws {
         let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -118,6 +174,21 @@ struct RemoteClientPairingModelTests {
 
 private struct StubRemotePairingClient: RemotePairingClient {
     let result: PairedMac
+    let status: Result<RemotePairedMacStatus, any Error>
+
+    init(
+        result: PairedMac,
+        status: Result<RemotePairedMacStatus, any Error> = .success(
+            RemotePairedMacStatus(macName: "Studio Mac", isRemoteAccessEnabled: true)
+        )
+    ) {
+        self.result = result
+        self.status = status
+    }
+
+    func fetchStatus(host: String, port: Int) async throws -> RemotePairedMacStatus {
+        try status.get()
+    }
 
     func completePairing(host: String, port: Int, pairingCode: String, deviceName: String) async throws -> PairedMac {
         result

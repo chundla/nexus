@@ -101,6 +101,20 @@ final class RemotePairingServer {
     }
 
     private func respond(to request: ParsedRequest, over connection: NWConnection) async {
+        if request.method == "GET", request.path == "/remote-client/status" {
+            do {
+                let state = try await client.getRemoteAccessState()
+                send(
+                    statusCode: 200,
+                    body: RemotePairedMacStatus(macName: macName, isRemoteAccessEnabled: state.isEnabled),
+                    over: connection
+                )
+            } catch {
+                send(statusCode: 500, body: RemotePairingErrorResponse(message: error.localizedDescription), over: connection)
+            }
+            return
+        }
+
         guard request.method == "POST", request.path == "/pairings/complete" else {
             send(statusCode: 404, body: RemotePairingErrorResponse(message: "Not found"), over: connection)
             return
@@ -122,13 +136,11 @@ final class RemotePairingServer {
     private func send<T: Encodable>(statusCode: Int, body: T, over connection: NWConnection) {
         do {
             let bodyData = try JSONEncoder().encode(body)
-            let responseHead = """
-            HTTP/1.1 \(statusCode) \(Self.reasonPhrase(for: statusCode))\r
-            Content-Type: application/json\r
-            Content-Length: \(bodyData.count)\r
-            Connection: close\r
-            \r
-            """
+            let responseHead = "HTTP/1.1 \(statusCode) \(Self.reasonPhrase(for: statusCode))\r\n"
+                + "Content-Type: application/json\r\n"
+                + "Content-Length: \(bodyData.count)\r\n"
+                + "Connection: close\r\n"
+                + "\r\n"
             var payload = Data(responseHead.utf8)
             payload.append(bodyData)
             connection.send(content: payload, completion: .contentProcessed { _ in

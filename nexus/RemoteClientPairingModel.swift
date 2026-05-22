@@ -2,6 +2,7 @@ import Foundation
 import Observation
 
 protocol RemotePairingClient {
+    func fetchStatus(host: String, port: Int) async throws -> RemotePairedMacStatus
     func completePairing(host: String, port: Int, pairingCode: String, deviceName: String) async throws -> PairedMac
 }
 
@@ -52,10 +53,28 @@ struct UserDefaultsPairedMacStore: PairedMacStore {
     }
 }
 
+enum PairedMacAvailability: Equatable {
+    case unknown
+    case available
+    case unavailable(String)
+
+    var summary: String {
+        switch self {
+        case .unknown:
+            "Checking availability…"
+        case .available:
+            "Available on this network"
+        case .unavailable(let message):
+            message
+        }
+    }
+}
+
 @MainActor
 @Observable
 final class RemoteClientPairingModel {
     var pairedMacs: [PairedMac]
+    var pairedMacAvailability: [PairedMac.ID: PairedMacAvailability] = [:]
     var activePairedMacID: PairedMac.ID?
     var macHost = ""
     var macPort = "9234"
@@ -83,6 +102,29 @@ final class RemoteClientPairingModel {
         )
     }
 
+    func availability(for pairedMac: PairedMac) -> PairedMacAvailability {
+        pairedMacAvailability[pairedMac.id] ?? .unknown
+    }
+
+    func refreshPairedMacAvailability() async {
+        var nextAvailability: [PairedMac.ID: PairedMacAvailability] = [:]
+
+        for pairedMac in pairedMacs {
+            do {
+                let status = try await client.fetchStatus(host: pairedMac.host, port: pairedMac.port)
+                nextAvailability[pairedMac.id] = status.isRemoteAccessEnabled
+                    ? .available
+                    : .unavailable("Remote Access is turned off on this Mac")
+            } catch {
+                nextAvailability[pairedMac.id] = .unavailable(
+                    "Nexus is unavailable. Make sure this Mac is awake, on the same network, and Nexus Remote Access is running."
+                )
+            }
+        }
+
+        pairedMacAvailability = nextAvailability
+    }
+
     func completePairing() async throws {
         guard let port = Int(macPort.trimmingCharacters(in: .whitespacesAndNewlines)) else {
             throw RemoteClientPairingModelError.invalidPort
@@ -97,6 +139,7 @@ final class RemoteClientPairingModel {
 
         pairedMacs.removeAll { $0.id == pairedMac.id }
         pairedMacs.append(pairedMac)
+        pairedMacAvailability[pairedMac.id] = .unknown
         try store.savePairedMacs(pairedMacs)
         activePairedMacID = pairedMac.id
         store.saveActivePairedMacID(activePairedMacID)
@@ -113,6 +156,7 @@ final class RemoteClientPairingModel {
 
     func forgetPairedMac(id: PairedMac.ID) throws {
         pairedMacs.removeAll { $0.id == id }
+        pairedMacAvailability[id] = nil
         activePairedMacID = Self.resolveActivePairedMacID(preferredID: activePairedMacID, pairedMacs: pairedMacs)
         try store.savePairedMacs(pairedMacs)
         store.saveActivePairedMacID(activePairedMacID)

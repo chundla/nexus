@@ -9,6 +9,11 @@ struct RemotePairingEndpoint: Equatable, Sendable {
     }
 }
 
+struct RemotePairedMacStatus: Codable, Equatable, Sendable {
+    let macName: String
+    let isRemoteAccessEnabled: Bool
+}
+
 struct PairedMac: Codable, Equatable, Identifiable, Sendable {
     let name: String
     let host: String
@@ -25,6 +30,19 @@ struct RemotePairingHTTPClient {
 
     init(session: URLSession = .shared) {
         self.session = session
+    }
+
+    func fetchStatus(host: String, port: Int) async throws -> RemotePairedMacStatus {
+        let request = URLRequest(url: URL(string: "http://\(host):\(port)/remote-client/status")!)
+        let (data, response) = try await session.data(for: request)
+        let httpResponse = response as? HTTPURLResponse
+        guard httpResponse?.statusCode == 200 else {
+            let message = (try? JSONDecoder().decode(RemotePairingErrorResponse.self, from: data).message)
+                ?? HTTPURLResponse.localizedString(forStatusCode: httpResponse?.statusCode ?? 500)
+            throw RemotePairingHTTPError.requestFailed(message)
+        }
+
+        return try JSONDecoder().decode(RemotePairedMacStatus.self, from: data)
     }
 
     func completePairing(host: String, port: Int, pairingCode: String, deviceName: String) async throws -> PairedMac {

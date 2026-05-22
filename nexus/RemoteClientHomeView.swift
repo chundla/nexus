@@ -6,11 +6,27 @@ struct RemoteClientHomeView: View {
 
     @State private var isShowingPairingForm = false
     @State private var isPairing = false
+    @State private var isRefreshingAvailability = false
     @State private var presentedError: RemoteClientHomePresentedError?
 
     var body: some View {
         NavigationStack {
             List {
+                if let activePairedMac = model.activePairedMac {
+                    Section("Active Paired Mac") {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(activePairedMac.name)
+                                .font(.headline)
+                            Text(model.availability(for: activePairedMac).summary)
+                                .font(.subheadline)
+                                .foregroundStyle(availabilityColor(for: activePairedMac))
+                            Text("\(activePairedMac.host):\(activePairedMac.port)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
                 if model.pairedMacs.isEmpty == false {
                     Section("Paired Macs") {
                         ForEach(model.pairedMacs) { pairedMac in
@@ -21,6 +37,9 @@ struct RemoteClientHomeView: View {
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(pairedMac.name)
                                             .fontWeight(.medium)
+                                        Text(model.availability(for: pairedMac).summary)
+                                            .font(.caption)
+                                            .foregroundStyle(availabilityColor(for: pairedMac))
                                         Text("\(pairedMac.host):\(pairedMac.port)")
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
@@ -75,10 +94,16 @@ struct RemoteClientHomeView: View {
                 }
 
                 Section("What’s Next") {
-                    Text("Pairing now stores durable trust and the default reconnect Mac. Discovery, workspace browsing, and Session control arrive in follow-on issues.")
+                    Text("Trusted Macs now refresh reachability automatically. Workspace browsing and Session control arrive in follow-on issues.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
+            }
+            .refreshable {
+                await refreshAvailability()
+            }
+            .task(id: availabilityRefreshID) {
+                await refreshAvailability()
             }
             .navigationTitle("Nexus Remote")
             .toolbar {
@@ -108,6 +133,7 @@ struct RemoteClientHomeView: View {
 
             do {
                 try await model.completePairing()
+                await model.refreshPairedMacAvailability()
                 model.pairingCode = ""
                 isShowingPairingForm = false
             } catch {
@@ -129,6 +155,31 @@ struct RemoteClientHomeView: View {
             try model.forgetPairedMac(id: pairedMac.id)
         } catch {
             presentedError = RemoteClientHomePresentedError(message: error.localizedDescription)
+        }
+    }
+
+    private var availabilityRefreshID: String {
+        model.pairedMacs.map(\.id).joined(separator: "|") + "::" + (model.activePairedMacID ?? "")
+    }
+
+    private func refreshAvailability() async {
+        guard model.pairedMacs.isEmpty == false, isRefreshingAvailability == false else {
+            return
+        }
+
+        isRefreshingAvailability = true
+        defer { isRefreshingAvailability = false }
+        await model.refreshPairedMacAvailability()
+    }
+
+    private func availabilityColor(for pairedMac: PairedMac) -> Color {
+        switch model.availability(for: pairedMac) {
+        case .available:
+            .green
+        case .unavailable:
+            .orange
+        case .unknown:
+            .secondary
         }
     }
 }

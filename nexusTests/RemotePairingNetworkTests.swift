@@ -5,6 +5,23 @@ import Testing
 @testable import nexus
 
 struct RemotePairingNetworkTests {
+    @Test func fetchesReachablePairedMacStatusOverDedicatedNetworkAPI() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
+
+        _ = try await client.setRemoteAccessEnabled(true)
+
+        let remoteClient = RemotePairingHTTPClient()
+        let status = try await remoteClient.fetchStatus(host: server.displayHost, port: server.port)
+
+        #expect(status == RemotePairedMacStatus(macName: "Studio Mac", isRemoteAccessEnabled: true))
+    }
+
     @Test func completesFirstTimePairingOverDedicatedNetworkAPI() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)
