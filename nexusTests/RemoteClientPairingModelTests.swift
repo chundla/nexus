@@ -227,6 +227,97 @@ struct RemoteClientPairingModelTests {
         #expect(reloadedModel.activePairedMac == secondMac)
     }
 
+    @Test func loadsFocusedRemoteSessionScreenForActivePairedMac() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: UUID()
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let screen = SessionScreen(session: session, transcript: "Claude ready")
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let model = RemoteClientPairingModel(
+            client: StubRemotePairingClient(result: pairedMac, sessionScreen: screen),
+            store: store
+        )
+
+        await model.focusRemoteSession(sessionID: session.id)
+
+        #expect(model.focusedSessionScreen == screen)
+        #expect(model.focusedSessionIsStale == false)
+        #expect(model.focusedSessionErrorMessage == nil)
+    }
+
+    @Test func preservesStaleFocusedRemoteSessionScreenWhenRefreshFails() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: UUID()
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let screen = SessionScreen(session: session, transcript: "Claude ready")
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let client = StubRemotePairingClient(
+            result: pairedMac,
+            sessionScreenResults: [
+                .success(screen),
+                .failure(NSError(domain: NSURLErrorDomain, code: NSURLErrorCannotConnectToHost))
+            ]
+        )
+        let model = RemoteClientPairingModel(client: client, store: store)
+
+        await model.focusRemoteSession(sessionID: session.id)
+        await model.refreshFocusedSessionScreen()
+
+        #expect(model.focusedSessionScreen == screen)
+        #expect(model.focusedSessionIsStale)
+        #expect(model.focusedSessionErrorMessage == "The operation couldn’t be completed. (NSURLErrorDomain error -1004.)")
+    }
+
     @Test func loadsActivePairedMacProviderDetailOnDemand() async throws {
         let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -270,11 +361,13 @@ struct RemoteClientPairingModelTests {
     }
 }
 
-private struct StubRemotePairingClient: RemotePairingClient {
+private final class StubRemotePairingClient: RemotePairingClient {
     let result: PairedMac
     let status: Result<RemotePairedMacStatus, any Error>
     let catalog: RemoteWorkspaceCatalog
     let providerDetail: ProviderDetail
+    private let defaultSessionScreen: SessionScreen
+    private var sessionScreenResults: [Result<SessionScreen, any Error>]
 
     init(
         result: PairedMac,
@@ -299,12 +392,25 @@ private struct StubRemotePairingClient: RemotePairingClient {
             defaultSession: nil,
             alternateSessions: [],
             failedSessions: []
-        )
+        ),
+        sessionScreen: SessionScreen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .claude,
+                isDefault: true,
+                state: .ready
+            ),
+            transcript: "Claude ready"
+        ),
+        sessionScreenResults: [Result<SessionScreen, any Error>] = []
     ) {
         self.result = result
         self.status = status
         self.catalog = catalog
         self.providerDetail = providerDetail
+        self.defaultSessionScreen = sessionScreen
+        self.sessionScreenResults = sessionScreenResults
     }
 
     func fetchStatus(host: String, port: Int) async throws -> RemotePairedMacStatus {
@@ -321,6 +427,14 @@ private struct StubRemotePairingClient: RemotePairingClient {
 
     func fetchProviderDetail(for pairedMac: PairedMac, workspaceID: UUID, providerID: ProviderID) async throws -> ProviderDetail {
         providerDetail
+    }
+
+    func fetchSessionScreen(for pairedMac: PairedMac, sessionID: UUID) async throws -> SessionScreen {
+        if sessionScreenResults.isEmpty == false {
+            return try sessionScreenResults.removeFirst().get()
+        }
+
+        return defaultSessionScreen
     }
 }
 

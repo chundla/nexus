@@ -162,6 +162,20 @@ final class RemotePairingServer {
             return
         }
 
+        if request.method == "GET",
+           let sessionScreenRequest = sessionScreenRequest(from: request) {
+            do {
+                try await authorize(request)
+                let screen = try await client.getSessionScreen(sessionID: sessionScreenRequest.sessionID)
+                send(statusCode: 200, body: screen, over: connection)
+            } catch RemotePairingServerError.unauthorized {
+                send(statusCode: 401, body: RemotePairingErrorResponse(message: "Pair this iPhone again to browse this Paired Mac"), over: connection)
+            } catch {
+                send(statusCode: 400, body: RemotePairingErrorResponse(message: error.localizedDescription), over: connection)
+            }
+            return
+        }
+
         guard request.method == "POST", request.path == "/pairings/complete" else {
             send(statusCode: 404, body: RemotePairingErrorResponse(message: "Not found"), over: connection)
             return
@@ -213,6 +227,19 @@ final class RemotePairingServer {
         }
 
         return ProviderDetailRequest(workspaceID: workspaceID, providerID: providerID)
+    }
+
+    private func sessionScreenRequest(from request: ParsedRequest) -> SessionScreenRequest? {
+        let components = request.path.split(separator: "/")
+        guard components.count == 4,
+              components[0] == "remote-client",
+              components[1] == "sessions",
+              let sessionID = UUID(uuidString: String(components[2])),
+              components[3] == "screen" else {
+            return nil
+        }
+
+        return SessionScreenRequest(sessionID: sessionID)
     }
 
     private func send<T: Encodable>(statusCode: Int, body: T, over connection: NWConnection) {
@@ -311,6 +338,10 @@ private struct ParsedRequest {
 private struct ProviderDetailRequest {
     let workspaceID: UUID
     let providerID: ProviderID
+}
+
+private struct SessionScreenRequest {
+    let sessionID: UUID
 }
 
 private enum RemotePairingServerError: LocalizedError {

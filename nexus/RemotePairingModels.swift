@@ -108,6 +108,15 @@ struct RemotePairingHTTPClient {
         return try JSONDecoder().decode(ProviderDetail.self, from: data)
     }
 
+    func fetchSessionScreen(for pairedMac: PairedMac, sessionID: UUID) async throws -> SessionScreen {
+        let request = try authenticatedRequest(
+            for: pairedMac,
+            path: "/remote-client/sessions/\(sessionID.uuidString)/screen"
+        )
+        let data = try await send(request)
+        return try JSONDecoder().decode(SessionScreen.self, from: data)
+    }
+
     private func authenticatedRequest(for pairedMac: PairedMac, path: String) throws -> URLRequest {
         guard let pairedDeviceID = pairedMac.pairedDeviceID else {
             throw RemotePairingHTTPError.missingPairedDeviceIdentity

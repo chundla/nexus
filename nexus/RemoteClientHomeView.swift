@@ -129,7 +129,7 @@ struct RemoteClientHomeView: View {
                 }
 
                 Section("What’s Next") {
-                    Text("Trusted Macs now reconnect into a summary-first Workspace catalog. Detailed Session actions arrive in follow-on issues.")
+                    Text("Session viewing now stays viewer-only. Taking Controller status and terminal input arrive in follow-on issues.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -328,7 +328,11 @@ private struct RemoteProviderDetailView: View {
 
             Section("Default Session") {
                 if let session = detail?.defaultSession {
-                    RemoteProviderSessionSummaryRow(session: session)
+                    NavigationLink {
+                        RemoteSessionScreenView(model: model, session: session)
+                    } label: {
+                        RemoteProviderSessionSummaryRow(session: session)
+                    }
                 } else {
                     Text(detail == nil && errorMessage == nil ? "Loading Session details…" : providerCard.defaultSession.summary)
                         .foregroundStyle(.secondary)
@@ -339,7 +343,11 @@ private struct RemoteProviderDetailView: View {
                 if detail.alternateSessions.isEmpty == false {
                     Section("Named Sessions") {
                         ForEach(detail.alternateSessions) { session in
-                            RemoteProviderSessionSummaryRow(session: session)
+                            NavigationLink {
+                                RemoteSessionScreenView(model: model, session: session)
+                            } label: {
+                                RemoteProviderSessionSummaryRow(session: session)
+                            }
                         }
                     }
                 }
@@ -347,7 +355,11 @@ private struct RemoteProviderDetailView: View {
                 if detail.failedSessions.isEmpty == false {
                     Section("Failed Sessions") {
                         ForEach(detail.failedSessions) { session in
-                            RemoteProviderSessionSummaryRow(session: session)
+                            NavigationLink {
+                                RemoteSessionScreenView(model: model, session: session)
+                            } label: {
+                                RemoteProviderSessionSummaryRow(session: session)
+                            }
                         }
                     }
                 }
@@ -368,6 +380,215 @@ private struct RemoteProviderDetailView: View {
     }
 }
 
+private struct RemoteSessionScreenView: View {
+    @Bindable var model: RemoteClientPairingModel
+    let session: Session
+
+    private var screen: SessionScreen? {
+        guard model.focusedSessionID == session.id else {
+            return nil
+        }
+        return model.focusedSessionScreen
+    }
+
+    var body: some View {
+        List {
+            Section("Attachment") {
+                LabeledContent("Mode", value: "Viewer")
+                Text("This iPhone is attached read-only and does not change Controller status.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            if model.focusedSessionIsStale, screen != nil {
+                Section {
+                    Text(model.focusedSessionErrorMessage ?? "Reconnecting… showing the last known Session screen.")
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                }
+            }
+
+            Section("Terminal") {
+                if let screen {
+                    ScrollView([.horizontal, .vertical]) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(Array(screen.styledVisibleLines.enumerated()), id: \.offset) { row, line in
+                                terminalLineView(line, row: row, screen: screen)
+                            }
+                        }
+                        .padding(12)
+                    }
+                    .listRowInsets(EdgeInsets())
+                    .frame(minHeight: 260)
+                    .background(Color.black.opacity(0.92))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                } else if let errorMessage = model.focusedSessionErrorMessage {
+                    Text(errorMessage)
+                        .foregroundStyle(.orange)
+                } else {
+                    Text("Loading Session screen…")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .navigationTitle(session.isDefault ? "Default Session" : (session.name ?? "Session"))
+        .task(id: session.id) {
+            await model.focusRemoteSession(sessionID: session.id)
+            while Task.isCancelled == false, model.focusedSessionID == session.id {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                if Task.isCancelled {
+                    break
+                }
+                await model.refreshFocusedSessionScreen()
+            }
+        }
+        .refreshable {
+            await model.refreshFocusedSessionScreen()
+        }
+        .onDisappear {
+            if model.focusedSessionID == session.id {
+                model.stopFocusingRemoteSession()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func terminalLineView(_ line: TerminalLine, row: Int, screen: SessionScreen) -> some View {
+        let segments = renderedTerminalSegments(for: line, row: row, screen: screen)
+
+        HStack(spacing: 0) {
+            ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
+                terminalSegmentView(segment)
+            }
+        }
+        .font(.system(.body, design: .monospaced))
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    @ViewBuilder
+    private func terminalSegmentView(_ segment: RemoteTerminalLineSegment) -> some View {
+        let colors = resolvedTerminalColors(for: segment.style)
+        let text = Text(segment.text)
+            .fontWeight(segment.style.isBold ? .bold : .regular)
+            .foregroundStyle(colors.foreground)
+            .background(colors.background)
+            .opacity(segment.style.isDim ? 0.65 : 1)
+            .lineLimit(1)
+
+        if segment.style.isItalic {
+            text.italic()
+        } else {
+            text
+        }
+    }
+
+    private func renderedTerminalSegments(for line: TerminalLine, row: Int, screen: SessionScreen) -> [RemoteTerminalLineSegment] {
+        var cells = line.cells
+
+        if screen.cursorVisible, row == screen.cursorRow {
+            let cursorIndex = max(0, min(screen.cursorColumn, cells.count))
+            cells.insert(TerminalCell(text: "█"), at: cursorIndex)
+        }
+
+        if cells.isEmpty {
+            cells = [TerminalCell(text: " ")]
+        }
+
+        var segments: [RemoteTerminalLineSegment] = []
+        for cell in cells {
+            if let lastIndex = segments.indices.last, segments[lastIndex].style == cell.style {
+                segments[lastIndex].text.append(cell.text)
+            } else {
+                segments.append(RemoteTerminalLineSegment(text: cell.text, style: cell.style))
+            }
+        }
+
+        return segments
+    }
+
+    private func resolvedTerminalColors(for style: TerminalStyle) -> (foreground: Color, background: Color) {
+        let defaultForeground = Color.white
+        let defaultBackground = Color.black
+        let foreground = color(for: style.foregroundColor) ?? defaultForeground
+        let background = color(for: style.backgroundColor)
+
+        if style.isInverse {
+            return (background ?? defaultBackground, foreground)
+        }
+
+        return (foreground, background ?? .clear)
+    }
+
+    private func color(for terminalColor: TerminalColor?) -> Color? {
+        guard let terminalColor else {
+            return nil
+        }
+
+        switch terminalColor.kind {
+        case .ansi256:
+            guard let index = terminalColor.index else {
+                return nil
+            }
+            return color(forANSI256: index)
+        case .rgb:
+            guard let red = terminalColor.red,
+                  let green = terminalColor.green,
+                  let blue = terminalColor.blue else {
+                return nil
+            }
+            return Color(
+                red: Double(red) / 255,
+                green: Double(green) / 255,
+                blue: Double(blue) / 255
+            )
+        }
+    }
+
+    private func color(forANSI256 index: Int) -> Color {
+        let clampedIndex = max(0, min(index, 255))
+        let standardPalette: [(Double, Double, Double)] = [
+            (0, 0, 0),
+            (205, 49, 49),
+            (13, 188, 121),
+            (229, 229, 16),
+            (36, 114, 200),
+            (188, 63, 188),
+            (17, 168, 205),
+            (229, 229, 229),
+            (102, 102, 102),
+            (241, 76, 76),
+            (35, 209, 139),
+            (245, 245, 67),
+            (59, 142, 234),
+            (214, 112, 214),
+            (41, 184, 219),
+            (255, 255, 255)
+        ]
+
+        let rgb: (Double, Double, Double)
+        switch clampedIndex {
+        case 0..<16:
+            rgb = standardPalette[clampedIndex]
+        case 16..<232:
+            let cubeIndex = clampedIndex - 16
+            let redIndex = cubeIndex / 36
+            let greenIndex = (cubeIndex / 6) % 6
+            let blueIndex = cubeIndex % 6
+            let levels: [Double] = [0, 95, 135, 175, 215, 255]
+            rgb = (levels[redIndex], levels[greenIndex], levels[blueIndex])
+        default:
+            let grayscale = Double(8 + ((clampedIndex - 232) * 10))
+            rgb = (grayscale, grayscale, grayscale)
+        }
+
+        return Color(
+            red: rgb.0 / 255,
+            green: rgb.1 / 255,
+            blue: rgb.2 / 255
+        )
+    }
+}
+
 private struct RemoteProviderSessionSummaryRow: View {
     let session: Session
 
@@ -380,6 +601,11 @@ private struct RemoteProviderSessionSummaryRow: View {
                 .foregroundStyle(.secondary)
         }
     }
+}
+
+private struct RemoteTerminalLineSegment {
+    var text: String
+    let style: TerminalStyle
 }
 
 private struct RemoteClientHomePresentedError: Identifiable {

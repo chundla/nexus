@@ -7,6 +7,7 @@ protocol RemotePairingClient {
     func completePairing(host: String, port: Int, pairingCode: String, deviceName: String) async throws -> PairedMac
     func fetchCatalog(for pairedMac: PairedMac) async throws -> RemoteWorkspaceCatalog
     func fetchProviderDetail(for pairedMac: PairedMac, workspaceID: UUID, providerID: ProviderID) async throws -> ProviderDetail
+    func fetchSessionScreen(for pairedMac: PairedMac, sessionID: UUID) async throws -> SessionScreen
 }
 
 extension RemotePairingHTTPClient: RemotePairingClient {}
@@ -83,6 +84,10 @@ final class RemoteClientPairingModel {
     var catalogErrorMessage: String?
     var providerDetails: [RemoteProviderDetailKey: ProviderDetail] = [:]
     var providerDetailErrorMessages: [RemoteProviderDetailKey: String] = [:]
+    var focusedSessionID: UUID?
+    var focusedSessionScreen: SessionScreen?
+    var focusedSessionIsStale = false
+    var focusedSessionErrorMessage: String?
     var macHost = ""
     var macPort = "9234"
     var pairingCode = ""
@@ -177,6 +182,50 @@ final class RemoteClientPairingModel {
         }
     }
 
+    func focusRemoteSession(sessionID: UUID) async {
+        focusedSessionID = sessionID
+        await refreshFocusedSessionScreen()
+    }
+
+    func refreshFocusedSessionScreen() async {
+        guard let sessionID = focusedSessionID else {
+            focusedSessionScreen = nil
+            focusedSessionIsStale = false
+            focusedSessionErrorMessage = nil
+            return
+        }
+
+        guard let pairedMac = activePairedMac else {
+            focusedSessionScreen = nil
+            focusedSessionIsStale = false
+            focusedSessionErrorMessage = nil
+            return
+        }
+
+        let hasSnapshot = focusedSessionScreen?.session.id == sessionID
+
+        do {
+            focusedSessionScreen = try await client.fetchSessionScreen(for: pairedMac, sessionID: sessionID)
+            focusedSessionIsStale = false
+            focusedSessionErrorMessage = nil
+        } catch {
+            if hasSnapshot {
+                focusedSessionIsStale = true
+            } else {
+                focusedSessionScreen = nil
+                focusedSessionIsStale = false
+            }
+            focusedSessionErrorMessage = error.localizedDescription
+        }
+    }
+
+    func stopFocusingRemoteSession() {
+        focusedSessionID = nil
+        focusedSessionScreen = nil
+        focusedSessionIsStale = false
+        focusedSessionErrorMessage = nil
+    }
+
     func completePairing() async throws {
         guard let port = Int(macPort.trimmingCharacters(in: .whitespacesAndNewlines)) else {
             throw RemoteClientPairingModelError.invalidPort
@@ -222,6 +271,7 @@ final class RemoteClientPairingModel {
         catalogErrorMessage = nil
         providerDetails = [:]
         providerDetailErrorMessages = [:]
+        stopFocusingRemoteSession()
     }
 
     private static func resolveActivePairedMacID(
