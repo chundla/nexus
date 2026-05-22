@@ -202,7 +202,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
                         ProviderHealthDiagnostic(
                             severity: .error,
                             code: classification.code,
-                            message: detail.isEmpty ? classification.summary : detail
+                            message: classification.message ?? (detail.isEmpty ? classification.summary : detail)
                         )
                     ]
                 )
@@ -388,7 +388,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
     }
 
     private func remoteClaudeHealthProbeScript(for workspace: Workspace) -> String {
-        "cd \(shellQuoted(workspace.folderPath)) && command -v tmux >/dev/null 2>&1 && CLAUDE_PATH=\"$(command -v claude)\" && printf '%s\\n' \"$CLAUDE_PATH\" && claude --version && claude --help >/dev/null 2>&1"
+        "cd \(shellQuoted(workspace.folderPath)) || { echo 'NEXUS_REMOTE_WORKSPACE_UNAVAILABLE' >&2; exit 1; }; command -v tmux >/dev/null 2>&1 || { echo 'NEXUS_REMOTE_TMUX_UNAVAILABLE' >&2; exit 1; }; LOGIN_SHELL=\"${SHELL:-/bin/bash}\"; CLAUDE_PATH=\"$(\"$LOGIN_SHELL\" -lc \(shellQuoted("command -v claude")))\" || { echo 'NEXUS_REMOTE_CLAUDE_NOT_FOUND' >&2; exit 1; }; [ -n \"$CLAUDE_PATH\" ] || { echo 'NEXUS_REMOTE_CLAUDE_NOT_FOUND' >&2; exit 1; }; printf '%s\\n' \"$CLAUDE_PATH\"; \"$CLAUDE_PATH\" --version; \"$CLAUDE_PATH\" --help >/dev/null 2>&1"
     }
 
     private func firstDiagnosticLine(stdout: String, stderr: String) -> String {
@@ -400,17 +400,39 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
             .first(where: { $0.isEmpty == false }) ?? ""
     }
 
-    private func classifyRemoteClaudeFailure(detail: String) -> (state: ProviderHealthSummary.State, summary: String, code: String) {
+    private func classifyRemoteClaudeFailure(detail: String) -> (state: ProviderHealthSummary.State, summary: String, code: String, message: String?) {
         let normalized = detail.lowercased()
 
-        if normalized.contains("command not found") || normalized.contains("no such file") {
-            return (.unavailable, "Claude is unavailable on the Remote Workspace", "remoteExecutableNotFound")
+        if normalized.contains("nexus_remote_workspace_unavailable") {
+            return (
+                .unavailable,
+                "Claude is unavailable on the Remote Workspace",
+                "remoteWorkspaceUnavailable",
+                "The Remote Workspace path is unavailable on the Host."
+            )
         }
 
-        if normalized.contains("permission denied")
+        if normalized.contains("nexus_remote_claude_not_found")
+            || normalized.contains("command not found")
+            || normalized.contains("no such file") {
+            return (
+                .unavailable,
+                "Claude is unavailable on the Remote Workspace",
+                "remoteExecutableNotFound",
+                "Claude executable was not found in the remote login-shell PATH."
+            )
+        }
+
+        if normalized.contains("nexus_remote_tmux_unavailable")
+            || normalized.contains("permission denied")
             || normalized.contains("bad configuration option")
             || normalized.contains("tmux") {
-            return (.misconfigured, "Remote Claude launch prerequisites are misconfigured", "remoteLaunchMisconfigured")
+            return (
+                .misconfigured,
+                "Remote Claude launch prerequisites are misconfigured",
+                "remoteLaunchMisconfigured",
+                normalized.contains("nexus_remote_tmux_unavailable") ? "tmux is not available in the remote shell." : nil
+            )
         }
 
         if normalized.contains("connection timed out")
@@ -418,10 +440,10 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
             || normalized.contains("connection refused")
             || normalized.contains("network is unreachable")
             || normalized.contains("no route to host") {
-            return (.unavailable, "Remote Claude is currently unavailable", "remoteUnavailable")
+            return (.unavailable, "Remote Claude is currently unavailable", "remoteUnavailable", nil)
         }
 
-        return (.misconfigured, "Claude is installed but failed the remote launch probe", "remoteLaunchProbeFailed")
+        return (.misconfigured, "Claude is installed but failed the remote launch probe", "remoteLaunchProbeFailed", nil)
     }
 
     private func launchProbeFailureMessage(stdout: String, stderr: String) -> String {

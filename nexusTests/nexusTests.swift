@@ -274,7 +274,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    "cd '/srv/api' && command -v tmux >/dev/null 2>&1 && CLAUDE_PATH=\"$(command -v claude)\" && printf '%s\\n' \"$CLAUDE_PATH\" && claude --version && claude --help >/dev/null 2>&1"
+                    remoteClaudeProbeScript("/srv/api")
                 ]
             ): .success(stdout: "/usr/local/bin/claude\n9.9.9 (Claude Code)\n")
         ])
@@ -351,7 +351,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    "cd '/srv/api' && command -v tmux >/dev/null 2>&1 && CLAUDE_PATH=\"$(command -v claude)\" && printf '%s\\n' \"$CLAUDE_PATH\" && claude --version && claude --help >/dev/null 2>&1"
+                    remoteClaudeProbeScript("/srv/api")
                 ]
             ): .success(stdout: "/usr/local/bin/claude\n9.9.9 (Claude Code)\n")
         ])
@@ -398,6 +398,170 @@ struct nexusTests {
 
         #expect(persistedDetail.health.checkedAt == firstHealth.checkedAt)
         #expect(persistedDetail.health == firstHealth)
+    }
+
+    @Test func remoteClaudeProviderHealthExplainsMissingExecutableInRemoteLoginShell() async throws {
+        let availabilityRunner = StubCommandRunner(results: [
+            StubCommandRunner.Invocation(
+                executable: "/usr/bin/ssh",
+                arguments: [
+                    "-o", "BatchMode=yes",
+                    "-o", "ConnectTimeout=5",
+                    "build-box",
+                    "cd '/srv/api' && pwd"
+                ]
+            ): .success(stdout: "/srv/api\n")
+        ])
+        let providerHealthRunner = StubCommandRunner(results: [
+            StubCommandRunner.Invocation(
+                executable: "/usr/bin/ssh",
+                arguments: [
+                    "-o", "BatchMode=yes",
+                    "-o", "ConnectTimeout=5",
+                    "build-box",
+                    remoteClaudeProbeScript("/srv/api")
+                ]
+            ): .success(stdout: "", stderr: "NEXUS_REMOTE_CLAUDE_NOT_FOUND\n", exitStatus: 1)
+        ])
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+                commandRunner: providerHealthRunner
+            ),
+            hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
+                "build-box": HostValidationResult(
+                    state: .available,
+                    summary: "Host is available",
+                    diagnostics: []
+                )
+            ]),
+            workspaceAvailabilityEvaluator: WorkspaceAvailabilityEvaluator(commandRunner: availabilityRunner)
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+
+        let group = try await client.createWorkspaceGroup(name: "Remote")
+        let host = try await client.createHost(name: "Build Server", sshTarget: "build-box", port: nil as Int?)
+        _ = try await client.validateHost(hostID: host.id)
+        let workspace = try await client.createRemoteWorkspace(
+            name: nil as String?,
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+
+        let detail = try await client.getProviderDetail(workspaceID: workspace.id, providerID: .claude)
+        let diagnostic = try #require(detail.health.diagnostics.first(where: { $0.code == "remoteExecutableNotFound" }))
+
+        #expect(detail.health.state == .unavailable)
+        #expect(detail.health.summary == "Claude is unavailable on the Remote Workspace")
+        #expect(detail.health.launchability == .notLaunchable)
+        #expect(diagnostic.message == "Claude executable was not found in the remote login-shell PATH.")
+    }
+
+    @Test func remoteClaudeLaunchRefreshesStaleFailedProviderHealthSnapshot() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let availabilityRunner = StubCommandRunner(results: [
+            StubCommandRunner.Invocation(
+                executable: "/usr/bin/ssh",
+                arguments: [
+                    "-o", "BatchMode=yes",
+                    "-o", "ConnectTimeout=5",
+                    "build-box",
+                    "cd '/srv/api' && pwd"
+                ]
+            ): .success(stdout: "/srv/api\n")
+        ])
+        let failedHealthRunner = StubCommandRunner(results: [
+            StubCommandRunner.Invocation(
+                executable: "/usr/bin/ssh",
+                arguments: [
+                    "-o", "BatchMode=yes",
+                    "-o", "ConnectTimeout=5",
+                    "build-box",
+                    remoteClaudeProbeScript("/srv/api")
+                ]
+            ): .success(stdout: "", stderr: "NEXUS_REMOTE_CLAUDE_NOT_FOUND\n", exitStatus: 1)
+        ])
+        let firstService = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+                commandRunner: failedHealthRunner
+            ),
+            hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
+                "build-box": HostValidationResult(
+                    state: .available,
+                    summary: "Host is available",
+                    diagnostics: []
+                )
+            ]),
+            workspaceAvailabilityEvaluator: WorkspaceAvailabilityEvaluator(commandRunner: availabilityRunner)
+        )
+        let firstClient = try NexusIPCClient.connect(to: firstService.listenerEndpoint)
+
+        let group = try await firstClient.createWorkspaceGroup(name: "Remote")
+        let host = try await firstClient.createHost(name: "Build Server", sshTarget: "build-box", port: nil as Int?)
+        _ = try await firstClient.validateHost(hostID: host.id)
+        let workspace = try await firstClient.createRemoteWorkspace(
+            name: nil as String?,
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+        let failedDetail = try await firstClient.getProviderDetail(workspaceID: workspace.id, providerID: .claude)
+
+        #expect(failedDetail.health.state == .unavailable)
+        #expect(failedDetail.health.summary == "Claude is unavailable on the Remote Workspace")
+
+        let recoveredHealthRunner = StubCommandRunner(results: [
+            StubCommandRunner.Invocation(
+                executable: "/usr/bin/ssh",
+                arguments: [
+                    "-o", "BatchMode=yes",
+                    "-o", "ConnectTimeout=5",
+                    "build-box",
+                    remoteClaudeProbeScript("/srv/api")
+                ]
+            ): .success(stdout: "/usr/local/bin/claude\n9.9.9 (Claude Code)\n")
+        ])
+        let runtimeManager = StubSessionRuntimeManager(
+            launchTranscriptForConfiguration: { configuration, _, _ in
+                "\(configuration.executable) @ \(configuration.workingDirectory)"
+            }
+        )
+        let secondService = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+                commandRunner: recoveredHealthRunner
+            ),
+            hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
+                "build-box": HostValidationResult(
+                    state: .available,
+                    summary: "Host is available",
+                    diagnostics: []
+                )
+            ]),
+            workspaceAvailabilityEvaluator: WorkspaceAvailabilityEvaluator(commandRunner: availabilityRunner),
+            sessionRuntimeManager: runtimeManager
+        )
+        let secondClient = try NexusIPCClient.connect(to: secondService.listenerEndpoint)
+
+        let session = try await secondClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let screen = try await secondClient.getSessionScreen(sessionID: session.id)
+        let refreshedDetail = try await secondClient.getProviderDetail(workspaceID: workspace.id, providerID: .claude)
+
+        #expect(session.state == .ready)
+        #expect(screen.transcript == "/usr/local/bin/claude @ /srv/api")
+        #expect(refreshedDetail.health.state == .available)
+        #expect(refreshedDetail.health.resolvedExecutable == "/usr/local/bin/claude")
+        #expect(refreshedDetail.defaultSession?.id == session.id)
+        #expect(refreshedDetail.defaultSession?.state == .ready)
     }
 
     @Test func remoteWorkspaceOverviewBlocksProviderHealthBehindHostValidation() async throws {
@@ -716,7 +880,7 @@ struct nexusTests {
                     "-o", "ConnectTimeout=5",
                     "-p", "2222",
                     "build-box",
-                    "cd '/srv/api' && command -v tmux >/dev/null 2>&1 && CLAUDE_PATH=\"$(command -v claude)\" && printf '%s\\n' \"$CLAUDE_PATH\" && claude --version && claude --help >/dev/null 2>&1"
+                    remoteClaudeProbeScript("/srv/api")
                 ]
             ): .success(stdout: "/usr/local/bin/claude\n9.9.9 (Claude Code)\n")
         ])
@@ -763,6 +927,84 @@ struct nexusTests {
         #expect(screen.transcript == "ssh build-box:2222 /srv/api /usr/local/bin/claude session:nexus-\(session.id.uuidString.lowercased())")
         #expect(detail.defaultSession?.id == session.id)
         #expect(detail.defaultSession?.state == .ready)
+    }
+
+    @Test func remoteClaudeDefaultSessionLaunchesWhenExecutableIsOnlyInHostLoginShellPath() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let availabilityRunner = StubCommandRunner(results: [
+            StubCommandRunner.Invocation(
+                executable: "/usr/bin/ssh",
+                arguments: [
+                    "-o", "BatchMode=yes",
+                    "-o", "ConnectTimeout=5",
+                    "build-box",
+                    "cd '/srv/api' && pwd"
+                ]
+            ): .success(stdout: "/srv/api\n")
+        ])
+        let providerHealthRunner = StubCommandRunner(results: [
+            StubCommandRunner.Invocation(
+                executable: "/usr/bin/ssh",
+                arguments: [
+                    "-o", "BatchMode=yes",
+                    "-o", "ConnectTimeout=5",
+                    "build-box",
+                    legacyRemoteClaudeProbeScript("/srv/api")
+                ]
+            ): .success(stdout: "", stderr: "NEXUS_REMOTE_CLAUDE_NOT_FOUND\n", exitStatus: 1),
+            StubCommandRunner.Invocation(
+                executable: "/usr/bin/ssh",
+                arguments: [
+                    "-o", "BatchMode=yes",
+                    "-o", "ConnectTimeout=5",
+                    "build-box",
+                    remoteClaudeProbeScript("/srv/api")
+                ]
+            ): .success(stdout: "/home/chundla/.local/bin/claude\n9.9.9 (Claude Code)\n")
+        ])
+        let runtimeManager = StubSessionRuntimeManager(
+            launchTranscriptForConfiguration: { configuration, session, _ in
+                "\(configuration.executable) @ \(configuration.workingDirectory) session:nexus-\(session.id.uuidString.lowercased())"
+            }
+        )
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+                commandRunner: providerHealthRunner
+            ),
+            hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
+                "build-box": HostValidationResult(
+                    state: .available,
+                    summary: "Host is available",
+                    diagnostics: []
+                )
+            ]),
+            workspaceAvailabilityEvaluator: WorkspaceAvailabilityEvaluator(commandRunner: availabilityRunner),
+            sessionRuntimeManager: runtimeManager
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+
+        let group = try await client.createWorkspaceGroup(name: "Remote")
+        let host = try await client.createHost(name: "Build Server", sshTarget: "build-box", port: nil as Int?)
+        _ = try await client.validateHost(hostID: host.id)
+        let workspace = try await client.createRemoteWorkspace(
+            name: nil as String?,
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+
+        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let screen = try await client.getSessionScreen(sessionID: session.id)
+        let detail = try await client.getProviderDetail(workspaceID: workspace.id, providerID: .claude)
+
+        #expect(session.state == .ready)
+        #expect(screen.transcript == "/home/chundla/.local/bin/claude @ /srv/api session:nexus-\(session.id.uuidString.lowercased())")
+        #expect(detail.health.state == .available)
+        #expect(detail.health.resolvedExecutable == "/home/chundla/.local/bin/claude")
     }
 
     @Test func remoteSessionCommandBuilderUsesPortPathAndDeterministicTmuxLane() {
@@ -5228,6 +5470,18 @@ private func waitUntil(
 
         try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
     }
+}
+
+private func legacyRemoteClaudeProbeScript(_ workspacePath: String) -> String {
+    "cd \(testShellQuoted(workspacePath)) || { echo 'NEXUS_REMOTE_WORKSPACE_UNAVAILABLE' >&2; exit 1; }; command -v tmux >/dev/null 2>&1 || { echo 'NEXUS_REMOTE_TMUX_UNAVAILABLE' >&2; exit 1; }; CLAUDE_PATH=\"$(command -v claude)\" || { echo 'NEXUS_REMOTE_CLAUDE_NOT_FOUND' >&2; exit 1; }; printf '%s\\n' \"$CLAUDE_PATH\"; \"$CLAUDE_PATH\" --version; \"$CLAUDE_PATH\" --help >/dev/null 2>&1"
+}
+
+private func remoteClaudeProbeScript(_ workspacePath: String) -> String {
+    "cd \(testShellQuoted(workspacePath)) || { echo 'NEXUS_REMOTE_WORKSPACE_UNAVAILABLE' >&2; exit 1; }; command -v tmux >/dev/null 2>&1 || { echo 'NEXUS_REMOTE_TMUX_UNAVAILABLE' >&2; exit 1; }; LOGIN_SHELL=\"${SHELL:-/bin/bash}\"; CLAUDE_PATH=\"$(\"$LOGIN_SHELL\" -lc \(testShellQuoted("command -v claude")))\" || { echo 'NEXUS_REMOTE_CLAUDE_NOT_FOUND' >&2; exit 1; }; [ -n \"$CLAUDE_PATH\" ] || { echo 'NEXUS_REMOTE_CLAUDE_NOT_FOUND' >&2; exit 1; }; printf '%s\\n' \"$CLAUDE_PATH\"; \"$CLAUDE_PATH\" --version; \"$CLAUDE_PATH\" --help >/dev/null 2>&1"
+}
+
+private func testShellQuoted(_ value: String) -> String {
+    "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
 }
 
 private actor SessionScreenCollector {

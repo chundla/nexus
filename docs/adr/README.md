@@ -31,3 +31,4 @@ Initial set:
 23. Remote hosts are first-class saved profiles, not just fields embedded in workspaces
 24. SSH authentication reuses the user’s existing SSH configuration and agent; Nexus does not manage SSH secrets in V1
 25. Provider authentication remains provider-native; Nexus only performs light auth-readiness detection
+26. Remote provider executable resolution uses the Host user's login-shell environment
