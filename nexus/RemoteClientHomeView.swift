@@ -279,7 +279,7 @@ struct RemoteClientHomeView: View {
         switch model.availability(for: pairedMac) {
         case .available:
             .green
-        case .unavailable:
+        case .unavailablePairedMac, .remoteAccessDisabled:
             .orange
         case .unknown:
             .secondary

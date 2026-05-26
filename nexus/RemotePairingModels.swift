@@ -316,6 +316,11 @@ struct RemotePairingHTTPClient {
     private nonisolated static func decodeRequestFailure(from data: Data, statusCode: Int) -> RemotePairingHTTPError {
         let message = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["message"] as? String
             ?? HTTPURLResponse.localizedString(forStatusCode: statusCode)
+
+        if statusCode == 401 {
+            return .pairingRevoked(message)
+        }
+
         return .requestFailed(message)
     }
 }
@@ -332,13 +337,14 @@ private final class RemoteSessionScreenHTTPObservation: SessionScreenObservation
     }
 }
 
-enum RemotePairingHTTPError: LocalizedError {
+enum RemotePairingHTTPError: LocalizedError, Equatable {
     case requestFailed(String)
+    case pairingRevoked(String)
     case missingPairedDeviceIdentity
 
     var errorDescription: String? {
         switch self {
-        case .requestFailed(let message):
+        case .requestFailed(let message), .pairingRevoked(let message):
             message
         case .missingPairedDeviceIdentity:
             "Pair this Mac again to browse its Workspace catalog"

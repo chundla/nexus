@@ -76,7 +76,8 @@ struct UserDefaultsPairedMacStore: PairedMacStore {
 enum PairedMacAvailability: Equatable {
     case unknown
     case available
-    case unavailable(String)
+    case unavailablePairedMac
+    case remoteAccessDisabled
 
     var summary: String {
         switch self {
@@ -84,8 +85,10 @@ enum PairedMacAvailability: Equatable {
             "Checking availability…"
         case .available:
             "Available on this network"
-        case .unavailable(let message):
-            message
+        case .unavailablePairedMac:
+            "Nexus is unavailable. Make sure this Mac is awake, on the same network, and Nexus Remote Access is running."
+        case .remoteAccessDisabled:
+            "Remote Access is turned off on this Mac"
         }
     }
 }
@@ -184,11 +187,9 @@ final class RemoteClientPairingModel {
                 let status = try await client.fetchStatus(host: pairedMac.host, port: pairedMac.port)
                 nextAvailability[pairedMac.id] = status.isRemoteAccessEnabled
                     ? .available
-                    : .unavailable("Remote Access is turned off on this Mac")
+                    : .remoteAccessDisabled
             } catch {
-                nextAvailability[pairedMac.id] = .unavailable(
-                    "Nexus is unavailable. Make sure this Mac is awake, on the same network, and Nexus Remote Access is running."
-                )
+                nextAvailability[pairedMac.id] = .unavailablePairedMac
             }
         }
 
@@ -777,16 +778,14 @@ final class RemoteClientPairingModel {
     }
 
     private func handleUnauthorizedPairedMac(_ error: any Error, pairedMacID: PairedMac.ID) -> Bool {
-        guard error.localizedDescription == Self.unauthorizedPairedMacMessage else {
+        guard case .pairingRevoked(let message) = error as? RemotePairingHTTPError else {
             return false
         }
 
         try? forgetPairedMac(id: pairedMacID)
-        pairingRecoveryMessage = error.localizedDescription
+        pairingRecoveryMessage = message
         return true
     }
-
-    private static let unauthorizedPairedMacMessage = "Pair this iPhone again to browse this Paired Mac"
 
     private static func resolveActivePairedMacID(
         preferredID: PairedMac.ID?,

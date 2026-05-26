@@ -58,6 +58,36 @@ struct RemotePairingNetworkTests {
         #expect(catalog.workspaceOverviews.first?.providerCards.isEmpty == false)
     }
 
+    @Test func revokedPairingReturnsProductShapedRecoveryErrorOverDedicatedNetworkAPI() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
+
+        _ = try await client.setRemoteAccessEnabled(true)
+        let pairing = try await client.startPairing()
+
+        let remoteClient = RemotePairingHTTPClient()
+        let pairedMac = try await remoteClient.completePairing(
+            host: server.displayHost,
+            port: server.port,
+            pairingCode: pairing.code,
+            deviceName: "Chris’s iPhone"
+        )
+        _ = try await client.revokePairedDevice(deviceID: try #require(pairedMac.pairedDeviceID))
+
+        do {
+            _ = try await remoteClient.fetchCatalog(for: pairedMac)
+            Issue.record("Expected revoked Pairing to require pairing again before browsing this Paired Mac")
+        } catch let error as RemotePairingHTTPError {
+            #expect(error == .pairingRevoked("Pair this iPhone again to browse this Paired Mac"))
+            #expect(error.localizedDescription == "Pair this iPhone again to browse this Paired Mac")
+        }
+    }
+
     @Test func fetchesRemoteProviderDetailOnDemandOverDedicatedNetworkAPI() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)

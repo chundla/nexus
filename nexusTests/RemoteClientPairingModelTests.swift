@@ -55,10 +55,35 @@ struct RemoteClientPairingModelTests {
 
         await model.refreshPairedMacAvailability()
 
-        #expect(
-            model.availability(for: pairedMac)
-                == .unavailable("Nexus is unavailable. Make sure this Mac is awake, on the same network, and Nexus Remote Access is running.")
+        #expect(model.availability(for: pairedMac) == .unavailablePairedMac)
+    }
+
+    @Test func marksPairedMacWithRemoteAccessDisabledAfterRefresh() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600)
         )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let model = RemoteClientPairingModel(
+            client: StubRemotePairingClient(
+                result: pairedMac,
+                status: .success(RemotePairedMacStatus(macName: "Studio Mac", isRemoteAccessEnabled: false))
+            ),
+            store: store
+        )
+
+        await model.refreshPairedMacAvailability()
+
+        #expect(model.availability(for: pairedMac) == .remoteAccessDisabled)
     }
 
     @Test func storesSuccessfulPairingAsLastUsedMacForLaterReconnect() async throws {
@@ -376,7 +401,7 @@ struct RemoteClientPairingModelTests {
         let model = RemoteClientPairingModel(
             client: StubRemotePairingClient(
                 result: pairedMac,
-                catalogResult: .failure(RemotePairingHTTPError.requestFailed("Pair this iPhone again to browse this Paired Mac"))
+                catalogResult: .failure(RemotePairingHTTPError.pairingRevoked("Pair this iPhone again to browse this Paired Mac"))
             ),
             store: store
         )
@@ -553,7 +578,7 @@ struct RemoteClientPairingModelTests {
         let model = RemoteClientPairingModel(client: client, store: store)
 
         await model.focusRemoteSession(sessionID: session.id)
-        await client.disconnectObservedSession(RemotePairingHTTPError.requestFailed("Pair this iPhone again to browse this Paired Mac"))
+        await client.disconnectObservedSession(RemotePairingHTTPError.pairingRevoked("Pair this iPhone again to browse this Paired Mac"))
         await Task.yield()
 
         #expect(model.pairedMacs.isEmpty)
@@ -717,7 +742,7 @@ struct RemoteClientPairingModelTests {
         let model = RemoteClientPairingModel(client: client, store: store)
 
         await model.focusRemoteSession(sessionID: session.id)
-        await client.disconnectObservedSession(RemotePairingHTTPError.requestFailed("Pair this iPhone again to browse this Paired Mac"))
+        await client.disconnectObservedSession(RemotePairingHTTPError.pairingRevoked("Pair this iPhone again to browse this Paired Mac"))
         await Task.yield()
         try await Task.sleep(nanoseconds: 1_100_000_000)
         await Task.yield()
