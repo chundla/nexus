@@ -547,9 +547,8 @@ final class RemoteClientPairingModel {
         }
 
         do {
-            focusedSessionScreen = try await client.sendSessionText(for: pairedMac, sessionID: sessionID, text: text)
-            focusedSessionIsStale = false
-            focusedSessionErrorMessage = nil
+            let screen = try await client.sendSessionText(for: pairedMac, sessionID: sessionID, text: text)
+            applyFocusedSessionInputResponse(screen, sessionID: sessionID)
         } catch {
             throw loggedRemoteActionError(
                 error,
@@ -570,9 +569,8 @@ final class RemoteClientPairingModel {
         }
 
         do {
-            focusedSessionScreen = try await client.sendSessionInputKey(for: pairedMac, sessionID: sessionID, key: key)
-            focusedSessionIsStale = false
-            focusedSessionErrorMessage = nil
+            let screen = try await client.sendSessionInputKey(for: pairedMac, sessionID: sessionID, key: key)
+            applyFocusedSessionInputResponse(screen, sessionID: sessionID)
         } catch {
             throw loggedRemoteActionError(
                 error,
@@ -581,6 +579,19 @@ final class RemoteClientPairingModel {
                 sessionID: sessionID
             )
         }
+    }
+
+    private func applyFocusedSessionInputResponse(_ screen: SessionScreen, sessionID: UUID) {
+        guard focusedSessionID == sessionID else {
+            return
+        }
+
+        if focusedSessionObservation == nil || focusedSessionScreen?.session.id != sessionID {
+            focusedSessionScreen = screen
+        }
+
+        focusedSessionIsStale = false
+        focusedSessionErrorMessage = nil
     }
 
     func stopFocusingRemoteSession() {
