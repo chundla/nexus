@@ -234,6 +234,56 @@ struct RemotePairingNetworkTests {
         #expect(detail.defaultSession?.state == .exited)
     }
 
+    @Test func deletesDefaultRemoteSessionRecordOverDedicatedNetworkAPI() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
+
+        _ = try await client.setRemoteAccessEnabled(true)
+        let pairing = try await client.startPairing()
+        let group = try await client.createWorkspaceGroup(name: "Client Work")
+        let workspace = try await client.createLocalWorkspace(
+            name: "Nexus",
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+
+        let remoteClient = RemotePairingHTTPClient()
+        let pairedMac = try await remoteClient.completePairing(
+            host: server.displayHost,
+            port: server.port,
+            pairingCode: pairing.code,
+            deviceName: "Chris’s iPhone"
+        )
+        _ = try await remoteClient.stopSession(for: pairedMac, sessionID: session.id)
+        let deleted = try await remoteClient.deleteSessionRecord(for: pairedMac, sessionID: session.id)
+        let detail = try await remoteClient.fetchProviderDetail(
+            for: pairedMac,
+            workspaceID: workspace.id,
+            providerID: .claude
+        )
+        let catalog = try await remoteClient.fetchCatalog(for: pairedMac)
+        let providerCard = try #require(
+            catalog.workspaceOverviews
+                .first(where: { $0.workspace.id == workspace.id })?
+                .providerCards
+                .first(where: { $0.provider.id == .claude })
+        )
+
+        #expect(deleted)
+        #expect(detail.defaultSession == nil)
+        #expect(providerCard.defaultSession.state == .notCreated)
+        #expect(providerCard.defaultSession.actionTitle == "Launch")
+    }
+
     @Test func deletesFailedRemoteSessionRecordOverDedicatedNetworkAPI() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)

@@ -342,6 +342,10 @@ private struct RemoteProviderDetailView: View {
         detail?.health ?? providerCard.health
     }
 
+    private var defaultSessionSection: RemoteDefaultSessionSectionState {
+        RemoteDefaultSessionSectionState(detail: detail)
+    }
+
     private var namedSessionsSection: RemoteNamedSessionsSectionState {
         RemoteNamedSessionsSectionState(
             providerID: providerCard.provider.id,
@@ -390,11 +394,19 @@ private struct RemoteProviderDetailView: View {
             }
 
             Section("Default Session") {
-                if let session = detail?.defaultSession {
+                if let session = defaultSessionSection.session {
                     NavigationLink {
                         RemoteSessionScreenView(model: model, session: session)
                     } label: {
                         RemoteProviderSessionSummaryRow(session: session)
+                    }
+                    .swipeActions(allowsFullSwipe: false) {
+                        if defaultSessionSection.canDeleteSessionRecord {
+                            Button("Delete", role: .destructive) {
+                                pendingDeleteSessionRecord = session
+                            }
+                            .disabled(isDeletingSessionRecord)
+                        }
                     }
                 } else {
                     Text(detail == nil && errorMessage == nil ? "Loading Session details…" : providerCard.defaultSession.summary)

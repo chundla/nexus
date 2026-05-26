@@ -1,6 +1,24 @@
 import Foundation
 import NexusDomain
 
+struct RemoteDefaultSessionSectionState: Equatable {
+    let session: Session?
+    let canDeleteSessionRecord: Bool
+
+    init(detail: ProviderDetail?) {
+        session = detail?.defaultSession
+        canDeleteSessionRecord = Self.canDeleteSessionRecord(detail?.defaultSession)
+    }
+
+    private static func canDeleteSessionRecord(_ session: Session?) -> Bool {
+        guard let session else {
+            return false
+        }
+
+        return session.isDefault && session.state != .ready
+    }
+}
+
 struct RemoteNamedSessionsSectionState: Equatable {
     enum Content: Equatable {
         case loading

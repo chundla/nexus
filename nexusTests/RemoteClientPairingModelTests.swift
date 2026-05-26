@@ -967,6 +967,103 @@ struct RemoteClientPairingModelTests {
         #expect(model.providerDetail(for: workspace.id, providerID: .claude)?.defaultSession?.state == .exited)
     }
 
+    @Test func deletingDefaultRemoteSessionRecordRefreshesCatalogBackToNoDefaultState() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let groupID = UUID()
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .remote,
+            folderPath: "/srv/nexus",
+            primaryGroupID: groupID
+        )
+        let exitedSession = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .exited,
+            failureMessage: "Session exited. Relaunch to start a new live runtime."
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let initialDetail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+            defaultSession: exitedSession,
+            alternateSessions: [],
+            failedSessions: []
+        )
+        let refreshedDetail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+            defaultSession: nil,
+            alternateSessions: [],
+            failedSessions: []
+        )
+        let refreshedCatalog = RemoteWorkspaceCatalog(
+            workspaceGroups: [WorkspaceGroup(id: groupID, name: "Client Work")],
+            recentNavigation: [],
+            workspaceOverviews: [
+                WorkspaceOverview(
+                    workspace: workspace,
+                    providerCards: [
+                        WorkspaceProviderCard(
+                            provider: Provider(id: .claude),
+                            health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+                            defaultSession: ProviderDefaultSessionSummary(
+                                state: .notCreated,
+                                summary: "No default session yet",
+                                actionTitle: "Launch"
+                            ),
+                            alternateSessionCount: 0
+                        )
+                    ]
+                )
+            ]
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let client = StubRemotePairingClient(
+            result: pairedMac,
+            catalog: refreshedCatalog,
+            providerDetail: refreshedDetail,
+            providerDetailResults: [initialDetail, refreshedDetail]
+        )
+        let model = RemoteClientPairingModel(client: client, store: store)
+
+        await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
+        let deleted = try await model.deleteSessionRecord(
+            sessionID: exitedSession.id,
+            workspaceID: workspace.id,
+            providerID: .claude
+        )
+
+        #expect(deleted)
+        #expect(model.catalog == refreshedCatalog)
+        #expect(model.providerDetail(for: workspace.id, providerID: .claude)?.defaultSession == nil)
+        #expect(model.catalog?.workspaceOverviews.first?.providerCards.first?.defaultSession.state == .notCreated)
+        #expect(model.catalog?.workspaceOverviews.first?.providerCards.first?.defaultSession.actionTitle == "Launch")
+        #expect(client.requestLog == [
+            "fetchProviderDetail",
+            "deleteSessionRecord",
+            "fetchCatalog",
+            "fetchProviderDetail"
+        ])
+    }
+
     @Test func deletingFailedRemoteSessionRecordRefreshesCatalogAndProviderDetail() async throws {
         let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -1203,6 +1300,67 @@ struct RemoteClientPairingModelTests {
         #expect(model.focusedSessionID == readySession.id)
         #expect(model.focusedSessionScreen?.session.state == .ready)
         #expect(model.providerDetail(for: workspace.id, providerID: .claude)?.alternateSessions.first?.state == .ready)
+    }
+
+    @Test func defaultSessionSectionAllowsDeletingNonRunningDefaultSessionRecord() {
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .remote,
+            folderPath: "/srv/nexus",
+            primaryGroupID: UUID()
+        )
+        let exitedSession = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .exited,
+            failureMessage: "Session exited. Relaunch to start a new live runtime."
+        )
+        let detail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+            defaultSession: exitedSession,
+            alternateSessions: [],
+            failedSessions: []
+        )
+
+        let section = RemoteDefaultSessionSectionState(detail: detail)
+
+        #expect(section.session == exitedSession)
+        #expect(section.canDeleteSessionRecord)
+    }
+
+    @Test func defaultSessionSectionKeepsRunningDefaultSessionRecordNonDeletable() {
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: UUID()
+        )
+        let readySession = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let detail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+            defaultSession: readySession,
+            alternateSessions: [],
+            failedSessions: []
+        )
+
+        let section = RemoteDefaultSessionSectionState(detail: detail)
+
+        #expect(section.session == readySession)
+        #expect(section.canDeleteSessionRecord == false)
     }
 
     @Test func namedSessionSectionShowsEmptyStateAndEnabledCreateActionForLaunchableClaudeProvider() {
