@@ -204,7 +204,7 @@ struct nexusTests {
         let secondState = try await secondClient.getRemoteAccessState()
         let persistedDevices = try await secondClient.listPairedDevices()
 
-        #expect(secondState.isEnabled == false)
+        #expect(secondState.isEnabled)
         #expect(persistedDevices == [pairedDevice])
 
         _ = try await secondClient.revokePairedDevice(deviceID: pairedDevice.id)
@@ -5825,7 +5825,7 @@ struct nexusTests {
 
     @MainActor
     @Test func liveAppModelBootstrapsEmbeddedBackgroundServiceAndLoadsStatus() async throws {
-        let model = try NexusAppModel.live()
+        let model = try NexusAppModel.live(listeningPort: nil)
 
         await model.refreshServiceStatus()
 

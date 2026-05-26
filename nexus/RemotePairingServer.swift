@@ -23,12 +23,21 @@ final class RemotePairingServer {
     init(
         client: any NexusServiceClient,
         displayHost: String = ProcessInfo.processInfo.hostName,
-        macName: String = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
+        macName: String = Host.current().localizedName ?? ProcessInfo.processInfo.hostName,
+        listeningPort: Int? = nil
     ) throws {
         self.client = client
         self.displayHost = displayHost
         self.macName = macName
-        self.listener = try NWListener(using: .tcp, on: .any)
+        if let listeningPort {
+            guard (1...65_535).contains(listeningPort),
+                  let nwPort = NWEndpoint.Port(rawValue: UInt16(listeningPort)) else {
+                throw RemotePairingServerError.invalidPort
+            }
+            self.listener = try NWListener(using: .tcp, on: nwPort)
+        } else {
+            self.listener = try NWListener(using: .tcp, on: .any)
+        }
 
         let startup = DispatchSemaphore(value: 0)
         var startupError: Error?
@@ -856,12 +865,15 @@ private struct SessionScreenControlRequest {
 
 private enum RemotePairingServerError: LocalizedError {
     case invalidRequest
+    case invalidPort
     case unauthorized
 
     var errorDescription: String? {
         switch self {
         case .invalidRequest:
             "Invalid request"
+        case .invalidPort:
+            "Invalid port"
         case .unauthorized:
             "Unauthorized"
         }

@@ -126,6 +126,11 @@ final class NexusMetadataStore {
                 paired_at INTEGER NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS service_settings (
+                key TEXT PRIMARY KEY NOT NULL,
+                value INTEGER NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS remote_client_diagnostic_breadcrumbs (
                 id TEXT PRIMARY KEY NOT NULL,
                 kind TEXT NOT NULL,
@@ -234,6 +239,38 @@ final class NexusMetadataStore {
                 hosts.append(try readHost(from: statement))
             }
             return hosts
+        }
+    }
+
+    func remoteAccessEnabled() throws -> Bool {
+        try withLock {
+            let statement = try prepare(
+                "SELECT value FROM service_settings WHERE key = ? LIMIT 1;"
+            )
+            defer { sqlite3_finalize(statement) }
+
+            try bind("remote_access_enabled", at: 1, in: statement)
+            guard sqlite3_step(statement) == SQLITE_ROW else {
+                return false
+            }
+
+            return sqlite3_column_int(statement, 0) != 0
+        }
+    }
+
+    func setRemoteAccessEnabled(_ isEnabled: Bool) throws {
+        try withLock {
+            let statement = try prepare(
+                """
+                INSERT INTO service_settings (key, value) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+                """
+            )
+            defer { sqlite3_finalize(statement) }
+
+            try bind("remote_access_enabled", at: 1, in: statement)
+            try bind(Int32(isEnabled ? 1 : 0), at: 2, in: statement)
+            try stepDone(statement)
         }
     }
 

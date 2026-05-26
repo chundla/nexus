@@ -24,6 +24,62 @@ struct RemotePairingNetworkTests {
         #expect(status == RemotePairedMacStatus(macName: "Studio Mac", isRemoteAccessEnabled: true))
     }
 
+    @Test func pairedRemoteClientReconnectsAfterMacAppRestartOverDedicatedNetworkAPI() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let fixedPort = 49_234
+
+        let firstService = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let firstClient = try NexusIPCClient.connect(to: firstService.listenerEndpoint)
+        var firstServer: RemotePairingServer? = try RemotePairingServer(
+            client: firstClient,
+            displayHost: "127.0.0.1",
+            macName: "Studio Mac",
+            listeningPort: fixedPort
+        )
+
+        _ = try await firstClient.setRemoteAccessEnabled(true)
+        let pairing = try await firstClient.startPairing()
+        let group = try await firstClient.createWorkspaceGroup(name: "Client Work")
+        let workspace = try await firstClient.createLocalWorkspace(
+            name: "Nexus",
+            folderPath: "/tmp/nexus",
+            primaryGroupID: group.id
+        )
+
+        let remoteClient = RemotePairingHTTPClient()
+        let pairedMac = try await remoteClient.completePairing(
+            host: try #require(firstServer).displayHost,
+            port: try #require(firstServer).port,
+            pairingCode: pairing.code,
+            deviceName: "Chris’s iPhone"
+        )
+        let firstStatus = try await remoteClient.fetchStatus(host: pairedMac.host, port: pairedMac.port)
+        #expect(firstStatus == RemotePairedMacStatus(macName: "Studio Mac", isRemoteAccessEnabled: true))
+
+        firstServer = nil
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        let restartedService = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let restartedClient = try NexusIPCClient.connect(to: restartedService.listenerEndpoint)
+        let restartedServer = try RemotePairingServer(
+            client: restartedClient,
+            displayHost: "127.0.0.1",
+            macName: "Studio Mac",
+            listeningPort: fixedPort
+        )
+
+        #expect(restartedServer.port == fixedPort)
+
+        let restartedStatus = try await remoteClient.fetchStatus(host: pairedMac.host, port: pairedMac.port)
+        #expect(restartedStatus == RemotePairedMacStatus(macName: "Studio Mac", isRemoteAccessEnabled: true))
+
+        let catalog = try await remoteClient.fetchCatalog(for: pairedMac)
+        #expect(catalog.workspaceGroups == [group])
+        #expect(catalog.workspaceOverviews.map(\.workspace.id) == [workspace.id])
+    }
+
     @Test func fetchesSummaryFirstRemoteWorkspaceCatalogOverDedicatedNetworkAPI() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)

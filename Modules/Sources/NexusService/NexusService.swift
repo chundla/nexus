@@ -901,6 +901,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         }
 
         let metadataStore = try NexusMetadataStore(storeURL: storeURL)
+        remoteAccessRuntime.restore(isEnabled: try metadataStore.remoteAccessEnabled())
         return NexusService(
             listener: NSXPCListener.anonymous(),
             storeURL: storeURL,
@@ -981,7 +982,9 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     func setRemoteAccessEnabled(_ isEnabled: Bool) -> RemoteAccessState {
-        remoteAccessRuntime.setEnabled(isEnabled)
+        let state = remoteAccessRuntime.setEnabled(isEnabled)
+        try? metadataStore.setRemoteAccessEnabled(isEnabled)
+        return state
     }
 
     func startPairing() throws -> PairingCeremony {

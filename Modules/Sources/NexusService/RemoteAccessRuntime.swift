@@ -3,8 +3,19 @@ import NexusDomain
 
 final class RemoteAccessRuntime {
     private let lock = NSLock()
-    private var isEnabled = false
+    private var isEnabled: Bool
     private var activePairing: PairingCeremony?
+
+    init(isEnabled: Bool = false) {
+        self.isEnabled = isEnabled
+    }
+
+    func restore(isEnabled: Bool) {
+        lock.lock()
+        defer { lock.unlock() }
+        self.isEnabled = isEnabled
+        activePairing = nil
+    }
 
     func state(now: Date = Date()) -> RemoteAccessState {
         lock.lock()

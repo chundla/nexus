@@ -64,10 +64,10 @@ final class NexusAppModel {
         self.remotePairingEndpoint = remotePairingServer?.endpoint
     }
 
-    static func live() throws -> NexusAppModel {
+    static func live(listeningPort: Int? = 9234) throws -> NexusAppModel {
         let service = try NexusEmbeddedServiceBootstrap.bootstrap()
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
-        let remotePairingServer = try RemotePairingServer(client: client)
+        let remotePairingServer = try RemotePairingServer(client: client, listeningPort: listeningPort)
         return NexusAppModel(client: client, embeddedService: service, remotePairingServer: remotePairingServer)
     }
 
