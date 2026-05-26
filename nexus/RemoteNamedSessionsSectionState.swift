@@ -1,3 +1,4 @@
+import Foundation
 import NexusDomain
 
 struct RemoteNamedSessionsSectionState: Equatable {
@@ -11,6 +12,7 @@ struct RemoteNamedSessionsSectionState: Equatable {
     let content: Content
     let canCreateSession: Bool
     let createDisabledReason: String?
+    let deletableSessionIDs: Set<UUID>
 
     init(
         providerID: ProviderID,
@@ -22,10 +24,13 @@ struct RemoteNamedSessionsSectionState: Equatable {
 
         if let detail {
             content = detail.alternateSessions.isEmpty ? .empty : .sessions(detail.alternateSessions)
+            deletableSessionIDs = Set(detail.alternateSessions.filter(Self.canDeleteSessionRecord).map(\.id))
         } else if errorMessage == nil {
             content = .loading
+            deletableSessionIDs = []
         } else {
             content = .none
+            deletableSessionIDs = []
         }
 
         guard providerID == .claude else {
@@ -41,5 +46,9 @@ struct RemoteNamedSessionsSectionState: Equatable {
             return
         }
         createDisabledReason = providerHealth.summary
+    }
+
+    private static func canDeleteSessionRecord(_ session: Session) -> Bool {
+        session.isDefault == false && session.state != .ready
     }
 }

@@ -1273,6 +1273,67 @@ struct RemoteClientPairingModelTests {
         #expect(section.createDisabledReason == "Claude blocked by Host Validation")
     }
 
+    @Test func namedSessionSectionKeepsNonRunningSessionsDeletableWhenCreateIsBlocked() {
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .remote,
+            folderPath: "/srv/nexus",
+            primaryGroupID: UUID()
+        )
+        let health = ProviderHealthSummary(
+            state: .unavailable,
+            summary: "Claude is unavailable on this Workspace.",
+            launchability: .notLaunchable
+        )
+        let readySession = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            name: "Live Review",
+            isDefault: false,
+            state: .ready
+        )
+        let exitedSession = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            name: "Exited Review",
+            isDefault: false,
+            state: .exited,
+            failureMessage: "Session exited. Relaunch to start a new live runtime."
+        )
+        let interruptedSession = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            name: "Interrupted Review",
+            isDefault: false,
+            state: .interrupted,
+            failureMessage: "Session interrupted. Relaunch to resume work."
+        )
+        let detail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .claude),
+            health: health,
+            defaultSession: nil,
+            alternateSessions: [readySession, exitedSession, interruptedSession],
+            failedSessions: []
+        )
+
+        let section = RemoteNamedSessionsSectionState(
+            providerID: .claude,
+            providerHealth: health,
+            detail: detail,
+            errorMessage: nil
+        )
+
+        #expect(section.content == .sessions([readySession, exitedSession, interruptedSession]))
+        #expect(section.canCreateSession == false)
+        #expect(section.createDisabledReason == "Claude is unavailable on this Workspace.")
+        #expect(section.deletableSessionIDs == [exitedSession.id, interruptedSession.id])
+    }
+
     @Test func namedSessionSectionKeepsUnsupportedProvidersVisibleButDisabled() {
         let workspace = Workspace(
             id: UUID(),

@@ -419,6 +419,14 @@ private struct RemoteProviderDetailView: View {
                         } label: {
                             RemoteProviderSessionSummaryRow(session: session)
                         }
+                        .swipeActions(allowsFullSwipe: false) {
+                            if namedSessionsSection.deletableSessionIDs.contains(session.id) {
+                                Button("Delete", role: .destructive) {
+                                    pendingDeleteSessionRecord = session
+                                }
+                                .disabled(isDeletingSessionRecord)
+                            }
+                        }
                     }
                 case .loading:
                     Text("Loading Named Sessions…")
@@ -477,7 +485,7 @@ private struct RemoteProviderDetailView: View {
             RemoteSessionScreenView(model: model, session: session)
         }
         .confirmationDialog(
-            "Delete Failed Session Record?",
+            "Delete Session Record?",
             isPresented: Binding(
                 get: { pendingDeleteSessionRecord != nil },
                 set: { isPresented in
@@ -492,7 +500,7 @@ private struct RemoteProviderDetailView: View {
                 deleteSessionRecord(session)
             }
         } message: { _ in
-            Text("Delete this failed Session Record from Nexus on this Paired Mac? This does not stop a live runtime.")
+            Text("Delete this Session Record from Nexus on this Paired Mac? This does not stop a live runtime.")
         }
         .alert(item: $presentedError) { error in
             Alert(title: Text("Nexus Remote"), message: Text(error.message))
