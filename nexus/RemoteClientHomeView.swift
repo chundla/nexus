@@ -458,16 +458,20 @@ private func remoteWorkspaceAvailabilityColor(for state: WorkspaceAvailabilitySn
     }
 }
 
+private enum RemoteProviderDetailAction: Equatable {
+    case launchDefaultSession
+    case createNamedSession
+    case deleteSessionRecord(UUID)
+}
+
 private struct RemoteProviderDetailView: View {
     @Bindable var model: RemoteClientPairingModel
     let overview: WorkspaceOverview
     let providerCard: WorkspaceProviderCard
 
     @State private var openedSession: Session?
-    @State private var isLaunchingDefaultSession = false
-    @State private var isCreatingNamedSession = false
+    @State private var activeAction: RemoteProviderDetailAction?
     @State private var pendingDeleteSessionRecord: Session?
-    @State private var isDeletingSessionRecord = false
     @State private var presentedError: RemoteClientHomePresentedError?
 
     private var detail: ProviderDetail? {
@@ -476,6 +480,21 @@ private struct RemoteProviderDetailView: View {
 
     private var errorMessage: String? {
         model.providerDetailErrorMessage(for: overview.workspace.id, providerID: providerCard.provider.id)
+    }
+
+    private var isLaunchingDefaultSession: Bool {
+        activeAction == .launchDefaultSession
+    }
+
+    private var isCreatingNamedSession: Bool {
+        activeAction == .createNamedSession
+    }
+
+    private var isDeletingSessionRecord: Bool {
+        if case .deleteSessionRecord = activeAction {
+            return true
+        }
+        return false
     }
 
     private var defaultSessionActionTitle: String {
@@ -668,54 +687,56 @@ private struct RemoteProviderDetailView: View {
     }
 
     private func launchDefaultSession() {
-        isLaunchingDefaultSession = true
-        Task {
-            defer { isLaunchingDefaultSession = false }
-
-            do {
-                openedSession = try await model.launchOrResumeDefaultSession(
-                    workspaceID: overview.workspace.id,
-                    providerID: providerCard.provider.id
-                )
-            } catch {
-                presentedError = RemoteClientHomePresentedError(message: error.localizedDescription)
-            }
+        performAction(.launchDefaultSession) {
+            openedSession = try await model.launchOrResumeDefaultSession(
+                workspaceID: overview.workspace.id,
+                providerID: providerCard.provider.id
+            )
         }
     }
 
     private func createNamedSession() {
-        isCreatingNamedSession = true
-        Task {
-            defer { isCreatingNamedSession = false }
-
-            do {
-                openedSession = try await model.createNamedSession(
-                    workspaceID: overview.workspace.id,
-                    providerID: providerCard.provider.id
-                )
-            } catch {
-                presentedError = RemoteClientHomePresentedError(message: error.localizedDescription)
-            }
+        performAction(.createNamedSession) {
+            openedSession = try await model.createNamedSession(
+                workspaceID: overview.workspace.id,
+                providerID: providerCard.provider.id
+            )
         }
     }
 
     private func deleteSessionRecord(_ session: Session) {
         pendingDeleteSessionRecord = nil
-        isDeletingSessionRecord = true
-        Task {
-            defer { isDeletingSessionRecord = false }
+        performAction(.deleteSessionRecord(session.id)) {
+            _ = try await model.deleteSessionRecord(
+                sessionID: session.id,
+                workspaceID: overview.workspace.id,
+                providerID: providerCard.provider.id
+            )
+        }
+    }
+
+    private func performAction(
+        _ action: RemoteProviderDetailAction,
+        operation: @escaping @MainActor () async throws -> Void
+    ) {
+        activeAction = action
+        Task { @MainActor in
+            defer { activeAction = nil }
 
             do {
-                _ = try await model.deleteSessionRecord(
-                    sessionID: session.id,
-                    workspaceID: overview.workspace.id,
-                    providerID: providerCard.provider.id
-                )
+                try await operation()
             } catch {
                 presentedError = RemoteClientHomePresentedError(message: error.localizedDescription)
             }
         }
     }
+}
+
+private enum RemoteSessionAction: Equatable {
+    case relaunch
+    case stop
+    case takeController
+    case returnToViewer
 }
 
 private struct RemoteSessionScreenView: View {
@@ -726,7 +747,7 @@ private struct RemoteSessionScreenView: View {
     @State private var terminalDraft = ""
     @State private var terminalViewportSize: CGSize = .zero
     @State private var isShowingStopConfirmation = false
-    @State private var isPerformingAction = false
+    @State private var activeAction: RemoteSessionAction?
     @State private var presentedError: RemoteClientHomePresentedError?
 
     private var screen: SessionScreen? {
@@ -742,6 +763,21 @@ private struct RemoteSessionScreenView: View {
 
     private var isReady: Bool {
         currentSession.state == .ready
+    }
+
+    private var isPerformingAction: Bool {
+        activeAction != nil
+    }
+
+    private var controllerActionTitle: String {
+        switch activeAction {
+        case .takeController:
+            "Taking Controller…"
+        case .returnToViewer:
+            "Returning to Viewer…"
+        default:
+            model.focusedSessionIsController ? "Return to Viewer" : "Take Controller"
+        }
     }
 
     var body: some View {
@@ -778,7 +814,7 @@ private struct RemoteSessionScreenView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
 
-                    Button(model.focusedSessionIsController ? "Return to Viewer" : "Take Controller") {
+                    Button(controllerActionTitle) {
                         toggleControllerState()
                     }
                     .disabled(isPerformingAction)
@@ -894,48 +930,47 @@ private struct RemoteSessionScreenView: View {
     }
 
     private func relaunchSession() {
-        isPerformingAction = true
-        Task {
-            defer { isPerformingAction = false }
-
-            do {
-                _ = try await model.launchOrResumeSession(
-                    sessionID: currentSession.id,
-                    workspaceID: currentSession.workspaceID,
-                    providerID: currentSession.providerID
-                )
-            } catch {
-                presentedError = RemoteClientHomePresentedError(message: error.localizedDescription)
-            }
+        performAction(.relaunch) {
+            _ = try await model.launchOrResumeSession(
+                sessionID: currentSession.id,
+                workspaceID: currentSession.workspaceID,
+                providerID: currentSession.providerID
+            )
         }
     }
 
     private func stopSession() {
-        isPerformingAction = true
-        Task {
-            defer { isPerformingAction = false }
-
-            do {
-                _ = try await model.stopSession(
-                    sessionID: currentSession.id,
-                    workspaceID: currentSession.workspaceID,
-                    providerID: currentSession.providerID
-                )
-            } catch {
-                presentedError = RemoteClientHomePresentedError(message: error.localizedDescription)
-            }
+        performAction(.stop) {
+            _ = try await model.stopSession(
+                sessionID: currentSession.id,
+                workspaceID: currentSession.workspaceID,
+                providerID: currentSession.providerID
+            )
         }
     }
 
     private func toggleControllerState() {
-        Task {
+        let action: RemoteSessionAction = model.focusedSessionIsController ? .returnToViewer : .takeController
+        performAction(action) {
+            if model.focusedSessionIsController {
+                await model.releaseFocusedRemoteSessionControl()
+            } else {
+                let viewport = terminalViewport()
+                try await model.takeFocusedRemoteSessionControl(columns: viewport.columns, rows: viewport.rows)
+            }
+        }
+    }
+
+    private func performAction(
+        _ action: RemoteSessionAction,
+        operation: @escaping @MainActor () async throws -> Void
+    ) {
+        activeAction = action
+        Task { @MainActor in
+            defer { activeAction = nil }
+
             do {
-                if model.focusedSessionIsController {
-                    await model.releaseFocusedRemoteSessionControl()
-                } else {
-                    let viewport = terminalViewport()
-                    try await model.takeFocusedRemoteSessionControl(columns: viewport.columns, rows: viewport.rows)
-                }
+                try await operation()
             } catch {
                 presentedError = RemoteClientHomePresentedError(message: error.localizedDescription)
             }
