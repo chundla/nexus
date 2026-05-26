@@ -1255,6 +1255,67 @@ struct RemoteClientPairingModelTests {
         }
     }
 
+    @Test func sendingTextAppliesActionResponseWhenObservationDoesNotDeliverUpdateDuringRequest() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: UUID()
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let pairedDeviceID = UUID()
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: pairedDeviceID
+        )
+        let initialScreen = SessionScreen(session: session, transcript: "Claude ready")
+        let controlledScreen = SessionScreen(
+            session: session,
+            controller: .pairedDevice(pairedDeviceID),
+            transcript: "Claude ready",
+            terminalColumns: 44,
+            terminalRows: 12
+        )
+        let actionResponseScreen = SessionScreen(
+            session: session,
+            controller: .pairedDevice(pairedDeviceID),
+            transcript: "Claude readytyped",
+            terminalColumns: 44,
+            terminalRows: 12
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let client = StubRemotePairingClient(
+            result: pairedMac,
+            sessionScreen: initialScreen,
+            takeSessionControlResult: .success(controlledScreen),
+            sendSessionTextResult: .success(actionResponseScreen)
+        )
+        let model = RemoteClientPairingModel(client: client, store: store)
+
+        await model.focusRemoteSession(sessionID: session.id)
+        try await model.takeFocusedRemoteSessionControl(columns: 44, rows: 12)
+        try await model.sendTextToFocusedRemoteSession("typed")
+
+        #expect(model.focusedSessionScreen == actionResponseScreen)
+    }
+
     @Test func sendingTextDoesNotOverwriteNewerObservedScreenWithStaleActionResponse() async throws {
         let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -1315,6 +1376,67 @@ struct RemoteClientPairingModelTests {
         try await model.sendTextToFocusedRemoteSession("typed")
 
         #expect(model.focusedSessionScreen == observedScreen)
+    }
+
+    @Test func sendingInputKeyAppliesActionResponseWhenObservationDoesNotDeliverUpdateDuringRequest() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: UUID()
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let pairedDeviceID = UUID()
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: pairedDeviceID
+        )
+        let initialScreen = SessionScreen(session: session, transcript: "Claude ready")
+        let controlledScreen = SessionScreen(
+            session: session,
+            controller: .pairedDevice(pairedDeviceID),
+            transcript: "Claude ready",
+            terminalColumns: 44,
+            terminalRows: 12
+        )
+        let actionResponseScreen = SessionScreen(
+            session: session,
+            controller: .pairedDevice(pairedDeviceID),
+            transcript: "Claude ready\nAUTH:654321",
+            terminalColumns: 44,
+            terminalRows: 12
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let client = StubRemotePairingClient(
+            result: pairedMac,
+            sessionScreen: initialScreen,
+            takeSessionControlResult: .success(controlledScreen),
+            sendSessionInputKeyResult: .success(actionResponseScreen)
+        )
+        let model = RemoteClientPairingModel(client: client, store: store)
+
+        await model.focusRemoteSession(sessionID: session.id)
+        try await model.takeFocusedRemoteSessionControl(columns: 44, rows: 12)
+        try await model.sendInputKeyToFocusedRemoteSession(.enter)
+
+        #expect(model.focusedSessionScreen == actionResponseScreen)
     }
 
     @Test func sendingInputKeyDoesNotOverwriteNewerObservedScreenWithStaleActionResponse() async throws {

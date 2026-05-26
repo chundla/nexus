@@ -546,9 +546,11 @@ final class RemoteClientPairingModel {
             throw RemoteClientPairingModelError.controllerRequired
         }
 
+        let screenBeforeRequest = focusedSessionScreen
+
         do {
             let screen = try await client.sendSessionText(for: pairedMac, sessionID: sessionID, text: text)
-            applyFocusedSessionInputResponse(screen, sessionID: sessionID)
+            applyFocusedSessionInputResponse(screen, sessionID: sessionID, screenBeforeRequest: screenBeforeRequest)
         } catch {
             throw loggedRemoteActionError(
                 error,
@@ -568,9 +570,11 @@ final class RemoteClientPairingModel {
             throw RemoteClientPairingModelError.controllerRequired
         }
 
+        let screenBeforeRequest = focusedSessionScreen
+
         do {
             let screen = try await client.sendSessionInputKey(for: pairedMac, sessionID: sessionID, key: key)
-            applyFocusedSessionInputResponse(screen, sessionID: sessionID)
+            applyFocusedSessionInputResponse(screen, sessionID: sessionID, screenBeforeRequest: screenBeforeRequest)
         } catch {
             throw loggedRemoteActionError(
                 error,
@@ -581,12 +585,21 @@ final class RemoteClientPairingModel {
         }
     }
 
-    private func applyFocusedSessionInputResponse(_ screen: SessionScreen, sessionID: UUID) {
+    private func applyFocusedSessionInputResponse(
+        _ screen: SessionScreen,
+        sessionID: UUID,
+        screenBeforeRequest: SessionScreen?
+    ) {
         guard focusedSessionID == sessionID else {
             return
         }
 
-        if focusedSessionObservation == nil || focusedSessionScreen?.session.id != sessionID {
+        let currentScreen = focusedSessionScreen
+        let receivedObservedUpdateDuringRequest = currentScreen != nil && currentScreen != screenBeforeRequest
+
+        if focusedSessionObservation == nil
+            || currentScreen?.session.id != sessionID
+            || receivedObservedUpdateDuringRequest == false {
             focusedSessionScreen = screen
         }
 
