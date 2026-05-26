@@ -234,6 +234,82 @@ struct RemotePairingNetworkTests {
         #expect(detail.defaultSession?.state == .exited)
     }
 
+    @Test func deletesFailedRemoteSessionRecordOverDedicatedNetworkAPI() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let failedHealthRunner = StubCommandRunner(results: [
+            StubCommandRunner.Invocation(
+                executable: "/usr/bin/ssh",
+                arguments: [
+                    "-o", "BatchMode=yes",
+                    "-o", "ConnectTimeout=5",
+                    "build-box",
+                    remoteClaudeProbeScript("/srv/api")
+                ]
+            ): .success(stdout: "", stderr: "NEXUS_REMOTE_CLAUDE_NOT_FOUND\n", exitStatus: 1)
+        ])
+        let availabilityRunner = StubCommandRunner(results: [
+            StubCommandRunner.Invocation(
+                executable: "/usr/bin/ssh",
+                arguments: [
+                    "-o", "BatchMode=yes",
+                    "-o", "ConnectTimeout=5",
+                    "build-box",
+                    "python3 - <<'PY'\nimport os\nimport sys\npath = '/srv/api'\nif os.path.isdir(path):\n    print('available')\n    sys.exit(0)\nprint('missing')\nsys.exit(1)\nPY"
+                ]
+            ): .success(stdout: "available\n")
+        ])
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+                commandRunner: failedHealthRunner
+            ),
+            hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
+                "build-box": HostValidationResult(
+                    state: .available,
+                    summary: "Host is available",
+                    diagnostics: []
+                )
+            ]),
+            workspaceAvailabilityEvaluator: WorkspaceAvailabilityEvaluator(commandRunner: availabilityRunner)
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
+
+        _ = try await client.setRemoteAccessEnabled(true)
+        let pairing = try await client.startPairing()
+        let group = try await client.createWorkspaceGroup(name: "Remote")
+        let host = try await client.createHost(name: "Build Server", sshTarget: "build-box", port: nil as Int?)
+        _ = try await client.validateHost(hostID: host.id)
+        let workspace = try await client.createRemoteWorkspace(
+            name: nil as String?,
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+        let failedSession = try await client.createNamedSession(workspaceID: workspace.id, providerID: .claude, name: "Review")
+
+        let remoteClient = RemotePairingHTTPClient()
+        let pairedMac = try await remoteClient.completePairing(
+            host: server.displayHost,
+            port: server.port,
+            pairingCode: pairing.code,
+            deviceName: "Chris’s iPhone"
+        )
+        let deleted = try await remoteClient.deleteSessionRecord(for: pairedMac, sessionID: failedSession.id)
+        let detail = try await remoteClient.fetchProviderDetail(
+            for: pairedMac,
+            workspaceID: workspace.id,
+            providerID: .claude
+        )
+
+        #expect(deleted)
+        #expect(detail.failedSessions.isEmpty)
+    }
+
     @Test func relaunchesRemoteSessionRecordOverDedicatedNetworkAPI() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)

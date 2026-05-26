@@ -162,6 +162,16 @@ struct RemotePairingHTTPClient {
         return try JSONDecoder().decode(Session.self, from: data)
     }
 
+    func deleteSessionRecord(for pairedMac: PairedMac, sessionID: UUID) async throws -> Bool {
+        var request = try authenticatedRequest(
+            for: pairedMac,
+            path: "/remote-client/sessions/\(sessionID.uuidString)/delete-record"
+        )
+        request.httpMethod = "POST"
+        let data = try await send(request)
+        return try JSONDecoder().decode(Bool.self, from: data)
+    }
+
     func takeSessionControl(for pairedMac: PairedMac, sessionID: UUID, columns: Int, rows: Int) async throws -> SessionScreen {
         var request = try authenticatedRequest(
             for: pairedMac,

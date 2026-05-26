@@ -253,6 +253,20 @@ final class RemotePairingServer {
             return
         }
 
+        if request.method == "POST",
+           let deleteSessionRecordRequest = deleteSessionRecordRequest(from: request) {
+            do {
+                try await authorize(request)
+                let deleted = try await client.deleteSessionRecord(sessionID: deleteSessionRecordRequest.sessionID)
+                send(statusCode: 200, body: deleted, over: connection)
+            } catch RemotePairingServerError.unauthorized {
+                send(statusCode: 401, body: RemotePairingErrorResponse(message: "Pair this iPhone again to browse this Paired Mac"), over: connection)
+            } catch {
+                send(statusCode: 400, body: RemotePairingErrorResponse(message: error.localizedDescription), over: connection)
+            }
+            return
+        }
+
         if request.method == "GET",
            let sessionScreenRequest = sessionScreenRequest(from: request) {
             do {
@@ -463,6 +477,19 @@ final class RemotePairingServer {
               components[1] == "sessions",
               let sessionID = UUID(uuidString: String(components[2])),
               components[3] == "stop" else {
+            return nil
+        }
+
+        return SessionScreenRequest(sessionID: sessionID)
+    }
+
+    private func deleteSessionRecordRequest(from request: ParsedRequest) -> SessionScreenRequest? {
+        let components = request.path.split(separator: "/")
+        guard components.count == 4,
+              components[0] == "remote-client",
+              components[1] == "sessions",
+              let sessionID = UUID(uuidString: String(components[2])),
+              components[3] == "delete-record" else {
             return nil
         }
 

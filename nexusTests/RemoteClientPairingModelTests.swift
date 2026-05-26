@@ -967,6 +967,103 @@ struct RemoteClientPairingModelTests {
         #expect(model.providerDetail(for: workspace.id, providerID: .claude)?.defaultSession?.state == .exited)
     }
 
+    @Test func deletingFailedRemoteSessionRecordRefreshesCatalogAndProviderDetail() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let groupID = UUID()
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .remote,
+            folderPath: "/srv/nexus",
+            primaryGroupID: groupID
+        )
+        let failedSession = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            name: "Review",
+            isDefault: false,
+            state: .failed,
+            failureMessage: "Claude is unavailable on this Workspace."
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let initialDetail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .unavailable, summary: "Claude is unavailable on this Workspace."),
+            defaultSession: nil,
+            alternateSessions: [],
+            failedSessions: [failedSession]
+        )
+        let refreshedDetail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .unavailable, summary: "Claude is unavailable on this Workspace."),
+            defaultSession: nil,
+            alternateSessions: [],
+            failedSessions: []
+        )
+        let refreshedCatalog = RemoteWorkspaceCatalog(
+            workspaceGroups: [WorkspaceGroup(id: groupID, name: "Client Work")],
+            recentNavigation: [],
+            workspaceOverviews: [
+                WorkspaceOverview(
+                    workspace: workspace,
+                    providerCards: [
+                        WorkspaceProviderCard(
+                            provider: Provider(id: .claude),
+                            health: ProviderHealthSummary(state: .unavailable, summary: "Claude is unavailable on this Workspace."),
+                            defaultSession: ProviderDefaultSessionSummary(
+                                state: .notCreated,
+                                summary: "No default session yet",
+                                actionTitle: "Launch"
+                            ),
+                            alternateSessionCount: 0
+                        )
+                    ]
+                )
+            ]
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let client = StubRemotePairingClient(
+            result: pairedMac,
+            catalog: refreshedCatalog,
+            providerDetail: refreshedDetail,
+            providerDetailResults: [initialDetail, refreshedDetail]
+        )
+        let model = RemoteClientPairingModel(client: client, store: store)
+
+        await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
+        let deleted = try await model.deleteSessionRecord(
+            sessionID: failedSession.id,
+            workspaceID: workspace.id,
+            providerID: .claude
+        )
+
+        #expect(deleted)
+        #expect(model.focusedSessionID == nil)
+        #expect(model.catalog == refreshedCatalog)
+        #expect(model.providerDetail(for: workspace.id, providerID: .claude)?.failedSessions.isEmpty == true)
+        #expect(client.requestLog == [
+            "fetchProviderDetail",
+            "deleteSessionRecord",
+            "fetchCatalog",
+            "fetchProviderDetail"
+        ])
+    }
+
     @Test func creatingFailedNamedRemoteSessionStillFocusesInspectableSessionRecord() async throws {
         let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -1233,6 +1330,7 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
     let createdNamedSessionResult: Result<Session, any Error>?
     let launchedSession: Session
     let stoppedSession: Session
+    let deletedSessionRecord: Bool
     let catalogFetchGate: AsyncGate?
     let providerDetailFetchGate: AsyncGate?
     private let defaultSessionScreen: SessionScreen
@@ -1287,6 +1385,7 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
         createdNamedSessionResult: Result<Session, any Error>? = nil,
         launchedSession: Session? = nil,
         stoppedSession: Session? = nil,
+        deletedSessionRecord: Bool = true,
         catalogFetchGate: AsyncGate? = nil,
         providerDetailFetchGate: AsyncGate? = nil
     ) {
@@ -1300,6 +1399,7 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
         self.createdNamedSessionResult = createdNamedSessionResult
         self.launchedSession = launchedSession ?? sessionScreen.session
         self.stoppedSession = stoppedSession ?? sessionScreen.session
+        self.deletedSessionRecord = deletedSessionRecord
         self.catalogFetchGate = catalogFetchGate
         self.providerDetailFetchGate = providerDetailFetchGate
         self.providerDetailResults = providerDetailResults
@@ -1362,6 +1462,11 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
     func stopSession(for pairedMac: PairedMac, sessionID: UUID) async throws -> Session {
         requestLog.append("stopSession")
         return stoppedSession
+    }
+
+    func deleteSessionRecord(for pairedMac: PairedMac, sessionID: UUID) async throws -> Bool {
+        requestLog.append("deleteSessionRecord")
+        return deletedSessionRecord
     }
 
     func fetchSessionScreen(for pairedMac: PairedMac, sessionID: UUID) async throws -> SessionScreen {

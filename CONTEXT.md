@@ -16,6 +16,10 @@ _Avoid_: tool, backend
 An app-owned workstream for one Provider in one Workspace.
 _Avoid_: process, tab
 
+**Session Record**:
+The persisted Nexus record for a Session, which may exist even when no live runtime is attached.
+_Avoid_: process, terminal instance
+
 **Default Session**:
 The implicit reusable Session lane for one Provider in one Workspace.
 _Avoid_: primary tab, main process
@@ -107,9 +111,11 @@ _Avoid_: stop, close
 - A **Session** belongs to exactly one **Workspace** and one **Provider**
 - A **Default Session** is a **Session**
 - A **Named Session** is a **Session**
-- A **Workspace** and **Provider** pair has exactly one **Default Session**
+- A **Workspace** and **Provider** pair has exactly one conceptual **Default Session** lane
+- Deleting a **Default Session Record** does not remove the conceptual **Default Session** lane for its **Workspace** and **Provider**
 - A **Workspace** and **Provider** pair may have many **Named Sessions**
 - A **Session** may be **Detached** without being stopped
+- A **Session** has exactly one **Session Record** in Nexus persistence
 - A **Session** has at most one **Controller** at a time
 - A **Session** may have many viewers at the same time
 - A **Remote Client** may attach to a **Session** as its **Controller** or as a viewer
@@ -146,6 +152,8 @@ _Avoid_: stop, close
 - Service restart semantics are not uniform across targets — resolved: local session runtime may be lost after service restart, while tmux-backed remote Sessions are recoverable.
 - A failed dependency is not the same as a failed check — resolved: use **Blocked Check** for checks that could not run because an upstream dependency failed.
 - "stop" and "detach" are not synonyms — resolved: **Detach** leaves runtime alive; stop terminates runtime.
+- "delete session" could imply killing a live runtime — resolved: **Delete Session Record** removes Nexus persistence only and is allowed only when the Session is not running.
+- deleting a **Default Session Record** could imply removing the default lane itself — resolved: the persisted record is deleted, but the conceptual **Default Session** lane remains for that **Workspace** and **Provider**.
 - "unavailable" and "broken" are not synonyms for a **Workspace** — resolved: unavailable means transient environment failure; broken means saved target/configuration requires repair.
 - The same unavailable/broken distinction applies to a **Host** — resolved: unavailable means transient reachability/auth environment failure; broken means the saved Host target/configuration needs repair.
 - A **Workspace** target is not always a folder path — resolved: use **Workspace Target** for the local-folder vs Host-plus-remote-path distinction.

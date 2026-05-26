@@ -12,6 +12,7 @@ protocol RemotePairingClient {
     func createNamedSession(for pairedMac: PairedMac, workspaceID: UUID, providerID: ProviderID) async throws -> Session
     func launchOrResumeSession(for pairedMac: PairedMac, sessionID: UUID) async throws -> Session
     func stopSession(for pairedMac: PairedMac, sessionID: UUID) async throws -> Session
+    func deleteSessionRecord(for pairedMac: PairedMac, sessionID: UUID) async throws -> Bool
     func fetchSessionScreen(for pairedMac: PairedMac, sessionID: UUID) async throws -> SessionScreen
     func takeSessionControl(for pairedMac: PairedMac, sessionID: UUID, columns: Int, rows: Int) async throws -> SessionScreen
     func releaseSessionControl(for pairedMac: PairedMac, sessionID: UUID) async throws -> SessionScreen
@@ -275,6 +276,24 @@ final class RemoteClientPairingModel {
         await refreshActivePairedMacCatalog()
         await loadProviderDetail(workspaceID: workspaceID, providerID: providerID)
         return session
+    }
+
+    func deleteSessionRecord(sessionID: UUID, workspaceID: UUID, providerID: ProviderID) async throws -> Bool {
+        guard let pairedMac = activePairedMac else {
+            throw RemoteClientPairingModelError.pairedMacNotFound
+        }
+
+        let deleted = try await client.deleteSessionRecord(for: pairedMac, sessionID: sessionID)
+        guard deleted else {
+            return false
+        }
+
+        if focusedSessionID == sessionID {
+            stopFocusingRemoteSession()
+        }
+        await refreshActivePairedMacCatalog()
+        await loadProviderDetail(workspaceID: workspaceID, providerID: providerID)
+        return true
     }
 
     func focusRemoteSession(sessionID: UUID) async {

@@ -318,6 +318,8 @@ private struct RemoteProviderDetailView: View {
     @State private var openedSession: Session?
     @State private var isLaunchingDefaultSession = false
     @State private var isCreatingNamedSession = false
+    @State private var pendingDeleteSessionRecord: Session?
+    @State private var isDeletingSessionRecord = false
     @State private var presentedError: RemoteClientHomePresentedError?
 
     private var detail: ProviderDetail? {
@@ -439,12 +441,18 @@ private struct RemoteProviderDetailView: View {
             }
 
             if let detail, detail.failedSessions.isEmpty == false {
-                Section("Failed Sessions") {
+                Section("Failed Session Records") {
                     ForEach(detail.failedSessions) { session in
                         NavigationLink {
                             RemoteSessionScreenView(model: model, session: session)
                         } label: {
                             RemoteProviderSessionSummaryRow(session: session)
+                        }
+                        .swipeActions(allowsFullSwipe: false) {
+                            Button("Delete", role: .destructive) {
+                                pendingDeleteSessionRecord = session
+                            }
+                            .disabled(isDeletingSessionRecord)
                         }
                     }
                 }
@@ -467,6 +475,24 @@ private struct RemoteProviderDetailView: View {
         }
         .navigationDestination(item: $openedSession) { session in
             RemoteSessionScreenView(model: model, session: session)
+        }
+        .confirmationDialog(
+            "Delete Failed Session Record?",
+            isPresented: Binding(
+                get: { pendingDeleteSessionRecord != nil },
+                set: { isPresented in
+                    if isPresented == false {
+                        pendingDeleteSessionRecord = nil
+                    }
+                }
+            ),
+            presenting: pendingDeleteSessionRecord
+        ) { session in
+            Button("Delete Session Record", role: .destructive) {
+                deleteSessionRecord(session)
+            }
+        } message: { _ in
+            Text("Delete this failed Session Record from Nexus on this Paired Mac? This does not stop a live runtime.")
         }
         .alert(item: $presentedError) { error in
             Alert(title: Text("Nexus Remote"), message: Text(error.message))
@@ -496,6 +522,24 @@ private struct RemoteProviderDetailView: View {
 
             do {
                 openedSession = try await model.createNamedSession(
+                    workspaceID: overview.workspace.id,
+                    providerID: providerCard.provider.id
+                )
+            } catch {
+                presentedError = RemoteClientHomePresentedError(message: error.localizedDescription)
+            }
+        }
+    }
+
+    private func deleteSessionRecord(_ session: Session) {
+        pendingDeleteSessionRecord = nil
+        isDeletingSessionRecord = true
+        Task {
+            defer { isDeletingSessionRecord = false }
+
+            do {
+                _ = try await model.deleteSessionRecord(
+                    sessionID: session.id,
                     workspaceID: overview.workspace.id,
                     providerID: providerCard.provider.id
                 )
