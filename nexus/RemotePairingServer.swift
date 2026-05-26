@@ -5,6 +5,8 @@ import NexusDomain
 import NexusIPC
 
 final class RemotePairingServer {
+    private static let revokedPairingMessage = "Pair this iPhone again to browse this Paired Mac"
+
     let displayHost: String
     let macName: String
 
@@ -117,82 +119,76 @@ final class RemotePairingServer {
         }
 
         if request.method == "GET", request.path == "/remote-client/catalog" {
-            do {
-                try await authorize(request)
-
-                let workspaceGroups = try await client.listWorkspaceGroups()
-                let recentNavigation = try await client.listRecentNavigation(limit: 10)
-                let workspaces = try await client.listWorkspaces()
+            await respondToAuthorizedRequest(
+                operation: .fetchCatalog,
+                request: request,
+                over: connection
+            ) { [self] in
+                let workspaceGroups = try await self.client.listWorkspaceGroups()
+                let recentNavigation = try await self.client.listRecentNavigation(limit: 10)
+                let workspaces = try await self.client.listWorkspaces()
                 var workspaceOverviews: [WorkspaceOverview] = []
                 for workspace in workspaces {
-                    workspaceOverviews.append(try await client.getWorkspaceOverview(workspaceID: workspace.id))
+                    workspaceOverviews.append(try await self.client.getWorkspaceOverview(workspaceID: workspace.id))
                 }
 
-                send(
-                    statusCode: 200,
-                    body: RemoteWorkspaceCatalog(
-                        workspaceGroups: workspaceGroups,
-                        recentNavigation: recentNavigation,
-                        workspaceOverviews: workspaceOverviews
-                    ),
-                    over: connection
+                return RemoteWorkspaceCatalog(
+                    workspaceGroups: workspaceGroups,
+                    recentNavigation: recentNavigation,
+                    workspaceOverviews: workspaceOverviews
                 )
-            } catch RemotePairingServerError.unauthorized {
-                send(statusCode: 401, body: RemotePairingErrorResponse(message: "Pair this iPhone again to browse this Paired Mac"), over: connection)
-            } catch {
-                send(statusCode: 400, body: RemotePairingErrorResponse(message: error.localizedDescription), over: connection)
             }
             return
         }
 
         if request.method == "GET",
            let providerDetailRequest = providerDetailRequest(from: request) {
-            do {
-                try await authorize(request)
-                let detail = try await client.getProviderDetail(
+            await respondToAuthorizedRequest(
+                operation: .fetchProviderDetail,
+                request: request,
+                over: connection,
+                workspaceID: providerDetailRequest.workspaceID,
+                providerID: providerDetailRequest.providerID
+            ) { [self] in
+                try await self.client.getProviderDetail(
                     workspaceID: providerDetailRequest.workspaceID,
                     providerID: providerDetailRequest.providerID
                 )
-                send(statusCode: 200, body: detail, over: connection)
-            } catch RemotePairingServerError.unauthorized {
-                send(statusCode: 401, body: RemotePairingErrorResponse(message: "Pair this iPhone again to browse this Paired Mac"), over: connection)
-            } catch {
-                send(statusCode: 400, body: RemotePairingErrorResponse(message: error.localizedDescription), over: connection)
             }
             return
         }
 
         if request.method == "POST",
            let defaultSessionLaunchRequest = defaultSessionLaunchRequest(from: request) {
-            do {
-                try await authorize(request)
-                let session = try await client.launchOrResumeDefaultSession(
+            await respondToAuthorizedRequest(
+                operation: .launchDefaultSession,
+                request: request,
+                over: connection,
+                workspaceID: defaultSessionLaunchRequest.workspaceID,
+                providerID: defaultSessionLaunchRequest.providerID
+            ) { [self] in
+                try await self.client.launchOrResumeDefaultSession(
                     workspaceID: defaultSessionLaunchRequest.workspaceID,
                     providerID: defaultSessionLaunchRequest.providerID
                 )
-                send(statusCode: 200, body: session, over: connection)
-            } catch RemotePairingServerError.unauthorized {
-                send(statusCode: 401, body: RemotePairingErrorResponse(message: "Pair this iPhone again to browse this Paired Mac"), over: connection)
-            } catch {
-                send(statusCode: 400, body: RemotePairingErrorResponse(message: error.localizedDescription), over: connection)
             }
             return
         }
 
         if request.method == "POST",
            let namedSessionCreateRequest = namedSessionCreateRequest(from: request) {
-            do {
-                try await authorize(request)
-                let session = try await client.createNamedSession(
+            await respondToAuthorizedRequest(
+                operation: .createNamedSession,
+                request: request,
+                over: connection,
+                workspaceID: namedSessionCreateRequest.workspaceID,
+                providerID: namedSessionCreateRequest.providerID
+            ) { [self] in
+                try await self.client.createNamedSession(
                     workspaceID: namedSessionCreateRequest.workspaceID,
                     providerID: namedSessionCreateRequest.providerID,
                     name: nil
                 )
-                send(statusCode: 200, body: session, over: connection)
-            } catch RemotePairingServerError.unauthorized {
-                send(statusCode: 401, body: RemotePairingErrorResponse(message: "Pair this iPhone again to browse this Paired Mac"), over: connection)
-            } catch {
-                send(statusCode: 400, body: RemotePairingErrorResponse(message: error.localizedDescription), over: connection)
             }
             return
         }
@@ -223,9 +219,9 @@ final class RemotePairingServer {
                     operation: .observeSessionScreen,
                     request: request,
                     sessionID: sessionScreenObservationRequest.sessionID,
-                    message: "Pair this iPhone again to browse this Paired Mac"
+                    message: Self.revokedPairingMessage
                 )
-                send(statusCode: 401, body: RemotePairingErrorResponse(message: "Pair this iPhone again to browse this Paired Mac"), over: connection)
+                send(statusCode: 401, body: RemotePairingErrorResponse(message: Self.revokedPairingMessage), over: connection)
             } catch {
                 await recordRemoteClientDiagnosticBreadcrumb(
                     kind: .reconnectFailure,
@@ -241,142 +237,127 @@ final class RemotePairingServer {
 
         if request.method == "POST",
            let sessionLaunchRequest = sessionLaunchRequest(from: request) {
-            do {
-                try await authorize(request)
-                let session = try await client.launchOrResumeSession(sessionID: sessionLaunchRequest.sessionID)
-                send(statusCode: 200, body: session, over: connection)
-            } catch RemotePairingServerError.unauthorized {
-                send(statusCode: 401, body: RemotePairingErrorResponse(message: "Pair this iPhone again to browse this Paired Mac"), over: connection)
-            } catch {
-                send(statusCode: 400, body: RemotePairingErrorResponse(message: error.localizedDescription), over: connection)
+            await respondToAuthorizedRequest(
+                operation: .launchSession,
+                request: request,
+                over: connection,
+                sessionID: sessionLaunchRequest.sessionID
+            ) { [self] in
+                try await self.client.launchOrResumeSession(sessionID: sessionLaunchRequest.sessionID)
             }
             return
         }
 
         if request.method == "POST",
            let stopSessionRequest = stopSessionRequest(from: request) {
-            do {
-                try await authorize(request)
-                let session = try await client.stopSession(sessionID: stopSessionRequest.sessionID)
-                send(statusCode: 200, body: session, over: connection)
-            } catch RemotePairingServerError.unauthorized {
-                send(statusCode: 401, body: RemotePairingErrorResponse(message: "Pair this iPhone again to browse this Paired Mac"), over: connection)
-            } catch {
-                send(statusCode: 400, body: RemotePairingErrorResponse(message: error.localizedDescription), over: connection)
+            await respondToAuthorizedRequest(
+                operation: .stopSession,
+                request: request,
+                over: connection,
+                sessionID: stopSessionRequest.sessionID
+            ) { [self] in
+                try await self.client.stopSession(sessionID: stopSessionRequest.sessionID)
             }
             return
         }
 
         if request.method == "POST",
            let deleteSessionRecordRequest = deleteSessionRecordRequest(from: request) {
-            do {
-                try await authorize(request)
-                let deleted = try await client.deleteSessionRecord(sessionID: deleteSessionRecordRequest.sessionID)
-                send(statusCode: 200, body: deleted, over: connection)
-            } catch RemotePairingServerError.unauthorized {
-                send(statusCode: 401, body: RemotePairingErrorResponse(message: "Pair this iPhone again to browse this Paired Mac"), over: connection)
-            } catch {
-                await recordRemoteClientDiagnosticBreadcrumb(
-                    kind: .actionFailure,
-                    operation: .deleteSessionRecord,
-                    request: request,
-                    sessionID: deleteSessionRecordRequest.sessionID,
-                    message: error.localizedDescription
-                )
-                send(statusCode: 400, body: RemotePairingErrorResponse(message: error.localizedDescription), over: connection)
+            await respondToAuthorizedRequest(
+                operation: .deleteSessionRecord,
+                request: request,
+                over: connection,
+                sessionID: deleteSessionRecordRequest.sessionID
+            ) { [self] in
+                try await self.client.deleteSessionRecord(sessionID: deleteSessionRecordRequest.sessionID)
             }
             return
         }
 
         if request.method == "GET",
            let sessionScreenRequest = sessionScreenRequest(from: request) {
-            do {
-                try await authorize(request)
-                let screen = try await client.getSessionScreen(sessionID: sessionScreenRequest.sessionID)
-                send(statusCode: 200, body: screen, over: connection)
-            } catch RemotePairingServerError.unauthorized {
-                send(statusCode: 401, body: RemotePairingErrorResponse(message: "Pair this iPhone again to browse this Paired Mac"), over: connection)
-            } catch {
-                send(statusCode: 400, body: RemotePairingErrorResponse(message: error.localizedDescription), over: connection)
+            await respondToAuthorizedRequest(
+                operation: .fetchSessionScreen,
+                request: request,
+                over: connection,
+                sessionID: sessionScreenRequest.sessionID
+            ) { [self] in
+                try await self.client.getSessionScreen(sessionID: sessionScreenRequest.sessionID)
             }
             return
         }
 
         if request.method == "POST",
            let takeControlRequest = takeControlRequest(from: request) {
-            do {
-                let pairedDeviceID = try pairedDeviceID(from: request)
-                try await authorize(request)
+            await respondToAuthorizedRequest(
+                operation: .takeSessionControl,
+                request: request,
+                over: connection,
+                sessionID: takeControlRequest.sessionID
+            ) { [self] in
+                let pairedDeviceID = try self.pairedDeviceID(from: request)
                 let body = try JSONDecoder().decode(RemoteSessionControlRequest.self, from: request.body)
-                let screen = try await client.takeRemoteSessionControl(
+                return try await self.client.takeRemoteSessionControl(
                     sessionID: takeControlRequest.sessionID,
                     pairedDeviceID: pairedDeviceID,
                     columns: body.columns,
                     rows: body.rows
                 )
-                send(statusCode: 200, body: screen, over: connection)
-            } catch RemotePairingServerError.unauthorized {
-                send(statusCode: 401, body: RemotePairingErrorResponse(message: "Pair this iPhone again to browse this Paired Mac"), over: connection)
-            } catch {
-                send(statusCode: 400, body: RemotePairingErrorResponse(message: error.localizedDescription), over: connection)
             }
             return
         }
 
         if request.method == "POST",
            let releaseControlRequest = releaseControlRequest(from: request) {
-            do {
-                let pairedDeviceID = try pairedDeviceID(from: request)
-                try await authorize(request)
-                let screen = try await client.releaseRemoteSessionControl(
+            await respondToAuthorizedRequest(
+                operation: .releaseSessionControl,
+                request: request,
+                over: connection,
+                sessionID: releaseControlRequest.sessionID
+            ) { [self] in
+                let pairedDeviceID = try self.pairedDeviceID(from: request)
+                return try await self.client.releaseRemoteSessionControl(
                     sessionID: releaseControlRequest.sessionID,
                     pairedDeviceID: pairedDeviceID
                 )
-                send(statusCode: 200, body: screen, over: connection)
-            } catch RemotePairingServerError.unauthorized {
-                send(statusCode: 401, body: RemotePairingErrorResponse(message: "Pair this iPhone again to browse this Paired Mac"), over: connection)
-            } catch {
-                send(statusCode: 400, body: RemotePairingErrorResponse(message: error.localizedDescription), over: connection)
             }
             return
         }
 
         if request.method == "POST",
            let sessionTextRequest = sessionTextRequest(from: request) {
-            do {
-                let pairedDeviceID = try pairedDeviceID(from: request)
-                try await authorize(request)
+            await respondToAuthorizedRequest(
+                operation: .sendSessionText,
+                request: request,
+                over: connection,
+                sessionID: sessionTextRequest.sessionID
+            ) { [self] in
+                let pairedDeviceID = try self.pairedDeviceID(from: request)
                 let body = try JSONDecoder().decode(RemoteSessionTextRequest.self, from: request.body)
-                let screen = try await client.sendRemoteSessionText(
+                return try await self.client.sendRemoteSessionText(
                     sessionID: sessionTextRequest.sessionID,
                     pairedDeviceID: pairedDeviceID,
                     text: body.text
                 )
-                send(statusCode: 200, body: screen, over: connection)
-            } catch RemotePairingServerError.unauthorized {
-                send(statusCode: 401, body: RemotePairingErrorResponse(message: "Pair this iPhone again to browse this Paired Mac"), over: connection)
-            } catch {
-                send(statusCode: 400, body: RemotePairingErrorResponse(message: error.localizedDescription), over: connection)
             }
             return
         }
 
         if request.method == "POST",
            let sessionKeyRequest = sessionKeyRequest(from: request) {
-            do {
-                let pairedDeviceID = try pairedDeviceID(from: request)
-                try await authorize(request)
+            await respondToAuthorizedRequest(
+                operation: .sendSessionInputKey,
+                request: request,
+                over: connection,
+                sessionID: sessionKeyRequest.sessionID
+            ) { [self] in
+                let pairedDeviceID = try self.pairedDeviceID(from: request)
                 let body = try JSONDecoder().decode(RemoteSessionKeyRequest.self, from: request.body)
-                let screen = try await client.sendRemoteSessionInputKey(
+                return try await self.client.sendRemoteSessionInputKey(
                     sessionID: sessionKeyRequest.sessionID,
                     pairedDeviceID: pairedDeviceID,
                     key: body.key
                 )
-                send(statusCode: 200, body: screen, over: connection)
-            } catch RemotePairingServerError.unauthorized {
-                send(statusCode: 401, body: RemotePairingErrorResponse(message: "Pair this iPhone again to browse this Paired Mac"), over: connection)
-            } catch {
-                send(statusCode: 400, body: RemotePairingErrorResponse(message: error.localizedDescription), over: connection)
             }
             return
         }
@@ -403,6 +384,45 @@ final class RemotePairingServer {
         }
     }
 
+    private func respondToAuthorizedRequest<Response: Encodable>(
+        operation: RemoteClientDiagnosticOperation,
+        request: ParsedRequest,
+        over connection: NWConnection,
+        kind: RemoteClientDiagnosticKind = .actionFailure,
+        workspaceID: UUID? = nil,
+        providerID: ProviderID? = nil,
+        sessionID: UUID? = nil,
+        action: @escaping () async throws -> Response
+    ) async {
+        do {
+            try await authorize(request)
+            let response = try await action()
+            send(statusCode: 200, body: response, over: connection)
+        } catch RemotePairingServerError.unauthorized {
+            await recordRemoteClientDiagnosticBreadcrumb(
+                kind: kind,
+                operation: operation,
+                request: request,
+                workspaceID: workspaceID,
+                providerID: providerID,
+                sessionID: sessionID,
+                message: Self.revokedPairingMessage
+            )
+            send(statusCode: 401, body: RemotePairingErrorResponse(message: Self.revokedPairingMessage), over: connection)
+        } catch {
+            await recordRemoteClientDiagnosticBreadcrumb(
+                kind: kind,
+                operation: operation,
+                request: request,
+                workspaceID: workspaceID,
+                providerID: providerID,
+                sessionID: sessionID,
+                message: error.localizedDescription
+            )
+            send(statusCode: 400, body: RemotePairingErrorResponse(message: error.localizedDescription), over: connection)
+        }
+    }
+
     private func recordRemoteClientDiagnosticBreadcrumb(
         kind: RemoteClientDiagnosticKind,
         operation: RemoteClientDiagnosticOperation,
@@ -412,17 +432,39 @@ final class RemotePairingServer {
         sessionID: UUID? = nil,
         message: String
     ) async {
+        let resolvedContext = await resolveRemoteClientDiagnosticContext(
+            workspaceID: workspaceID,
+            providerID: providerID,
+            sessionID: sessionID
+        )
         let breadcrumb = RemoteClientDiagnosticBreadcrumb(
             kind: kind,
             operation: operation,
             message: message,
             pairedMacID: endpoint.displayAddress.lowercased(),
             pairedDeviceID: UUID(uuidString: request.headers["x-nexus-paired-device-id"] ?? ""),
-            workspaceID: workspaceID,
-            providerID: providerID,
+            workspaceID: resolvedContext.workspaceID,
+            providerID: resolvedContext.providerID,
             sessionID: sessionID
         )
         try? await client.recordRemoteClientDiagnosticBreadcrumb(breadcrumb)
+    }
+
+    private func resolveRemoteClientDiagnosticContext(
+        workspaceID: UUID?,
+        providerID: ProviderID?,
+        sessionID: UUID?
+    ) async -> (workspaceID: UUID?, providerID: ProviderID?) {
+        guard let sessionID,
+              workspaceID == nil || providerID == nil,
+              let session = try? await client.getSessionRecord(sessionID: sessionID) else {
+            return (workspaceID, providerID)
+        }
+
+        return (
+            workspaceID ?? session.workspaceID,
+            providerID ?? session.providerID
+        )
     }
 
     private func authorize(_ request: ParsedRequest) async throws {

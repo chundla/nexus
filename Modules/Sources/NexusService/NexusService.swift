@@ -1349,6 +1349,14 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         return try metadataStore.deleteSession(id: sessionID)
     }
 
+    func getSessionRecord(sessionID: UUID) throws -> Session {
+        guard let session = try metadataStore.session(id: sessionID) else {
+            throw NexusMetadataStoreError.sessionNotFound
+        }
+
+        return try reconcileSessionRuntimeState(session)
+    }
+
     func getSessionScreen(sessionID: UUID) throws -> SessionScreen {
         guard let session = try metadataStore.session(id: sessionID) else {
             throw NexusMetadataStoreError.sessionNotFound
@@ -3069,6 +3077,10 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
 
     func deleteSessionRecord(sessionID: String, reply: @escaping (Data?, NSString?) -> Void) {
         sendReply(with: { try service.deleteSessionRecord(sessionID: resolveUUID(sessionID)) }, reply: reply)
+    }
+
+    func getSessionRecord(sessionID: String, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(with: { try service.getSessionRecord(sessionID: resolveUUID(sessionID)) }, reply: reply)
     }
 
     func getSessionScreen(sessionID: String, reply: @escaping (Data?, NSString?) -> Void) {

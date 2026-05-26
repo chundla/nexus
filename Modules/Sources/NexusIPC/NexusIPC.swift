@@ -50,6 +50,7 @@ public protocol SessionScreenObservation: Sendable {
     func createNamedSession(workspaceID: String, providerID: String, name: String?, reply: @escaping (Data?, NSString?) -> Void)
     func stopSession(sessionID: String, reply: @escaping (Data?, NSString?) -> Void)
     func deleteSessionRecord(sessionID: String, reply: @escaping (Data?, NSString?) -> Void)
+    func getSessionRecord(sessionID: String, reply: @escaping (Data?, NSString?) -> Void)
     func getSessionScreen(sessionID: String, reply: @escaping (Data?, NSString?) -> Void)
     func observeSessionScreen(sessionID: String, reply: @escaping (Data?, NSString?) -> Void)
     func cancelSessionScreenObservation(observationID: String, reply: @escaping (Data?, NSString?) -> Void)
@@ -93,6 +94,7 @@ public protocol NexusServiceClient {
     func createNamedSession(workspaceID: UUID, providerID: ProviderID, name: String?) async throws -> Session
     func stopSession(sessionID: UUID) async throws -> Session
     func deleteSessionRecord(sessionID: UUID) async throws -> Bool
+    func getSessionRecord(sessionID: UUID) async throws -> Session
     func getSessionScreen(sessionID: UUID) async throws -> SessionScreen
     func observeSessionScreen(sessionID: UUID, onUpdate: @escaping @Sendable (SessionScreen) -> Void) async throws -> any SessionScreenObservation
     func sendSessionInput(sessionID: UUID, text: String) async throws -> SessionScreen
@@ -327,6 +329,12 @@ public final class NexusIPCClient: NexusServiceClient, @unchecked Sendable {
     nonisolated public func deleteSessionRecord(sessionID: UUID) async throws -> Bool {
         try await requestDecodable { proxy, reply in
             proxy.deleteSessionRecord(sessionID: sessionID.uuidString, reply: reply)
+        }
+    }
+
+    nonisolated public func getSessionRecord(sessionID: UUID) async throws -> Session {
+        try await requestDecodable { proxy, reply in
+            proxy.getSessionRecord(sessionID: sessionID.uuidString, reply: reply)
         }
     }
 

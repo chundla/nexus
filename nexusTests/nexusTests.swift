@@ -6662,6 +6662,13 @@ private final class TrackingServiceClient: NexusServiceClient {
         return true
     }
 
+    func getSessionRecord(sessionID: UUID) async throws -> Session {
+        guard sessionValue.id == sessionID else {
+            throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Session not found"])
+        }
+        return sessionValue
+    }
+
     func getSessionScreen(sessionID: UUID) async throws -> SessionScreen {
         guard sessionValue.id == sessionID else {
             throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Session not found"])
@@ -6872,6 +6879,10 @@ private struct FailingServiceClient: NexusServiceClient {
     }
 
     func deleteSessionRecord(sessionID: UUID) async throws -> Bool {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func getSessionRecord(sessionID: UUID) async throws -> Session {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 

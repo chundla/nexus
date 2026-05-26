@@ -88,6 +88,47 @@ struct RemotePairingNetworkTests {
         }
     }
 
+    @Test func persistsRemoteUnauthorizedCatalogBreadcrumbForDedicatedNetworkAPI() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
+
+        _ = try await client.setRemoteAccessEnabled(true)
+        let pairing = try await client.startPairing()
+
+        let remoteClient = RemotePairingHTTPClient()
+        let pairedMac = try await remoteClient.completePairing(
+            host: server.displayHost,
+            port: server.port,
+            pairingCode: pairing.code,
+            deviceName: "Chris’s iPhone"
+        )
+        _ = try await client.revokePairedDevice(deviceID: try #require(pairedMac.pairedDeviceID))
+
+        do {
+            _ = try await remoteClient.fetchCatalog(for: pairedMac)
+            Issue.record("Expected revoked Pairing to require pairing again before browsing this Paired Mac")
+        } catch let error as RemotePairingHTTPError {
+            #expect(error == .pairingRevoked("Pair this iPhone again to browse this Paired Mac"))
+        }
+
+        let storeURL = rootURL.appendingPathComponent("Nexus.sqlite", isDirectory: false)
+        let store = try NexusMetadataStore(storeURL: storeURL)
+        let breadcrumb = try #require(store.listRemoteClientDiagnosticBreadcrumbs(limit: 1).first)
+        #expect(breadcrumb.kind == .actionFailure)
+        #expect(breadcrumb.operation == .fetchCatalog)
+        #expect(breadcrumb.message == "Pair this iPhone again to browse this Paired Mac")
+        #expect(breadcrumb.pairedMacID == pairedMac.id)
+        #expect(breadcrumb.pairedDeviceID == pairedMac.pairedDeviceID)
+        #expect(breadcrumb.workspaceID == nil)
+        #expect(breadcrumb.providerID == nil)
+        #expect(breadcrumb.sessionID == nil)
+    }
+
     @Test func persistsRemoteActionFailureBreadcrumbForDedicatedNetworkAPI() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)
