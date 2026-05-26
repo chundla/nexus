@@ -454,7 +454,15 @@ final class RemoteClientPairingModel {
     }
 
     func handleFocusedSessionBackgrounded() async {
+        await handleFocusedSessionScreenDisappeared(preserveAttachment: true)
+    }
+
+    func handleFocusedSessionScreenDisappeared(preserveAttachment: Bool) async {
         await releaseFocusedRemoteSessionControl()
+
+        if preserveAttachment == false {
+            stopFocusingRemoteSession()
+        }
     }
 
     func sendTextToFocusedRemoteSession(_ text: String) async throws {

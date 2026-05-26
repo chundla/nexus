@@ -887,8 +887,7 @@ private struct RemoteSessionScreenView: View {
         .onDisappear {
             if model.focusedSessionID == session.id {
                 Task {
-                    await model.releaseFocusedRemoteSessionControl()
-                    model.stopFocusingRemoteSession()
+                    await model.handleFocusedSessionScreenDisappeared(preserveAttachment: scenePhase == .background)
                 }
             }
         }

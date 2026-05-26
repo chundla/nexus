@@ -950,6 +950,161 @@ struct RemoteClientPairingModelTests {
         #expect(model.focusedSessionIsController == false)
     }
 
+    @Test func backgroundingFocusedSessionScreenPreservesAttachedSessionWhenViewDisappears() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: UUID()
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let screen = SessionScreen(session: session, transcript: "Claude ready")
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let client = StubRemotePairingClient(result: pairedMac, sessionScreen: screen)
+        let model = RemoteClientPairingModel(client: client, store: store)
+
+        await model.focusRemoteSession(sessionID: session.id)
+        try await model.takeFocusedRemoteSessionControl(columns: 44, rows: 12)
+        await model.handleFocusedSessionScreenDisappeared(preserveAttachment: true)
+
+        #expect(client.releaseSessionControlRequests == [session.id])
+        #expect(model.focusedSessionID == session.id)
+        #expect(model.focusedSessionScreen?.session.id == session.id)
+        #expect(model.focusedSessionScreen?.controller == .mac)
+        #expect(model.focusedSessionIsController == false)
+    }
+
+    @Test func returningToFocusedSessionAfterBackgroundStaysViewerUntilTakeControllerAgain() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: UUID()
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let screen = SessionScreen(session: session, transcript: "Claude ready")
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let client = StubRemotePairingClient(result: pairedMac, sessionScreen: screen)
+        let model = RemoteClientPairingModel(client: client, store: store)
+
+        await model.focusRemoteSession(sessionID: session.id)
+        try await model.takeFocusedRemoteSessionControl(columns: 44, rows: 12)
+        await model.handleFocusedSessionBackgrounded()
+        await model.focusRemoteSession(sessionID: session.id)
+
+        #expect(client.takeSessionControlRequests == [.init(sessionID: session.id, columns: 44, rows: 12)])
+        #expect(model.focusedSessionID == session.id)
+        #expect(model.focusedSessionIsController == false)
+        #expect(model.focusedSessionScreen?.controller == .mac)
+
+        do {
+            try await model.sendTextToFocusedRemoteSession("still viewer")
+            Issue.record("Expected returning from background to keep this iPhone in Viewer mode until Controller is explicitly retaken")
+        } catch {
+            #expect(error.localizedDescription == "Take Controller on this iPhone before sending terminal input")
+        }
+    }
+
+    @Test func macControllerReclaimKeepsFocusedSessionAttachedAsViewerAndBlocksInput() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: UUID()
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let screen = SessionScreen(session: session, transcript: "Claude ready")
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let client = StubRemotePairingClient(result: pairedMac, sessionScreen: screen)
+        let model = RemoteClientPairingModel(client: client, store: store)
+
+        await model.focusRemoteSession(sessionID: session.id)
+        try await model.takeFocusedRemoteSessionControl(columns: 44, rows: 12)
+
+        let reclaimedScreen = SessionScreen(
+            session: session,
+            controller: .mac,
+            transcript: "Claude ready\nLOCAL:mac reclaim",
+            terminalColumns: 132,
+            terminalRows: 40
+        )
+        await client.emitObservedScreen(reclaimedScreen)
+
+        #expect(model.focusedSessionID == session.id)
+        #expect(model.focusedSessionIsController == false)
+        #expect(model.focusedSessionScreen == reclaimedScreen)
+
+        do {
+            try await model.sendTextToFocusedRemoteSession("still remote")
+            Issue.record("Expected Mac reclaim to leave this iPhone attached as a Viewer until Controller is explicitly retaken")
+        } catch {
+            #expect(error.localizedDescription == "Take Controller on this iPhone before sending terminal input")
+        }
+    }
+
     @Test func loadsActivePairedMacProviderDetailOnDemand() async throws {
         let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
