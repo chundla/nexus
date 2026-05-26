@@ -345,6 +345,177 @@ struct RemoteClientPairingModelTests {
         #expect(model.focusedSessionScreen == nil)
     }
 
+    @Test func automaticallyReconnectsFocusedRemoteSessionAfterObservedDisconnect() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: UUID()
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let initialScreen = SessionScreen(session: session, transcript: "Claude ready")
+        let recoveredScreen = SessionScreen(session: session, transcript: "Claude ready\nReconnected update")
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let client = StubRemotePairingClient(
+            result: pairedMac,
+            sessionScreenResults: [
+                .success(initialScreen),
+                .success(recoveredScreen)
+            ]
+        )
+        let model = RemoteClientPairingModel(client: client, store: store)
+
+        await model.focusRemoteSession(sessionID: session.id)
+        await client.disconnectObservedSession(NSError(domain: NSURLErrorDomain, code: NSURLErrorCannotConnectToHost))
+        await Task.yield()
+
+        #expect(model.focusedSessionScreen == initialScreen)
+        #expect(model.focusedSessionIsStale)
+        #expect(model.focusedSessionErrorMessage == "The operation couldn’t be completed. (NSURLErrorDomain error -1004.)")
+
+        try await Task.sleep(nanoseconds: 1_100_000_000)
+        await Task.yield()
+
+        #expect(model.focusedSessionScreen == recoveredScreen)
+        #expect(model.focusedSessionIsStale == false)
+        #expect(model.focusedSessionErrorMessage == nil)
+        #expect(client.requestLog == [
+            "observeSessionScreen",
+            "fetchSessionScreen",
+            "observeSessionScreen",
+            "fetchSessionScreen"
+        ])
+    }
+
+    @Test func stoppingFocusedRemoteSessionCancelsAutomaticReconnectAfterObservedDisconnect() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: UUID()
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let initialScreen = SessionScreen(session: session, transcript: "Claude ready")
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let client = StubRemotePairingClient(
+            result: pairedMac,
+            sessionScreenResults: [.success(initialScreen)]
+        )
+        let model = RemoteClientPairingModel(client: client, store: store)
+
+        await model.focusRemoteSession(sessionID: session.id)
+        await client.disconnectObservedSession(NSError(domain: NSURLErrorDomain, code: NSURLErrorCannotConnectToHost))
+        await Task.yield()
+        model.stopFocusingRemoteSession()
+
+        try await Task.sleep(nanoseconds: 1_100_000_000)
+        await Task.yield()
+
+        #expect(model.focusedSessionID == nil)
+        #expect(model.focusedSessionScreen == nil)
+        #expect(model.focusedSessionIsStale == false)
+        #expect(client.requestLog == [
+            "observeSessionScreen",
+            "fetchSessionScreen"
+        ])
+    }
+
+    @Test func unauthorizedObservedSessionDisconnectStopsReconnectAndShowsPairingRecovery() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: UUID()
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let initialScreen = SessionScreen(session: session, transcript: "Claude ready")
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let client = StubRemotePairingClient(
+            result: pairedMac,
+            sessionScreenResults: [.success(initialScreen)]
+        )
+        let model = RemoteClientPairingModel(client: client, store: store)
+
+        await model.focusRemoteSession(sessionID: session.id)
+        await client.disconnectObservedSession(RemotePairingHTTPError.requestFailed("Pair this iPhone again to browse this Paired Mac"))
+        await Task.yield()
+        try await Task.sleep(nanoseconds: 1_100_000_000)
+        await Task.yield()
+
+        #expect(model.pairedMacs.isEmpty)
+        #expect(model.activePairedMac == nil)
+        #expect(model.focusedSessionID == nil)
+        #expect(model.focusedSessionScreen == nil)
+        #expect(model.pairingRecoveryMessage == "Pair this iPhone again to browse this Paired Mac")
+        #expect(client.requestLog == [
+            "observeSessionScreen",
+            "fetchSessionScreen"
+        ])
+    }
+
     @Test func preservesStaleFocusedRemoteSessionScreenWhenRefreshFails() async throws {
         let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
