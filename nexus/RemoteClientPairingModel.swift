@@ -90,6 +90,37 @@ enum PairedMacAvailability: Equatable {
     }
 }
 
+enum RemoteBrowseDestination: Hashable, Identifiable {
+    case workspace(UUID)
+    case provider(UUID, ProviderID)
+    case session(workspaceID: UUID, providerID: ProviderID, sessionID: UUID)
+
+    var id: String {
+        switch self {
+        case .workspace(let workspaceID):
+            "workspace:\(workspaceID.uuidString)"
+        case .provider(let workspaceID, let providerID):
+            "provider:\(workspaceID.uuidString):\(providerID.rawValue)"
+        case .session(let workspaceID, let providerID, let sessionID):
+            "session:\(workspaceID.uuidString):\(providerID.rawValue):\(sessionID.uuidString)"
+        }
+    }
+}
+
+enum RemoteBrowseNavigationError: LocalizedError {
+    case catalogUnavailable
+    case itemUnavailable
+
+    var errorDescription: String? {
+        switch self {
+        case .catalogUnavailable:
+            "Reconnect to this Paired Mac before opening recents."
+        case .itemUnavailable:
+            "This recent item is no longer available on this Paired Mac."
+        }
+    }
+}
+
 @MainActor
 @Observable
 final class RemoteClientPairingModel {
@@ -193,22 +224,82 @@ final class RemoteClientPairingModel {
         providerDetailErrorMessages[RemoteProviderDetailKey(workspaceID: workspaceID, providerID: providerID)]
     }
 
-    func loadProviderDetail(workspaceID: UUID, providerID: ProviderID) async {
-        let key = RemoteProviderDetailKey(workspaceID: workspaceID, providerID: providerID)
-        guard let pairedMac = activePairedMac else {
-            providerDetails[key] = nil
-            providerDetailErrorMessages[key] = nil
-            return
+    func workspaceOverview(id workspaceID: UUID) -> WorkspaceOverview? {
+        catalog?.workspaceOverviews.first(where: { $0.workspace.id == workspaceID })
+    }
+
+    func providerCard(workspaceID: UUID, providerID: ProviderID) -> WorkspaceProviderCard? {
+        workspaceOverview(id: workspaceID)?.providerCards.first(where: { $0.provider.id == providerID })
+    }
+
+    func resolvedSession(workspaceID: UUID, providerID: ProviderID, sessionID: UUID) -> Session? {
+        guard let detail = providerDetail(for: workspaceID, providerID: providerID) else {
+            return nil
         }
 
+        return session(in: detail, sessionID: sessionID)
+    }
+
+    func browseDestination(for target: NavigationTarget) async throws -> RemoteBrowseDestination {
+        guard let catalog else {
+            throw RemoteBrowseNavigationError.catalogUnavailable
+        }
+
+        switch target.kind {
+        case .workspace:
+            guard let workspaceID = target.workspaceID,
+                  catalog.workspaceOverviews.contains(where: { $0.workspace.id == workspaceID }) else {
+                throw RemoteBrowseNavigationError.itemUnavailable
+            }
+            return .workspace(workspaceID)
+        case .provider:
+            guard let workspaceID = target.workspaceID,
+                  let providerID = target.providerID,
+                  catalog.workspaceOverviews
+                    .first(where: { $0.workspace.id == workspaceID })?
+                    .providerCards
+                    .contains(where: { $0.provider.id == providerID }) == true else {
+                throw RemoteBrowseNavigationError.itemUnavailable
+            }
+            return .provider(workspaceID, providerID)
+        case .session:
+            guard let sessionID = target.sessionID else {
+                throw RemoteBrowseNavigationError.itemUnavailable
+            }
+
+            if let destination = browseDestinationForKnownSession(sessionID, catalog: catalog) {
+                return destination
+            }
+
+            for overview in catalog.workspaceOverviews {
+                for providerCard in overview.providerCards {
+                    let detail = try await storedOrFetchedProviderDetail(
+                        workspaceID: overview.workspace.id,
+                        providerID: providerCard.provider.id
+                    )
+                    if session(in: detail, sessionID: sessionID) != nil {
+                        return .session(
+                            workspaceID: overview.workspace.id,
+                            providerID: providerCard.provider.id,
+                            sessionID: sessionID
+                        )
+                    }
+                }
+            }
+
+            throw RemoteBrowseNavigationError.itemUnavailable
+        }
+    }
+
+    func loadProviderDetail(workspaceID: UUID, providerID: ProviderID) async {
         do {
-            providerDetails[key] = try await client.fetchProviderDetail(
-                for: pairedMac,
+            _ = try await storedOrFetchedProviderDetail(
                 workspaceID: workspaceID,
-                providerID: providerID
+                providerID: providerID,
+                forceRefresh: true
             )
-            providerDetailErrorMessages[key] = nil
         } catch {
+            let key = RemoteProviderDetailKey(workspaceID: workspaceID, providerID: providerID)
             providerDetails[key] = nil
             providerDetailErrorMessages[key] = error.localizedDescription
         }
@@ -458,6 +549,72 @@ final class RemoteClientPairingModel {
         providerDetails = [:]
         providerDetailErrorMessages = [:]
         stopFocusingRemoteSession()
+    }
+
+    private func browseDestinationForKnownSession(
+        _ sessionID: UUID,
+        catalog: RemoteWorkspaceCatalog
+    ) -> RemoteBrowseDestination? {
+        for overview in catalog.workspaceOverviews {
+            for providerCard in overview.providerCards {
+                if providerCard.defaultSession.sessionID == sessionID {
+                    return .session(
+                        workspaceID: overview.workspace.id,
+                        providerID: providerCard.provider.id,
+                        sessionID: sessionID
+                    )
+                }
+
+                let key = RemoteProviderDetailKey(workspaceID: overview.workspace.id, providerID: providerCard.provider.id)
+                if let detail = providerDetails[key], session(in: detail, sessionID: sessionID) != nil {
+                    return .session(
+                        workspaceID: overview.workspace.id,
+                        providerID: providerCard.provider.id,
+                        sessionID: sessionID
+                    )
+                }
+            }
+        }
+
+        return nil
+    }
+
+    private func storedOrFetchedProviderDetail(
+        workspaceID: UUID,
+        providerID: ProviderID,
+        forceRefresh: Bool = false
+    ) async throws -> ProviderDetail {
+        let key = RemoteProviderDetailKey(workspaceID: workspaceID, providerID: providerID)
+        if forceRefresh == false, let detail = providerDetails[key] {
+            return detail
+        }
+
+        guard let pairedMac = activePairedMac else {
+            providerDetails[key] = nil
+            providerDetailErrorMessages[key] = nil
+            throw RemoteClientPairingModelError.pairedMacNotFound
+        }
+
+        let detail = try await client.fetchProviderDetail(
+            for: pairedMac,
+            workspaceID: workspaceID,
+            providerID: providerID
+        )
+        providerDetails[key] = detail
+        providerDetailErrorMessages[key] = nil
+        return detail
+    }
+
+    private func session(in detail: ProviderDetail, sessionID: UUID) -> Session? {
+        if detail.defaultSession?.id == sessionID {
+            return detail.defaultSession
+        }
+
+        if let session = detail.alternateSessions.first(where: { $0.id == sessionID }) {
+            return session
+        }
+
+        return detail.failedSessions.first(where: { $0.id == sessionID })
     }
 
     private func openRemoteSessionAndRefreshBrowseState(

@@ -8,6 +8,7 @@ struct RemoteClientHomeView: View {
     @State private var isShowingPairingForm = false
     @State private var isPairing = false
     @State private var isRefreshingAvailability = false
+    @State private var recentDestination: RemoteBrowseDestination?
     @State private var presentedError: RemoteClientHomePresentedError?
 
     var body: some View {
@@ -72,13 +73,18 @@ struct RemoteClientHomeView: View {
                     if catalog.recentNavigation.isEmpty == false {
                         Section("Recent") {
                             ForEach(catalog.recentNavigation) { item in
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(item.title)
-                                        .fontWeight(.medium)
-                                    Text(item.subtitle)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                Button {
+                                    openRecent(item)
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(item.title)
+                                            .fontWeight(.medium)
+                                        Text(item.subtitle)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
+                                .buttonStyle(.plain)
                             }
                         }
                     }
@@ -88,7 +94,11 @@ struct RemoteClientHomeView: View {
                         if overviews.isEmpty == false {
                             Section(group.name) {
                                 ForEach(overviews, id: \.workspace.id) { overview in
-                                    workspaceOverviewRow(overview)
+                                    NavigationLink {
+                                        RemoteWorkspaceDetailView(model: model, overview: overview)
+                                    } label: {
+                                        RemoteWorkspaceSummaryRow(overview: overview)
+                                    }
                                 }
                             }
                         }
@@ -147,6 +157,9 @@ struct RemoteClientHomeView: View {
             }
             .task(id: availabilityRefreshID) {
                 await refreshAvailability()
+            }
+            .navigationDestination(item: $recentDestination) { destination in
+                recentDestinationView(destination)
             }
             .navigationTitle("Nexus Remote")
             .toolbar {
@@ -207,6 +220,35 @@ struct RemoteClientHomeView: View {
         }
     }
 
+    private func openRecent(_ item: NavigationItem) {
+        Task {
+            do {
+                let destination = try await model.browseDestination(for: item.target)
+                recentDestination = nil
+                recentDestination = destination
+            } catch {
+                presentedError = RemoteClientHomePresentedError(message: error.localizedDescription)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func recentDestinationView(_ destination: RemoteBrowseDestination) -> some View {
+        switch destination {
+        case .workspace(let workspaceID):
+            RemoteWorkspaceDestinationView(model: model, workspaceID: workspaceID)
+        case .provider(let workspaceID, let providerID):
+            RemoteProviderDestinationView(model: model, workspaceID: workspaceID, providerID: providerID)
+        case .session(let workspaceID, let providerID, let sessionID):
+            RemoteSessionDestinationView(
+                model: model,
+                workspaceID: workspaceID,
+                providerID: providerID,
+                sessionID: sessionID
+            )
+        }
+    }
+
     private var availabilityRefreshID: String {
         model.pairedMacs.map(\.id).joined(separator: "|") + "::" + (model.activePairedMacID ?? "")
     }
@@ -229,37 +271,158 @@ struct RemoteClientHomeView: View {
         }
     }
 
-    @ViewBuilder
-    private func workspaceOverviewRow(_ overview: WorkspaceOverview) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(overview.workspace.name)
-                .font(.headline)
-            Text(workspaceTargetSummary(for: overview))
+    private func workspaceOverviews(in group: WorkspaceGroup, catalog: RemoteWorkspaceCatalog) -> [WorkspaceOverview] {
+        catalog.workspaceOverviews.filter { $0.workspace.primaryGroupID == group.id }
+    }
+
+    private func availabilityColor(for pairedMac: PairedMac) -> Color {
+        switch model.availability(for: pairedMac) {
+        case .available:
+            .green
+        case .unavailable:
+            .orange
+        case .unknown:
+            .secondary
+        }
+    }
+}
+
+private struct RemoteWorkspaceSummaryRow: View {
+    let overview: WorkspaceOverview
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(overview.workspace.name)
+                    .font(.headline)
+                Spacer()
+                Text("\(overview.providerCards.count) provider\(overview.providerCards.count == 1 ? "" : "s")")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Text(remoteWorkspaceTargetSummary(for: overview))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             if let workspaceAvailability = overview.remoteTarget?.workspaceAvailability {
                 Text(workspaceAvailability.summary)
                     .font(.caption)
-                    .foregroundStyle(workspaceAvailabilityColor(for: workspaceAvailability.state))
-            }
-
-            ForEach(overview.providerCards) { providerCard in
-                NavigationLink {
-                    RemoteProviderDetailView(
-                        model: model,
-                        overview: overview,
-                        providerCard: providerCard
-                    )
-                } label: {
-                    providerCardRow(providerCard)
-                }
-                .buttonStyle(.plain)
+                    .foregroundStyle(remoteWorkspaceAvailabilityColor(for: workspaceAvailability.state))
             }
         }
         .padding(.vertical, 4)
     }
+}
 
-    private func providerCardRow(_ providerCard: WorkspaceProviderCard) -> some View {
+private struct RemoteWorkspaceDetailView: View {
+    @Bindable var model: RemoteClientPairingModel
+    let overview: WorkspaceOverview
+
+    var body: some View {
+        List {
+            Section("Workspace") {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(overview.workspace.name)
+                        .font(.headline)
+                    Text(remoteWorkspaceTargetSummary(for: overview))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if let workspaceAvailability = overview.remoteTarget?.workspaceAvailability {
+                Section("Workspace Availability") {
+                    Text(workspaceAvailability.summary)
+                    if workspaceAvailability.diagnostics.isEmpty == false {
+                        ForEach(Array(workspaceAvailability.diagnostics.enumerated()), id: \.offset) { entry in
+                            Text(entry.element.message)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+
+            Section("Providers") {
+                if overview.providerCards.isEmpty {
+                    Text("No Providers available yet.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(overview.providerCards) { providerCard in
+                        NavigationLink {
+                            RemoteProviderDetailView(
+                                model: model,
+                                overview: overview,
+                                providerCard: providerCard
+                            )
+                        } label: {
+                            RemoteProviderCardRow(providerCard: providerCard)
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle(overview.workspace.name)
+    }
+}
+
+private struct RemoteWorkspaceDestinationView: View {
+    @Bindable var model: RemoteClientPairingModel
+    let workspaceID: UUID
+
+    var body: some View {
+        if let overview = model.workspaceOverview(id: workspaceID) {
+            RemoteWorkspaceDetailView(model: model, overview: overview)
+        } else {
+            ContentUnavailableView("Workspace Unavailable", systemImage: "exclamationmark.triangle")
+        }
+    }
+}
+
+private struct RemoteProviderDestinationView: View {
+    @Bindable var model: RemoteClientPairingModel
+    let workspaceID: UUID
+    let providerID: ProviderID
+
+    var body: some View {
+        if let overview = model.workspaceOverview(id: workspaceID),
+           let providerCard = model.providerCard(workspaceID: workspaceID, providerID: providerID) {
+            RemoteProviderDetailView(model: model, overview: overview, providerCard: providerCard)
+        } else {
+            ContentUnavailableView("Provider Unavailable", systemImage: "exclamationmark.triangle")
+        }
+    }
+}
+
+private struct RemoteSessionDestinationView: View {
+    @Bindable var model: RemoteClientPairingModel
+    let workspaceID: UUID
+    let providerID: ProviderID
+    let sessionID: UUID
+
+    var body: some View {
+        Group {
+            if let session = model.resolvedSession(workspaceID: workspaceID, providerID: providerID, sessionID: sessionID) {
+                RemoteSessionScreenView(model: model, session: session)
+            } else if let errorMessage = model.providerDetailErrorMessage(for: workspaceID, providerID: providerID) {
+                Text(errorMessage)
+                    .foregroundStyle(.orange)
+            } else {
+                Text("Loading Session…")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .task(id: sessionID) {
+            if model.providerDetail(for: workspaceID, providerID: providerID) == nil {
+                await model.loadProviderDetail(workspaceID: workspaceID, providerID: providerID)
+            }
+        }
+    }
+}
+
+private struct RemoteProviderCardRow: View {
+    let providerCard: WorkspaceProviderCard
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack {
                 Text(providerCard.provider.displayName)
@@ -280,33 +443,18 @@ struct RemoteClientHomeView: View {
                 .foregroundStyle(.secondary)
         }
     }
+}
 
-    private func workspaceOverviews(in group: WorkspaceGroup, catalog: RemoteWorkspaceCatalog) -> [WorkspaceOverview] {
-        catalog.workspaceOverviews.filter { $0.workspace.primaryGroupID == group.id }
-    }
+private func remoteWorkspaceTargetSummary(for overview: WorkspaceOverview) -> String {
+    overview.remoteTarget.map { "\($0.host.name) • \(overview.workspace.folderPath)" } ?? overview.workspace.folderPath
+}
 
-    private func workspaceTargetSummary(for overview: WorkspaceOverview) -> String {
-        overview.remoteTarget.map { "\($0.host.name) • \(overview.workspace.folderPath)" } ?? overview.workspace.folderPath
-    }
-
-    private func availabilityColor(for pairedMac: PairedMac) -> Color {
-        switch model.availability(for: pairedMac) {
-        case .available:
-            .green
-        case .unavailable:
-            .orange
-        case .unknown:
-            .secondary
-        }
-    }
-
-    private func workspaceAvailabilityColor(for state: WorkspaceAvailabilitySnapshot.State) -> Color {
-        switch state {
-        case .available:
-            .green
-        case .unavailable, .broken, .blocked:
-            .orange
-        }
+private func remoteWorkspaceAvailabilityColor(for state: WorkspaceAvailabilitySnapshot.State) -> Color {
+    switch state {
+    case .available:
+        .green
+    case .unavailable, .broken, .blocked:
+        .orange
     }
 }
 
