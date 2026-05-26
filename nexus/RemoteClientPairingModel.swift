@@ -139,6 +139,7 @@ final class RemoteClientPairingModel {
     var focusedSessionScreen: SessionScreen?
     var focusedSessionIsStale = false
     var focusedSessionErrorMessage: String?
+    var remoteFailureBreadcrumbs: [RemoteClientDiagnosticBreadcrumb] = []
     var macHost = ""
     var macPort = "9234"
     var pairingCode = ""
@@ -213,6 +214,12 @@ final class RemoteClientPairingModel {
                 return
             }
 
+            recordRemoteFailureBreadcrumb(
+                kind: .actionFailure,
+                operation: .fetchCatalog,
+                pairedMac: pairedMac,
+                error: normalizedError
+            )
             catalog = nil
             catalogErrorMessage = normalizedError.localizedDescription
         }
@@ -323,8 +330,9 @@ final class RemoteClientPairingModel {
             )
             return session
         } catch {
-            throw normalizedRemoteActionError(
+            throw loggedRemoteActionError(
                 error,
+                operation: .launchDefaultSession,
                 pairedMac: pairedMac,
                 workspaceID: workspaceID,
                 providerID: providerID
@@ -348,8 +356,9 @@ final class RemoteClientPairingModel {
             )
             return session
         } catch {
-            throw normalizedRemoteActionError(
+            throw loggedRemoteActionError(
                 error,
+                operation: .createNamedSession,
                 pairedMac: pairedMac,
                 workspaceID: workspaceID,
                 providerID: providerID
@@ -369,11 +378,13 @@ final class RemoteClientPairingModel {
             )
             return session
         } catch {
-            throw normalizedRemoteActionError(
+            throw loggedRemoteActionError(
                 error,
+                operation: .launchSession,
                 pairedMac: pairedMac,
                 workspaceID: workspaceID,
-                providerID: providerID
+                providerID: providerID,
+                sessionID: sessionID
             )
         }
     }
@@ -390,11 +401,13 @@ final class RemoteClientPairingModel {
             await loadProviderDetail(workspaceID: workspaceID, providerID: providerID)
             return session
         } catch {
-            throw normalizedRemoteActionError(
+            throw loggedRemoteActionError(
                 error,
+                operation: .stopSession,
                 pairedMac: pairedMac,
                 workspaceID: workspaceID,
-                providerID: providerID
+                providerID: providerID,
+                sessionID: sessionID
             )
         }
     }
@@ -415,11 +428,13 @@ final class RemoteClientPairingModel {
             await loadProviderDetail(workspaceID: workspaceID, providerID: providerID)
             return true
         } catch {
-            throw normalizedRemoteActionError(
+            throw loggedRemoteActionError(
                 error,
+                operation: .deleteSessionRecord,
                 pairedMac: pairedMac,
                 workspaceID: workspaceID,
-                providerID: providerID
+                providerID: providerID,
+                sessionID: sessionID
             )
         }
     }
@@ -449,7 +464,12 @@ final class RemoteClientPairingModel {
             focusedSessionIsStale = false
             focusedSessionErrorMessage = nil
         } catch {
-            throw normalizedRemoteActionError(error, pairedMac: pairedMac)
+            throw loggedRemoteActionError(
+                error,
+                operation: .takeSessionControl,
+                pairedMac: pairedMac,
+                sessionID: sessionID
+            )
         }
     }
 
@@ -465,7 +485,12 @@ final class RemoteClientPairingModel {
             focusedSessionIsStale = false
             focusedSessionErrorMessage = nil
         } catch {
-            let normalizedError = normalizedRemoteActionError(error, pairedMac: pairedMac)
+            let normalizedError = loggedRemoteActionError(
+                error,
+                operation: .releaseSessionControl,
+                pairedMac: pairedMac,
+                sessionID: sessionID
+            )
             focusedSessionErrorMessage = normalizedError.localizedDescription
         }
     }
@@ -490,7 +515,12 @@ final class RemoteClientPairingModel {
             focusedSessionIsStale = false
             focusedSessionErrorMessage = nil
         } catch {
-            let normalizedError = normalizedRemoteActionError(error, pairedMac: pairedMac)
+            let normalizedError = loggedRemoteActionError(
+                error,
+                operation: .takeSessionControl,
+                pairedMac: pairedMac,
+                sessionID: sessionID
+            )
             focusedSessionErrorMessage = normalizedError.localizedDescription
         }
     }
@@ -516,9 +546,18 @@ final class RemoteClientPairingModel {
             throw RemoteClientPairingModelError.controllerRequired
         }
 
-        focusedSessionScreen = try await client.sendSessionText(for: pairedMac, sessionID: sessionID, text: text)
-        focusedSessionIsStale = false
-        focusedSessionErrorMessage = nil
+        do {
+            focusedSessionScreen = try await client.sendSessionText(for: pairedMac, sessionID: sessionID, text: text)
+            focusedSessionIsStale = false
+            focusedSessionErrorMessage = nil
+        } catch {
+            throw loggedRemoteActionError(
+                error,
+                operation: .sendSessionText,
+                pairedMac: pairedMac,
+                sessionID: sessionID
+            )
+        }
     }
 
     func sendInputKeyToFocusedRemoteSession(_ key: SessionInputKey) async throws {
@@ -530,9 +569,18 @@ final class RemoteClientPairingModel {
             throw RemoteClientPairingModelError.controllerRequired
         }
 
-        focusedSessionScreen = try await client.sendSessionInputKey(for: pairedMac, sessionID: sessionID, key: key)
-        focusedSessionIsStale = false
-        focusedSessionErrorMessage = nil
+        do {
+            focusedSessionScreen = try await client.sendSessionInputKey(for: pairedMac, sessionID: sessionID, key: key)
+            focusedSessionIsStale = false
+            focusedSessionErrorMessage = nil
+        } catch {
+            throw loggedRemoteActionError(
+                error,
+                operation: .sendSessionInputKey,
+                pairedMac: pairedMac,
+                sessionID: sessionID
+            )
+        }
     }
 
     func stopFocusingRemoteSession() {
@@ -641,6 +689,32 @@ final class RemoteClientPairingModel {
         return error
     }
 
+    private func loggedRemoteActionError(
+        _ error: any Error,
+        operation: RemoteClientDiagnosticOperation,
+        pairedMac: PairedMac,
+        workspaceID: UUID? = nil,
+        providerID: ProviderID? = nil,
+        sessionID: UUID? = nil
+    ) -> any Error {
+        let normalizedError = normalizedRemoteActionError(
+            error,
+            pairedMac: pairedMac,
+            workspaceID: workspaceID,
+            providerID: providerID
+        )
+        recordRemoteFailureBreadcrumb(
+            kind: .actionFailure,
+            operation: operation,
+            pairedMac: pairedMac,
+            workspaceID: workspaceID,
+            providerID: providerID,
+            sessionID: sessionID,
+            error: normalizedError
+        )
+        return normalizedError
+    }
+
     private func clearRemoteBrowseState() {
         catalog = nil
         catalogErrorMessage = nil
@@ -703,8 +777,9 @@ final class RemoteClientPairingModel {
             providerDetailErrorMessages[key] = nil
             return detail
         } catch {
-            let normalizedError = normalizedRemoteActionError(
+            let normalizedError = loggedRemoteActionError(
                 error,
+                operation: .fetchProviderDetail,
                 pairedMac: pairedMac,
                 workspaceID: workspaceID,
                 providerID: providerID
@@ -852,6 +927,13 @@ final class RemoteClientPairingModel {
         }
 
         focusedSessionErrorMessage = error.localizedDescription
+        recordRemoteFailureBreadcrumb(
+            kind: .reconnectFailure,
+            operation: .observeSessionScreen,
+            pairedMac: activePairedMac,
+            sessionID: sessionID,
+            error: error
+        )
     }
 
     private func scheduleFocusedSessionReconnect(for sessionID: UUID) {
@@ -892,6 +974,33 @@ final class RemoteClientPairingModel {
         try? forgetPairedMac(id: pairedMacID)
         pairingRecoveryMessage = message
         return true
+    }
+
+    private func recordRemoteFailureBreadcrumb(
+        kind: RemoteClientDiagnosticKind,
+        operation: RemoteClientDiagnosticOperation,
+        pairedMac: PairedMac?,
+        workspaceID: UUID? = nil,
+        providerID: ProviderID? = nil,
+        sessionID: UUID? = nil,
+        error: any Error
+    ) {
+        remoteFailureBreadcrumbs.append(
+            RemoteClientDiagnosticBreadcrumb(
+                kind: kind,
+                operation: operation,
+                message: error.localizedDescription,
+                pairedMacID: pairedMac?.id,
+                pairedDeviceID: pairedMac?.pairedDeviceID,
+                workspaceID: workspaceID,
+                providerID: providerID,
+                sessionID: sessionID
+            )
+        )
+
+        if remoteFailureBreadcrumbs.count > 20 {
+            remoteFailureBreadcrumbs.removeFirst(remoteFailureBreadcrumbs.count - 20)
+        }
     }
 
     private static func resolveActivePairedMacID(

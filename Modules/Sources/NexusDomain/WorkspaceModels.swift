@@ -396,3 +396,61 @@ public struct NavigationItem: Codable, Equatable, Identifiable, Sendable {
         }
     }
 }
+
+public enum RemoteClientDiagnosticKind: String, Codable, Equatable, Sendable {
+    case reconnectFailure
+    case actionFailure
+}
+
+public enum RemoteClientDiagnosticOperation: String, Codable, Equatable, Sendable {
+    case fetchCatalog
+    case fetchProviderDetail
+    case launchDefaultSession
+    case createNamedSession
+    case launchSession
+    case stopSession
+    case deleteSessionRecord
+    case fetchSessionScreen
+    case observeSessionScreen
+    case takeSessionControl
+    case releaseSessionControl
+    case sendSessionText
+    case sendSessionInputKey
+}
+
+public struct RemoteClientDiagnosticBreadcrumb: Codable, Equatable, Identifiable, Sendable {
+    public let id: UUID
+    public let kind: RemoteClientDiagnosticKind
+    public let operation: RemoteClientDiagnosticOperation
+    public let message: String
+    public let pairedMacID: String?
+    public let pairedDeviceID: UUID?
+    public let workspaceID: UUID?
+    public let providerID: ProviderID?
+    public let sessionID: UUID?
+    public let recordedAt: Date
+
+    public init(
+        id: UUID = UUID(),
+        kind: RemoteClientDiagnosticKind,
+        operation: RemoteClientDiagnosticOperation,
+        message: String,
+        pairedMacID: String? = nil,
+        pairedDeviceID: UUID? = nil,
+        workspaceID: UUID? = nil,
+        providerID: ProviderID? = nil,
+        sessionID: UUID? = nil,
+        recordedAt: Date = Date()
+    ) {
+        self.id = id
+        self.kind = kind
+        self.operation = operation
+        self.message = message
+        self.pairedMacID = pairedMacID
+        self.pairedDeviceID = pairedDeviceID
+        self.workspaceID = workspaceID
+        self.providerID = providerID
+        self.sessionID = sessionID
+        self.recordedAt = recordedAt
+    }
+}

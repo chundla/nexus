@@ -6484,6 +6484,8 @@ private final class TrackingServiceClient: NexusServiceClient {
         searchResultsValue
     }
 
+    func recordRemoteClientDiagnosticBreadcrumb(_ breadcrumb: RemoteClientDiagnosticBreadcrumb) async throws {}
+
     func getRemoteAccessState() async throws -> RemoteAccessState {
         remoteAccessStateValue
     }
@@ -6806,6 +6808,10 @@ private struct FailingServiceClient: NexusServiceClient {
     }
 
     func searchNavigation(query: String) async throws -> [NavigationItem] {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func recordRemoteClientDiagnosticBreadcrumb(_ breadcrumb: RemoteClientDiagnosticBreadcrumb) async throws {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 

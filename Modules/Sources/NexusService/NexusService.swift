@@ -1001,6 +1001,10 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         try metadataStore.deletePairedDevice(id: deviceID)
     }
 
+    func recordRemoteClientDiagnosticBreadcrumb(_ breadcrumb: RemoteClientDiagnosticBreadcrumb) throws {
+        try metadataStore.recordRemoteClientDiagnosticBreadcrumb(breadcrumb)
+    }
+
     func recordNavigation(target: NavigationTarget) throws {
         try metadataStore.recordNavigation(target: target)
     }
@@ -2962,6 +2966,17 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
 
     func searchNavigation(query: String, reply: @escaping (Data?, NSString?) -> Void) {
         sendReply(with: { try service.searchNavigation(query: query) }, reply: reply)
+    }
+
+    func recordRemoteClientDiagnosticBreadcrumb(payload: Data, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(
+            with: {
+                let breadcrumb = try JSONDecoder().decode(RemoteClientDiagnosticBreadcrumb.self, from: payload)
+                try service.recordRemoteClientDiagnosticBreadcrumb(breadcrumb)
+                return true
+            },
+            reply: reply
+        )
     }
 
     func getWorkspaceOverview(workspaceID: String, reply: @escaping (Data?, NSString?) -> Void) {

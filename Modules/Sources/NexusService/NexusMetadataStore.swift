@@ -125,6 +125,22 @@ final class NexusMetadataStore {
                 name TEXT NOT NULL,
                 paired_at INTEGER NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS remote_client_diagnostic_breadcrumbs (
+                id TEXT PRIMARY KEY NOT NULL,
+                kind TEXT NOT NULL,
+                operation TEXT NOT NULL,
+                message TEXT NOT NULL,
+                paired_mac_id TEXT,
+                paired_device_id TEXT,
+                workspace_id TEXT,
+                provider_id TEXT,
+                session_id TEXT,
+                recorded_at INTEGER NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_remote_client_diagnostic_breadcrumbs_recorded_at
+            ON remote_client_diagnostic_breadcrumbs(recorded_at DESC);
             """
         )
         try ensureColumnExists(
@@ -267,6 +283,70 @@ final class NexusMetadataStore {
             try bind(id.uuidString, at: 1, in: statement)
             try stepDone(statement)
             return sqlite3_changes(database) > 0
+        }
+    }
+
+    func recordRemoteClientDiagnosticBreadcrumb(_ breadcrumb: RemoteClientDiagnosticBreadcrumb) throws {
+        try withLock {
+            let recordedAtMilliseconds = Int64(breadcrumb.recordedAt.timeIntervalSince1970 * 1_000)
+            let statement = try prepare(
+                """
+                INSERT INTO remote_client_diagnostic_breadcrumbs (
+                    id, kind, operation, message, paired_mac_id, paired_device_id, workspace_id, provider_id, session_id, recorded_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                """
+            )
+            defer { sqlite3_finalize(statement) }
+
+            try bind(breadcrumb.id.uuidString, at: 1, in: statement)
+            try bind(breadcrumb.kind.rawValue, at: 2, in: statement)
+            try bind(breadcrumb.operation.rawValue, at: 3, in: statement)
+            try bind(breadcrumb.message, at: 4, in: statement)
+            try bind(breadcrumb.pairedMacID, at: 5, in: statement)
+            try bind(breadcrumb.pairedDeviceID?.uuidString, at: 6, in: statement)
+            try bind(breadcrumb.workspaceID?.uuidString, at: 7, in: statement)
+            try bind(breadcrumb.providerID?.rawValue, at: 8, in: statement)
+            try bind(breadcrumb.sessionID?.uuidString, at: 9, in: statement)
+            try bind(recordedAtMilliseconds, at: 10, in: statement)
+            try stepDone(statement)
+
+            let trimStatement = try prepare(
+                """
+                DELETE FROM remote_client_diagnostic_breadcrumbs
+                WHERE id NOT IN (
+                    SELECT id FROM remote_client_diagnostic_breadcrumbs
+                    ORDER BY recorded_at DESC, rowid DESC
+                    LIMIT 200
+                );
+                """
+            )
+            defer { sqlite3_finalize(trimStatement) }
+            try stepDone(trimStatement)
+        }
+    }
+
+    func listRemoteClientDiagnosticBreadcrumbs(limit: Int) throws -> [RemoteClientDiagnosticBreadcrumb] {
+        guard limit > 0 else {
+            return []
+        }
+
+        return try withLock {
+            let statement = try prepare(
+                """
+                SELECT id, kind, operation, message, paired_mac_id, paired_device_id, workspace_id, provider_id, session_id, recorded_at
+                FROM remote_client_diagnostic_breadcrumbs
+                ORDER BY recorded_at DESC, rowid DESC
+                LIMIT ?;
+                """
+            )
+            defer { sqlite3_finalize(statement) }
+
+            try bind(Int32(limit), at: 1, in: statement)
+            var breadcrumbs: [RemoteClientDiagnosticBreadcrumb] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                breadcrumbs.append(try readRemoteClientDiagnosticBreadcrumb(from: statement))
+            }
+            return breadcrumbs
         }
     }
 
@@ -1228,6 +1308,30 @@ final class NexusMetadataStore {
             id: try readUUID(column: 0, from: statement),
             name: try readString(column: 1, from: statement),
             pairedAt: Date(timeIntervalSince1970: Double(sqlite3_column_int64(statement, 2)) / 1_000)
+        )
+    }
+
+    private func readRemoteClientDiagnosticBreadcrumb(from statement: OpaquePointer?) throws -> RemoteClientDiagnosticBreadcrumb {
+        let kindRawValue = try readString(column: 1, from: statement)
+        guard let kind = RemoteClientDiagnosticKind(rawValue: kindRawValue) else {
+            throw NexusMetadataStoreError.sqlite("Unknown remote client diagnostic kind: \(kindRawValue)")
+        }
+        let operationRawValue = try readString(column: 2, from: statement)
+        guard let operation = RemoteClientDiagnosticOperation(rawValue: operationRawValue) else {
+            throw NexusMetadataStoreError.sqlite("Unknown remote client diagnostic operation: \(operationRawValue)")
+        }
+
+        return RemoteClientDiagnosticBreadcrumb(
+            id: try readUUID(column: 0, from: statement),
+            kind: kind,
+            operation: operation,
+            message: try readString(column: 3, from: statement),
+            pairedMacID: readOptionalString(column: 4, from: statement),
+            pairedDeviceID: try readOptionalUUID(column: 5, from: statement),
+            workspaceID: try readOptionalUUID(column: 6, from: statement),
+            providerID: readOptionalString(column: 7, from: statement).flatMap(ProviderID.init(rawValue:)),
+            sessionID: try readOptionalUUID(column: 8, from: statement),
+            recordedAt: Date(timeIntervalSince1970: Double(sqlite3_column_int64(statement, 9)) / 1_000)
         )
     }
 

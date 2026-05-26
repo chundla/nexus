@@ -218,8 +218,22 @@ final class RemotePairingServer {
                 }
                 stream.start()
             } catch RemotePairingServerError.unauthorized {
+                await recordRemoteClientDiagnosticBreadcrumb(
+                    kind: .reconnectFailure,
+                    operation: .observeSessionScreen,
+                    request: request,
+                    sessionID: sessionScreenObservationRequest.sessionID,
+                    message: "Pair this iPhone again to browse this Paired Mac"
+                )
                 send(statusCode: 401, body: RemotePairingErrorResponse(message: "Pair this iPhone again to browse this Paired Mac"), over: connection)
             } catch {
+                await recordRemoteClientDiagnosticBreadcrumb(
+                    kind: .reconnectFailure,
+                    operation: .observeSessionScreen,
+                    request: request,
+                    sessionID: sessionScreenObservationRequest.sessionID,
+                    message: error.localizedDescription
+                )
                 send(statusCode: 400, body: RemotePairingErrorResponse(message: error.localizedDescription), over: connection)
             }
             return
@@ -262,6 +276,13 @@ final class RemotePairingServer {
             } catch RemotePairingServerError.unauthorized {
                 send(statusCode: 401, body: RemotePairingErrorResponse(message: "Pair this iPhone again to browse this Paired Mac"), over: connection)
             } catch {
+                await recordRemoteClientDiagnosticBreadcrumb(
+                    kind: .actionFailure,
+                    operation: .deleteSessionRecord,
+                    request: request,
+                    sessionID: deleteSessionRecordRequest.sessionID,
+                    message: error.localizedDescription
+                )
                 send(statusCode: 400, body: RemotePairingErrorResponse(message: error.localizedDescription), over: connection)
             }
             return
@@ -380,6 +401,28 @@ final class RemotePairingServer {
         } catch {
             send(statusCode: 400, body: RemotePairingErrorResponse(message: error.localizedDescription), over: connection)
         }
+    }
+
+    private func recordRemoteClientDiagnosticBreadcrumb(
+        kind: RemoteClientDiagnosticKind,
+        operation: RemoteClientDiagnosticOperation,
+        request: ParsedRequest,
+        workspaceID: UUID? = nil,
+        providerID: ProviderID? = nil,
+        sessionID: UUID? = nil,
+        message: String
+    ) async {
+        let breadcrumb = RemoteClientDiagnosticBreadcrumb(
+            kind: kind,
+            operation: operation,
+            message: message,
+            pairedMacID: endpoint.displayAddress.lowercased(),
+            pairedDeviceID: UUID(uuidString: request.headers["x-nexus-paired-device-id"] ?? ""),
+            workspaceID: workspaceID,
+            providerID: providerID,
+            sessionID: sessionID
+        )
+        try? await client.recordRemoteClientDiagnosticBreadcrumb(breadcrumb)
     }
 
     private func authorize(_ request: ParsedRequest) async throws {

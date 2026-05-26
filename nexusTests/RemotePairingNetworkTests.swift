@@ -88,6 +88,122 @@ struct RemotePairingNetworkTests {
         }
     }
 
+    @Test func persistsRemoteActionFailureBreadcrumbForDedicatedNetworkAPI() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
+
+        _ = try await client.setRemoteAccessEnabled(true)
+        let pairing = try await client.startPairing()
+        let group = try await client.createWorkspaceGroup(name: "Client Work")
+        let workspace = try await client.createLocalWorkspace(
+            name: "Nexus",
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+
+        let remoteClient = RemotePairingHTTPClient()
+        let pairedMac = try await remoteClient.completePairing(
+            host: server.displayHost,
+            port: server.port,
+            pairingCode: pairing.code,
+            deviceName: "Chris’s iPhone"
+        )
+        let session = try await remoteClient.launchOrResumeDefaultSession(
+            for: pairedMac,
+            workspaceID: workspace.id,
+            providerID: .claude
+        )
+
+        do {
+            _ = try await remoteClient.deleteSessionRecord(for: pairedMac, sessionID: session.id)
+            Issue.record("Expected deleting a running Session Record over the dedicated remote API to fail")
+        } catch let error as RemotePairingHTTPError {
+            #expect(error == .requestFailed("Stop the session before deleting its record"))
+        }
+
+        let storeURL = rootURL.appendingPathComponent("Nexus.sqlite", isDirectory: false)
+        let store = try NexusMetadataStore(storeURL: storeURL)
+        let breadcrumb = try #require(store.listRemoteClientDiagnosticBreadcrumbs(limit: 1).first)
+        #expect(breadcrumb.kind == .actionFailure)
+        #expect(breadcrumb.operation == .deleteSessionRecord)
+        #expect(breadcrumb.message == "Stop the session before deleting its record")
+        #expect(breadcrumb.pairedMacID == pairedMac.id)
+        #expect(breadcrumb.pairedDeviceID == pairedMac.pairedDeviceID)
+        #expect(breadcrumb.workspaceID == workspace.id)
+        #expect(breadcrumb.providerID == .claude)
+        #expect(breadcrumb.sessionID == session.id)
+    }
+
+    @Test func persistsRemoteReconnectFailureBreadcrumbForDedicatedNetworkAPI() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
+
+        _ = try await client.setRemoteAccessEnabled(true)
+        let pairing = try await client.startPairing()
+        let group = try await client.createWorkspaceGroup(name: "Client Work")
+        let workspace = try await client.createLocalWorkspace(
+            name: "Nexus",
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+
+        let remoteClient = RemotePairingHTTPClient()
+        let pairedMac = try await remoteClient.completePairing(
+            host: server.displayHost,
+            port: server.port,
+            pairingCode: pairing.code,
+            deviceName: "Chris’s iPhone"
+        )
+        _ = try await client.revokePairedDevice(deviceID: try #require(pairedMac.pairedDeviceID))
+
+        var disconnectContinuation: AsyncStream<any Error>.Continuation?
+        let disconnectStream = AsyncStream<any Error> { continuation in
+            disconnectContinuation = continuation
+        }
+        var disconnectIterator = disconnectStream.makeAsyncIterator()
+
+        let observation = try await remoteClient.observeSessionScreen(
+            for: pairedMac,
+            sessionID: session.id,
+            onUpdate: { _ in },
+            onDisconnect: { error in
+                disconnectContinuation?.yield(error)
+                disconnectContinuation?.finish()
+            }
+        )
+        let disconnectError = try #require(await disconnectIterator.next())
+        await observation.cancel()
+
+        #expect((disconnectError as? RemotePairingHTTPError) == .pairingRevoked("Pair this iPhone again to browse this Paired Mac"))
+
+        let storeURL = rootURL.appendingPathComponent("Nexus.sqlite", isDirectory: false)
+        let store = try NexusMetadataStore(storeURL: storeURL)
+        let breadcrumb = try #require(store.listRemoteClientDiagnosticBreadcrumbs(limit: 1).first)
+        #expect(breadcrumb.kind == .reconnectFailure)
+        #expect(breadcrumb.operation == .observeSessionScreen)
+        #expect(breadcrumb.message == "Pair this iPhone again to browse this Paired Mac")
+        #expect(breadcrumb.pairedMacID == pairedMac.id)
+        #expect(breadcrumb.pairedDeviceID == pairedMac.pairedDeviceID)
+        #expect(breadcrumb.sessionID == session.id)
+    }
+
     @Test func fetchesRemoteProviderDetailOnDemandOverDedicatedNetworkAPI() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)
