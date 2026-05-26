@@ -877,6 +877,29 @@ final class RemoteClientPairingModel {
                 }
             )
             focusedSessionObservation = observation
+
+            if focusedSessionScreen?.session.id != sessionID {
+                do {
+                    let initialScreen = try await client.fetchSessionScreen(for: pairedMac, sessionID: sessionID)
+                    if focusedSessionID == sessionID {
+                        focusedSessionScreen = initialScreen
+                        focusedSessionIsStale = false
+                        focusedSessionErrorMessage = nil
+                    }
+                } catch {
+                    if focusedSessionScreen?.session.id != sessionID {
+                        await cancelFocusedSessionObservation()
+                        if handleUnauthorizedPairedMac(error, pairedMacID: pairedMac.id) {
+                            return
+                        }
+
+                        applyFocusedSessionObservationError(error, sessionID: sessionID)
+                        scheduleFocusedSessionReconnect(for: sessionID)
+                        return
+                    }
+                }
+            }
+
             focusedSessionReconnectTask?.cancel()
             focusedSessionReconnectTask = nil
         } catch {
