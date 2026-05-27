@@ -74,7 +74,9 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
             return localCLIHealthSummary(commandName: "claude", providerName: "Claude", workspace: workspace)
         case .codex:
             return localCLIHealthSummary(commandName: "codex", providerName: "Codex", workspace: workspace)
-        case .ibmBob, .pi:
+        case .pi:
+            return localCLIHealthSummary(commandName: "pi", providerName: "Pi", workspace: workspace)
+        case .ibmBob:
             return ProviderHealthSummary(
                 state: .notChecked,
                 summary: "Health checks coming soon"
