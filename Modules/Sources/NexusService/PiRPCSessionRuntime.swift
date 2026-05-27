@@ -39,10 +39,10 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         return runtimeState
     }
 
-    var piSessionLinkage: PiSessionLinkage? {
+    var sessionRecordAdapterMetadata: SessionRecordAdapterMetadata? {
         lock.lock()
         defer { lock.unlock() }
-        return sessionLinkage
+        return sessionLinkage?.sessionRecordAdapterMetadata
     }
 
     private let lock = NSLock()

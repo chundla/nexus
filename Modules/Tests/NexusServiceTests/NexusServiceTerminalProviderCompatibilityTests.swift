@@ -148,7 +148,7 @@ private struct CompatibilitySessionRuntimeLauncher: SessionRuntimeLaunching {
 
 private final class CompatibilityStaticSessionRuntime: SessionRuntime, @unchecked Sendable {
     var state: Session.State = .ready
-    var piSessionLinkage: PiSessionLinkage? { nil }
+    var sessionRecordAdapterMetadata: SessionRecordAdapterMetadata? { nil }
 
     private let primarySurface: SessionSurface
     private let transcript: String

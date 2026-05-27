@@ -111,10 +111,10 @@ final class NexusMetadataStore {
                 resolved_working_directory TEXT NOT NULL
             );
 
-            CREATE TABLE IF NOT EXISTS pi_session_linkages (
+            CREATE TABLE IF NOT EXISTS session_record_adapter_metadata (
                 session_id TEXT PRIMARY KEY NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-                pi_session_id TEXT,
-                session_file TEXT
+                provider_id TEXT NOT NULL,
+                metadata_json TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS recent_navigation (
@@ -174,6 +174,7 @@ final class NexusMetadataStore {
             column: "remote_runtime_generation",
             definition: "INTEGER NOT NULL DEFAULT 0"
         )
+        try migrateLegacyPiSessionLinkagesIfNeeded()
     }
 
     deinit {
@@ -887,33 +888,19 @@ final class NexusMetadataStore {
         }
     }
 
-    func piSessionLinkage(sessionID: UUID) throws -> PiSessionLinkage? {
+    func sessionRecordAdapterMetadata(sessionID: UUID) throws -> SessionRecordAdapterMetadata? {
         try withLock {
-            try piSessionLinkageWithoutLock(sessionID: sessionID)
+            try sessionRecordAdapterMetadataWithoutLock(sessionID: sessionID)
         }
     }
 
-    func savePiSessionLinkage(sessionID: UUID, linkage: PiSessionLinkage) throws {
-        guard linkage.isEmpty == false else {
+    func saveSessionRecordAdapterMetadata(sessionID: UUID, metadata: SessionRecordAdapterMetadata) throws {
+        guard metadata.isEmpty == false else {
             return
         }
 
         try withLock {
-            let statement = try prepare(
-                """
-                INSERT INTO pi_session_linkages (session_id, pi_session_id, session_file)
-                VALUES (?, ?, ?)
-                ON CONFLICT(session_id) DO UPDATE SET
-                    pi_session_id = excluded.pi_session_id,
-                    session_file = excluded.session_file;
-                """
-            )
-            defer { sqlite3_finalize(statement) }
-
-            try bind(sessionID.uuidString, at: 1, in: statement)
-            try bind(linkage.piSessionID, at: 2, in: statement)
-            try bind(linkage.sessionFile, at: 3, in: statement)
-            try stepDone(statement)
+            try saveSessionRecordAdapterMetadataWithoutLock(sessionID: sessionID, metadata: metadata)
         }
     }
 
@@ -1206,9 +1193,9 @@ final class NexusMetadataStore {
         return try readLaunchSnapshot(from: statement)
     }
 
-    private func piSessionLinkageWithoutLock(sessionID: UUID) throws -> PiSessionLinkage? {
+    private func sessionRecordAdapterMetadataWithoutLock(sessionID: UUID) throws -> SessionRecordAdapterMetadata? {
         let statement = try prepare(
-            "SELECT pi_session_id, session_file FROM pi_session_linkages WHERE session_id = ? LIMIT 1;"
+            "SELECT provider_id, metadata_json FROM session_record_adapter_metadata WHERE session_id = ? LIMIT 1;"
         )
         defer { sqlite3_finalize(statement) }
 
@@ -1217,11 +1204,31 @@ final class NexusMetadataStore {
             return nil
         }
 
-        let linkage = PiSessionLinkage(
-            piSessionID: readOptionalString(column: 0, from: statement),
-            sessionFile: readOptionalString(column: 1, from: statement)
+        let providerRawValue = try readString(column: 0, from: statement)
+        guard let providerID = ProviderID(rawValue: providerRawValue) else {
+            throw NexusMetadataStoreError.sqlite("Unknown provider ID: \(providerRawValue)")
+        }
+        let values = try decodeSessionRecordAdapterMetadataValues(from: try readString(column: 1, from: statement))
+        let metadata = SessionRecordAdapterMetadata(providerID: providerID, values: values)
+        return metadata.isEmpty ? nil : metadata
+    }
+
+    private func saveSessionRecordAdapterMetadataWithoutLock(sessionID: UUID, metadata: SessionRecordAdapterMetadata) throws {
+        let statement = try prepare(
+            """
+            INSERT INTO session_record_adapter_metadata (session_id, provider_id, metadata_json)
+            VALUES (?, ?, ?)
+            ON CONFLICT(session_id) DO UPDATE SET
+                provider_id = excluded.provider_id,
+                metadata_json = excluded.metadata_json;
+            """
         )
-        return linkage.isEmpty ? nil : linkage
+        defer { sqlite3_finalize(statement) }
+
+        try bind(sessionID.uuidString, at: 1, in: statement)
+        try bind(metadata.providerID.rawValue, at: 2, in: statement)
+        try bind(try encodeSessionRecordAdapterMetadataValues(metadata.values), at: 3, in: statement)
+        try stepDone(statement)
     }
 
     func session(id: UUID) throws -> Session? {
@@ -1539,6 +1546,58 @@ final class NexusMetadataStore {
             throw NexusMetadataStoreError.sqlite("Invalid UUID: \(rawValue)")
         }
         return value
+    }
+
+    private func migrateLegacyPiSessionLinkagesIfNeeded() throws {
+        guard try tableExists("pi_session_linkages") else {
+            return
+        }
+
+        let statement = try prepare("SELECT session_id, pi_session_id, session_file FROM pi_session_linkages;")
+        defer { sqlite3_finalize(statement) }
+
+        while sqlite3_step(statement) == SQLITE_ROW {
+            let sessionID = try readUUID(column: 0, from: statement)
+            if try sessionRecordAdapterMetadataWithoutLock(sessionID: sessionID) != nil {
+                continue
+            }
+
+            let metadata = SessionRecordAdapterMetadata(
+                providerID: .pi,
+                values: [
+                    "piSessionID": readOptionalString(column: 1, from: statement) ?? "",
+                    "sessionFile": readOptionalString(column: 2, from: statement) ?? ""
+                ]
+            )
+            guard metadata.isEmpty == false else {
+                continue
+            }
+
+            try saveSessionRecordAdapterMetadataWithoutLock(sessionID: sessionID, metadata: metadata)
+        }
+    }
+
+    private func tableExists(_ table: String) throws -> Bool {
+        let statement = try prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1;")
+        defer { sqlite3_finalize(statement) }
+
+        try bind(table, at: 1, in: statement)
+        return sqlite3_step(statement) == SQLITE_ROW
+    }
+
+    private func encodeSessionRecordAdapterMetadataValues(_ values: [String: String]) throws -> String {
+        let data = try JSONEncoder().encode(values)
+        guard let json = String(data: data, encoding: .utf8) else {
+            throw NexusMetadataStoreError.sqlite("Could not encode Session Record adapter metadata")
+        }
+        return json
+    }
+
+    private func decodeSessionRecordAdapterMetadataValues(from json: String) throws -> [String: String] {
+        guard let data = json.data(using: .utf8) else {
+            throw NexusMetadataStoreError.sqlite("Could not decode Session Record adapter metadata")
+        }
+        return try JSONDecoder().decode([String: String].self, from: data)
     }
 
     private func encodeHostValidationDiagnostics(_ diagnostics: [HostValidationDiagnostic]) throws -> String {

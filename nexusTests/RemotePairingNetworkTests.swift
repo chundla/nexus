@@ -1572,7 +1572,7 @@ private final class DelayedEchoSessionRuntimeManager: SessionRuntimeManaging, @u
         return runtimes[session.id]?.state
     }
 
-    func piSessionLinkage(for session: Session) -> PiSessionLinkage? {
+    func sessionRecordAdapterMetadata(for session: Session) -> SessionRecordAdapterMetadata? {
         nil
     }
 

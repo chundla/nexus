@@ -1,5 +1,6 @@
 #if os(macOS)
 import Foundation
+import NexusDomain
 
 struct PiSessionLinkage: Equatable, Sendable {
     let piSessionID: String?
@@ -12,6 +13,31 @@ struct PiSessionLinkage: Equatable, Sendable {
             }
             return trimmed.isEmpty
         }
+    }
+
+    var sessionRecordAdapterMetadata: SessionRecordAdapterMetadata? {
+        let metadata = SessionRecordAdapterMetadata(
+            providerID: .pi,
+            values: [
+                "piSessionID": piSessionID ?? "",
+                "sessionFile": sessionFile ?? ""
+            ]
+        )
+        return metadata.isEmpty ? nil : metadata
+    }
+}
+
+extension SessionRecordAdapterMetadata {
+    var piSessionLinkage: PiSessionLinkage? {
+        guard providerID == .pi else {
+            return nil
+        }
+
+        let linkage = PiSessionLinkage(
+            piSessionID: values["piSessionID"],
+            sessionFile: values["sessionFile"]
+        )
+        return linkage.isEmpty ? nil : linkage
     }
 }
 #endif

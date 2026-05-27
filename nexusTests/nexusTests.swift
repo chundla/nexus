@@ -6146,7 +6146,7 @@ struct nexusTests {
     @Test func appModelKeepsTerminalBackedProvidersOnTerminalSurfacesAlongsidePiSessionSurfaces() async throws {
         final class CompatibilityStaticSessionRuntime: SessionRuntime, @unchecked Sendable {
             var state: Session.State = .ready
-            var piSessionLinkage: PiSessionLinkage? { nil }
+            var sessionRecordAdapterMetadata: SessionRecordAdapterMetadata? { nil }
 
             private let transcript: String
             private let activityItems: [SessionActivityItem]
@@ -6316,7 +6316,7 @@ struct nexusTests {
                 try PiRPCSessionRuntime(
                     executable: launchConfiguration.executable,
                     workingDirectory: launchConfiguration.workingDirectory,
-                    sessionLinkage: launchConfiguration.piSessionLinkage,
+                    sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.piSessionLinkage,
                     terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
                     transportFactory: { _, _, _ in
                         NexusTestsPiRPCTransport(promptResponseText: "world")
@@ -6379,7 +6379,7 @@ struct nexusTests {
             try PiRPCSessionRuntime(
                 executable: launchConfiguration.executable,
                 workingDirectory: launchConfiguration.workingDirectory,
-                sessionLinkage: launchConfiguration.piSessionLinkage,
+                sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.piSessionLinkage,
                 terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
                 transportFactory: { _, _, _ in
                     NexusTestsPiRPCTransport(promptResponseText: "world")
@@ -7783,7 +7783,7 @@ private final class StubSessionRuntimeManager: SessionRuntimeManaging {
         states[session.id]
     }
 
-    func piSessionLinkage(for session: Session) -> PiSessionLinkage? {
+    func sessionRecordAdapterMetadata(for session: Session) -> SessionRecordAdapterMetadata? {
         nil
     }
 

@@ -71,7 +71,7 @@ struct NexusServicePiSessionStreamTests {
                 try PiRPCSessionRuntime(
                     executable: launchConfiguration.executable,
                     workingDirectory: launchConfiguration.workingDirectory,
-                    sessionLinkage: launchConfiguration.piSessionLinkage,
+                    sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.piSessionLinkage,
                     terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
                     transportFactory: { _, arguments, _ in
                         transportHarness.makeTransport(arguments: arguments)
@@ -127,7 +127,7 @@ struct NexusServicePiSessionStreamTests {
                 try PiRPCSessionRuntime(
                     executable: launchConfiguration.executable,
                     workingDirectory: launchConfiguration.workingDirectory,
-                    sessionLinkage: launchConfiguration.piSessionLinkage,
+                    sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.piSessionLinkage,
                     terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
                     transportFactory: { _, _, _ in
                         TestPiRPCTransport()
@@ -200,7 +200,7 @@ struct NexusServicePiSessionStreamTests {
                 try PiRPCSessionRuntime(
                     executable: launchConfiguration.executable,
                     workingDirectory: launchConfiguration.workingDirectory,
-                    sessionLinkage: launchConfiguration.piSessionLinkage,
+                    sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.piSessionLinkage,
                     terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
                     transportFactory: { _, arguments, _ in
                         transportHarness.makeTransport(arguments: arguments)

@@ -29,7 +29,7 @@ protocol SessionRuntimeManaging: AnyObject {
     func remove(session: Session)
     func hasRuntime(for session: Session) -> Bool
     func runtimeState(for session: Session) -> Session.State?
-    func piSessionLinkage(for session: Session) -> PiSessionLinkage?
+    func sessionRecordAdapterMetadata(for session: Session) -> SessionRecordAdapterMetadata?
     func sessionScreen(for session: Session) throws -> SessionScreen
     func addUpdateObserver(id: UUID, for session: Session, observer: @escaping @Sendable () -> Void)
     func removeUpdateObserver(id: UUID)
@@ -52,7 +52,7 @@ struct SessionRuntimeLaunchConfiguration {
     let remoteHost: NexusDomain.Host?
     let remoteRuntimeIdentifier: String?
     let remoteRuntimeLaunchMode: RemoteRuntimeLaunchMode
-    let piSessionLinkage: PiSessionLinkage?
+    let sessionRecordAdapterMetadata: SessionRecordAdapterMetadata?
     let initialTranscript: String
     let terminationStatusMessageBuilder: (Int32) -> String
 
@@ -63,7 +63,7 @@ struct SessionRuntimeLaunchConfiguration {
         remoteHost: NexusDomain.Host?,
         remoteRuntimeIdentifier: String? = nil,
         remoteRuntimeLaunchMode: RemoteRuntimeLaunchMode = .launchNew,
-        piSessionLinkage: PiSessionLinkage? = nil,
+        sessionRecordAdapterMetadata: SessionRecordAdapterMetadata? = nil,
         initialTranscript: String = "",
         terminationStatusMessageBuilder: @escaping (Int32) -> String = { _ in "" }
     ) {
@@ -73,7 +73,7 @@ struct SessionRuntimeLaunchConfiguration {
         self.remoteHost = remoteHost
         self.remoteRuntimeIdentifier = remoteRuntimeIdentifier
         self.remoteRuntimeLaunchMode = remoteRuntimeLaunchMode
-        self.piSessionLinkage = piSessionLinkage
+        self.sessionRecordAdapterMetadata = sessionRecordAdapterMetadata
         self.initialTranscript = initialTranscript
         self.terminationStatusMessageBuilder = terminationStatusMessageBuilder
     }
@@ -85,7 +85,7 @@ protocol SessionRuntimeLaunching {
 
 protocol SessionRuntime: AnyObject {
     var state: Session.State { get }
-    var piSessionLinkage: PiSessionLinkage? { get }
+    var sessionRecordAdapterMetadata: SessionRecordAdapterMetadata? { get }
     func sessionScreen(for session: Session) -> SessionScreen
     func setChangeHandler(_ handler: (@Sendable () -> Void)?)
     func stop() throws
@@ -242,10 +242,10 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Se
         return runtimes[session.id]?.state
     }
 
-    func piSessionLinkage(for session: Session) -> PiSessionLinkage? {
+    func sessionRecordAdapterMetadata(for session: Session) -> SessionRecordAdapterMetadata? {
         lock.lock()
         defer { lock.unlock() }
-        return runtimes[session.id]?.piSessionLinkage
+        return runtimes[session.id]?.sessionRecordAdapterMetadata
     }
 
     func sessionScreen(for session: Session) throws -> SessionScreen {
@@ -449,7 +449,7 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
             try PiRPCSessionRuntime(
                 executable: launchConfiguration.executable,
                 workingDirectory: launchConfiguration.workingDirectory,
-                sessionLinkage: launchConfiguration.piSessionLinkage,
+                sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.piSessionLinkage,
                 terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder
             )
         }
@@ -523,7 +523,7 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
 }
 
 final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
-    var piSessionLinkage: PiSessionLinkage? {
+    var sessionRecordAdapterMetadata: SessionRecordAdapterMetadata? {
         nil
     }
 
@@ -2205,13 +2205,12 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     private func persistRuntimeLinkageIfNeeded(for session: Session) throws {
-        guard session.providerID == .pi,
-              let linkage = sessionRuntimeManager.piSessionLinkage(for: session),
-              linkage.isEmpty == false else {
+        guard let metadata = sessionRuntimeManager.sessionRecordAdapterMetadata(for: session),
+              metadata.isEmpty == false else {
             return
         }
 
-        try metadataStore.savePiSessionLinkage(sessionID: session.id, linkage: linkage)
+        try metadataStore.saveSessionRecordAdapterMetadata(sessionID: session.id, metadata: metadata)
     }
 
     private func remoteRuntimeRecoveryFailure(
@@ -2260,7 +2259,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             remoteHost: remoteHost,
             remoteRuntimeIdentifier: resolvedRemoteRuntimeIdentifier,
             remoteRuntimeLaunchMode: remoteRuntimeLaunchMode,
-            piSessionLinkage: session.providerID == .pi ? try metadataStore.piSessionLinkage(sessionID: session.id) : nil,
+            sessionRecordAdapterMetadata: try metadataStore.sessionRecordAdapterMetadata(sessionID: session.id),
             initialTranscript: adapter.initialTranscript(
                 for: workspace,
                 remoteHost: remoteHost,
