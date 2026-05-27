@@ -398,14 +398,31 @@ struct RemoteSessionCommandBuilder {
 }
 
 final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
+    typealias PiRuntimeFactory = (_ launchConfiguration: SessionRuntimeLaunchConfiguration, _ session: Session, _ workspace: Workspace) throws -> any SessionRuntime
+
     private let remoteSessionCommandBuilder = RemoteSessionCommandBuilder()
     private let localShellCommandBuilder: LocalShellCommandBuilder
+    private let piRuntimeFactory: PiRuntimeFactory
 
-    init(localShellCommandBuilder: LocalShellCommandBuilder = LocalShellCommandBuilder()) {
+    init(
+        localShellCommandBuilder: LocalShellCommandBuilder = LocalShellCommandBuilder(),
+        piRuntimeFactory: PiRuntimeFactory? = nil
+    ) {
         self.localShellCommandBuilder = localShellCommandBuilder
+        self.piRuntimeFactory = piRuntimeFactory ?? { launchConfiguration, _, _ in
+            try PiRPCSessionRuntime(
+                executable: launchConfiguration.executable,
+                workingDirectory: launchConfiguration.workingDirectory,
+                terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder
+            )
+        }
     }
 
     func makeRuntime(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) throws -> any SessionRuntime {
+        if session.providerID == .pi, launchConfiguration.remoteHost == nil {
+            return try piRuntimeFactory(launchConfiguration, session, workspace)
+        }
+
         if let remoteHost = launchConfiguration.remoteHost,
            let runtimeIdentifier = launchConfiguration.remoteRuntimeIdentifier {
             let arguments: [String]

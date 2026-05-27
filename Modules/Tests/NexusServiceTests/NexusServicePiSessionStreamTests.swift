@@ -12,11 +12,19 @@ struct NexusServicePiSessionStreamTests {
         let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
 
-        let launcher = ActivitySessionRuntimeLauncher(
-            activityItems: [
-                SessionActivityItem(kind: .status, text: "Pi shared Session stream connected")
-            ]
-        )
+        let launchCounter = LaunchCounter()
+        let launcher = ProcessSessionRuntimeLauncher(piRuntimeFactory: { launchConfiguration, _, _ in
+            launchCounter.increment()
+            return try PiRPCSessionRuntime(
+                executable: launchConfiguration.executable,
+                workingDirectory: launchConfiguration.workingDirectory,
+                terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
+                transportFactory: { _, _, _ in
+                    TestPiRPCTransport()
+                }
+            )
+        })
+
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthEvaluator(
@@ -47,7 +55,38 @@ struct NexusServicePiSessionStreamTests {
         #expect(firstScreen.activityItems.map(\.text) == ["Pi shared Session stream connected"])
         #expect(firstScreen.activityItems.map(\.kind) == [.status])
         #expect(firstScreen.transcript.isEmpty)
-        #expect(launcher.launchCount == 1)
+        #expect(launchCounter.value == 1)
+    }
+
+    @Test func localPiRuntimeStreamsPromptAndAssistantMessageIntoSharedSessionActivity() throws {
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in
+                TestPiRPCTransport(promptResponseText: "world")
+            }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendText("hello")
+        try runtime.sendInputKey(.enter, applicationCursorMode: false)
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(screen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "You: hello",
+            "Pi: world"
+        ])
+        #expect(screen.activityItems.map(\.kind) == [.status, .message, .message])
+        #expect(screen.transcript == "> hello\nworld")
     }
 }
 
@@ -88,62 +127,96 @@ private struct PiStreamStubCommandRunner: ProviderCommandRunning {
     }
 }
 
-private final class ActivitySessionRuntimeLauncher: SessionRuntimeLaunching, @unchecked Sendable {
-    private let activityItems: [SessionActivityItem]
-    private(set) var launchCount = 0
+private final class LaunchCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private(set) var value = 0
 
-    init(activityItems: [SessionActivityItem]) {
-        self.activityItems = activityItems
-    }
-
-    func makeRuntime(
-        session: Session,
-        workspace: Workspace,
-        launchConfiguration: SessionRuntimeLaunchConfiguration
-    ) throws -> any SessionRuntime {
-        launchCount += 1
-        return ActivitySessionRuntime(activityItems: activityItems)
+    func increment() {
+        lock.lock()
+        value += 1
+        lock.unlock()
     }
 }
 
-private final class ActivitySessionRuntime: SessionRuntime, @unchecked Sendable {
-    var state: Session.State = .ready
-    private let activityItems: [SessionActivityItem]
-    private var terminalColumns = 80
-    private var terminalRows = 24
-    private var changeHandler: (@Sendable () -> Void)?
+private final class TestPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
+    private let promptResponseText: String
+    private var stdoutLineHandler: (@Sendable (String) -> Void)?
+    private var terminationHandler: (@Sendable (Int32) -> Void)?
 
-    init(activityItems: [SessionActivityItem]) {
-        self.activityItems = activityItems
+    init(promptResponseText: String = "") {
+        self.promptResponseText = promptResponseText
     }
 
-    func sessionScreen(for session: Session) -> SessionScreen {
-        SessionScreen(
-            session: session,
-            transcript: "",
-            terminalColumns: terminalColumns,
-            terminalRows: terminalRows,
-            activityItems: activityItems
-        )
+    func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
+        stdoutLineHandler = handler
     }
 
-    func setChangeHandler(_ handler: (@Sendable () -> Void)?) {
-        changeHandler = handler
+    func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?) {
+        terminationHandler = handler
     }
 
-    func stop() throws {
-        state = .exited
-        changeHandler?()
+    func start() throws {}
+
+    func sendLine(_ line: String) throws {
+        guard let data = line.data(using: .utf8),
+              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = object["type"] as? String else {
+            return
+        }
+
+        switch type {
+        case "get_state":
+            emit([
+                "id": object["id"] as? String ?? "state",
+                "type": "response",
+                "command": "get_state",
+                "success": true,
+                "data": [
+                    "sessionId": "pi-session-1"
+                ]
+            ])
+        case "prompt":
+            emit([
+                "type": "response",
+                "command": "prompt",
+                "success": true
+            ])
+            guard promptResponseText.isEmpty == false else {
+                return
+            }
+            emit([
+                "type": "message_update",
+                "assistantMessageEvent": [
+                    "type": "text_delta",
+                    "delta": promptResponseText
+                ]
+            ])
+            emit([
+                "type": "turn_end",
+                "message": [
+                    "content": [
+                        [
+                            "type": "text",
+                            "text": promptResponseText
+                        ]
+                    ]
+                ]
+            ])
+        default:
+            return
+        }
     }
 
-    func sendInput(_ text: String) throws {}
-    func sendText(_ text: String) throws {}
-    func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool) throws {}
+    func terminate() throws {
+        terminationHandler?(0)
+    }
 
-    func resize(columns: Int, rows: Int) throws {
-        terminalColumns = columns
-        terminalRows = rows
-        changeHandler?()
+    private func emit(_ object: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: object),
+              let line = String(data: data, encoding: .utf8) else {
+            return
+        }
+        stdoutLineHandler?(line)
     }
 }
 #endif
