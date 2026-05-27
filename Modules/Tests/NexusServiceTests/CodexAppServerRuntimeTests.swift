@@ -34,6 +34,23 @@ struct CodexAppServerRuntimeTests {
         #expect(transport.sentMessages.compactMap { $0["method"] as? String } == ["initialize", "initialized", "thread/start"])
     }
 
+    @Test func resumesStructuredSessionFromExistingCodexThreadLinkage() throws {
+        let transport = TestCodexAppServerTransport(threadID: "codex-thread-1")
+        _ = try CodexAppServerRuntime(
+            executable: "/tmp/fake-codex",
+            workingDirectory: "/tmp/workspace",
+            sessionLinkage: CodexSessionLinkage(threadID: "codex-thread-1"),
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let resumeParameters = try #require(transport.sentMessages.last?["params"] as? [String: Any])
+
+        #expect(transport.sentMessages.compactMap { $0["method"] as? String } == ["initialize", "initialized", "thread/resume"])
+        #expect(resumeParameters["threadId"] as? String == "codex-thread-1")
+        #expect(resumeParameters["cwd"] as? String == "/tmp/workspace")
+    }
+
     @Test func surfacesPendingCommandApprovalRequestInSharedSessionStream() throws {
         let transport = TestCodexAppServerTransport(threadID: "codex-thread-1")
         let runtime = try CodexAppServerRuntime(
@@ -182,7 +199,7 @@ private final class TestCodexAppServerTransport: CodexAppServerTransporting, @un
                     "platformOs": "macos"
                 ]
             ]))
-        case "thread/start":
+        case "thread/start", "thread/resume":
             stdoutLineHandler?(jsonLine([
                 "id": object["id"] ?? 0,
                 "result": [
