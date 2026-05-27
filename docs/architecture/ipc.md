@@ -64,8 +64,12 @@ Planned:
 - `stopSession(sessionID)`
 - `deleteSessionRecord(sessionID)`
 - `relaunchSession(sessionID)`
+- `observeSession(sessionID)`
+- `respondToApprovalRequest(sessionID, approvalRequestID, decision)`
 
-### Terminal attachment
+### Optional terminal attachment
+
+Used only when a Provider exposes a terminal surface.
 
 - `attachTerminal(sessionID, clientMetadata)`
 - `detachTerminal(sessionID, clientID)`
@@ -82,9 +86,14 @@ Planned:
 
 ## Stream event families
 
+- `sessionMessage`
+- `sessionApprovalChanged`
+- `sessionProgressChanged`
+- `sessionDiffChanged`
+- `sessionCommandActivityChanged`
+- `sessionStateChanged`
 - `terminalOutput`
 - `terminalStateChanged`
-- `sessionStateChanged`
 - `providerHealthChanged`
 - `workspaceChanged`
 - `diagnosticLogged`

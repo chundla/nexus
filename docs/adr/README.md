@@ -12,7 +12,7 @@ Initial set:
 4. SQLite/custom store owned by the Background Service
 5. Provider adapters live entirely in the Background Service
 6. Separate local and remote workspaces
-7. Shared terminal session model with platform-specific rendering
+7. Shared terminal session model with platform-specific rendering (superseded by ADR-0028)
 8. Workspace groups are first-class, with one primary group per workspace in V1
 9. Session launch config is snapshotted at creation time
 10. Service restart does not restore live local PTY runtime in milestone one
@@ -33,3 +33,4 @@ Initial set:
 25. Provider authentication remains provider-native; Nexus only performs light auth-readiness detection
 26. Remote provider executable resolution uses shell-aware discovery on the Host
 27. Remote clients use a dedicated network API that reuses Nexus domain concepts rather than exposing local IPC directly
+28. Shared Session stream is canonical; terminal is an optional Session surface

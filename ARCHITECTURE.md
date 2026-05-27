@@ -6,7 +6,7 @@ Nexus is the workspace-first control center for coding agent CLIs across local a
 
 - **Workspace-first**: Workspace is the primary object in the product and domain model.
 - **Provider-aware**: Codex, Claude, IBM Bob, and Pi are first-class providers.
-- **Session-oriented**: Sessions are managed within a workspace and provider.
+- **Session-oriented**: Sessions are provider-managed workstreams within a workspace and provider.
 - **Mac-centric execution**: macOS runs the UI and the Background Service; iOS later acts as a remote client.
 - **Service-owned orchestration**: The Background Service is the source of truth for state, persistence, provider adapters, and session lifecycle.
 
@@ -15,7 +15,7 @@ Nexus is the workspace-first control center for coding agent CLIs across local a
 - **Workspace Group**: top-level organizer; each workspace has one primary group in V1.
 - **Workspace**: a named local or remote working target with stable UUID identity.
 - **Provider**: a supported coding CLI integration.
-- **Session**: an app-owned session tied to a workspace and provider.
+- **Session**: an app-owned provider-managed workstream tied to a workspace and provider.
 - **Launch Snapshot**: resolved launch configuration captured at session creation time.
 - **Host**: a saved remote SSH host profile.
 - **Provider Health**: adapter-reported health and diagnostics for a provider on a target.
@@ -54,7 +54,8 @@ Owns:
 - provider adapters
 - session lifecycle
 - launch snapshot creation
-- terminal session ownership
+- shared Session streams and presentation state
+- terminal session ownership where a Provider exposes a terminal surface
 - diagnostics/logging
 - later: paired devices and remote client coordination
 
@@ -71,6 +72,7 @@ Owns:
 - Users may create additional named sessions explicitly.
 - Session launch configuration is snapshotted at creation time.
 - Failed launches create inspectable failed session records.
+- Nexus may host both terminal-backed and protocol-native Session runtimes behind the same Session model during migration.
 
 ### Top-level lifecycle
 
@@ -84,24 +86,30 @@ Owns:
 
 Providers and transports may attach substate/diagnostics beneath these shared states.
 
-## Terminal model
+## Session presentation model
 
-The Background Service owns canonical terminal session state.
+The Background Service owns a canonical shared Session stream for every Session.
 
-Shared terminal concepts:
+Shared Session concepts:
 
-- input
-- output
-- resize
-- bounded scrollback
+- user and assistant messages
+- approval requests and decisions
+- plan and progress updates
+- diffs and file-change proposals
+- command activity
+- errors and completion state
 - attach/detach
-- transcript capture policy
 - controller/viewer ownership
+
+A Provider may additionally expose presentation-specific surfaces such as:
+
+- terminal input/output/resize and bounded scrollback
+- provider-native structured artifacts
 
 Renderers are platform-specific:
 
-- macOS: embedded terminal component
-- iOS: later remote renderer
+- macOS: native Session UI, with terminal rendering when a Provider exposes a terminal surface
+- iOS: later remote Session renderer, with terminal rendering when a Provider exposes a terminal surface
 
 ## Persistence model
 
@@ -137,7 +145,7 @@ If the Background Service restarts, live local sessions are treated as lost and 
 - Top level: workspace groups and workspaces
 - Workspace screen: **provider-first** overview
 - Provider detail: default session, named sessions, failed sessions, actions
-- Focused session screen: terminal-first, but still owned by workspace/provider
+- Focused session screen: provider-appropriate Session presentation, but still owned by workspace/provider
 - Quick switch: workspace-first, with provider/session results secondary
 
 ## Milestone one
@@ -183,4 +191,5 @@ Milestone one proves the service-centered architecture with local-only execution
 - `docs/architecture/milestone-5.md`
 - `docs/architecture/milestone-6.md`
 - `docs/architecture/milestone-7.md`
+- `docs/architecture/milestone-8.md`
 - `docs/adr/`

@@ -13,8 +13,8 @@ A supported coding CLI integration that can be used inside a Workspace.
 _Avoid_: tool, backend
 
 **Session**:
-An app-owned workstream for one Provider in one Workspace.
-_Avoid_: process, tab
+An app-owned provider-managed workstream for one Provider in one Workspace.
+_Avoid_: process, tab, terminal
 
 **Session Record**:
 The persisted Nexus record for a Session, which may exist even when no live runtime is attached.
@@ -77,7 +77,7 @@ The status of whether Nexus can reach and authenticate to a Host and verify requ
 _Avoid_: provider health, remote health
 
 **Provider Health**:
-The status of whether a Provider is available and launchable for a specific Workspace target. For a **Remote Workspace**, this resolves the Provider from the Host user's shell environments, records an absolute executable path, and then launches by absolute path.
+The status of whether a Provider is available and launchable for a specific Workspace target; diagnostics may come from executable resolution, auth readiness, protocol handshake readiness, or other provider-specific launch prerequisites.
 _Avoid_: host status, remote health
 
 **Launchable Provider**:
@@ -87,6 +87,10 @@ _Avoid_: operable provider, enabled provider
 **Provider Capability**:
 A product-supported action Nexus exposes for a Provider on a specific Workspace target, such as launching the **Default Session** or creating a **Named Session**.
 _Avoid_: hidden feature flag, UI-only affordance
+
+**Approval Request**:
+A Session event that asks Nexus to collect an allow-or-deny decision for provider work before it continues.
+_Avoid_: auth prompt, provider popup
 
 **Workspace Availability**:
 The status of whether a Workspace's target location is currently accessible and usable.
@@ -147,6 +151,7 @@ _Avoid_: stop, close
 - A **Remote Workspace** uses one **Remote Session Strategy** when launched remotely
 - A **Provider** has a separate **Provider Health** state for each Workspace target
 - A **Provider** exposes one or more **Provider Capabilities** for a specific **Workspace** target
+- A **Session** may emit zero or more **Approval Requests** while work is in progress
 - A remote **Provider Health** check resolves the **Provider** from the **Host** user's shell environments and records an absolute executable path for launch
 
 ## Example dialogue
@@ -162,7 +167,7 @@ _Avoid_: stop, close
 - **Pairing** scope could be read as per-Workspace or per-Provider approval — resolved: a trusted **Paired Device** is authorized against the **Paired Mac** as a whole in V1.
 - "tmux" could sound like a workspace type — resolved: it is a **Remote Session Strategy**.
 - "remote health" was too vague — resolved: split into **Host Validation** and **Provider Health**.
-- User-installed provider CLIs may appear in one Host shell environment but not another, and may not appear in the raw SSH command PATH at all — resolved: remote **Provider Health** resolves executables across the Host user's shell environments and standard per-user install locations, then remote launch uses that absolute path.
+- User-installed provider CLIs may appear in one Host shell environment but not another, and may not appear in the raw SSH command PATH at all — resolved: terminal-backed remote **Provider Health** resolves executables across the Host user's shell environments and standard per-user install locations, then remote launch uses that absolute path.
 - Remote path accessibility is not **Host Validation** — resolved: it belongs under **Workspace Availability**.
 - Service restart semantics are not uniform across targets — resolved: local session runtime may be lost after service restart, while tmux-backed remote Sessions are recoverable.
 - A failed dependency is not the same as a failed check — resolved: use **Blocked Check** for checks that could not run because an upstream dependency failed.
@@ -177,3 +182,6 @@ _Avoid_: stop, close
 - "operable provider" was vague product language — resolved: use **Launchable Provider** when the issue is whether Nexus can start a **Session** now, based on current **Provider Health**.
 - Shared UI affordances should not infer action support from provider names alone — resolved: expose **Provider Capability** from the service rather than hardcoding Claude-specific checks in the UI.
 - Action support and launch readiness are different questions — resolved: **Provider Capability** explains whether Nexus supports an action on a target, while **Provider Health** explains whether it can succeed now.
+- "session" could be mistaken for a terminal runtime — resolved: a **Session** is a provider-managed workstream; terminal I/O is only one possible presentation.
+- provider-native words like "thread" or "conversation" could leak into product language — resolved: Nexus keeps **Session** as the public concept and stores provider-native identifiers as adapter details.
+- approvals could be confused with provider login or auth — resolved: **Approval Request** is Session-time control over provider work, while provider authentication remains provider-native readiness/auth state.

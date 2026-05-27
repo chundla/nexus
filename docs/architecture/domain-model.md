@@ -113,6 +113,24 @@ Notes:
 - Default session exists conceptually per workspace+provider.
 - Additional named sessions are explicit.
 - Failed launches still create session records.
+- Provider-native thread or conversation identifiers remain linkage metadata rather than public product language.
+
+### SessionStream
+
+Service-owned shared activity model for every Session:
+- `sessionID`
+- `messages[]`
+- `approvalRequests[]`
+- `planUpdates[]`
+- `diffs[]`
+- `commandActivity[]`
+- `errors[]`
+- `completionState`
+- `attachments[]`
+
+Notes:
+- Present for every Session regardless of Provider runtime shape.
+- Both terminal-backed and protocol-native runtimes project activity into this shared model.
 
 ### LaunchSnapshot
 
@@ -136,7 +154,7 @@ Notes:
 
 ### TerminalSession
 
-Service-owned runtime concept:
+Optional service-owned runtime concept when a Provider exposes a terminal surface:
 - `sessionID`
 - `pty/process ref`
 - `size`
@@ -158,6 +176,7 @@ Service-owned runtime concept:
 - Host 1 -> many remote Workspaces
 - Workspace 1 -> many Sessions
 - Provider 1 -> many Sessions
+- Session 1 -> 1 SessionStream
 - Session 1 -> 1 LaunchSnapshot
 - Session 1 -> 0..1 live TerminalSession
 

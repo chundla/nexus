@@ -8,7 +8,7 @@ Responsibilities:
 - macOS UI
 - workspace-first navigation
 - provider cards and provider detail screens
-- session terminal screen
+- provider-appropriate Session screens, including structured Session UI and terminal rendering when needed
 - quick switch UI
 - minimal diagnostics and service status UI
 - local IPC client
@@ -17,6 +17,7 @@ Must not own:
 - authoritative session lifecycle
 - provider adapter logic
 - persistence
+- protocol-native runtime orchestration
 - PTY/process orchestration
 
 ### NexusService
@@ -28,7 +29,9 @@ Responsibilities:
 - health checks
 - launch snapshot resolution
 - session lifecycle orchestration
-- PTY/process ownership
+- shared Session streams and presentation state
+- protocol-native runtime ownership
+- PTY/process ownership where a Provider exposes a terminal surface
 - diagnostics
 
 Current bootstrap implementation:
@@ -65,6 +68,10 @@ Extract provider adapter interfaces and implementations when complexity warrants
 ### NexusTerminal
 
 Extract shared terminal model/runtime helpers once macOS+iOS renderers both exist.
+
+### NexusSessionPresentation
+
+Extract shared Session-stream and presentation helpers once structured Session UI exists for more than one Provider.
 
 ## Boundary rules
 
