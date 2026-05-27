@@ -49,19 +49,25 @@ struct SessionRuntimeLaunchConfiguration {
     let remoteHost: NexusDomain.Host?
     let remoteRuntimeIdentifier: String?
     let remoteRuntimeLaunchMode: RemoteRuntimeLaunchMode
+    let initialTranscript: String
+    let terminationStatusMessageBuilder: (Int32) -> String
 
     init(
         executable: String,
         workingDirectory: String,
         remoteHost: NexusDomain.Host?,
         remoteRuntimeIdentifier: String? = nil,
-        remoteRuntimeLaunchMode: RemoteRuntimeLaunchMode = .launchNew
+        remoteRuntimeLaunchMode: RemoteRuntimeLaunchMode = .launchNew,
+        initialTranscript: String = "",
+        terminationStatusMessageBuilder: @escaping (Int32) -> String = { _ in "" }
     ) {
         self.executable = executable
         self.workingDirectory = workingDirectory
         self.remoteHost = remoteHost
         self.remoteRuntimeIdentifier = remoteRuntimeIdentifier
         self.remoteRuntimeLaunchMode = remoteRuntimeLaunchMode
+        self.initialTranscript = initialTranscript
+        self.terminationStatusMessageBuilder = terminationStatusMessageBuilder
     }
 }
 
@@ -410,27 +416,25 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
         if let remoteHost = launchConfiguration.remoteHost,
            let runtimeIdentifier = launchConfiguration.remoteRuntimeIdentifier {
             let arguments: [String]
-            let initialTranscript: String
             switch launchConfiguration.remoteRuntimeLaunchMode {
             case .launchNew:
                 arguments = remoteSessionCommandBuilder.launchArguments(configuration: launchConfiguration)
-                initialTranscript = "Connecting to \(workspace.name) on \(remoteHost.name) with Claude…\n"
             case .attachExisting:
                 arguments = remoteSessionCommandBuilder.recoverArguments(configuration: launchConfiguration)
-                initialTranscript = "Reconnecting to \(workspace.name) on \(remoteHost.name) with Claude…\n"
             }
 
             return try ProcessSessionRuntime(
                 executable: "/usr/bin/ssh",
                 arguments: arguments,
                 workingDirectory: nil,
-                initialTranscript: initialTranscript,
+                initialTranscript: launchConfiguration.initialTranscript,
                 stopHandler: {
                     try Self.runCommand(
                         executable: "/usr/bin/ssh",
                         arguments: self.remoteSessionCommandBuilder.stopArguments(runtimeIdentifier: runtimeIdentifier, host: remoteHost)
                     )
-                }
+                },
+                terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder
             )
         }
 
@@ -438,7 +442,8 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
             executable: launchConfiguration.executable,
             arguments: [],
             workingDirectory: launchConfiguration.workingDirectory,
-            initialTranscript: "Launching \(workspace.name) with Claude…\n"
+            initialTranscript: launchConfiguration.initialTranscript,
+            terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder
         )
     }
 
@@ -473,6 +478,7 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
     private let readSource: DispatchSourceRead
     private let terminationSource: DispatchSourceProcess
     private let stopHandler: (() throws -> Void)?
+    private let terminationStatusMessageBuilder: (Int32) -> String
     private let lock = NSLock()
     private var runtimeState: Session.State
     private var storage: String
@@ -488,7 +494,10 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
         arguments: [String],
         workingDirectory: String?,
         initialTranscript: String,
-        stopHandler: (() throws -> Void)? = nil
+        stopHandler: (() throws -> Void)? = nil,
+        terminationStatusMessageBuilder: @escaping (Int32) -> String = { status in
+            "\n[Process exited with status \(status)]\n"
+        }
     ) throws {
         self.runtimeState = .ready
         self.storage = initialTranscript
@@ -497,6 +506,7 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
         self.columns = 80
         self.rows = 24
         self.stopHandler = stopHandler
+        self.terminationStatusMessageBuilder = terminationStatusMessageBuilder
 
         var masterFileDescriptor: Int32 = -1
         var initialWindowSize = winsize(ws_row: 24, ws_col: 80, ws_xpixel: 0, ws_ypixel: 0)
@@ -564,7 +574,7 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
                 self.append(trailingText)
                 self.appendTerminalOutput(trailingText)
             }
-            self.append("\n[Claude exited with status \(status)]\n")
+            self.append(self.terminationStatusMessageBuilder(status))
             self.readSource.cancel()
             self.terminationSource.cancel()
             self.notifyChange()
@@ -792,11 +802,21 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
     }
 }
 
+struct RemoteRuntimeRecoveryFailureContext {
+    let detail: String
+    let normalizedDetail: String
+    let runtimeIdentifier: String
+    let hostName: String
+}
+
 struct ServiceProviderAdapter {
     let provider: Provider
     let supportsDefaultSessionLaunch: Bool
     let supportsNamedSessions: Bool
     let healthSummaryEvaluator: (Workspace, RemoteWorkspaceHealthContext?, any ProviderHealthEvaluating) -> ProviderHealthSummary
+    let initialTranscriptBuilder: (Workspace, NexusDomain.Host?, RemoteRuntimeLaunchMode) -> String
+    let terminationStatusMessageBuilder: (Int32) -> String
+    let remoteRuntimeRecoveryFailureEvaluator: (RemoteRuntimeRecoveryFailureContext) -> (state: Session.State, message: String)
     let shouldReuseRemoteHealthSnapshot: (ProviderHealthSummary, RemoteWorkspaceHealthContext?) -> Bool
 
     init(
@@ -804,12 +824,58 @@ struct ServiceProviderAdapter {
         supportsDefaultSessionLaunch: Bool,
         supportsNamedSessions: Bool,
         healthSummaryEvaluator: @escaping (Workspace, RemoteWorkspaceHealthContext?, any ProviderHealthEvaluating) -> ProviderHealthSummary,
+        initialTranscriptBuilder: ((Workspace, NexusDomain.Host?, RemoteRuntimeLaunchMode) -> String)? = nil,
+        terminationStatusMessageBuilder: ((Int32) -> String)? = nil,
+        remoteRuntimeRecoveryFailureEvaluator: ((RemoteRuntimeRecoveryFailureContext) -> (state: Session.State, message: String))? = nil,
         shouldReuseRemoteHealthSnapshot: @escaping (ProviderHealthSummary, RemoteWorkspaceHealthContext?) -> Bool = { _, _ in false }
     ) {
-        self.provider = Provider(id: providerID)
+        let provider = Provider(id: providerID)
+        self.provider = provider
         self.supportsDefaultSessionLaunch = supportsDefaultSessionLaunch
         self.supportsNamedSessions = supportsNamedSessions
         self.healthSummaryEvaluator = healthSummaryEvaluator
+        self.initialTranscriptBuilder = initialTranscriptBuilder ?? { workspace, remoteHost, launchMode in
+            if let remoteHost {
+                switch launchMode {
+                case .launchNew:
+                    return "Connecting to \(workspace.name) on \(remoteHost.name) with \(provider.displayName)…\n"
+                case .attachExisting:
+                    return "Reconnecting to \(workspace.name) on \(remoteHost.name) with \(provider.displayName)…\n"
+                }
+            }
+
+            return "Launching \(workspace.name) with \(provider.displayName)…\n"
+        }
+        self.terminationStatusMessageBuilder = terminationStatusMessageBuilder ?? { status in
+            "\n[\(provider.displayName) exited with status \(status)]\n"
+        }
+        self.remoteRuntimeRecoveryFailureEvaluator = remoteRuntimeRecoveryFailureEvaluator ?? { context in
+            if context.normalizedDetail.contains("nexus_remote_runtime_not_found") || context.normalizedDetail.contains("can't find session") {
+                return (
+                    state: .failed,
+                    message: "Known remote runtime '\(context.runtimeIdentifier)' is no longer available on \(context.hostName). Relaunch to create a new remote runtime."
+                )
+            }
+
+            if context.normalizedDetail.contains("could not resolve hostname")
+                || context.normalizedDetail.contains("operation timed out")
+                || context.normalizedDetail.contains("connection refused")
+                || context.normalizedDetail.contains("no route to host")
+                || context.normalizedDetail.contains("connection closed by remote host")
+                || context.normalizedDetail.contains("permission denied") {
+                let suffix = context.detail.isEmpty ? "" : " \(context.detail)"
+                return (
+                    state: .interrupted,
+                    message: "Could not reach \(context.hostName) to recover remote runtime '\(context.runtimeIdentifier)'.\(suffix)"
+                )
+            }
+
+            let suffix = context.detail.isEmpty ? "" : " \(context.detail)"
+            return (
+                state: .interrupted,
+                message: "Could not recover remote runtime '\(context.runtimeIdentifier)' on \(context.hostName).\(suffix)"
+            )
+        }
         self.shouldReuseRemoteHealthSnapshot = shouldReuseRemoteHealthSnapshot
     }
 
@@ -819,6 +885,24 @@ struct ServiceProviderAdapter {
         providerHealthEvaluator: any ProviderHealthEvaluating
     ) -> ProviderHealthSummary {
         healthSummaryEvaluator(workspace, remoteContext, providerHealthEvaluator)
+    }
+
+    func initialTranscript(
+        for workspace: Workspace,
+        remoteHost: NexusDomain.Host?,
+        launchMode: RemoteRuntimeLaunchMode
+    ) -> String {
+        initialTranscriptBuilder(workspace, remoteHost, launchMode)
+    }
+
+    func terminationStatusMessage(for status: Int32) -> String {
+        terminationStatusMessageBuilder(status)
+    }
+
+    func remoteRuntimeRecoveryFailure(
+        for context: RemoteRuntimeRecoveryFailureContext
+    ) -> (state: Session.State, message: String) {
+        remoteRuntimeRecoveryFailureEvaluator(context)
     }
 }
 
@@ -2004,34 +2088,15 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         workspace: Workspace
     ) throws -> (state: Session.State, message: String) {
         let detail = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalized = detail.lowercased()
         let runtimeIdentifier = try remoteRuntimeIdentifier(for: session, forceNew: false)
         let hostName = try workspace.remoteHostID.flatMap { try metadataStore.host(id: $0)?.name } ?? workspace.name
-
-        if normalized.contains("nexus_remote_runtime_not_found") || normalized.contains("can't find session") {
-            return (
-                state: .failed,
-                message: "Known remote runtime '\(runtimeIdentifier)' is no longer available on \(hostName). Relaunch to create a new remote runtime."
+        return providerAdapter(for: session.providerID).remoteRuntimeRecoveryFailure(
+            for: RemoteRuntimeRecoveryFailureContext(
+                detail: detail,
+                normalizedDetail: detail.lowercased(),
+                runtimeIdentifier: runtimeIdentifier,
+                hostName: hostName
             )
-        }
-
-        if normalized.contains("could not resolve hostname")
-            || normalized.contains("operation timed out")
-            || normalized.contains("connection refused")
-            || normalized.contains("no route to host")
-            || normalized.contains("connection closed by remote host")
-            || normalized.contains("permission denied") {
-            let suffix = detail.isEmpty ? "" : " \(detail)"
-            return (
-                state: .interrupted,
-                message: "Could not reach \(hostName) to recover remote runtime '\(runtimeIdentifier)'.\(suffix)"
-            )
-        }
-
-        let suffix = detail.isEmpty ? "" : " \(detail)"
-        return (
-            state: .interrupted,
-            message: "Could not recover remote runtime '\(runtimeIdentifier)' on \(hostName).\(suffix)"
         )
     }
 
@@ -2042,6 +2107,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         forceFreshRemoteRuntime: Bool,
         remoteRuntimeLaunchMode: RemoteRuntimeLaunchMode
     ) throws -> SessionRuntimeLaunchConfiguration {
+        let adapter = providerAdapter(for: session.providerID)
         let remoteHost: NexusDomain.Host?
         let resolvedRemoteRuntimeIdentifier: String?
         if workspace.kind == .remote {
@@ -2061,7 +2127,15 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             workingDirectory: launchSnapshot.resolvedWorkingDirectory,
             remoteHost: remoteHost,
             remoteRuntimeIdentifier: resolvedRemoteRuntimeIdentifier,
-            remoteRuntimeLaunchMode: remoteRuntimeLaunchMode
+            remoteRuntimeLaunchMode: remoteRuntimeLaunchMode,
+            initialTranscript: adapter.initialTranscript(
+                for: workspace,
+                remoteHost: remoteHost,
+                launchMode: remoteRuntimeLaunchMode
+            ),
+            terminationStatusMessageBuilder: { status in
+                adapter.terminationStatusMessage(for: status)
+            }
         )
     }
 

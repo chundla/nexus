@@ -1075,6 +1075,58 @@ struct nexusTests {
         #expect(claudeCard.health.resolvedExecutable == adapterExecutable)
     }
 
+    @Test func launchOrResumeDefaultSessionUsesInjectedClaudeAdapterLaunchCopyOverIPC() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: [:]),
+                commandRunner: StubCommandRunner(results: [:])
+            ),
+            sessionRuntimeManager: StubSessionRuntimeManager(
+                launchTranscriptForConfiguration: { configuration, _, _ in
+                    configuration.initialTranscript
+                }
+            ),
+            providerAdapters: [
+                .claude: ServiceProviderAdapter(
+                    providerID: .claude,
+                    supportsDefaultSessionLaunch: true,
+                    supportsNamedSessions: true,
+                    healthSummaryEvaluator: { workspace, _, _ in
+                        ProviderHealthSummary(
+                            state: .available,
+                            summary: "Claude adapter available for \(workspace.name)",
+                            resolvedExecutable: "/tmp/adapter-claude",
+                            launchability: .launchable
+                        )
+                    },
+                    initialTranscriptBuilder: { workspace, _, _ in
+                        "Adapter launch copy for \(workspace.name)"
+                    }
+                )
+            ]
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+
+        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let screen = try await client.getSessionScreen(sessionID: session.id)
+
+        #expect(session.state == .ready)
+        #expect(screen.transcript == "Adapter launch copy for \(workspace.name)")
+    }
+
     @Test func createNamedSessionUsesInjectedClaudeAdapterHealthOnRemoteWorkspaceOverIPC() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)
@@ -1501,6 +1553,106 @@ struct nexusTests {
         #expect(recoveredScreen.transcript == "runtime:nexus-\(launchedSession.id.uuidString.lowercased())-runtime-1")
     }
 
+    @Test func recoveredRemoteClaudeSessionUsesInjectedAdapterReconnectCopyOverIPC() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let availabilityRunner = StubCommandRunner(results: [
+            StubCommandRunner.Invocation(
+                executable: "/usr/bin/ssh",
+                arguments: [
+                    "-o", "BatchMode=yes",
+                    "-o", "ConnectTimeout=5",
+                    "build-box",
+                    "cd '/srv/api' && pwd"
+                ]
+            ): .success(stdout: "/srv/api\n")
+        ])
+        let adapterOverride = ServiceProviderAdapter(
+            providerID: .claude,
+            supportsDefaultSessionLaunch: true,
+            supportsNamedSessions: true,
+            healthSummaryEvaluator: { _, _, _ in
+                ProviderHealthSummary(
+                    state: .available,
+                    summary: "Claude adapter available on the Remote Workspace",
+                    resolvedExecutable: "/usr/local/bin/adapter-claude",
+                    launchability: .launchable
+                )
+            },
+            initialTranscriptBuilder: { _, remoteHost, launchMode in
+                switch launchMode {
+                case .launchNew:
+                    return "Adapter connect copy"
+                case .attachExisting:
+                    return "Adapter reconnect copy for \(remoteHost?.name ?? "unknown host")"
+                }
+            }
+        )
+        let firstService = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: [:]),
+                commandRunner: StubCommandRunner(results: [:])
+            ),
+            hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
+                "build-box": HostValidationResult(
+                    state: .available,
+                    summary: "Host is available",
+                    diagnostics: []
+                )
+            ]),
+            workspaceAvailabilityEvaluator: WorkspaceAvailabilityEvaluator(commandRunner: availabilityRunner),
+            sessionRuntimeManager: StubSessionRuntimeManager(
+                launchTranscriptForConfiguration: { configuration, _, _ in
+                    configuration.initialTranscript
+                }
+            ),
+            providerAdapters: [.claude: adapterOverride]
+        )
+        let firstClient = try NexusIPCClient.connect(to: firstService.listenerEndpoint)
+
+        let group = try await firstClient.createWorkspaceGroup(name: "Remote")
+        let host = try await firstClient.createHost(name: "Build Server", sshTarget: "build-box", port: nil as Int?)
+        _ = try await firstClient.validateHost(hostID: host.id)
+        let workspace = try await firstClient.createRemoteWorkspace(
+            name: nil as String?,
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+
+        let launchedSession = try await firstClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let restartedService = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: [:]),
+                commandRunner: StubCommandRunner(results: [:])
+            ),
+            hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
+                "build-box": HostValidationResult(
+                    state: .available,
+                    summary: "Host is available",
+                    diagnostics: []
+                )
+            ]),
+            workspaceAvailabilityEvaluator: WorkspaceAvailabilityEvaluator(commandRunner: availabilityRunner),
+            sessionRuntimeManager: StubSessionRuntimeManager(
+                launchTranscriptForConfiguration: { configuration, _, _ in
+                    configuration.initialTranscript
+                }
+            ),
+            providerAdapters: [.claude: adapterOverride]
+        )
+        let restartedClient = try NexusIPCClient.connect(to: restartedService.listenerEndpoint)
+
+        let recoveredSession = try await restartedClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let recoveredScreen = try await restartedClient.getSessionScreen(sessionID: launchedSession.id)
+
+        #expect(recoveredSession.id == launchedSession.id)
+        #expect(recoveredScreen.transcript == "Adapter reconnect copy for Build Server")
+    }
+
     @Test func missingRecoveredRemoteRuntimeStaysInspectableAndRelaunchesFresh() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)
@@ -1599,6 +1751,106 @@ struct nexusTests {
         #expect(relaunchedSession.id == launchedSession.id)
         #expect(relaunchedSession.state == .ready)
         #expect(relaunchedScreen.transcript == "runtime:nexus-\(launchedSession.id.uuidString.lowercased())-runtime-2")
+    }
+
+    @Test func missingRecoveredRemoteRuntimeUsesInjectedClaudeAdapterRecoveryFailureOverIPC() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let availabilityRunner = StubCommandRunner(results: [
+            StubCommandRunner.Invocation(
+                executable: "/usr/bin/ssh",
+                arguments: [
+                    "-o", "BatchMode=yes",
+                    "-o", "ConnectTimeout=5",
+                    "build-box",
+                    "cd '/srv/api' && pwd"
+                ]
+            ): .success(stdout: "/srv/api\n")
+        ])
+        let adapterOverride: ServiceProviderAdapter = ServiceProviderAdapter(
+            providerID: .claude,
+            supportsDefaultSessionLaunch: true,
+            supportsNamedSessions: true,
+            healthSummaryEvaluator: { _, _, _ in
+                ProviderHealthSummary(
+                    state: .available,
+                    summary: "Claude adapter available on the Remote Workspace",
+                    resolvedExecutable: "/usr/local/bin/adapter-claude",
+                    launchability: .launchable
+                )
+            },
+            remoteRuntimeRecoveryFailureEvaluator: { context in
+                (
+                    state: .failed,
+                    message: "Adapter recovery failure for \(context.runtimeIdentifier) on \(context.hostName)."
+                )
+            }
+        )
+        let firstService = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: [:]),
+                commandRunner: StubCommandRunner(results: [:])
+            ),
+            hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
+                "build-box": HostValidationResult(
+                    state: .available,
+                    summary: "Host is available",
+                    diagnostics: []
+                )
+            ]),
+            workspaceAvailabilityEvaluator: WorkspaceAvailabilityEvaluator(commandRunner: availabilityRunner),
+            sessionRuntimeManager: StubSessionRuntimeManager(
+                launchTranscriptForConfiguration: { configuration, _, _ in
+                    "runtime:\(configuration.remoteRuntimeIdentifier ?? "missing")"
+                }
+            ),
+            providerAdapters: [.claude: adapterOverride]
+        )
+        let firstClient = try NexusIPCClient.connect(to: firstService.listenerEndpoint)
+
+        let group = try await firstClient.createWorkspaceGroup(name: "Remote")
+        let host = try await firstClient.createHost(name: "Build Server", sshTarget: "build-box", port: nil as Int?)
+        _ = try await firstClient.validateHost(hostID: host.id)
+        let workspace = try await firstClient.createRemoteWorkspace(
+            name: nil as String?,
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+
+        let launchedSession = try await firstClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let restartedService = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: [:]),
+                commandRunner: StubCommandRunner(results: [:])
+            ),
+            hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
+                "build-box": HostValidationResult(
+                    state: .available,
+                    summary: "Host is available",
+                    diagnostics: []
+                )
+            ]),
+            workspaceAvailabilityEvaluator: WorkspaceAvailabilityEvaluator(commandRunner: availabilityRunner),
+            sessionRuntimeManager: StubSessionRuntimeManager(
+                launchBehavior: { configuration, _, _ in
+                    if configuration.remoteRuntimeLaunchMode == .attachExisting {
+                        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "NEXUS_REMOTE_RUNTIME_NOT_FOUND"])
+                    }
+                }
+            ),
+            providerAdapters: [.claude: adapterOverride]
+        )
+        let restartedClient = try NexusIPCClient.connect(to: restartedService.listenerEndpoint)
+
+        let recoveryAttempt = try await restartedClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+
+        #expect(recoveryAttempt.id == launchedSession.id)
+        #expect(recoveryAttempt.state == .failed)
+        #expect(recoveryAttempt.failureMessage == "Adapter recovery failure for nexus-\(launchedSession.id.uuidString.lowercased())-runtime-1 on Build Server.")
     }
 
     @Test func failedNamedRemoteSessionRemainsInspectableAndCanBeRelaunched() async throws {
@@ -4526,6 +4778,64 @@ struct nexusTests {
         }
 
         #expect(screen.transcript.contains("HOME-END"))
+    }
+
+    @Test func exitedClaudeRuntimeUsesInjectedAdapterExitCopyOverIPC() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let executableURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: false)
+        try """
+        #!/usr/bin/env python3
+        print("Claude finished work", flush=True)
+        """.write(to: executableURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: [:]),
+                commandRunner: StubCommandRunner(results: [:])
+            ),
+            providerAdapters: [
+                .claude: ServiceProviderAdapter(
+                    providerID: .claude,
+                    supportsDefaultSessionLaunch: true,
+                    supportsNamedSessions: true,
+                    healthSummaryEvaluator: { workspace, _, _ in
+                        ProviderHealthSummary(
+                            state: .available,
+                            summary: "Claude adapter available for \(workspace.name)",
+                            resolvedExecutable: executableURL.path(percentEncoded: false),
+                            launchability: .launchable
+                        )
+                    },
+                    terminationStatusMessageBuilder: { status in
+                        "\n[Adapter exit status \(status)]\n"
+                    }
+                )
+            ]
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+
+        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let exitedScreen = try await waitForSessionScreen(client: client, sessionID: session.id) { screen in
+            screen.session.state == .exited
+        }
+
+        #expect(exitedScreen.transcript.contains("Claude finished work"))
+        #expect(exitedScreen.transcript.contains("[Adapter exit status 0]"))
+        #expect(exitedScreen.transcript.contains("Claude exited") == false)
     }
 
     @Test func exitedClaudeRuntimeBecomesInspectableAndRelaunchableOverIPC() async throws {
