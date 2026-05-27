@@ -343,6 +343,223 @@ struct RemotePairingNetworkTests {
         #expect(detail.capabilities.createNamedSession.disabledReason == detail.health.summary)
     }
 
+    @Test func fetchesLaunchableCodexCapabilitiesInCatalogAndProviderDetailOverDedicatedNetworkAPI() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(stdout: "Usage: codex\n")
+                ])
+            )
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
+
+        _ = try await client.setRemoteAccessEnabled(true)
+        let pairing = try await client.startPairing()
+        let group = try await client.createWorkspaceGroup(name: "Client Work")
+        let workspace = try await client.createLocalWorkspace(
+            name: "Nexus",
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+
+        let remoteClient = RemotePairingHTTPClient()
+        let pairedMac = try await remoteClient.completePairing(
+            host: server.displayHost,
+            port: server.port,
+            pairingCode: pairing.code,
+            deviceName: "Chris’s iPhone"
+        )
+        let catalog = try await remoteClient.fetchCatalog(for: pairedMac)
+        let codexCard = try #require(
+            catalog.workspaceOverviews
+                .first(where: { $0.workspace.id == workspace.id })?
+                .providerCards
+                .first(where: { $0.provider.id == .codex })
+        )
+        let detail = try await remoteClient.fetchProviderDetail(
+            for: pairedMac,
+            workspaceID: workspace.id,
+            providerID: .codex
+        )
+
+        #expect(codexCard.health.summary == "Codex 1.2.3 is available")
+        #expect(codexCard.capabilities.launchDefaultSession.isSupported)
+        #expect(codexCard.capabilities.launchDefaultSession.isEnabled)
+        #expect(codexCard.capabilities.launchDefaultSession.disabledReason == nil)
+        #expect(codexCard.capabilities.createNamedSession.isSupported)
+        #expect(codexCard.capabilities.createNamedSession.isEnabled)
+        #expect(codexCard.capabilities.createNamedSession.disabledReason == nil)
+        #expect(detail.provider.id == .codex)
+        #expect(detail.health.summary == "Codex 1.2.3 is available")
+        #expect(detail.capabilities == codexCard.capabilities)
+    }
+
+    @Test func fetchesUnavailableCodexCapabilityReasonsOverDedicatedNetworkAPI() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
+
+        _ = try await client.setRemoteAccessEnabled(true)
+        let pairing = try await client.startPairing()
+        let group = try await client.createWorkspaceGroup(name: "Client Work")
+        let workspace = try await client.createLocalWorkspace(
+            name: "Nexus",
+            folderPath: "/tmp/nexus",
+            primaryGroupID: group.id
+        )
+
+        let remoteClient = RemotePairingHTTPClient()
+        let pairedMac = try await remoteClient.completePairing(
+            host: server.displayHost,
+            port: server.port,
+            pairingCode: pairing.code,
+            deviceName: "Chris’s iPhone"
+        )
+        let detail = try await remoteClient.fetchProviderDetail(
+            for: pairedMac,
+            workspaceID: workspace.id,
+            providerID: .codex
+        )
+
+        #expect(detail.provider.id == .codex)
+        #expect(detail.health.summary == "Codex executable was not found")
+        #expect(detail.capabilities.launchDefaultSession.isSupported)
+        #expect(detail.capabilities.launchDefaultSession.isEnabled == false)
+        #expect(detail.capabilities.launchDefaultSession.disabledReason == detail.health.summary)
+        #expect(detail.capabilities.createNamedSession.isSupported)
+        #expect(detail.capabilities.createNamedSession.isEnabled == false)
+        #expect(detail.capabilities.createNamedSession.disabledReason == detail.health.summary)
+    }
+
+    @Test func launchesCodexDefaultSessionOverDedicatedNetworkAPI() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(stdout: "Usage: codex\n")
+                ])
+            )
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
+
+        _ = try await client.setRemoteAccessEnabled(true)
+        let pairing = try await client.startPairing()
+        let group = try await client.createWorkspaceGroup(name: "Client Work")
+        let workspace = try await client.createLocalWorkspace(
+            name: "Nexus",
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+
+        let remoteClient = RemotePairingHTTPClient()
+        let pairedMac = try await remoteClient.completePairing(
+            host: server.displayHost,
+            port: server.port,
+            pairingCode: pairing.code,
+            deviceName: "Chris’s iPhone"
+        )
+        let session = try await remoteClient.launchOrResumeDefaultSession(
+            for: pairedMac,
+            workspaceID: workspace.id,
+            providerID: .codex
+        )
+        let detail = try await remoteClient.fetchProviderDetail(
+            for: pairedMac,
+            workspaceID: workspace.id,
+            providerID: .codex
+        )
+
+        #expect(session.workspaceID == workspace.id)
+        #expect(session.providerID == ProviderID.codex)
+        #expect(session.isDefault)
+        #expect(session.state == Session.State.ready)
+        #expect(detail.defaultSession?.id == session.id)
+        #expect(detail.defaultSession?.state == Session.State.ready)
+    }
+
+    @Test func createsCodexNamedSessionOverDedicatedNetworkAPIWithoutDefaultSession() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(stdout: "Usage: codex\n")
+                ])
+            )
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
+
+        _ = try await client.setRemoteAccessEnabled(true)
+        let pairing = try await client.startPairing()
+        let group = try await client.createWorkspaceGroup(name: "Client Work")
+        let workspace = try await client.createLocalWorkspace(
+            name: "Nexus",
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+
+        let remoteClient = RemotePairingHTTPClient()
+        let pairedMac = try await remoteClient.completePairing(
+            host: server.displayHost,
+            port: server.port,
+            pairingCode: pairing.code,
+            deviceName: "Chris’s iPhone"
+        )
+        let session = try await remoteClient.createNamedSession(
+            for: pairedMac,
+            workspaceID: workspace.id,
+            providerID: .codex
+        )
+        let detail = try await remoteClient.fetchProviderDetail(
+            for: pairedMac,
+            workspaceID: workspace.id,
+            providerID: .codex
+        )
+
+        #expect(session.workspaceID == workspace.id)
+        #expect(session.providerID == ProviderID.codex)
+        #expect(session.isDefault == false)
+        #expect(session.state == Session.State.ready)
+        #expect(session.name == "Session 1")
+        #expect(detail.defaultSession == nil)
+        #expect(detail.alternateSessions.map { $0.id } == [session.id])
+        #expect(detail.alternateSessions.first?.name == "Session 1")
+    }
+
     @Test func launchesRemoteDefaultSessionOverDedicatedNetworkAPI() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)

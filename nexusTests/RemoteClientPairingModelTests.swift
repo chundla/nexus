@@ -1610,6 +1610,109 @@ struct RemoteClientPairingModelTests {
         #expect(model.providerDetail(for: workspace.id, providerID: .claude)?.defaultSession?.id == session.id)
     }
 
+    @Test func launchingCodexDefaultRemoteSessionRefreshesCatalogProviderDetailAndFocusesSession() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let groupID = UUID()
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: groupID
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .codex,
+            isDefault: true,
+            state: .ready
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let refreshedCatalog = RemoteWorkspaceCatalog(
+            workspaceGroups: [WorkspaceGroup(id: groupID, name: "Client Work")],
+            recentNavigation: [],
+            workspaceOverviews: [
+                WorkspaceOverview(
+                    workspace: workspace,
+                    providerCards: [
+                        WorkspaceProviderCard(
+                            provider: Provider(id: .codex),
+                            health: ProviderHealthSummary(state: .available, summary: "Codex available"),
+                            capabilities: ProviderCapabilities(
+                                launchDefaultSession: ProviderCapability(action: .launchDefaultSession, isSupported: true, isEnabled: true),
+                                createNamedSession: ProviderCapability(action: .createNamedSession, isSupported: true, isEnabled: true)
+                            ),
+                            defaultSession: ProviderDefaultSessionSummary(
+                                state: .ready,
+                                summary: "Default session ready",
+                                actionTitle: "Resume",
+                                sessionID: session.id
+                            )
+                        )
+                    ]
+                )
+            ]
+        )
+        let initialDetail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .codex),
+            health: ProviderHealthSummary(state: .available, summary: "Codex available"),
+            capabilities: ProviderCapabilities(
+                launchDefaultSession: ProviderCapability(action: .launchDefaultSession, isSupported: true, isEnabled: true),
+                createNamedSession: ProviderCapability(action: .createNamedSession, isSupported: true, isEnabled: true)
+            ),
+            defaultSession: nil,
+            alternateSessions: [],
+            failedSessions: []
+        )
+        let refreshedDetail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .codex),
+            health: ProviderHealthSummary(state: .available, summary: "Codex available"),
+            capabilities: ProviderCapabilities(
+                launchDefaultSession: ProviderCapability(action: .launchDefaultSession, isSupported: true, isEnabled: true),
+                createNamedSession: ProviderCapability(action: .createNamedSession, isSupported: true, isEnabled: true)
+            ),
+            defaultSession: session,
+            alternateSessions: [],
+            failedSessions: []
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let model = RemoteClientPairingModel(
+            client: StubRemotePairingClient(
+                result: pairedMac,
+                catalog: refreshedCatalog,
+                providerDetail: refreshedDetail,
+                providerDetailResults: [initialDetail, refreshedDetail],
+                sessionScreen: SessionScreen(session: session, transcript: "Codex ready"),
+                launchedDefaultSession: session
+            ),
+            store: store
+        )
+
+        await model.loadProviderDetail(workspaceID: workspace.id, providerID: .codex)
+        let launchedSession = try await model.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .codex)
+        await Task.yield()
+
+        #expect(launchedSession.id == session.id)
+        #expect(model.catalog == refreshedCatalog)
+        #expect(model.focusedSessionID == session.id)
+        #expect(model.focusedSessionScreen?.session.id == session.id)
+        #expect(model.providerDetail(for: workspace.id, providerID: .codex)?.defaultSession?.id == session.id)
+    }
+
     @Test func creatingNamedRemoteSessionRefreshesCatalogProviderDetailAndFocusesSession() async throws {
         let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -1690,6 +1793,96 @@ struct RemoteClientPairingModelTests {
         #expect(model.focusedSessionID == session.id)
         #expect(model.focusedSessionScreen?.session.id == session.id)
         #expect(model.providerDetail(for: workspace.id, providerID: .claude)?.alternateSessions.map { $0.id } == [session.id])
+    }
+
+    @Test func creatingCodexNamedRemoteSessionRefreshesCatalogProviderDetailAndFocusesSession() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let groupID = UUID()
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: groupID
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .codex,
+            name: "Session 1",
+            isDefault: false,
+            state: .ready
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let refreshedCatalog = RemoteWorkspaceCatalog(
+            workspaceGroups: [WorkspaceGroup(id: groupID, name: "Client Work")],
+            recentNavigation: [],
+            workspaceOverviews: [
+                WorkspaceOverview(
+                    workspace: workspace,
+                    providerCards: [
+                        WorkspaceProviderCard(
+                            provider: Provider(id: .codex),
+                            health: ProviderHealthSummary(state: .available, summary: "Codex available"),
+                            capabilities: ProviderCapabilities(
+                                launchDefaultSession: ProviderCapability(action: .launchDefaultSession, isSupported: true, isEnabled: true),
+                                createNamedSession: ProviderCapability(action: .createNamedSession, isSupported: true, isEnabled: true)
+                            ),
+                            defaultSession: ProviderDefaultSessionSummary(
+                                state: .notCreated,
+                                summary: "No default session yet",
+                                actionTitle: "Launch"
+                            ),
+                            alternateSessionCount: 1
+                        )
+                    ]
+                )
+            ]
+        )
+        let refreshedDetail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .codex),
+            health: ProviderHealthSummary(state: .available, summary: "Codex available"),
+            capabilities: ProviderCapabilities(
+                launchDefaultSession: ProviderCapability(action: .launchDefaultSession, isSupported: true, isEnabled: true),
+                createNamedSession: ProviderCapability(action: .createNamedSession, isSupported: true, isEnabled: true)
+            ),
+            defaultSession: nil,
+            alternateSessions: [session],
+            failedSessions: []
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let model = RemoteClientPairingModel(
+            client: StubRemotePairingClient(
+                result: pairedMac,
+                catalog: refreshedCatalog,
+                providerDetail: refreshedDetail,
+                sessionScreen: SessionScreen(session: session, transcript: "Codex ready"),
+                createdNamedSession: session
+            ),
+            store: store
+        )
+
+        let createdSession = try await model.createNamedSession(workspaceID: workspace.id, providerID: .codex)
+        await Task.yield()
+
+        #expect(createdSession.id == session.id)
+        #expect(model.catalog == refreshedCatalog)
+        #expect(model.focusedSessionID == session.id)
+        #expect(model.focusedSessionScreen?.session.id == session.id)
+        #expect(model.providerDetail(for: workspace.id, providerID: .codex)?.alternateSessions.map { $0.id } == [session.id])
     }
 
     @Test func creatingNamedRemoteSessionPropagatesRequestFailuresWithoutOpeningSession() async throws {
