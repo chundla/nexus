@@ -115,6 +115,78 @@ struct NexusServicePiSessionStreamTests {
         #expect(resumedTurn.activityItems.suffix(2).map(\.text) == ["You: what was my last message?", "Pi: alpha"])
     }
 
+    @Test func localPiRestartedSessionShowsInterruptedLostRuntimeCopyAcrossInspectableSurfaces() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
+
+        func makeService() throws -> NexusService {
+            let launcher = ProcessSessionRuntimeLauncher(piRuntimeFactory: { launchConfiguration, _, _ in
+                try PiRPCSessionRuntime(
+                    executable: launchConfiguration.executable,
+                    workingDirectory: launchConfiguration.workingDirectory,
+                    sessionLinkage: launchConfiguration.piSessionLinkage,
+                    terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
+                    transportFactory: { _, _, _ in
+                        TestPiRPCTransport()
+                    }
+                )
+            })
+
+            return try NexusService.bootstrapForTests(
+                rootURL: rootURL,
+                providerHealthEvaluator: ProviderHealthEvaluator(
+                    executableResolver: PiStreamStubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
+                    commandRunner: PiStreamStubCommandRunner(results: [
+                        .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
+                        .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                    ]),
+                    localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+                ),
+                sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+            )
+        }
+
+        let service = try makeService()
+        let group = try service.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try service.createLocalWorkspace(
+            name: "Local Pi",
+            folderPath: workspaceFolder.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+
+        let defaultSession = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+        let namedSession = try service.createNamedSession(workspaceID: workspace.id, providerID: .pi, name: "Review")
+
+        let restartedService = try makeService()
+        let overview = try restartedService.getWorkspaceOverview(workspaceID: workspace.id)
+        let providerDetail = try restartedService.getProviderDetail(workspaceID: workspace.id, providerID: .pi)
+        let interruptedDefaultScreen = try restartedService.getSessionScreen(sessionID: defaultSession.id)
+        let interruptedNamedScreen = try restartedService.getSessionScreen(sessionID: namedSession.id)
+
+        let expectedMessage = "Pi Session Record survived, but its live runtime was lost when the background service restarted. Relaunch to create a new live runtime."
+
+        let piCard = try #require(overview.providerCards.first(where: { $0.provider.id == .pi }))
+        let restartedNamedSession = try #require(providerDetail.alternateSessions.first)
+
+        #expect(piCard.defaultSession.state == .interrupted)
+        #expect(piCard.defaultSession.summary == expectedMessage)
+        #expect(piCard.defaultSession.actionTitle == "Relaunch")
+        #expect(providerDetail.defaultSession?.failureMessage == expectedMessage)
+        #expect(restartedNamedSession.id == namedSession.id)
+        #expect(restartedNamedSession.state == .interrupted)
+        #expect(restartedNamedSession.failureMessage == expectedMessage)
+        #expect(interruptedDefaultScreen.session.state == .interrupted)
+        #expect(interruptedDefaultScreen.transcript == expectedMessage)
+        #expect(interruptedDefaultScreen.activityItems.map(\.kind) == [.error])
+        #expect(interruptedDefaultScreen.activityItems.map(\.text) == [expectedMessage])
+        #expect(interruptedNamedScreen.session.state == .interrupted)
+        #expect(interruptedNamedScreen.activityItems.map(\.kind) == [.error])
+        #expect(interruptedNamedScreen.activityItems.map(\.text) == [expectedMessage])
+    }
+
     @Test func localPiNamedSessionCanBeStoppedRelaunchedAndDeletedWhilePreservingConversationLinkage() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)

@@ -6141,6 +6141,73 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelShowsInterruptedPiRestartCopyForInspectableLostRuntimeSession() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        func makeService() throws -> NexusService {
+            let launcher = ProcessSessionRuntimeLauncher(piRuntimeFactory: { launchConfiguration, _, _ in
+                try PiRPCSessionRuntime(
+                    executable: launchConfiguration.executable,
+                    workingDirectory: launchConfiguration.workingDirectory,
+                    sessionLinkage: launchConfiguration.piSessionLinkage,
+                    terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
+                    transportFactory: { _, _, _ in
+                        NexusTestsPiRPCTransport(promptResponseText: "world")
+                    }
+                )
+            })
+
+            return try NexusService.bootstrapForTests(
+                rootURL: rootURL,
+                providerHealthEvaluator: ProviderHealthEvaluator(
+                    executableResolver: StubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
+                    commandRunner: StubCommandRunner(results: [
+                        StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
+                        StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                    ]),
+                    localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+                ),
+                sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+            )
+        }
+
+        let service = try makeService()
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+        let launchedSession = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+
+        let restartedService = try makeService()
+        let restartedClient = try NexusIPCClient.connect(to: restartedService.listenerEndpoint)
+        let model = NexusAppModel(client: restartedClient)
+        let expectedMessage = "Pi Session Record survived, but its live runtime was lost when the background service restarted. Relaunch to create a new live runtime."
+
+        await model.refresh()
+        try await model.focusSession(sessionID: launchedSession.id)
+
+        let piCard = try #require(model.workspaceOverview(for: workspace.id)?.providerCards.first(where: { $0.provider.id == .pi }))
+        let screen = try #require(model.focusedSessionScreen)
+
+        #expect(piCard.defaultSession.state == .interrupted)
+        #expect(piCard.defaultSession.summary == expectedMessage)
+        #expect(focusedSessionSurface(for: screen) == .structuredActivityFeed)
+        #expect(screen.session.state == .interrupted)
+        #expect(screen.activityItems.map(\.kind) == [.error])
+        #expect(screen.activityItems.map(\.text) == [expectedMessage])
+        #expect(structuredSessionActivityRows(for: screen).map(\.title) == ["Error"])
+        #expect(structuredSessionActivityRows(for: screen).map(\.text) == [expectedMessage])
+    }
+
+    @MainActor
     @Test func appModelPiNamedSessionLifecycleRefreshesProviderDetailAndClearsFocusAfterDelete() async throws {
         let workspaceFolderURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

@@ -2279,9 +2279,20 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 session: session,
                 transcript: transcript,
                 terminalColumns: terminalSize.columns,
-                terminalRows: terminalSize.rows
+                terminalRows: terminalSize.rows,
+                activityItems: staticSessionActivityItems(for: session, transcript: transcript)
             )
         )
+    }
+
+    private func staticSessionActivityItems(for session: Session, transcript: String) -> [SessionActivityItem] {
+        guard session.providerID == .pi,
+              session.state == .interrupted,
+              transcript.isEmpty == false else {
+            return []
+        }
+
+        return [SessionActivityItem(kind: .error, text: transcript)]
     }
 
     private func navigationItem(_ target: NavigationTarget) throws -> NavigationItem? {
@@ -3273,11 +3284,20 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             return session
         }
 
+        let workspace = try metadataStore.workspace(id: session.workspaceID)
         return try metadataStore.updateSession(
             id: session.id,
             state: .interrupted,
-            failureMessage: "Session interrupted because the background service restarted. Relaunch to create a new live runtime."
+            failureMessage: interruptedSessionFailureMessage(for: session, workspace: workspace)
         )
+    }
+
+    private func interruptedSessionFailureMessage(for session: Session, workspace: Workspace?) -> String {
+        guard session.providerID == .pi, workspace?.kind == .local else {
+            return "Session interrupted because the background service restarted. Relaunch to create a new live runtime."
+        }
+
+        return "Pi Session Record survived, but its live runtime was lost when the background service restarted. Relaunch to create a new live runtime."
     }
 }
 
