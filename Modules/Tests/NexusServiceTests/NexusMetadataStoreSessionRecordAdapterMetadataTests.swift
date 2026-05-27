@@ -29,6 +29,7 @@ struct NexusMetadataStoreSessionRecordAdapterMetadataTests {
             sessionID: session.id,
             workspaceID: workspace.id,
             providerID: .pi,
+            primarySurface: .structuredActivityFeed,
             resolvedExecutable: "/tmp/fake-pi",
             resolvedWorkingDirectory: workspace.folderPath
         )

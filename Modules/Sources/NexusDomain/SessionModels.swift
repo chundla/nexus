@@ -55,6 +55,7 @@ public struct LaunchSnapshot: Codable, Equatable, Sendable {
     public let sessionID: UUID
     public let workspaceID: UUID
     public let providerID: ProviderID
+    public let primarySurface: SessionSurface
     public let resolvedExecutable: String
     public let resolvedWorkingDirectory: String
 
@@ -62,12 +63,14 @@ public struct LaunchSnapshot: Codable, Equatable, Sendable {
         sessionID: UUID,
         workspaceID: UUID,
         providerID: ProviderID,
+        primarySurface: SessionSurface = .terminal,
         resolvedExecutable: String,
         resolvedWorkingDirectory: String
     ) {
         self.sessionID = sessionID
         self.workspaceID = workspaceID
         self.providerID = providerID
+        self.primarySurface = primarySurface
         self.resolvedExecutable = resolvedExecutable
         self.resolvedWorkingDirectory = resolvedWorkingDirectory
     }

@@ -869,6 +869,7 @@ struct ServiceProviderAdapter {
     let provider: Provider
     private let defaultSessionLaunchSupportEvaluator: (Workspace) -> Bool
     private let namedSessionSupportEvaluator: (Workspace) -> Bool
+    private let primarySurfaceEvaluator: (Workspace) -> SessionSurface
     let healthSummaryEvaluator: (Workspace, RemoteWorkspaceHealthContext?, any ProviderHealthEvaluating) -> ProviderHealthSummary
     let initialTranscriptBuilder: (Workspace, NexusDomain.Host?, RemoteRuntimeLaunchMode) -> String
     let terminationStatusMessageBuilder: (Int32) -> String
@@ -882,6 +883,7 @@ struct ServiceProviderAdapter {
         healthSummaryEvaluator: @escaping (Workspace, RemoteWorkspaceHealthContext?, any ProviderHealthEvaluating) -> ProviderHealthSummary,
         defaultSessionLaunchSupportEvaluator: ((Workspace) -> Bool)? = nil,
         namedSessionSupportEvaluator: ((Workspace) -> Bool)? = nil,
+        primarySurfaceEvaluator: ((Workspace) -> SessionSurface)? = nil,
         initialTranscriptBuilder: ((Workspace, NexusDomain.Host?, RemoteRuntimeLaunchMode) -> String)? = nil,
         terminationStatusMessageBuilder: ((Int32) -> String)? = nil,
         remoteRuntimeRecoveryFailureEvaluator: ((RemoteRuntimeRecoveryFailureContext) -> (state: Session.State, message: String))? = nil,
@@ -891,6 +893,7 @@ struct ServiceProviderAdapter {
         self.provider = provider
         self.defaultSessionLaunchSupportEvaluator = defaultSessionLaunchSupportEvaluator ?? { _ in supportsDefaultSessionLaunch }
         self.namedSessionSupportEvaluator = namedSessionSupportEvaluator ?? { _ in supportsNamedSessions }
+        self.primarySurfaceEvaluator = primarySurfaceEvaluator ?? { _ in .terminal }
         self.healthSummaryEvaluator = healthSummaryEvaluator
         self.initialTranscriptBuilder = initialTranscriptBuilder ?? { workspace, remoteHost, launchMode in
             if let remoteHost {
@@ -943,6 +946,10 @@ struct ServiceProviderAdapter {
 
     func supportsNamedSessions(in workspace: Workspace) -> Bool {
         namedSessionSupportEvaluator(workspace)
+    }
+
+    func primarySurface(in workspace: Workspace) -> SessionSurface {
+        primarySurfaceEvaluator(workspace)
     }
 
     func healthSummary(
@@ -1172,7 +1179,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                     providerHealthEvaluator.healthSummary(for: .pi, workspace: workspace, remoteContext: remoteContext)
                 },
                 defaultSessionLaunchSupportEvaluator: { $0.kind == .local },
-                namedSessionSupportEvaluator: { $0.kind == .local }
+                namedSessionSupportEvaluator: { $0.kind == .local },
+                primarySurfaceEvaluator: { _ in .structuredActivityFeed }
             )
         ]
 
@@ -1592,6 +1600,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             sessionID: session.id,
             workspaceID: session.workspaceID,
             providerID: session.providerID,
+            primarySurface: providerAdapter(for: session.providerID).primarySurface(in: workspace),
             resolvedExecutable: executable,
             resolvedWorkingDirectory: workspace.folderPath
         )
@@ -1656,6 +1665,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             sessionID: session.id,
             workspaceID: session.workspaceID,
             providerID: session.providerID,
+            primarySurface: providerAdapter(for: session.providerID).primarySurface(in: workspace),
             resolvedExecutable: executable,
             resolvedWorkingDirectory: workspace.folderPath
         )
@@ -2068,6 +2078,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             sessionID: session.id,
             workspaceID: session.workspaceID,
             providerID: session.providerID,
+            primarySurface: providerAdapter(for: session.providerID).primarySurface(in: workspace),
             resolvedExecutable: executable,
             resolvedWorkingDirectory: workspace.folderPath
         )
@@ -2273,29 +2284,38 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
 
     private func staticSessionScreen(for session: Session, transcript: String) throws -> SessionScreen {
         let terminalSize = try metadataStore.sessionTerminalSize(id: session.id)
+        let primarySurface = try persistedPrimarySurface(for: session)
         return normalizedSessionScreen(
             SessionScreen(
                 session: session,
-                primarySurface: staticSessionSurface(for: session),
+                primarySurface: primarySurface,
                 transcript: transcript,
                 terminalColumns: terminalSize.columns,
                 terminalRows: terminalSize.rows,
-                activityItems: staticSessionActivityItems(for: session, transcript: transcript)
+                activityItems: staticSessionActivityItems(for: session, transcript: transcript, primarySurface: primarySurface)
             )
         )
     }
 
-    private func staticSessionSurface(for session: Session) -> SessionSurface {
-        switch session.providerID {
-        case .pi:
-            .structuredActivityFeed
-        case .claude, .codex, .ibmBob:
-            .terminal
+    private func persistedPrimarySurface(for session: Session, workspace: Workspace? = nil) throws -> SessionSurface {
+        if let launchSnapshot = try metadataStore.launchSnapshot(sessionID: session.id) {
+            return launchSnapshot.primarySurface
         }
+
+        let resolvedWorkspace = if let workspace {
+            workspace
+        } else {
+            try metadataStore.workspace(id: session.workspaceID)
+        }
+        guard let resolvedWorkspace else {
+            return .terminal
+        }
+
+        return providerAdapter(for: session.providerID).primarySurface(in: resolvedWorkspace)
     }
 
-    private func staticSessionActivityItems(for session: Session, transcript: String) -> [SessionActivityItem] {
-        guard session.providerID == .pi,
+    private func staticSessionActivityItems(for session: Session, transcript: String, primarySurface: SessionSurface) -> [SessionActivityItem] {
+        guard primarySurface == .structuredActivityFeed,
               session.state == .interrupted,
               transcript.isEmpty == false else {
             return []
@@ -3298,13 +3318,13 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         return try metadataStore.updateSession(
             id: session.id,
             state: .interrupted,
-            failureMessage: interruptedSessionFailureMessage(for: session, workspace: workspace)
+            failureMessage: try interruptedSessionFailureMessage(for: session, workspace: workspace)
         )
     }
 
-    private func interruptedSessionFailureMessage(for session: Session, workspace: Workspace?) -> String {
+    private func interruptedSessionFailureMessage(for session: Session, workspace: Workspace?) throws -> String {
         guard workspace?.kind == .local,
-              staticSessionSurface(for: session) == .structuredActivityFeed else {
+              try persistedPrimarySurface(for: session, workspace: workspace) == .structuredActivityFeed else {
             return "Session interrupted because the background service restarted. Relaunch to create a new live runtime."
         }
 

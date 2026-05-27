@@ -107,6 +107,7 @@ final class NexusMetadataStore {
                 session_id TEXT PRIMARY KEY NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
                 workspace_id TEXT NOT NULL,
                 provider_id TEXT NOT NULL,
+                primary_surface TEXT NOT NULL DEFAULT 'terminal',
                 resolved_executable TEXT NOT NULL,
                 resolved_working_directory TEXT NOT NULL
             );
@@ -174,6 +175,14 @@ final class NexusMetadataStore {
             column: "remote_runtime_generation",
             definition: "INTEGER NOT NULL DEFAULT 0"
         )
+        let didAddLaunchSnapshotPrimarySurface = try ensureColumnExists(
+            table: "launch_snapshots",
+            column: "primary_surface",
+            definition: "TEXT NOT NULL DEFAULT 'terminal'"
+        )
+        if didAddLaunchSnapshotPrimarySurface {
+            try migrateLegacyStructuredLaunchSnapshotSurfacesIfNeeded()
+        }
         try migrateLegacyPiSessionLinkagesIfNeeded()
     }
 
@@ -858,6 +867,7 @@ final class NexusMetadataStore {
         sessionID: UUID,
         workspaceID: UUID,
         providerID: ProviderID,
+        primarySurface: SessionSurface = .terminal,
         resolvedExecutable: String,
         resolvedWorkingDirectory: String
     ) throws -> LaunchSnapshot {
@@ -870,19 +880,21 @@ final class NexusMetadataStore {
                 sessionID: sessionID,
                 workspaceID: workspaceID,
                 providerID: providerID,
+                primarySurface: primarySurface,
                 resolvedExecutable: resolvedExecutable,
                 resolvedWorkingDirectory: resolvedWorkingDirectory
             )
             let statement = try prepare(
-                "INSERT INTO launch_snapshots (session_id, workspace_id, provider_id, resolved_executable, resolved_working_directory) VALUES (?, ?, ?, ?, ?);"
+                "INSERT INTO launch_snapshots (session_id, workspace_id, provider_id, primary_surface, resolved_executable, resolved_working_directory) VALUES (?, ?, ?, ?, ?, ?);"
             )
             defer { sqlite3_finalize(statement) }
 
             try bind(snapshot.sessionID.uuidString, at: 1, in: statement)
             try bind(snapshot.workspaceID.uuidString, at: 2, in: statement)
             try bind(snapshot.providerID.rawValue, at: 3, in: statement)
-            try bind(snapshot.resolvedExecutable, at: 4, in: statement)
-            try bind(snapshot.resolvedWorkingDirectory, at: 5, in: statement)
+            try bind(snapshot.primarySurface.rawValue, at: 4, in: statement)
+            try bind(snapshot.resolvedExecutable, at: 5, in: statement)
+            try bind(snapshot.resolvedWorkingDirectory, at: 6, in: statement)
             try stepDone(statement)
             return snapshot
         }
@@ -1182,7 +1194,7 @@ final class NexusMetadataStore {
 
     private func launchSnapshotWithoutLock(sessionID: UUID) throws -> LaunchSnapshot? {
         let statement = try prepare(
-            "SELECT session_id, workspace_id, provider_id, resolved_executable, resolved_working_directory FROM launch_snapshots WHERE session_id = ? LIMIT 1;"
+            "SELECT session_id, workspace_id, provider_id, primary_surface, resolved_executable, resolved_working_directory FROM launch_snapshots WHERE session_id = ? LIMIT 1;"
         )
         defer { sqlite3_finalize(statement) }
 
@@ -1263,17 +1275,19 @@ final class NexusMetadataStore {
         return groups
     }
 
-    private func ensureColumnExists(table: String, column: String, definition: String) throws {
+    @discardableResult
+    private func ensureColumnExists(table: String, column: String, definition: String) throws -> Bool {
         let statement = try prepare("PRAGMA table_info(\(table));")
         defer { sqlite3_finalize(statement) }
 
         while sqlite3_step(statement) == SQLITE_ROW {
             if readOptionalString(column: 1, from: statement) == column {
-                return
+                return false
             }
         }
 
         try execute("ALTER TABLE \(table) ADD COLUMN \(column) \(definition);")
+        return true
     }
 
     private func withLock<T>(_ operation: () throws -> T) throws -> T {
@@ -1514,12 +1528,17 @@ final class NexusMetadataStore {
         guard let providerID = ProviderID(rawValue: providerRawValue) else {
             throw NexusMetadataStoreError.sqlite("Unknown provider id: \(providerRawValue)")
         }
-        let resolvedExecutable = try readString(column: 3, from: statement)
-        let resolvedWorkingDirectory = try readString(column: 4, from: statement)
+        let primarySurfaceRawValue = try readString(column: 3, from: statement)
+        guard let primarySurface = SessionSurface(rawValue: primarySurfaceRawValue) else {
+            throw NexusMetadataStoreError.sqlite("Unknown session surface: \(primarySurfaceRawValue)")
+        }
+        let resolvedExecutable = try readString(column: 4, from: statement)
+        let resolvedWorkingDirectory = try readString(column: 5, from: statement)
         return LaunchSnapshot(
             sessionID: sessionID,
             workspaceID: workspaceID,
             providerID: providerID,
+            primarySurface: primarySurface,
             resolvedExecutable: resolvedExecutable,
             resolvedWorkingDirectory: resolvedWorkingDirectory
         )
@@ -1546,6 +1565,18 @@ final class NexusMetadataStore {
             throw NexusMetadataStoreError.sqlite("Invalid UUID: \(rawValue)")
         }
         return value
+    }
+
+    private func migrateLegacyStructuredLaunchSnapshotSurfacesIfNeeded() throws {
+        let statement = try prepare(
+            "UPDATE launch_snapshots SET primary_surface = ? WHERE provider_id = ? AND primary_surface = ?;"
+        )
+        defer { sqlite3_finalize(statement) }
+
+        try bind(SessionSurface.structuredActivityFeed.rawValue, at: 1, in: statement)
+        try bind(ProviderID.pi.rawValue, at: 2, in: statement)
+        try bind(SessionSurface.terminal.rawValue, at: 3, in: statement)
+        try stepDone(statement)
     }
 
     private func migrateLegacyPiSessionLinkagesIfNeeded() throws {
