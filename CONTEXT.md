@@ -52,6 +52,10 @@ _Avoid_: remote workspace, execution host
 The one attached client currently allowed to send input to a Session.
 _Avoid_: owner, active viewer
 
+**Viewer**:
+An attached client that can observe a Session without sending input.
+_Avoid_: passive controller, read-only owner
+
 **Pairing**:
 The trust-establishment flow that allows a **Remote Client** to reconnect to Nexus over the local network without repeating setup each time.
 _Avoid_: login, sign-in
@@ -75,6 +79,14 @@ _Avoid_: provider health, remote health
 **Provider Health**:
 The status of whether a Provider is available and launchable for a specific Workspace target. For a **Remote Workspace**, this resolves the Provider from the Host user's shell environments, records an absolute executable path, and then launches by absolute path.
 _Avoid_: host status, remote health
+
+**Launchable Provider**:
+A Provider whose current **Provider Health** says Nexus can start a Session for a specific Workspace target now.
+_Avoid_: operable provider, enabled provider
+
+**Provider Capability**:
+A product-supported action Nexus exposes for a Provider on a specific Workspace target, such as launching the **Default Session** or creating a **Named Session**.
+_Avoid_: hidden feature flag, UI-only affordance
 
 **Workspace Availability**:
 The status of whether a Workspace's target location is currently accessible and usable.
@@ -117,9 +129,10 @@ _Avoid_: stop, close
 - A **Session** may be **Detached** without being stopped
 - A **Session** has exactly one **Session Record** in Nexus persistence
 - A **Session** has at most one **Controller** at a time
-- A **Session** may have many viewers at the same time
-- A **Remote Client** may attach to a **Session** as its **Controller** or as a viewer
+- A **Session** may have many **Viewers** at the same time
+- A **Remote Client** may attach to a **Session** as its **Controller** or as a **Viewer**
 - A successful **Pairing** allows a **Remote Client** to reconnect without repeating the first-time trust ceremony
+- A successful **Pairing** authorizes a **Paired Device** against its **Paired Mac** as a whole rather than per Workspace or per Provider
 - A **Remote Client** may trust many **Paired Macs** over time
 - A **Paired Mac** may trust many **Paired Devices** over time
 - **Remote Access** may be enabled or disabled on a **Paired Mac**
@@ -133,6 +146,7 @@ _Avoid_: stop, close
 - A **Workspace Availability** check or **Provider Health** check may end in a **Blocked Check** when an upstream dependency fails
 - A **Remote Workspace** uses one **Remote Session Strategy** when launched remotely
 - A **Provider** has a separate **Provider Health** state for each Workspace target
+- A **Provider** exposes one or more **Provider Capabilities** for a specific **Workspace** target
 - A remote **Provider Health** check resolves the **Provider** from the **Host** user's shell environments and records an absolute executable path for launch
 
 ## Example dialogue
@@ -145,6 +159,7 @@ _Avoid_: stop, close
 - "remote" was being used to mean both a **Remote Workspace** and remote control from iOS — resolved: a **Remote Workspace** is an execution target; a **Remote Client** is a separate client capability.
 - "handoff" could imply bilateral approval between devices — resolved: a viewer may take **Controller** status without approval from the current controller, and local Mac input automatically reclaims **Controller** status.
 - "remote access" could sound always-on — resolved: **Remote Access** is an explicit opt-in capability on a Mac and only works while Nexus is running.
+- **Pairing** scope could be read as per-Workspace or per-Provider approval — resolved: a trusted **Paired Device** is authorized against the **Paired Mac** as a whole in V1.
 - "tmux" could sound like a workspace type — resolved: it is a **Remote Session Strategy**.
 - "remote health" was too vague — resolved: split into **Host Validation** and **Provider Health**.
 - User-installed provider CLIs may appear in one Host shell environment but not another, and may not appear in the raw SSH command PATH at all — resolved: remote **Provider Health** resolves executables across the Host user's shell environments and standard per-user install locations, then remote launch uses that absolute path.
@@ -159,3 +174,6 @@ _Avoid_: stop, close
 - A **Workspace** target is not always a folder path — resolved: use **Workspace Target** for the local-folder vs Host-plus-remote-path distinction.
 - Changing a **Remote Workspace** Host or remote path is not a small edit — resolved: it creates a new **Remote Workspace** because the **Workspace Target** changed.
 - "alternate session" is vague product language — resolved: use **Named Session** for additional explicitly created Session lanes distinct from the **Default Session**.
+- "operable provider" was vague product language — resolved: use **Launchable Provider** when the issue is whether Nexus can start a **Session** now, based on current **Provider Health**.
+- Shared UI affordances should not infer action support from provider names alone — resolved: expose **Provider Capability** from the service rather than hardcoding Claude-specific checks in the UI.
+- Action support and launch readiness are different questions — resolved: **Provider Capability** explains whether Nexus supports an action on a target, while **Provider Health** explains whether it can succeed now.

@@ -180,4 +180,7 @@ Milestone one proves the service-centered architecture with local-only execution
 - `docs/architecture/milestone-2.md`
 - `docs/architecture/milestone-3.md`
 - `docs/architecture/milestone-4.md`
+- `docs/architecture/milestone-5.md`
+- `docs/architecture/milestone-6.md`
+- `docs/architecture/milestone-7.md`
 - `docs/adr/`
