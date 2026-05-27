@@ -472,6 +472,11 @@ private final class StartupState: @unchecked Sendable {
 }
 
 final class ProcessPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
+    private struct ProcessInvocation {
+        let executable: String
+        let arguments: [String]
+    }
+
     private let executable: String
     private let arguments: [String]
     private let workingDirectory: String?
@@ -503,9 +508,10 @@ final class ProcessPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
     }
 
     func start() throws {
+        let invocation = resolvedInvocation()
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = arguments
+        process.executableURL = URL(fileURLWithPath: invocation.executable)
+        process.arguments = invocation.arguments
         if let workingDirectory {
             process.currentDirectoryURL = URL(fileURLWithPath: workingDirectory, isDirectory: true)
         }
@@ -576,6 +582,68 @@ final class ProcessPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
         if process?.isRunning == true {
             process?.terminate()
         }
+    }
+
+    private func resolvedInvocation() -> ProcessInvocation {
+        guard let shebang = scriptShebang(),
+              let envInvocation = envInterpreterInvocation(for: shebang) else {
+            return ProcessInvocation(executable: executable, arguments: arguments)
+        }
+
+        return envInvocation
+    }
+
+    private func scriptShebang() -> String? {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: executable), options: .mappedIfSafe),
+              let newlineIndex = data.firstIndex(of: 0x0A) else {
+            return nil
+        }
+
+        let lineData = data.prefix(upTo: newlineIndex)
+        return String(data: lineData, encoding: .utf8)?.replacingOccurrences(of: "\r", with: "")
+    }
+
+    private func envInterpreterInvocation(for shebang: String) -> ProcessInvocation? {
+        guard shebang.hasPrefix("#!/usr/bin/env ") else {
+            return nil
+        }
+
+        var shebangArguments = shebang
+            .dropFirst("#!/usr/bin/env ".count)
+            .split(whereSeparator: \.isWhitespace)
+            .map(String.init)
+        guard shebangArguments.isEmpty == false else {
+            return nil
+        }
+
+        if shebangArguments.first == "-S" {
+            shebangArguments.removeFirst()
+        }
+
+        guard let interpreterName = shebangArguments.first,
+              let interpreterExecutable = resolvedInterpreter(named: interpreterName) else {
+            return nil
+        }
+
+        let interpreterArguments = Array(shebangArguments.dropFirst())
+        return ProcessInvocation(
+            executable: interpreterExecutable,
+            arguments: interpreterArguments + [executable] + arguments
+        )
+    }
+
+    private func resolvedInterpreter(named interpreterName: String) -> String? {
+        let siblingExecutable = URL(fileURLWithPath: executable)
+            .deletingLastPathComponent()
+            .appendingPathComponent(interpreterName, isDirectory: false)
+            .path
+        if FileManager.default.isExecutableFile(atPath: siblingExecutable) {
+            return siblingExecutable
+        }
+
+        return SystemProviderExecutableResolver()
+            .resolveExecutable(named: interpreterName)
+            .resolvedExecutable
     }
 
     private func consumeStdout(_ data: Data) {

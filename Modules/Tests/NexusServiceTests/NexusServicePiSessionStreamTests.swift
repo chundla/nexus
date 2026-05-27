@@ -265,6 +265,41 @@ struct NexusServicePiSessionStreamTests {
         }
     }
 
+    @Test func processPiRPCTransportLaunchesSiblingInterpreterForEnvShebangScripts() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let binURL = rootURL.appendingPathComponent("bin", isDirectory: true)
+        try FileManager.default.createDirectory(at: binURL, withIntermediateDirectories: true)
+
+        let interpreterURL = binURL.appendingPathComponent("fake-node-interpreter", isDirectory: false)
+        try "#!/bin/sh\nIFS= read -r _line\nprintf '%s\\n' '{\"id\":\"nexus-pi-startup\",\"type\":\"response\",\"command\":\"get_state\",\"success\":true,\"data\":{\"sessionId\":\"pi-session-1\"}}'\n".write(to: interpreterURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: interpreterURL.path)
+
+        let scriptURL = binURL.appendingPathComponent("fake-pi", isDirectory: false)
+        try "#!/usr/bin/env fake-node-interpreter\n".write(to: scriptURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+        let transport = try ProcessPiRPCTransport(
+            executable: scriptURL.path,
+            arguments: ["--mode", "rpc"],
+            workingDirectory: rootURL.path(percentEncoded: false)
+        )
+        let startupSemaphore = DispatchSemaphore(value: 0)
+        let response = LockedValue<String?>(nil)
+        transport.setStdoutLineHandler { line in
+            response.set(line)
+            startupSemaphore.signal()
+        }
+
+        try transport.start()
+        defer { try? transport.terminate() }
+        try transport.sendLine("{\"id\":\"nexus-pi-startup\",\"type\":\"get_state\"}")
+
+        #expect(startupSemaphore.wait(timeout: .now() + 2) == .success)
+        #expect(response.get()?.contains("\"success\":true") == true)
+    }
+
     @Test func localPiRuntimeStreamsPromptAndAssistantMessageIntoSharedSessionActivity() throws {
         let runtime = try PiRPCSessionRuntime(
             executable: "/tmp/fake-pi",
@@ -710,6 +745,27 @@ private final class ApprovalRequestTestPiRPCTransport: PiRPCTransporting, @unche
             return
         }
         stdoutLineHandler?(line)
+    }
+}
+
+private final class LockedValue<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Value
+
+    init(_ value: Value) {
+        self.value = value
+    }
+
+    func set(_ newValue: Value) {
+        lock.lock()
+        value = newValue
+        lock.unlock()
+    }
+
+    func get() -> Value {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
     }
 }
 
