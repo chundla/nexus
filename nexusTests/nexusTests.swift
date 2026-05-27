@@ -6116,7 +6116,7 @@ struct nexusTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let launcher = ProcessSessionRuntimeLauncher(piRuntimeFactory: { launchConfiguration, _, _ in
+        let launcher = ProcessSessionRuntimeLauncher(localProtocolNativeRuntimeFactories: [.pi: { launchConfiguration, _, _ in
             try PiRPCSessionRuntime(
                 executable: launchConfiguration.executable,
                 workingDirectory: launchConfiguration.workingDirectory,
@@ -6125,7 +6125,7 @@ struct nexusTests {
                     NexusTestsPiRPCTransport(promptResponseText: "world")
                 }
             )
-        })
+        }])
 
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
@@ -6333,7 +6333,7 @@ struct nexusTests {
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
         func makeService() throws -> NexusService {
-            let launcher = ProcessSessionRuntimeLauncher(piRuntimeFactory: { launchConfiguration, _, _ in
+            let launcher = ProcessSessionRuntimeLauncher(localProtocolNativeRuntimeFactories: [.pi: { launchConfiguration, _, _ in
                 try PiRPCSessionRuntime(
                     executable: launchConfiguration.executable,
                     workingDirectory: launchConfiguration.workingDirectory,
@@ -6343,7 +6343,7 @@ struct nexusTests {
                         NexusTestsPiRPCTransport(promptResponseText: "world")
                     }
                 )
-            })
+            }])
 
             return try NexusService.bootstrapForTests(
                 rootURL: rootURL,
@@ -6396,7 +6396,7 @@ struct nexusTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let launcher = ProcessSessionRuntimeLauncher(piRuntimeFactory: { launchConfiguration, _, _ in
+        let launcher = ProcessSessionRuntimeLauncher(localProtocolNativeRuntimeFactories: [.pi: { launchConfiguration, _, _ in
             try PiRPCSessionRuntime(
                 executable: launchConfiguration.executable,
                 workingDirectory: launchConfiguration.workingDirectory,
@@ -6406,7 +6406,7 @@ struct nexusTests {
                     NexusTestsPiRPCTransport(promptResponseText: "world")
                 }
             )
-        })
+        }])
 
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
