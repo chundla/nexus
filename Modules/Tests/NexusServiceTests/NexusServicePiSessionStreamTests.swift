@@ -115,6 +115,84 @@ struct NexusServicePiSessionStreamTests {
         #expect(resumedTurn.activityItems.suffix(2).map(\.text) == ["You: what was my last message?", "Pi: alpha"])
     }
 
+    @Test func localPiNamedSessionCanBeStoppedRelaunchedAndDeletedWhilePreservingConversationLinkage() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
+
+        let transportHarness = PersistentPiTransportHarness()
+        func makeService() throws -> NexusService {
+            let launcher = ProcessSessionRuntimeLauncher(piRuntimeFactory: { launchConfiguration, _, _ in
+                try PiRPCSessionRuntime(
+                    executable: launchConfiguration.executable,
+                    workingDirectory: launchConfiguration.workingDirectory,
+                    sessionLinkage: launchConfiguration.piSessionLinkage,
+                    terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
+                    transportFactory: { _, arguments, _ in
+                        transportHarness.makeTransport(arguments: arguments)
+                    }
+                )
+            })
+
+            return try NexusService.bootstrapForTests(
+                rootURL: rootURL,
+                providerHealthEvaluator: ProviderHealthEvaluator(
+                    executableResolver: PiStreamStubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
+                    commandRunner: PiStreamStubCommandRunner(results: [
+                        .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
+                        .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                    ]),
+                    localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+                ),
+                sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+            )
+        }
+
+        let service = try makeService()
+        let group = try service.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try service.createLocalWorkspace(
+            name: "Local Pi",
+            folderPath: workspaceFolder.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+
+        let namedSession = try service.createNamedSession(workspaceID: workspace.id, providerID: .pi, name: "Review")
+        _ = try service.sendSessionText(sessionID: namedSession.id, text: "alpha")
+        let firstTurn = try service.sendSessionInputKey(sessionID: namedSession.id, key: .enter)
+        let stoppedSession = try service.stopSession(sessionID: namedSession.id)
+        let stoppedRecord = try service.getSessionRecord(sessionID: namedSession.id)
+
+        let restartedService = try makeService()
+        let relaunchedSession = try restartedService.launchOrResumeSession(sessionID: namedSession.id)
+        _ = try restartedService.sendSessionText(sessionID: relaunchedSession.id, text: "what was my last message?")
+        let resumedTurn = try restartedService.sendSessionInputKey(sessionID: relaunchedSession.id, key: .enter)
+        _ = try restartedService.stopSession(sessionID: namedSession.id)
+        let deleted = try restartedService.deleteSessionRecord(sessionID: namedSession.id)
+        let providerDetail = try restartedService.getProviderDetail(workspaceID: workspace.id, providerID: .pi)
+
+        #expect(namedSession.providerID == .pi)
+        #expect(namedSession.name == "Review")
+        #expect(namedSession.isDefault == false)
+        #expect(firstTurn.activityItems.suffix(2).map(\.text) == ["You: alpha", "Pi: alpha"])
+        #expect(stoppedSession.id == namedSession.id)
+        #expect(stoppedSession.state == .exited)
+        #expect(stoppedRecord.id == namedSession.id)
+        #expect(stoppedRecord.state == .exited)
+        #expect(relaunchedSession.id == namedSession.id)
+        #expect(relaunchedSession.state == .ready)
+        #expect(resumedTurn.activityItems.suffix(2).map(\.text) == ["You: what was my last message?", "Pi: alpha"])
+        #expect(deleted)
+        #expect(providerDetail.alternateSessions.isEmpty)
+
+        do {
+            _ = try restartedService.getSessionScreen(sessionID: namedSession.id)
+            Issue.record("Expected deleted Pi Session Record to be unavailable")
+        } catch {
+        }
+    }
+
     @Test func localPiRuntimeStreamsPromptAndAssistantMessageIntoSharedSessionActivity() throws {
         let runtime = try PiRPCSessionRuntime(
             executable: "/tmp/fake-pi",

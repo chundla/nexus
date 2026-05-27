@@ -6141,6 +6141,92 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelPiNamedSessionLifecycleRefreshesProviderDetailAndClearsFocusAfterDelete() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let launcher = ProcessSessionRuntimeLauncher(piRuntimeFactory: { launchConfiguration, _, _ in
+            try PiRPCSessionRuntime(
+                executable: launchConfiguration.executable,
+                workingDirectory: launchConfiguration.workingDirectory,
+                sessionLinkage: launchConfiguration.piSessionLinkage,
+                terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
+                transportFactory: { _, _, _ in
+                    NexusTestsPiRPCTransport(promptResponseText: "world")
+                }
+            )
+        })
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
+                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                ]),
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+            ),
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+        let namedSession = try await model.createNamedSession(workspaceID: workspace.id, providerID: .pi, name: "Review")
+        try await model.sendInputToFocusedSession("hello")
+
+        let stoppedSession = try await model.stopSession(
+            sessionID: namedSession.id,
+            workspaceID: workspace.id,
+            providerID: .pi
+        )
+        let stoppedDetail = try #require(model.providerDetail(for: workspace.id, providerID: .pi))
+        let stoppedScreen = try #require(model.focusedSessionScreen)
+
+        let relaunchedSession = try await model.relaunchFocusedSession()
+        let relaunchedScreen = try #require(model.focusedSessionScreen)
+        _ = try await model.stopSession(sessionID: namedSession.id, workspaceID: workspace.id, providerID: .pi)
+        let deleted = try await model.deleteSessionRecord(
+            sessionID: namedSession.id,
+            workspaceID: workspace.id,
+            providerID: .pi
+        )
+        let deletedDetail = try #require(model.providerDetail(for: workspace.id, providerID: .pi))
+        let piCard = try #require(model.workspaceOverview(for: workspace.id)?.providerCards.first(where: { $0.provider.id == .pi }))
+
+        #expect(namedSession.providerID == .pi)
+        #expect(namedSession.name == "Review")
+        #expect(namedSession.isDefault == false)
+        #expect(focusedSessionSurface(for: stoppedScreen) == .structuredActivityFeed)
+        #expect(stoppedSession.state == .exited)
+        #expect(stoppedDetail.alternateSessions.map(\.id) == [namedSession.id])
+        #expect(stoppedDetail.alternateSessions.first?.state == .exited)
+        #expect(stoppedScreen.session.state == .exited)
+        #expect(stoppedScreen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "You: hello",
+            "Pi: world"
+        ])
+        #expect(relaunchedSession.id == namedSession.id)
+        #expect(relaunchedSession.state == .ready)
+        #expect(focusedSessionSurface(for: relaunchedScreen) == .structuredActivityFeed)
+        #expect(deleted)
+        #expect(model.focusedSessionScreen == nil)
+        #expect(deletedDetail.alternateSessions.isEmpty)
+        #expect(piCard.alternateSessionCount == 0)
+    }
+
+    @MainActor
     @Test func appModelLaunchOrResumeDefaultSessionRefreshesWorkspaceOverview() async throws {
         let workspaceFolderURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
