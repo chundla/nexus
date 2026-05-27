@@ -24,11 +24,11 @@ struct NexusServiceTerminalProviderCompatibilityTests {
                     .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-claude' '--version'"]): .success(stdout: "9.9.9 (Claude Code)\n"),
                     .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-claude' '--help'"]): .success(stdout: "Usage: claude\n"),
                     .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-codex' '--version'"]): .success(stdout: "1.2.3\n"),
-                    .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-codex' '--help'"]): .success(stdout: "Usage: codex\n"),
                     .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
                     .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
                 ]),
-                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
+                codexReadinessProbe: CompatibilityCodexReadinessProbe()
             ),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: CompatibilitySessionRuntimeLauncher())
         )
@@ -76,7 +76,7 @@ struct NexusServiceTerminalProviderCompatibilityTests {
         #expect(claudeScreen.primarySurface == .terminal)
         #expect(claudeScreen.transcript == "Claude ready")
         #expect(claudeScreen.activityItems.isEmpty)
-        #expect(codexScreen.primarySurface == .terminal)
+        #expect(codexScreen.primarySurface == .structuredActivityFeed)
         #expect(codexScreen.transcript == "Codex ready")
         #expect(codexScreen.activityItems.isEmpty)
         #expect(piScreen.primarySurface == .structuredActivityFeed)
@@ -123,6 +123,10 @@ private struct CompatibilityStubCommandRunner: ProviderCommandRunning {
     }
 }
 
+private struct CompatibilityCodexReadinessProbe: CodexReadinessProbing {
+    func probe(executable: String, workingDirectory: String) throws {}
+}
+
 private struct CompatibilitySessionRuntimeLauncher: SessionRuntimeLaunching {
     func makeRuntime(
         session: Session,
@@ -133,7 +137,7 @@ private struct CompatibilitySessionRuntimeLauncher: SessionRuntimeLaunching {
         case .claude:
             CompatibilityStaticSessionRuntime(transcript: "Claude ready")
         case .codex:
-            CompatibilityStaticSessionRuntime(transcript: "Codex ready")
+            CompatibilityStaticSessionRuntime(primarySurface: .structuredActivityFeed, transcript: "Codex ready")
         case .pi:
             CompatibilityStaticSessionRuntime(
                 primarySurface: .structuredActivityFeed,

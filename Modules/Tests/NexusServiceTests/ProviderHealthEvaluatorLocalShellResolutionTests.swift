@@ -27,14 +27,15 @@ struct ProviderHealthEvaluatorLocalShellResolutionTests {
         #expect(chmod(executablePath.path(percentEncoded: false), 0o755) == 0)
 
         let shellBuilder = LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+        let readinessProbe = RecordingCodexReadinessProbe()
         let evaluator = ProviderHealthEvaluator(
             executableResolver: TestExecutableResolver(executables: [:]),
             commandRunner: TestCommandRunner(results: [
                 .init(executable: "/bin/zsh", arguments: ["-lic", "command -v codex"]): .success(stdout: "\(executablePath.path(percentEncoded: false))\n"),
-                .init(executable: "/bin/zsh", arguments: ["-lic", "'\(executablePath.path(percentEncoded: false))' '--version'"]): .success(stdout: "1.2.3\n"),
-                .init(executable: "/bin/zsh", arguments: ["-lic", "'\(executablePath.path(percentEncoded: false))' '--help'"]): .success(stdout: "Usage: codex\n")
+                .init(executable: "/bin/zsh", arguments: ["-lic", "'\(executablePath.path(percentEncoded: false))' '--version'"]): .success(stdout: "1.2.3\n")
             ]),
-            localShellCommandBuilder: shellBuilder
+            localShellCommandBuilder: shellBuilder,
+            codexReadinessProbe: readinessProbe
         )
 
         let health = evaluator.healthSummary(
@@ -54,6 +55,9 @@ struct ProviderHealthEvaluatorLocalShellResolutionTests {
         #expect(health.resolvedExecutable == executablePath.path(percentEncoded: false))
         #expect(health.version == "1.2.3")
         #expect(health.launchability == .launchable)
+        #expect(readinessProbe.invocations.count == 1)
+        #expect(readinessProbe.invocations.first?.executable == executablePath.path(percentEncoded: false))
+        #expect(readinessProbe.invocations.first?.workingDirectory == workspaceFolder.path(percentEncoded: false))
     }
 
     @Test func localShellCommandBuilderAvoidsInteractivePosixShellForLaunches() {
@@ -107,16 +111,16 @@ struct ProviderHealthEvaluatorLocalShellResolutionTests {
 
         let wrappedCommand = "if ( -f ~/.login ) source ~/.login; command -v codex"
         let wrappedVersionCommand = "if ( -f ~/.login ) source ~/.login; '\(executablePath.path(percentEncoded: false))' '--version'"
-        let wrappedHelpCommand = "if ( -f ~/.login ) source ~/.login; '\(executablePath.path(percentEncoded: false))' '--help'"
         let shellBuilder = LocalShellCommandBuilder(environment: ["SHELL": "/bin/csh"])
+        let readinessProbe = RecordingCodexReadinessProbe()
         let evaluator = ProviderHealthEvaluator(
             executableResolver: TestExecutableResolver(executables: [:]),
             commandRunner: TestCommandRunner(results: [
                 .init(executable: "/bin/csh", arguments: ["-i", "-c", wrappedCommand]): .success(stdout: "\(executablePath.path(percentEncoded: false))\n"),
-                .init(executable: "/bin/csh", arguments: ["-i", "-c", wrappedVersionCommand]): .success(stdout: "1.2.3\n"),
-                .init(executable: "/bin/csh", arguments: ["-i", "-c", wrappedHelpCommand]): .success(stdout: "Usage: codex\n")
+                .init(executable: "/bin/csh", arguments: ["-i", "-c", wrappedVersionCommand]): .success(stdout: "1.2.3\n")
             ]),
-            localShellCommandBuilder: shellBuilder
+            localShellCommandBuilder: shellBuilder,
+            codexReadinessProbe: readinessProbe
         )
 
         let health = evaluator.healthSummary(
@@ -136,6 +140,9 @@ struct ProviderHealthEvaluatorLocalShellResolutionTests {
         #expect(health.resolvedExecutable == executablePath.path(percentEncoded: false))
         #expect(health.version == "1.2.3")
         #expect(health.launchability == .launchable)
+        #expect(readinessProbe.invocations.count == 1)
+        #expect(readinessProbe.invocations.first?.executable == executablePath.path(percentEncoded: false))
+        #expect(readinessProbe.invocations.first?.workingDirectory == workspaceFolder.path(percentEncoded: false))
     }
 
     @Test func remoteCodexHealthUsesShellAwareDiscoveryForHomeInstalledExecutable() {
@@ -239,6 +246,14 @@ private struct TestCommandRunner: ProviderCommandRunning {
         case let .success(stdout, stderr, exitStatus):
             return ProviderCommandResult(exitStatus: exitStatus, stdout: stdout, stderr: stderr)
         }
+    }
+}
+
+private final class RecordingCodexReadinessProbe: CodexReadinessProbing, @unchecked Sendable {
+    private(set) var invocations: [(executable: String, workingDirectory: String)] = []
+
+    func probe(executable: String, workingDirectory: String) throws {
+        invocations.append((executable, workingDirectory))
     }
 }
 #endif

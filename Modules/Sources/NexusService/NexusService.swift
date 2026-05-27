@@ -453,6 +453,14 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
                     sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.piSessionLinkage,
                     terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder
                 )
+            },
+            .codex: { launchConfiguration, _, _ in
+                try CodexAppServerRuntime(
+                    executable: launchConfiguration.executable,
+                    workingDirectory: launchConfiguration.workingDirectory,
+                    sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.codexSessionLinkage,
+                    terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder
+                )
             }
         ]
     }
@@ -1161,6 +1169,9 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 supportsNamedSessions: true,
                 healthSummaryEvaluator: { workspace, remoteContext, providerHealthEvaluator in
                     providerHealthEvaluator.healthSummary(for: .codex, workspace: workspace, remoteContext: remoteContext)
+                },
+                primarySurfaceEvaluator: { workspace in
+                    workspace.kind == .local ? .structuredActivityFeed : .terminal
                 },
                 shouldReuseRemoteHealthSnapshot: { snapshot, remoteContext in
                     shouldReuseRemoteCLIHealthSnapshot(snapshot, remoteContext: remoteContext)
@@ -2167,11 +2178,12 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             )
             try persistRuntimeLinkageIfNeeded(for: readySession)
             let terminalSize = try metadataStore.sessionTerminalSize(id: readySession.id)
-            _ = try sessionRuntimeManager.resize(
+            let screen = try sessionRuntimeManager.resize(
                 session: readySession,
                 columns: terminalSize.columns,
                 rows: terminalSize.rows
             )
+            try persistPrimarySurfaceIfNeeded(for: readySession, primarySurface: screen.primarySurface)
             return readySession
         } catch {
             let failure = try remoteRuntimeRecoveryFailure(for: error, session: readySession, workspace: workspace)
@@ -2203,11 +2215,12 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             )
             try persistRuntimeLinkageIfNeeded(for: session)
             let terminalSize = try metadataStore.sessionTerminalSize(id: session.id)
-            _ = try sessionRuntimeManager.resize(
+            let screen = try sessionRuntimeManager.resize(
                 session: session,
                 columns: terminalSize.columns,
                 rows: terminalSize.rows
             )
+            try persistPrimarySurfaceIfNeeded(for: session, primarySurface: screen.primarySurface)
             return session
         } catch {
             return try metadataStore.updateSession(
@@ -2225,6 +2238,15 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         }
 
         try metadataStore.saveSessionRecordAdapterMetadata(sessionID: session.id, metadata: metadata)
+    }
+
+    private func persistPrimarySurfaceIfNeeded(for session: Session, primarySurface: SessionSurface) throws {
+        guard let launchSnapshot = try metadataStore.launchSnapshot(sessionID: session.id),
+              launchSnapshot.primarySurface != primarySurface else {
+            return
+        }
+
+        try metadataStore.updateLaunchSnapshotPrimarySurface(sessionID: session.id, primarySurface: primarySurface)
     }
 
     private func remoteRuntimeRecoveryFailure(

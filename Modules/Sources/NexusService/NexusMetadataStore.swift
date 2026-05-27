@@ -900,6 +900,19 @@ final class NexusMetadataStore {
         }
     }
 
+    func updateLaunchSnapshotPrimarySurface(sessionID: UUID, primarySurface: SessionSurface) throws {
+        try withLock {
+            let statement = try prepare(
+                "UPDATE launch_snapshots SET primary_surface = ? WHERE session_id = ?;"
+            )
+            defer { sqlite3_finalize(statement) }
+
+            try bind(primarySurface.rawValue, at: 1, in: statement)
+            try bind(sessionID.uuidString, at: 2, in: statement)
+            try stepDone(statement)
+        }
+    }
+
     func sessionRecordAdapterMetadata(sessionID: UUID) throws -> SessionRecordAdapterMetadata? {
         try withLock {
             try sessionRecordAdapterMetadataWithoutLock(sessionID: sessionID)

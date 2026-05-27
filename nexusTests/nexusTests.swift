@@ -528,7 +528,8 @@ struct nexusTests {
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(stdout: "Usage: codex\n")
-                ])
+                ]),
+                codexReadinessProbe: NoOpCodexReadinessProbe()
             )
         )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -1060,7 +1061,8 @@ struct nexusTests {
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(stdout: "Usage: codex\n")
-                ])
+                ]),
+                codexReadinessProbe: NoOpCodexReadinessProbe()
             ),
             sessionRuntimeManager: StubSessionRuntimeManager()
         )
@@ -1145,7 +1147,8 @@ struct nexusTests {
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(stdout: "Usage: codex\n")
-                ])
+                ]),
+                codexReadinessProbe: NoOpCodexReadinessProbe()
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Codex ready")
         )
@@ -2562,7 +2565,8 @@ struct nexusTests {
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(stdout: "Usage: codex\n")
-                ])
+                ]),
+                codexReadinessProbe: NoOpCodexReadinessProbe()
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Codex ready")
         )
@@ -6169,10 +6173,12 @@ struct nexusTests {
             var state: Session.State = .ready
             var sessionRecordAdapterMetadata: SessionRecordAdapterMetadata? { nil }
 
+            private let primarySurface: SessionSurface
             private let transcript: String
             private let activityItems: [SessionActivityItem]
 
-            init(transcript: String, activityItems: [SessionActivityItem] = []) {
+            init(primarySurface: SessionSurface = .terminal, transcript: String, activityItems: [SessionActivityItem] = []) {
+                self.primarySurface = primarySurface
                 self.transcript = transcript
                 self.activityItems = activityItems
             }
@@ -6188,6 +6194,7 @@ struct nexusTests {
                         state: state,
                         failureMessage: session.failureMessage
                     ),
+                    primarySurface: primarySurface,
                     transcript: transcript,
                     activityItems: activityItems
                 )
@@ -6212,7 +6219,7 @@ struct nexusTests {
                 case .claude:
                     CompatibilityStaticSessionRuntime(transcript: "Claude ready")
                 case .codex:
-                    CompatibilityStaticSessionRuntime(transcript: "Codex ready")
+                    CompatibilityStaticSessionRuntime(primarySurface: .structuredActivityFeed, transcript: "Codex ready")
                 case .pi:
                     CompatibilityStaticSessionRuntime(
                         transcript: "",
@@ -6247,7 +6254,8 @@ struct nexusTests {
                     StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
                     StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
                 ]),
-                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
+                codexReadinessProbe: NoOpCodexReadinessProbe()
             ),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: CompatibilitySessionRuntimeLauncher())
         )
@@ -6287,7 +6295,7 @@ struct nexusTests {
         let codexSession = try await model.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .codex)
         let codexScreen = try #require(model.focusedSessionScreen)
         #expect(codexScreen.session.id == codexSession.id)
-        #expect(focusedSessionSurface(for: codexScreen) == .terminal)
+        #expect(focusedSessionSurface(for: codexScreen) == .structuredActivityFeed)
         #expect(codexScreen.transcript == "Codex ready")
 
         try await model.focusSession(sessionID: piSession.id)
@@ -7647,6 +7655,10 @@ struct StubCommandRunner: ProviderCommandRunning {
             return ProviderCommandResult(exitStatus: exitStatus, stdout: stdout, stderr: stderr)
         }
     }
+}
+
+private struct NoOpCodexReadinessProbe: CodexReadinessProbing {
+    func probe(executable: String, workingDirectory: String) throws {}
 }
 
 private final class NexusTestsPiRPCTransport: PiRPCTransporting, @unchecked Sendable {

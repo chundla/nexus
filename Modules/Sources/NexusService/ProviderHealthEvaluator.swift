@@ -24,6 +24,10 @@ struct ProviderCommandResult: Equatable {
     let stderr: String
 }
 
+protocol CodexReadinessProbing {
+    func probe(executable: String, workingDirectory: String) throws
+}
+
 struct RemoteWorkspaceHealthContext {
     let host: NexusDomain.Host
     let hostValidation: HostValidationSnapshot?
@@ -39,15 +43,18 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
     let executableResolver: any ProviderExecutableResolving
     let commandRunner: any ProviderCommandRunning
     let localShellCommandBuilder: LocalShellCommandBuilder
+    let codexReadinessProbe: any CodexReadinessProbing
 
     init(
         executableResolver: any ProviderExecutableResolving = SystemProviderExecutableResolver(),
         commandRunner: any ProviderCommandRunning = SystemProviderCommandRunner(),
-        localShellCommandBuilder: LocalShellCommandBuilder = LocalShellCommandBuilder()
+        localShellCommandBuilder: LocalShellCommandBuilder = LocalShellCommandBuilder(),
+        codexReadinessProbe: any CodexReadinessProbing = CodexAppServerReadinessProbe()
     ) {
         self.executableResolver = executableResolver
         self.commandRunner = commandRunner
         self.localShellCommandBuilder = localShellCommandBuilder
+        self.codexReadinessProbe = codexReadinessProbe
     }
 
     func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext? = nil) -> [WorkspaceProviderCard] {
@@ -73,7 +80,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
         case .claude:
             return localCLIHealthSummary(commandName: "claude", providerName: "Claude", workspace: workspace)
         case .codex:
-            return localCLIHealthSummary(commandName: "codex", providerName: "Codex", workspace: workspace)
+            return localCodexHealthSummary(workspace: workspace)
         case .pi:
             return localCLIHealthSummary(commandName: "pi", providerName: "Pi", workspace: workspace)
         case .ibmBob:
@@ -263,6 +270,70 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
                 ]
             )
         }
+    }
+
+    private func localCodexHealthSummary(workspace: Workspace) -> ProviderHealthSummary {
+        let resolution = resolvedLocalExecutable(named: "codex")
+        guard let executable = resolution.resolvedExecutable else {
+            return ProviderHealthSummary(
+                state: .unavailable,
+                summary: "Codex executable was not found",
+                launchability: .notLaunchable,
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .error,
+                        code: "executableNotFound",
+                        message: "Codex executable was not found in the service search paths."
+                    ),
+                    ProviderHealthDiagnostic(
+                        severity: .info,
+                        code: "searchedDirectories",
+                        message: "Searched directories: \(resolution.searchedDirectories.joined(separator: ", "))"
+                    ),
+                    ProviderHealthDiagnostic(
+                        severity: .info,
+                        code: "homeDirectories",
+                        message: "Resolved home directories: \(resolution.homeDirectories.joined(separator: ", "))"
+                    ),
+                    ProviderHealthDiagnostic(
+                        severity: .info,
+                        code: "pathEnvironment",
+                        message: "PATH: \(resolution.pathEnvironment ?? "<unset>")"
+                    )
+                ]
+            )
+        }
+
+        var diagnostics: [ProviderHealthDiagnostic] = []
+        let version = detectLocalVersion(executable: executable, providerName: "Codex", diagnostics: &diagnostics)
+
+        do {
+            try codexReadinessProbe.probe(executable: executable, workingDirectory: workspace.folderPath)
+        } catch {
+            return ProviderHealthSummary(
+                state: .misconfigured,
+                summary: "Codex is installed but failed the protocol-native readiness probe",
+                resolvedExecutable: executable,
+                version: version,
+                launchability: .notLaunchable,
+                diagnostics: diagnostics + [
+                    ProviderHealthDiagnostic(
+                        severity: .error,
+                        code: "launchProbeFailed",
+                        message: error.localizedDescription
+                    )
+                ]
+            )
+        }
+
+        return ProviderHealthSummary(
+            state: .available,
+            summary: version.map { "Codex \($0) is available" } ?? "Codex is available",
+            resolvedExecutable: executable,
+            version: version,
+            launchability: .launchable,
+            diagnostics: diagnostics
+        )
     }
 
     private func localCLIHealthSummary(commandName: String, providerName: String, workspace: Workspace) -> ProviderHealthSummary {
@@ -592,6 +663,88 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
     private func shellQuoted(_ value: String) -> String {
         "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
+}
+
+struct CodexAppServerReadinessProbe: CodexReadinessProbing {
+    func probe(executable: String, workingDirectory: String) throws {
+        let transport = try ProcessCodexAppServerTransport(
+            executable: executable,
+            arguments: ["app-server"],
+            workingDirectory: workingDirectory
+        )
+
+        let semaphore = DispatchSemaphore(value: 0)
+        let state = CodexReadinessProbeState()
+
+        transport.setStdoutLineHandler { line in
+            guard let data = line.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return
+            }
+
+            if let error = object["error"] as? [String: Any],
+               let message = error["message"] as? String {
+                state.error = NSError(domain: "CodexAppServerReadinessProbe", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+                semaphore.signal()
+                return
+            }
+
+            if let id = object["id"] as? String, id == "nexus-codex-readiness-initialize" {
+                semaphore.signal()
+            }
+        }
+        transport.setTerminationHandler { status in
+            if status != 0, state.error == nil {
+                state.error = NSError(
+                    domain: "CodexAppServerReadinessProbe",
+                    code: Int(status),
+                    userInfo: [NSLocalizedDescriptionKey: "Codex app-server exited before readiness completed."]
+                )
+                semaphore.signal()
+            }
+        }
+
+        try transport.start()
+        try transport.sendLine(Self.jsonLine([
+            "jsonrpc": "2.0",
+            "id": "nexus-codex-readiness-initialize",
+            "method": "initialize",
+            "params": [
+                "clientInfo": [
+                    "name": "nexus",
+                    "version": "1"
+                ]
+            ]
+        ]))
+
+        defer {
+            try? transport.terminate()
+        }
+
+        guard semaphore.wait(timeout: .now() + 5) == .success else {
+            throw NSError(
+                domain: "CodexAppServerReadinessProbe",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Codex app-server did not answer the readiness probe in time."]
+            )
+        }
+
+        if let error = state.error {
+            throw error
+        }
+    }
+
+    private static func jsonLine(_ object: [String: Any]) throws -> String {
+        let data = try JSONSerialization.data(withJSONObject: object)
+        guard let line = String(data: data, encoding: .utf8) else {
+            throw NSError(domain: "CodexAppServerReadinessProbe", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to encode Codex readiness probe request."])
+        }
+        return line
+    }
+}
+
+private final class CodexReadinessProbeState: @unchecked Sendable {
+    var error: Error?
 }
 
 struct SystemProviderExecutableResolver: ProviderExecutableResolving {
