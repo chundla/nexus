@@ -154,6 +154,16 @@ public enum SessionController: Codable, Equatable, Sendable {
     case pairedDevice(UUID)
 }
 
+public enum SessionSurface: String, Codable, Equatable, Sendable {
+    case terminal
+    case structuredActivityFeed
+}
+
+public enum SessionSurfaceSupport: String, Codable, Equatable, Sendable {
+    case supported
+    case unsupported
+}
+
 public struct SessionActivityItem: Codable, Equatable, Identifiable, Sendable {
     public enum Kind: String, Codable, Sendable {
         case status
@@ -205,6 +215,7 @@ public struct SessionApprovalRequest: Codable, Equatable, Identifiable, Sendable
 
 public struct SessionScreen: Codable, Equatable, Sendable {
     public let session: Session
+    public let primarySurface: SessionSurface
     public let controller: SessionController
     public let transcript: String
     public let terminalColumns: Int
@@ -219,6 +230,7 @@ public struct SessionScreen: Codable, Equatable, Sendable {
 
     public init(
         session: Session,
+        primarySurface: SessionSurface = .terminal,
         controller: SessionController = .mac,
         transcript: String,
         terminalColumns: Int = 80,
@@ -239,6 +251,7 @@ public struct SessionScreen: Codable, Equatable, Sendable {
         let resolvedVisibleLines = visibleLines ?? viewport.visibleLines
 
         self.session = session
+        self.primarySurface = primarySurface
         self.controller = controller
         self.transcript = transcript
         self.terminalColumns = terminalColumns

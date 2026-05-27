@@ -776,6 +776,18 @@ private struct RemoteSessionScreenView: View {
         currentSession.state == .ready
     }
 
+    private var focusedSessionSurfaceSupport: SessionSurfaceSupport? {
+        guard model.focusedSessionID == session.id else {
+            return nil
+        }
+
+        return model.focusedSessionSurfaceSupport
+    }
+
+    private var supportsFocusedSessionSurface: Bool {
+        focusedSessionSurfaceSupport == .supported
+    }
+
     private var isPerformingAction: Bool {
         activeAction != nil
     }
@@ -816,7 +828,7 @@ private struct RemoteSessionScreenView: View {
                 }
             }
 
-            if isReady {
+            if isReady, supportsFocusedSessionSurface {
                 Section("Attachment") {
                     LabeledContent("Mode", value: model.focusedSessionIsController ? "Controller" : "Viewer")
                     Text(model.focusedSessionIsController
@@ -840,60 +852,71 @@ private struct RemoteSessionScreenView: View {
                 }
             }
 
-            Section("Terminal") {
-                if let screen {
-                    ScrollView([.horizontal, .vertical]) {
-                        VStack(alignment: .leading, spacing: 0) {
-                            ForEach(Array(screen.styledVisibleLines.enumerated()), id: \.offset) { row, line in
-                                terminalLineView(line, row: row, screen: screen)
-                            }
-                        }
-                        .padding(12)
-                    }
-                    .listRowInsets(EdgeInsets())
-                    .frame(minHeight: 260)
-                    .background(Color.black.opacity(0.92))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .background {
-                        GeometryReader { proxy in
-                            Color.clear
-                                .onAppear {
-                                    terminalViewportSize = proxy.size
-                                }
-                                .onChange(of: proxy.size) { _, newSize in
-                                    terminalViewportSize = newSize
-                                }
-                        }
-                    }
-                } else if let errorMessage = model.focusedSessionErrorMessage {
-                    Text(errorMessage)
-                        .foregroundStyle(.orange)
-                } else {
-                    Text("Loading Session screen…")
+            if screen != nil, focusedSessionSurfaceSupport == .unsupported {
+                Section("Session Surface") {
+                    Text("This iPhone can inspect this Session, but it cannot present or operate the shared activity surface yet.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Text("Open this Session on the paired Mac to use its primary Session surface.")
+                        .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
-            }
+            } else {
+                Section("Terminal") {
+                    if let screen {
+                        ScrollView([.horizontal, .vertical]) {
+                            VStack(alignment: .leading, spacing: 0) {
+                                ForEach(Array(screen.styledVisibleLines.enumerated()), id: \.offset) { row, line in
+                                    terminalLineView(line, row: row, screen: screen)
+                                }
+                            }
+                            .padding(12)
+                        }
+                        .listRowInsets(EdgeInsets())
+                        .frame(minHeight: 260)
+                        .background(Color.black.opacity(0.92))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .background {
+                            GeometryReader { proxy in
+                                Color.clear
+                                    .onAppear {
+                                        terminalViewportSize = proxy.size
+                                    }
+                                    .onChange(of: proxy.size) { _, newSize in
+                                        terminalViewportSize = newSize
+                                    }
+                            }
+                        }
+                    } else if let errorMessage = model.focusedSessionErrorMessage {
+                        Text(errorMessage)
+                            .foregroundStyle(.orange)
+                    } else {
+                        Text("Loading Session screen…")
+                            .foregroundStyle(.secondary)
+                    }
+                }
 
-            if isReady {
-                Section("Input") {
-                    TextField("Type into the terminal", text: $terminalDraft)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .submitLabel(.send)
-                        .focused($isTerminalInputFocused)
-                        .onSubmit {
+                if isReady {
+                    Section("Input") {
+                        TextField("Type into the terminal", text: $terminalDraft)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .submitLabel(.send)
+                            .focused($isTerminalInputFocused)
+                            .onSubmit {
+                                prepareAndSendDraftText()
+                            }
+
+                        Button("Send Text") {
                             prepareAndSendDraftText()
                         }
+                        .disabled(model.focusedSessionIsController == false || terminalDraft.isEmpty || isPerformingAction)
 
-                    Button("Send Text") {
-                        prepareAndSendDraftText()
-                    }
-                    .disabled(model.focusedSessionIsController == false || terminalDraft.isEmpty || isPerformingAction)
-
-                    HStack {
-                        quickKeyButton("Return", key: .enter)
-                        quickKeyButton("Backspace", key: .backspace)
-                        quickKeyButton("Ctrl-C", key: .interrupt)
+                        HStack {
+                            quickKeyButton("Return", key: .enter)
+                            quickKeyButton("Backspace", key: .backspace)
+                            quickKeyButton("Ctrl-C", key: .interrupt)
+                        }
                     }
                 }
             }
@@ -920,7 +943,7 @@ private struct RemoteSessionScreenView: View {
             Alert(title: Text("Nexus Remote"), message: Text(error.message))
         }
         .onChange(of: terminalViewportSize) { _, _ in
-            guard isReady, model.focusedSessionIsController else {
+            guard isReady, supportsFocusedSessionSurface, model.focusedSessionIsController else {
                 return
             }
 

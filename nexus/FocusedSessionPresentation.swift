@@ -23,11 +23,11 @@ struct StructuredSessionActivityRow: Identifiable, Equatable {
 }
 
 func focusedSessionSurface(for screen: SessionScreen) -> FocusedSessionSurface {
-    switch screen.session.providerID {
-    case .pi:
-        .structuredActivityFeed
-    case .codex, .claude, .ibmBob:
+    switch screen.primarySurface {
+    case .terminal:
         .terminal
+    case .structuredActivityFeed:
+        .structuredActivityFeed
     }
 }
 

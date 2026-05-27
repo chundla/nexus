@@ -2277,12 +2277,22 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         return normalizedSessionScreen(
             SessionScreen(
                 session: session,
+                primarySurface: staticSessionSurface(for: session),
                 transcript: transcript,
                 terminalColumns: terminalSize.columns,
                 terminalRows: terminalSize.rows,
                 activityItems: staticSessionActivityItems(for: session, transcript: transcript)
             )
         )
+    }
+
+    private func staticSessionSurface(for session: Session) -> SessionSurface {
+        switch session.providerID {
+        case .pi:
+            .structuredActivityFeed
+        case .claude, .codex, .ibmBob:
+            .terminal
+        }
     }
 
     private func staticSessionActivityItems(for session: Session, transcript: String) -> [SessionActivityItem] {
@@ -2419,6 +2429,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
 
         return SessionScreen(
             session: screen.session,
+            primarySurface: screen.primarySurface,
             controller: sessionControllerRegistry.controller(for: screen.session.id),
             transcript: renderState.transcript,
             terminalColumns: screen.terminalColumns,

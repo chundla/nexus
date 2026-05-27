@@ -127,6 +127,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         defer { lock.unlock() }
         return SessionScreen(
             session: session,
+            primarySurface: .structuredActivityFeed,
             transcript: renderedTranscriptLocked(),
             terminalColumns: terminalColumns,
             terminalRows: terminalRows,

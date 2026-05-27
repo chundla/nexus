@@ -116,7 +116,7 @@ struct nexusTests {
     }
 
     @MainActor
-    @Test func focusedSessionSurfaceUsesStructuredActivityFeedForPiSessionsAndTerminalSurfaceForTerminalProviders() {
+    @Test func focusedSessionSurfaceUsesExplicitPrimarySurfaceInsteadOfProviderIdentity() {
         let piScreen = SessionScreen(
             session: Session(
                 id: UUID(),
@@ -125,10 +125,8 @@ struct nexusTests {
                 isDefault: true,
                 state: .ready
             ),
-            transcript: "",
-            activityItems: [
-                SessionActivityItem(kind: .status, text: "Pi shared Session stream connected")
-            ]
+            primarySurface: .terminal,
+            transcript: "Pi can still expose a terminal surface"
         )
         let claudeScreen = SessionScreen(
             session: Session(
@@ -138,11 +136,15 @@ struct nexusTests {
                 isDefault: true,
                 state: .ready
             ),
-            transcript: "Claude ready"
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .status, text: "Structured Claude session")
+            ]
         )
 
-        #expect(focusedSessionSurface(for: piScreen) == .structuredActivityFeed)
-        #expect(focusedSessionSurface(for: claudeScreen) == .terminal)
+        #expect(focusedSessionSurface(for: piScreen) == .terminal)
+        #expect(focusedSessionSurface(for: claudeScreen) == .structuredActivityFeed)
     }
 
     @MainActor

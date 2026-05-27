@@ -166,6 +166,14 @@ final class RemoteClientPairingModel {
         return focusedSessionScreen?.controller == .pairedDevice(pairedDeviceID)
     }
 
+    var focusedSessionSurfaceSupport: SessionSurfaceSupport? {
+        guard let focusedSessionScreen else {
+            return nil
+        }
+
+        return sessionSurfaceSupport(for: focusedSessionScreen, on: .remoteClient)
+    }
+
     init(client: any RemotePairingClient, store: any PairedMacStore) {
         self.client = client
         self.store = store

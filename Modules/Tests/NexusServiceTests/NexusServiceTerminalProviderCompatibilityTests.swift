@@ -73,10 +73,13 @@ struct NexusServiceTerminalProviderCompatibilityTests {
         #expect(piDetail.capabilities.createNamedSession.isEnabled)
         #expect(piDetail.defaultSession?.id == piSession.id)
 
+        #expect(claudeScreen.primarySurface == .terminal)
         #expect(claudeScreen.transcript == "Claude ready")
         #expect(claudeScreen.activityItems.isEmpty)
+        #expect(codexScreen.primarySurface == .terminal)
         #expect(codexScreen.transcript == "Codex ready")
         #expect(codexScreen.activityItems.isEmpty)
+        #expect(piScreen.primarySurface == .structuredActivityFeed)
         #expect(piScreen.transcript.isEmpty)
         #expect(piScreen.activityItems.map(\.text) == ["Pi shared Session stream connected"])
         #expect(piScreen.activityItems.map(\.kind) == [.status])
@@ -133,6 +136,7 @@ private struct CompatibilitySessionRuntimeLauncher: SessionRuntimeLaunching {
             CompatibilityStaticSessionRuntime(transcript: "Codex ready")
         case .pi:
             CompatibilityStaticSessionRuntime(
+                primarySurface: .structuredActivityFeed,
                 transcript: "",
                 activityItems: [SessionActivityItem(kind: .status, text: "Pi shared Session stream connected")]
             )
@@ -146,16 +150,23 @@ private final class CompatibilityStaticSessionRuntime: SessionRuntime, @unchecke
     var state: Session.State = .ready
     var piSessionLinkage: PiSessionLinkage? { nil }
 
+    private let primarySurface: SessionSurface
     private let transcript: String
     private let activityItems: [SessionActivityItem]
 
-    init(transcript: String, activityItems: [SessionActivityItem] = []) {
+    init(primarySurface: SessionSurface = .terminal, transcript: String, activityItems: [SessionActivityItem] = []) {
+        self.primarySurface = primarySurface
         self.transcript = transcript
         self.activityItems = activityItems
     }
 
     func sessionScreen(for session: Session) -> SessionScreen {
-        SessionScreen(session: sessionWithCurrentState(session), transcript: transcript, activityItems: activityItems)
+        SessionScreen(
+            session: sessionWithCurrentState(session),
+            primarySurface: primarySurface,
+            transcript: transcript,
+            activityItems: activityItems
+        )
     }
 
     func setChangeHandler(_ handler: (@Sendable () -> Void)?) {}
