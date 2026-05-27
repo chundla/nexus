@@ -4,6 +4,10 @@
 
 Prove the first iPhone-first Remote Client slice for Nexus by pairing an iPhone to a Mac over the local network and remotely browsing, attaching to, and controlling Mac-managed Sessions.
 
+## Current rollout note
+
+By Milestone Seven, iPhone can browse, inspect **Provider Health**, and use the supported remote launch and **Named Session** flows for both Claude and Codex when the active **Paired Mac** reports them as **Launchable Providers**. Pi and IBM Bob remain visible **Providers** but are not launchable yet.
+
 ## Success criteria
 
 - user can explicitly enable **Remote Access** on a Mac while Nexus is running
@@ -17,7 +21,7 @@ Prove the first iPhone-first Remote Client slice for Nexus by pairing an iPhone 
 - iPhone can take **Controller** status without Mac-side approval and can send real terminal input through a minimal iPhone input UI
 - any human interaction in Nexus on the Mac automatically reclaims **Controller** status
 - the current **Controller** owns terminal size; taking control from iPhone resizes the Session to the iPhone viewport and Mac reclaim resizes it back
-- iPhone can launch, resume, relaunch, and stop the default Session for an operable Provider on the active **Paired Mac**
+- iPhone can launch, resume, relaunch, and stop the default Session for a **Launchable Provider** on the active **Paired Mac**
 - iPhone can view and operate existing named Sessions that already exist on the active **Paired Mac**, but cannot create additional named Sessions yet
 - iPhone can inspect failed Session records and relaunch them when appropriate
 - provider-native auth prompts remain terminal-native and can be completed from iPhone through the Session terminal
@@ -73,7 +77,7 @@ Prove the first iPhone-first Remote Client slice for Nexus by pairing an iPhone 
 - remote Background Service admin actions such as restart or full diagnostics-log management from iPhone
 - a requirement that Nexus remote access survive full Mac app quit or reboot without relaunch
 - a merged cross-Mac workspace catalog on iPhone
-- pretending non-implemented Providers are operable from iPhone
+- pretending non-implemented Providers are launchable from iPhone
 
 ## UX minimums
 
@@ -108,7 +112,7 @@ Prove the first iPhone-first Remote Client slice for Nexus by pairing an iPhone 
 - **Workspace Availability** summary and refresh action
 - Provider list for supported product concepts
 - **Provider Health** summary and refresh action
-- clear indication when a Provider exists conceptually but is not operable on the active **Paired Mac**
+- clear indication when a Provider exists conceptually but is not launchable on the active **Paired Mac**
 - default Session summary and action
 - existing named Session summaries
 - failed Session summaries

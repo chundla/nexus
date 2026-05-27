@@ -4,6 +4,14 @@
 
 Prove the Nexus remote-workspace architecture with a useful macOS-only remote slice centered on the Background Service.
 
+## Historical note
+
+Milestone Two captured the first remote SSH-plus-tmux provider slice with Claude. Current rollout status is:
+
+- Claude and Codex are the remote **Launchable Providers** on supported **Remote Workspaces**
+- iPhone reuses the same Workspace-scoped remote capability surface through the dedicated **Remote Client** API
+- Pi and IBM Bob remain visible **Providers** but are not launchable yet
+
 ## Success criteria
 
 - user can create, edit, validate, and inspect a Host
@@ -20,7 +28,7 @@ Prove the Nexus remote-workspace architecture with a useful macOS-only remote sl
 - failed remote launches become inspectable failed Session records
 - Stop Session terminates the remote tmux-backed runtime; detach leaves runtime alive
 - tmux-backed remote Claude Sessions are recoverable after Background Service restart using persisted linkage
-- non-Claude Providers still appear on Remote Workspaces as supported product concepts, but remote execution is clearly not yet implemented for them
+- Providers outside the first implemented remote launch set still appear on Remote Workspaces as supported product concepts, but are clearly not launchable in this milestone
 
 ## Scope
 
@@ -51,7 +59,7 @@ Prove the Nexus remote-workspace architecture with a useful macOS-only remote sl
 
 - iOS target work
 - pairing or remote-client protocol work
-- remote execution for Providers other than Claude
+- additional remote launchable Providers beyond the first implemented remote slice
 - user-selectable Remote Session Strategy
 - automatic adoption or discovery of arbitrary tmux sessions
 - remote Workspace auto-discovery
@@ -120,7 +128,7 @@ Prove the Nexus remote-workspace architecture with a useful macOS-only remote sl
 - Host Validation is provider-agnostic
 - Workspace Availability is distinct from Host Validation and Provider Health
 - remote path accessibility belongs to Workspace Availability, not Host Validation
-- Provider Health for remote Claude is Remote-Workspace-scoped, not Host-scoped
+- Provider Health for a remote **Launchable Provider** is **Remote Workspace**-scoped, not Host-scoped
 - launch/resume may opportunistically revalidate Host, Workspace Availability, and Provider Health before launching
 - unavailable and broken are not synonyms:
   - unavailable means transient environmental failure

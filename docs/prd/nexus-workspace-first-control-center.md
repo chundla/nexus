@@ -126,7 +126,10 @@ Milestone one focuses on macOS with a Background Service as the source of truth,
 - Each Workspace has a stable internal identity and belongs to one primary Workspace Group in V1.
 - The Workspace overview is provider-first.
 - Provider cards show all supported Providers, not just detected ones.
-- Milestone one supported Provider set is Codex, Claude, IBM Bob, and Pi at the product level, but only one Provider adapter needs to be implemented first, chosen by simplest practical launch path.
+- Nexus keeps Codex, Claude, IBM Bob, and Pi visible at the product level.
+- Current rollout status is that Claude and Codex are the **Launchable Providers** across local **Workspaces**, **Remote Workspaces**, and supported iPhone **Remote Client** flows.
+- Pi and IBM Bob remain visible **Providers** but are not launchable yet.
+- The service-owned provider-adapter seam is intended to lower the future cost of making Pi and IBM Bob launchable later without changing the workspace-first product model.
 - Each Workspace + Provider pair has a default Session.
 - Selecting a Provider in a Workspace reuses the default Session by default.
 - Users can explicitly create additional named Sessions.

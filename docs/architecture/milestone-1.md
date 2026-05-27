@@ -4,6 +4,14 @@
 
 Prove the Nexus architecture with a useful macOS-only local-workspace slice centered on the Background Service.
 
+## Historical note
+
+Milestone One captured the first local provider slice. Current rollout status is:
+
+- Claude and Codex are the local **Launchable Providers** on supported **Workspaces**
+- Pi and IBM Bob remain visible **Providers** but are not launchable yet
+- the service-owned provider-adapter seam from Milestone Seven is intended to lower the future cost of making Pi and IBM Bob launchable later
+
 ## Success criteria
 
 - user can add multiple local workspaces

@@ -4,12 +4,16 @@
 
 Prove that a trusted iPhone **Remote Client** can create and enter additional **Named Sessions** on an active **Paired Mac** while preserving the existing workspace-first, viewer-by-default model.
 
+## Current rollout note
+
+By Milestone Seven, the same iPhone **Named Session** flow applies to both Claude and Codex whenever the active **Paired Mac** reports them as **Launchable Providers**. Pi and IBM Bob remain visible **Providers** but are not launchable yet, and the service-owned provider-adapter seam is intended to make that future enablement cheaper.
+
 ## Success criteria
 
 - iPhone can create an additional **Named Session** from **Provider detail** on the active **Paired Mac**
-- the create action works for local and **Remote Workspaces** whose **Provider** is actually operable on that **Workspace**
+- the create action works for local and **Remote Workspaces** whose **Provider** is a **Launchable Provider** on that **Workspace**
 - the **Named Sessions** section is visible on iPhone even when no **Named Sessions** exist yet
-- the create action is visible for supported product Providers but disabled when **Provider Health** says the Provider is not operable or launchable on that **Workspace**
+- the create action is visible for supported product Providers but disabled when **Provider Health** says the **Provider** is not launchable on that **Workspace**
 - creating a **Named Session** uses an auto-generated name and immediately attempts launch rather than creating a record-only lane
 - after create, iPhone opens the created **Session** immediately, including when the created **Session** is a failed Session record
 - after create, iPhone attaches to the created **Session** as a viewer by default rather than automatically taking **Controller** status
@@ -54,7 +58,7 @@ Prove that a trusted iPhone **Remote Client** can create and enter additional **
 - **Named Sessions** section remains visible even when empty
 - empty state clearly says there are no **Named Sessions** yet
 - a **Create Session** action lives with the **Named Sessions** section
-- **Create Session** is visible but disabled when the **Provider** is not operable on that **Workspace**
+- **Create Session** is visible but disabled when the **Provider** is not launchable on that **Workspace**
 - disabled create state explains why the **Provider** cannot currently create a **Session**
 - existing **Named Sessions** and failed Session records remain visible in the same detail surface
 
@@ -75,7 +79,7 @@ Prove that a trusted iPhone **Remote Client** can create and enter additional **
 - iPhone stays workspace-first; **Named Session** creation remains scoped under one **Workspace** and one **Provider**
 - iPhone enters the created **Session** as a viewer by default and may explicitly take **Controller** status afterward
 - action-local refresh is sufficient for this milestone; other clients may see the new **Named Session** on their next refresh
-- only Providers whose Mac-side support is actually implemented may be operable create targets in this milestone
+- only Providers whose Mac-side support is actually implemented may be launchable create targets in this milestone
 
 ## Open implementation choices
 
