@@ -23,15 +23,15 @@ struct LocalShellCommandBuilder {
     }
 
     func launchCommand(for executable: String, arguments: [String] = []) -> LocalShellCommand {
-        preferredShellLaunchStrategy().command(shellExecCommand(executable: executable, arguments: arguments))
+        preferredLaunchShellStrategy().command(shellExecCommand(executable: executable, arguments: arguments))
     }
 
     private func shellExecCommand(executable: String, arguments: [String]) -> String {
         (["exec", shellQuoted(executable)] + arguments.map(shellQuoted)).joined(separator: " ")
     }
 
-    private func preferredShellLaunchStrategy() -> ShellLaunchStrategy {
-        shellLaunchStrategies().first(where: { fileManager.isExecutableFile(atPath: $0.executable) })
+    private func preferredLaunchShellStrategy() -> ShellLaunchStrategy {
+        launchShellStrategies().first(where: { fileManager.isExecutableFile(atPath: $0.executable) })
             ?? ShellLaunchStrategy(
                 executable: "/bin/sh",
                 argumentsPrefix: ["-lc"],
@@ -41,6 +41,10 @@ struct LocalShellCommandBuilder {
 
     private func shellLaunchStrategies() -> [ShellLaunchStrategy] {
         shellCandidates().flatMap(Self.strategies(for:))
+    }
+
+    private func launchShellStrategies() -> [ShellLaunchStrategy] {
+        shellCandidates().flatMap(Self.launchStrategies(for:))
     }
 
     private func shellCandidates() -> [String] {
@@ -90,6 +94,55 @@ struct LocalShellCommandBuilder {
                 ShellLaunchStrategy(
                     executable: shell,
                     argumentsPrefix: ["-lc"],
+                    commandWrapper: { $0 }
+                )
+            ]
+        }
+    }
+
+    private static func launchStrategies(for shell: String) -> [ShellLaunchStrategy] {
+        switch ShellSupport.shellFamily(for: shell) {
+        case .cShell:
+            return [
+                ShellLaunchStrategy(
+                    executable: shell,
+                    argumentsPrefix: ["-c"],
+                    commandWrapper: Self.cShellWrappedCommand
+                ),
+                ShellLaunchStrategy(
+                    executable: shell,
+                    argumentsPrefix: ["-i", "-c"],
+                    commandWrapper: Self.cShellWrappedCommand
+                )
+            ]
+        case .fish:
+            return [
+                ShellLaunchStrategy(
+                    executable: shell,
+                    argumentsPrefix: ["-l", "-c"],
+                    commandWrapper: { $0 }
+                ),
+                ShellLaunchStrategy(
+                    executable: shell,
+                    argumentsPrefix: ["-c"],
+                    commandWrapper: { $0 }
+                ),
+                ShellLaunchStrategy(
+                    executable: shell,
+                    argumentsPrefix: ["-i", "-c"],
+                    commandWrapper: { $0 }
+                )
+            ]
+        case .posix:
+            return [
+                ShellLaunchStrategy(
+                    executable: shell,
+                    argumentsPrefix: ["-lc"],
+                    commandWrapper: { $0 }
+                ),
+                ShellLaunchStrategy(
+                    executable: shell,
+                    argumentsPrefix: ["-lic"],
                     commandWrapper: { $0 }
                 )
             ]

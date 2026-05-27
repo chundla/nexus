@@ -56,20 +56,37 @@ struct ProviderHealthEvaluatorLocalShellResolutionTests {
         #expect(health.launchability == .launchable)
     }
 
-    @Test func localShellCommandBuilderWrapsLaunchesInLoginShell() {
+    @Test func localShellCommandBuilderAvoidsInteractivePosixShellForLaunches() {
         let command = LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
             .launchCommand(for: "/tmp/fake-codex")
 
         #expect(command.executable == "/bin/zsh")
-        #expect(command.arguments == ["-lic", "exec '/tmp/fake-codex'"])
+        #expect(command.arguments == ["-lc", "exec '/tmp/fake-codex'"])
     }
 
-    @Test func localShellCommandBuilderWrapsLaunchesInInteractiveCShell() {
+    @Test func localShellCommandBuilderAvoidsInteractiveCShellForLaunches() {
         let command = LocalShellCommandBuilder(environment: ["SHELL": "/bin/csh"])
             .launchCommand(for: "/tmp/fake-codex")
 
         #expect(command.executable == "/bin/csh")
-        #expect(command.arguments == ["-i", "-c", "if ( -f ~/.login ) source ~/.login; exec '/tmp/fake-codex'"])
+        #expect(command.arguments == ["-c", "if ( -f ~/.login ) source ~/.login; exec '/tmp/fake-codex'"])
+    }
+
+    @Test func localShellCommandBuilderUsesLoginFishWithoutInteractiveModeForLaunches() throws {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ProviderHealthEvaluatorLocalShellResolutionTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+
+        let fishPath = tempRoot.appendingPathComponent("fish", isDirectory: false)
+        try "#!/bin/sh\nexit 0\n".write(to: fishPath, atomically: true, encoding: .utf8)
+        #expect(chmod(fishPath.path(percentEncoded: false), 0o755) == 0)
+
+        let command = LocalShellCommandBuilder(environment: ["SHELL": fishPath.path(percentEncoded: false)])
+            .launchCommand(for: "/tmp/fake-codex")
+
+        #expect(command.executable == fishPath.path(percentEncoded: false))
+        #expect(command.arguments == ["-l", "-c", "exec '/tmp/fake-codex'"])
     }
 
     @Test func localCodexHealthResolvesExecutableFromInteractiveCShellWhenServicePathsMissIt() throws {
