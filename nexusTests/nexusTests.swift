@@ -160,6 +160,8 @@ struct nexusTests {
             activityItems: [
                 SessionActivityItem(kind: .status, text: "Connected"),
                 SessionActivityItem(kind: .message, text: "Pi: hello"),
+                SessionActivityItem(kind: .approvalRequest, text: "Approval Request: Deploy to production?"),
+                SessionActivityItem(kind: .approvalDecision, text: "Approved: Deploy to production?"),
                 SessionActivityItem(kind: .progress, text: "Gathering context"),
                 SessionActivityItem(kind: .command, text: "git status"),
                 SessionActivityItem(kind: .diff, text: "Edited ContentView.swift"),
@@ -171,11 +173,13 @@ struct nexusTests {
         #expect(structuredSessionActivityRows(for: screen) == [
             StructuredSessionActivityRow(id: screen.activityItems[0].id, title: "Status", systemImage: "dot.radiowaves.left.and.right", text: "Connected", emphasis: .neutral),
             StructuredSessionActivityRow(id: screen.activityItems[1].id, title: "Message", systemImage: "message", text: "Pi: hello", emphasis: .accent),
-            StructuredSessionActivityRow(id: screen.activityItems[2].id, title: "Progress", systemImage: "hourglass", text: "Gathering context", emphasis: .accent),
-            StructuredSessionActivityRow(id: screen.activityItems[3].id, title: "Command", systemImage: "terminal", text: "git status", emphasis: .neutral),
-            StructuredSessionActivityRow(id: screen.activityItems[4].id, title: "Diff", systemImage: "square.and.pencil", text: "Edited ContentView.swift", emphasis: .accent),
-            StructuredSessionActivityRow(id: screen.activityItems[5].id, title: "Error", systemImage: "exclamationmark.triangle", text: "Provider request failed", emphasis: .critical),
-            StructuredSessionActivityRow(id: screen.activityItems[6].id, title: "Completion", systemImage: "checkmark.circle", text: "Turn complete", emphasis: .success)
+            StructuredSessionActivityRow(id: screen.activityItems[2].id, title: "Approval Request", systemImage: "hand.raised", text: "Approval Request: Deploy to production?", emphasis: .accent),
+            StructuredSessionActivityRow(id: screen.activityItems[3].id, title: "Approval Decision", systemImage: "checkmark.shield", text: "Approved: Deploy to production?", emphasis: .success),
+            StructuredSessionActivityRow(id: screen.activityItems[4].id, title: "Progress", systemImage: "hourglass", text: "Gathering context", emphasis: .accent),
+            StructuredSessionActivityRow(id: screen.activityItems[5].id, title: "Command", systemImage: "terminal", text: "git status", emphasis: .neutral),
+            StructuredSessionActivityRow(id: screen.activityItems[6].id, title: "Diff", systemImage: "square.and.pencil", text: "Edited ContentView.swift", emphasis: .accent),
+            StructuredSessionActivityRow(id: screen.activityItems[7].id, title: "Error", systemImage: "exclamationmark.triangle", text: "Provider request failed", emphasis: .critical),
+            StructuredSessionActivityRow(id: screen.activityItems[8].id, title: "Completion", systemImage: "checkmark.circle", text: "Turn complete", emphasis: .success)
         ])
     }
 
@@ -6827,6 +6831,59 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelRespondsToFocusedSessionApprovalRequestThroughServiceClient() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let approvalRequest = SessionApprovalRequest(
+            id: UUID(),
+            title: "Deploy to production?",
+            text: "Pi wants to run deploy --prod.",
+            state: .pending
+        )
+        let initialScreen = SessionScreen(
+            session: session,
+            transcript: "> deploy",
+            activityItems: [SessionActivityItem(kind: .approvalRequest, text: "Approval Request: Deploy to production?")],
+            approvalRequests: [approvalRequest]
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []),
+            session: session,
+            screen: initialScreen
+        )
+        let model = NexusAppModel(client: client)
+        model.focusedSessionScreen = initialScreen
+
+        try await model.respondToFocusedSessionApprovalRequest(approvalRequest.id, decision: .approve)
+
+        #expect(client.respondedApprovalRequests.count == 1)
+        #expect(client.respondedApprovalRequests[0].sessionID == session.id)
+        #expect(client.respondedApprovalRequests[0].approvalRequestID == approvalRequest.id)
+        #expect(client.respondedApprovalRequests[0].decision == .approve)
+        #expect(model.focusedSessionScreen?.approvalRequests == [
+            SessionApprovalRequest(
+                id: approvalRequest.id,
+                title: approvalRequest.title,
+                text: approvalRequest.text,
+                state: .approved
+            )
+        ])
+    }
+
+    @MainActor
     @Test func appModelResizeFocusedSessionUpdatesTerminalDimensions() async throws {
         let workspaceFolderURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -7482,6 +7539,10 @@ private final class StubSessionRuntimeManager: SessionRuntimeManaging {
         )
     }
 
+    func respondToApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision, to session: Session) throws -> SessionScreen {
+        throw NexusSessionApprovalError.approvalRequestsUnavailable
+    }
+
     func resize(session: Session, columns: Int, rows: Int) throws -> SessionScreen {
         sizes[session.id] = (columns, rows)
         notifyObservers(for: session.id)
@@ -7515,6 +7576,7 @@ private final class TrackingServiceClient: NexusServiceClient {
 
     var workspaceOverviewRequestCount = 0
     var recordedNavigationTargets: [NavigationTarget] = []
+    var respondedApprovalRequests: [(sessionID: UUID, approvalRequestID: UUID, decision: ApprovalRequestDecision)] = []
     var observedScreenHandlerCount: Int {
         observedScreenHandlers.count
     }
@@ -7889,6 +7951,37 @@ private final class TrackingServiceClient: NexusServiceClient {
         return screenValue
     }
 
+    func respondToApprovalRequest(sessionID: UUID, approvalRequestID: UUID, decision: ApprovalRequestDecision) async throws -> SessionScreen {
+        respondedApprovalRequests.append((sessionID: sessionID, approvalRequestID: approvalRequestID, decision: decision))
+        let updatedApprovalRequests = screenValue.approvalRequests.map { request in
+            guard request.id == approvalRequestID else {
+                return request
+            }
+
+            return SessionApprovalRequest(
+                id: request.id,
+                title: request.title,
+                text: request.text,
+                state: decision == .approve ? .approved : .denied
+            )
+        }
+        screenValue = SessionScreen(
+            session: sessionValue,
+            controller: screenValue.controller,
+            transcript: screenValue.transcript,
+            terminalColumns: screenValue.terminalColumns,
+            terminalRows: screenValue.terminalRows,
+            activityItems: screenValue.activityItems + [
+                SessionActivityItem(
+                    kind: .approvalDecision,
+                    text: "\(decision == .approve ? "Approved" : "Denied"): \(screenValue.approvalRequests.first(where: { $0.id == approvalRequestID })?.title ?? "Approval Request")"
+                )
+            ],
+            approvalRequests: updatedApprovalRequests
+        )
+        return screenValue
+    }
+
     func resizeSession(sessionID: UUID, columns: Int, rows: Int) async throws -> SessionScreen {
         screenValue = SessionScreen(
             session: sessionValue,
@@ -8092,6 +8185,10 @@ private struct FailingServiceClient: NexusServiceClient {
     }
 
     func sendSessionInputKey(sessionID: UUID, key: SessionInputKey) async throws -> SessionScreen {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func respondToApprovalRequest(sessionID: UUID, approvalRequestID: UUID, decision: ApprovalRequestDecision) async throws -> SessionScreen {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 

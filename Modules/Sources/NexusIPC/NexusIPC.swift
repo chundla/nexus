@@ -57,6 +57,7 @@ public protocol SessionScreenObservation: Sendable {
     func sendSessionInput(sessionID: String, text: String, reply: @escaping (Data?, NSString?) -> Void)
     func sendSessionText(sessionID: String, text: String, reply: @escaping (Data?, NSString?) -> Void)
     func sendSessionInputKey(sessionID: String, key: String, reply: @escaping (Data?, NSString?) -> Void)
+    func respondToApprovalRequest(sessionID: String, approvalRequestID: String, decision: String, reply: @escaping (Data?, NSString?) -> Void)
     func resizeSession(sessionID: String, columns: Int, rows: Int, reply: @escaping (Data?, NSString?) -> Void)
     func takeRemoteSessionControl(sessionID: String, pairedDeviceID: String, columns: Int, rows: Int, reply: @escaping (Data?, NSString?) -> Void)
     func releaseRemoteSessionControl(sessionID: String, pairedDeviceID: String, reply: @escaping (Data?, NSString?) -> Void)
@@ -100,6 +101,7 @@ public protocol NexusServiceClient {
     func sendSessionInput(sessionID: UUID, text: String) async throws -> SessionScreen
     func sendSessionText(sessionID: UUID, text: String) async throws -> SessionScreen
     func sendSessionInputKey(sessionID: UUID, key: SessionInputKey) async throws -> SessionScreen
+    func respondToApprovalRequest(sessionID: UUID, approvalRequestID: UUID, decision: ApprovalRequestDecision) async throws -> SessionScreen
     func resizeSession(sessionID: UUID, columns: Int, rows: Int) async throws -> SessionScreen
     func takeRemoteSessionControl(sessionID: UUID, pairedDeviceID: UUID, columns: Int, rows: Int) async throws -> SessionScreen
     func releaseRemoteSessionControl(sessionID: UUID, pairedDeviceID: UUID) async throws -> SessionScreen
@@ -390,6 +392,21 @@ public final class NexusIPCClient: NexusServiceClient, @unchecked Sendable {
     nonisolated public func sendSessionInputKey(sessionID: UUID, key: SessionInputKey) async throws -> SessionScreen {
         try await requestDecodable { proxy, reply in
             proxy.sendSessionInputKey(sessionID: sessionID.uuidString, key: key.rawValue, reply: reply)
+        }
+    }
+
+    nonisolated public func respondToApprovalRequest(
+        sessionID: UUID,
+        approvalRequestID: UUID,
+        decision: ApprovalRequestDecision
+    ) async throws -> SessionScreen {
+        try await requestDecodable { proxy, reply in
+            proxy.respondToApprovalRequest(
+                sessionID: sessionID.uuidString,
+                approvalRequestID: approvalRequestID.uuidString,
+                decision: decision.rawValue,
+                reply: reply
+            )
         }
     }
 

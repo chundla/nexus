@@ -14,6 +14,7 @@ enum PiRPCSessionRuntimeError: LocalizedError {
     case startupTimedOut
     case startupFailed(String)
     case busy
+    case approvalRequestNotFound
 
     var errorDescription: String? {
         switch self {
@@ -23,6 +24,8 @@ enum PiRPCSessionRuntimeError: LocalizedError {
             return message
         case .busy:
             return "Pi is already handling a prompt. Wait for the current turn to finish before sending another one."
+        case .approvalRequestNotFound:
+            return "Approval Request was not found for this Session."
         }
     }
 }
@@ -50,6 +53,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     private var transcriptEntries: [String] = []
     private var draft = ""
     private var activityItems: [SessionActivityItem] = []
+    private var approvalRequests: [SessionApprovalRequest] = []
     private var terminalColumns = 80
     private var terminalRows = 24
     private var sessionLinkage: PiSessionLinkage?
@@ -126,7 +130,8 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             transcript: renderedTranscriptLocked(),
             terminalColumns: terminalColumns,
             terminalRows: terminalRows,
-            activityItems: activityItems
+            activityItems: activityItems,
+            approvalRequests: approvalRequests
         )
     }
 
@@ -182,6 +187,38 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         }
     }
 
+    func respondToApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision) throws {
+        lock.lock()
+        guard let index = approvalRequests.firstIndex(where: { $0.id == approvalRequestID && $0.state == .pending }) else {
+            lock.unlock()
+            throw PiRPCSessionRuntimeError.approvalRequestNotFound
+        }
+
+        let request = approvalRequests[index]
+        approvalRequests[index] = SessionApprovalRequest(
+            id: request.id,
+            title: request.title,
+            text: request.text,
+            state: decision == .approve ? .approved : .denied
+        )
+        appendActivityItemLocked(
+            SessionActivityItem(
+                kind: .approvalDecision,
+                text: "\(decision == .approve ? "Approved" : "Denied"): \(request.title)"
+            )
+        )
+        lock.unlock()
+        notifyChange()
+
+        try transport.sendLine(
+            Self.jsonLine([
+                "type": "approval_response",
+                "id": approvalRequestID.uuidString,
+                "decision": decision.rawValue
+            ])
+        )
+    }
+
     func resize(columns: Int, rows: Int) throws {
         lock.lock()
         terminalColumns = max(1, columns)
@@ -233,11 +270,30 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             return
         case "message_update":
             handleMessageUpdate(object)
+        case "approval_request":
+            handleApprovalRequest(object)
         case "turn_end":
             handleTurnEnd(object)
         default:
             return
         }
+    }
+
+    private func handleApprovalRequest(_ object: [String: Any]) {
+        guard let rawID = string(for: "id", in: object),
+              let id = UUID(uuidString: rawID) else {
+            return
+        }
+
+        let title = string(for: "title", in: object) ?? "Approval Request"
+        let text = string(for: "text", in: object) ?? title
+
+        lock.lock()
+        approvalRequests.removeAll { $0.id == id }
+        approvalRequests.append(SessionApprovalRequest(id: id, title: title, text: text, state: .pending))
+        appendActivityItemLocked(SessionActivityItem(kind: .approvalRequest, text: "Approval Request: \(title)"))
+        lock.unlock()
+        notifyChange()
     }
 
     private func handleMessageUpdate(_ object: [String: Any]) {

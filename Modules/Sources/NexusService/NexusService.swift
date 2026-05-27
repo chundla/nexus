@@ -36,6 +36,7 @@ protocol SessionRuntimeManaging: AnyObject {
     func sendInput(_ text: String, to session: Session) throws -> SessionScreen
     func sendText(_ text: String, to session: Session) throws -> SessionScreen
     func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool, to session: Session) throws -> SessionScreen
+    func respondToApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision, to session: Session) throws -> SessionScreen
     func resize(session: Session, columns: Int, rows: Int) throws -> SessionScreen
 }
 
@@ -91,6 +92,7 @@ protocol SessionRuntime: AnyObject {
     func sendInput(_ text: String) throws
     func sendText(_ text: String) throws
     func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool) throws
+    func respondToApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision) throws
     func resize(columns: Int, rows: Int) throws
 }
 
@@ -159,6 +161,17 @@ enum NexusSessionControlError: LocalizedError {
         switch self {
         case .remoteControllerRequired:
             "Take Controller on this iPhone before sending terminal input."
+        }
+    }
+}
+
+enum NexusSessionApprovalError: LocalizedError {
+    case approvalRequestsUnavailable
+
+    var errorDescription: String? {
+        switch self {
+        case .approvalRequestsUnavailable:
+            "This Session does not have app-native approval requests."
         }
     }
 }
@@ -300,6 +313,18 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Se
         }
 
         try runtime.sendInputKey(key, applicationCursorMode: applicationCursorMode)
+        return runtime.sessionScreen(for: session)
+    }
+
+    func respondToApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision, to session: Session) throws -> SessionScreen {
+        let runtime = try withLock {
+            guard let runtime = runtimes[session.id] else {
+                throw NexusMetadataStoreError.sessionNotFound
+            }
+            return runtime
+        }
+
+        try runtime.respondToApprovalRequest(approvalRequestID, decision: decision)
         return runtime.sessionScreen(for: session)
     }
 
@@ -728,6 +753,10 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
             return
         }
         terminalHandle.write(data)
+    }
+
+    func respondToApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision) throws {
+        throw NexusSessionApprovalError.approvalRequestsUnavailable
     }
 
     func resize(columns: Int, rows: Int) throws {
@@ -1792,6 +1821,30 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         )
     }
 
+    func respondToApprovalRequest(
+        sessionID: UUID,
+        approvalRequestID: UUID,
+        decision: ApprovalRequestDecision
+    ) throws -> SessionScreen {
+        guard let session = try metadataStore.session(id: sessionID) else {
+            throw NexusMetadataStoreError.sessionNotFound
+        }
+
+        let resolvedSession = try reconcileSessionRuntimeState(session)
+        guard resolvedSession.state == .ready else {
+            throw NexusMetadataStoreError.sessionNotReady
+        }
+
+        _ = try claimMacController(for: resolvedSession)
+        return normalizedSessionScreen(
+            try sessionRuntimeManager.respondToApprovalRequest(
+                approvalRequestID,
+                decision: decision,
+                to: resolvedSession
+            )
+        )
+    }
+
     func resizeSession(sessionID: UUID, columns: Int, rows: Int) throws -> SessionScreen {
         guard let session = try metadataStore.session(id: sessionID) else {
             throw NexusMetadataStoreError.sessionNotFound
@@ -2360,6 +2413,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             terminalColumns: screen.terminalColumns,
             terminalRows: screen.terminalRows,
             activityItems: screen.activityItems,
+            approvalRequests: screen.approvalRequests,
             visibleLines: renderState.visibleLines,
             styledVisibleLines: renderState.styledVisibleLines,
             cursorRow: renderState.cursorRow,
@@ -3519,6 +3573,23 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
                 }
 
                 return try service.sendSessionInputKey(sessionID: resolveUUID(sessionID), key: resolvedKey)
+            },
+            reply: reply
+        )
+    }
+
+    func respondToApprovalRequest(sessionID: String, approvalRequestID: String, decision: String, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(
+            with: {
+                guard let resolvedDecision = ApprovalRequestDecision(rawValue: decision) else {
+                    throw CocoaError(.coderInvalidValue)
+                }
+
+                return try service.respondToApprovalRequest(
+                    sessionID: resolveUUID(sessionID),
+                    approvalRequestID: resolveUUID(approvalRequestID),
+                    decision: resolvedDecision
+                )
             },
             reply: reply
         )

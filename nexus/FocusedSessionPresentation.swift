@@ -49,6 +49,10 @@ private func structuredSessionActivityTitle(for kind: SessionActivityItem.Kind) 
         "Status"
     case .message:
         "Message"
+    case .approvalRequest:
+        "Approval Request"
+    case .approvalDecision:
+        "Approval Decision"
     case .progress:
         "Progress"
     case .command:
@@ -68,6 +72,10 @@ private func structuredSessionActivitySystemImage(for kind: SessionActivityItem.
         "dot.radiowaves.left.and.right"
     case .message:
         "message"
+    case .approvalRequest:
+        "hand.raised"
+    case .approvalDecision:
+        "checkmark.shield"
     case .progress:
         "hourglass"
     case .command:
@@ -85,8 +93,10 @@ private func structuredSessionActivityEmphasis(for kind: SessionActivityItem.Kin
     switch kind {
     case .status, .command:
         .neutral
-    case .message, .progress, .diff:
+    case .message, .approvalRequest, .progress, .diff:
         .accent
+    case .approvalDecision:
+        .success
     case .error:
         .critical
     case .completion:

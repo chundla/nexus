@@ -158,6 +158,8 @@ public struct SessionActivityItem: Codable, Equatable, Identifiable, Sendable {
     public enum Kind: String, Codable, Sendable {
         case status
         case message
+        case approvalRequest
+        case approvalDecision
         case progress
         case command
         case diff
@@ -176,6 +178,31 @@ public struct SessionActivityItem: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+public enum ApprovalRequestDecision: String, Codable, CaseIterable, Sendable {
+    case approve
+    case deny
+}
+
+public struct SessionApprovalRequest: Codable, Equatable, Identifiable, Sendable {
+    public enum State: String, Codable, Sendable {
+        case pending
+        case approved
+        case denied
+    }
+
+    public let id: UUID
+    public let title: String
+    public let text: String
+    public let state: State
+
+    public init(id: UUID = UUID(), title: String, text: String, state: State) {
+        self.id = id
+        self.title = title
+        self.text = text
+        self.state = state
+    }
+}
+
 public struct SessionScreen: Codable, Equatable, Sendable {
     public let session: Session
     public let controller: SessionController
@@ -183,6 +210,7 @@ public struct SessionScreen: Codable, Equatable, Sendable {
     public let terminalColumns: Int
     public let terminalRows: Int
     public let activityItems: [SessionActivityItem]
+    public let approvalRequests: [SessionApprovalRequest]
     public let visibleLines: [String]
     public let styledVisibleLines: [TerminalLine]
     public let cursorRow: Int
@@ -196,6 +224,7 @@ public struct SessionScreen: Codable, Equatable, Sendable {
         terminalColumns: Int = 80,
         terminalRows: Int = 24,
         activityItems: [SessionActivityItem] = [],
+        approvalRequests: [SessionApprovalRequest] = [],
         visibleLines: [String]? = nil,
         styledVisibleLines: [TerminalLine]? = nil,
         cursorRow: Int? = nil,
@@ -215,6 +244,7 @@ public struct SessionScreen: Codable, Equatable, Sendable {
         self.terminalColumns = terminalColumns
         self.terminalRows = terminalRows
         self.activityItems = activityItems
+        self.approvalRequests = approvalRequests
         self.visibleLines = resolvedVisibleLines
         self.styledVisibleLines = styledVisibleLines ?? resolvedVisibleLines.map(Self.defaultStyledLine)
         self.cursorRow = cursorRow ?? viewport.cursorRow

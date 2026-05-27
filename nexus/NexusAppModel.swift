@@ -374,6 +374,19 @@ final class NexusAppModel {
         focusedSessionScreen = screen
     }
 
+    func respondToFocusedSessionApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision) async throws {
+        guard let sessionID = focusedSessionScreen?.session.id else {
+            return
+        }
+
+        let screen = try await client.respondToApprovalRequest(
+            sessionID: sessionID,
+            approvalRequestID: approvalRequestID,
+            decision: decision
+        )
+        focusedSessionScreen = screen
+    }
+
     func resizeFocusedSession(columns: Int, rows: Int) async throws {
         guard let sessionID = focusedSessionScreen?.session.id else {
             return

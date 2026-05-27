@@ -1134,8 +1134,17 @@ struct ContentView: View {
     @ViewBuilder
     private func structuredSessionFeed(screen: SessionScreen, isReady: Bool) -> some View {
         let rows = structuredSessionActivityRows(for: screen)
+        let pendingApprovalRequests = screen.approvalRequests.filter { $0.state == .pending }
 
         VStack(alignment: .leading, spacing: 12) {
+            if pendingApprovalRequests.isEmpty == false {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(pendingApprovalRequests) { request in
+                        structuredSessionApprovalRequestView(request)
+                    }
+                }
+            }
+
             ScrollView {
                 if rows.isEmpty {
                     ContentUnavailableView(
@@ -1196,6 +1205,40 @@ struct ContentView: View {
         }
     }
 
+    private func structuredSessionApprovalRequestView(_ request: SessionApprovalRequest) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Approval Request", systemImage: "hand.raised.fill")
+                .font(.headline)
+                .foregroundStyle(.accent)
+
+            Text(request.title)
+                .font(.subheadline)
+                .fontWeight(.semibold)
+
+            Text(request.text)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: 10) {
+                Button("Deny", role: .destructive) {
+                    respondToStructuredSessionApprovalRequest(request.id, decision: .deny)
+                }
+
+                Button("Approve") {
+                    respondToStructuredSessionApprovalRequest(request.id, decision: .approve)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.background, in: RoundedRectangle(cornerRadius: 10))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.accentColor.opacity(0.2))
+        }
+    }
+
     private func structuredSessionActivityColor(for emphasis: StructuredSessionActivityEmphasis) -> Color {
         switch emphasis {
         case .neutral:
@@ -1219,6 +1262,16 @@ struct ContentView: View {
             do {
                 try await appModel.sendInputToFocusedSession(prompt)
                 structuredSessionPrompt = ""
+            } catch {
+                presentedError = PresentedError(message: error.localizedDescription)
+            }
+        }
+    }
+
+    private func respondToStructuredSessionApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision) {
+        Task { @MainActor in
+            do {
+                try await appModel.respondToFocusedSessionApprovalRequest(approvalRequestID, decision: decision)
             } catch {
                 presentedError = PresentedError(message: error.localizedDescription)
             }

@@ -1647,6 +1647,10 @@ private final class DelayedEchoSessionRuntimeManager: SessionRuntimeManaging, @u
         try sessionScreen(for: session)
     }
 
+    func respondToApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision, to session: Session) throws -> SessionScreen {
+        throw NexusSessionApprovalError.approvalRequestsUnavailable
+    }
+
     func resize(session: Session, columns: Int, rows: Int) throws -> SessionScreen {
         lock.lock()
         guard var runtime = runtimes[session.id] else {

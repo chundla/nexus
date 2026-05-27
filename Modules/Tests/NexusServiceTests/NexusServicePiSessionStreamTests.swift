@@ -145,6 +145,149 @@ struct NexusServicePiSessionStreamTests {
         #expect(screen.activityItems.map(\.kind) == [.status, .message, .message])
         #expect(screen.transcript == "> hello\nworld")
     }
+
+    @Test func localPiSessionScreenShowsPendingApprovalRequestInSharedSessionStream() throws {
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in
+                ApprovalRequestTestPiRPCTransport()
+            }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendText("deploy")
+        try runtime.sendInputKey(.enter, applicationCursorMode: false)
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(screen.activityItems.map(\.kind) == [.status, .message, .approvalRequest])
+        #expect(screen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "You: deploy",
+            "Approval Request: Deploy to production?"
+        ])
+        #expect(screen.approvalRequests == [
+            SessionApprovalRequest(
+                id: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
+                title: "Deploy to production?",
+                text: "Pi wants to run deploy --prod.",
+                state: .pending
+            )
+        ])
+    }
+
+    @Test func localPiApprovalDecisionContinuesSessionWithoutChangingProviderHealth() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
+
+        let launcher = ProcessSessionRuntimeLauncher(piRuntimeFactory: { launchConfiguration, _, _ in
+            try PiRPCSessionRuntime(
+                executable: launchConfiguration.executable,
+                workingDirectory: launchConfiguration.workingDirectory,
+                terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
+                transportFactory: { _, _, _ in
+                    ApprovalRequestTestPiRPCTransport()
+                }
+            )
+        })
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: PiStreamStubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
+                commandRunner: PiStreamStubCommandRunner(results: [
+                    .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
+                    .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                ]),
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+            ),
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+        )
+
+        let group = try service.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try service.createLocalWorkspace(
+            name: "Local Pi",
+            folderPath: workspaceFolder.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+        let pendingScreen = try service.sendSessionInput(sessionID: session.id, text: "deploy")
+        let approvalRequest = try #require(pendingScreen.approvalRequests.first)
+
+        let approvedScreen = try service.respondToApprovalRequest(
+            sessionID: session.id,
+            approvalRequestID: approvalRequest.id,
+            decision: .approve
+        )
+        let providerDetail = try service.getProviderDetail(workspaceID: workspace.id, providerID: .pi)
+
+        #expect(approvedScreen.activityItems.suffix(3).map(\.text) == [
+            "Approval Request: Deploy to production?",
+            "Approved: Deploy to production?",
+            "Pi: Deployment approved"
+        ])
+        #expect(approvedScreen.approvalRequests == [
+            SessionApprovalRequest(
+                id: approvalRequest.id,
+                title: "Deploy to production?",
+                text: "Pi wants to run deploy --prod.",
+                state: .approved
+            )
+        ])
+        #expect(approvedScreen.transcript == "> deploy\nDeployment approved")
+        #expect(providerDetail.health.state == .available)
+        #expect(providerDetail.health.summary == "Pi 0.9.0 is available")
+    }
+
+    @Test func localPiDeniedApprovalRequestKeepsDeniedDecisionInSharedSessionState() throws {
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in
+                ApprovalRequestTestPiRPCTransport()
+            }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("deploy")
+        let approvalRequest = try #require(runtime.sessionScreen(for: session).approvalRequests.first)
+        try runtime.respondToApprovalRequest(approvalRequest.id, decision: .deny)
+        let deniedScreen = runtime.sessionScreen(for: session)
+
+        #expect(deniedScreen.activityItems.suffix(3).map(\.text) == [
+            "Approval Request: Deploy to production?",
+            "Denied: Deploy to production?",
+            "Pi: Deployment denied"
+        ])
+        #expect(deniedScreen.approvalRequests == [
+            SessionApprovalRequest(
+                id: approvalRequest.id,
+                title: approvalRequest.title,
+                text: approvalRequest.text,
+                state: .denied
+            )
+        ])
+    }
 }
 
 private struct PiStreamStubExecutableResolver: ProviderExecutableResolving {
@@ -315,6 +458,82 @@ private final class PersistentTestPiRPCTransport: PiRPCTransporting, @unchecked 
                     "delta": responseText
                 ]
             ])
+            emit([
+                "type": "turn_end",
+                "message": [
+                    "content": [
+                        [
+                            "type": "text",
+                            "text": responseText
+                        ]
+                    ]
+                ]
+            ])
+        default:
+            return
+        }
+    }
+
+    func terminate() throws {
+        terminationHandler?(0)
+    }
+
+    private func emit(_ object: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: object),
+              let line = String(data: data, encoding: .utf8) else {
+            return
+        }
+        stdoutLineHandler?(line)
+    }
+}
+
+private final class ApprovalRequestTestPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
+    private var stdoutLineHandler: (@Sendable (String) -> Void)?
+    private var terminationHandler: (@Sendable (Int32) -> Void)?
+
+    func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
+        stdoutLineHandler = handler
+    }
+
+    func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?) {
+        terminationHandler = handler
+    }
+
+    func start() throws {}
+
+    func sendLine(_ line: String) throws {
+        guard let data = line.data(using: .utf8),
+              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = object["type"] as? String else {
+            return
+        }
+
+        switch type {
+        case "get_state":
+            emit([
+                "id": object["id"] as? String ?? "state",
+                "type": "response",
+                "command": "get_state",
+                "success": true,
+                "data": [
+                    "sessionId": "pi-session-1"
+                ]
+            ])
+        case "prompt":
+            emit([
+                "type": "response",
+                "command": "prompt",
+                "success": true
+            ])
+            emit([
+                "type": "approval_request",
+                "id": "11111111-1111-1111-1111-111111111111",
+                "title": "Deploy to production?",
+                "text": "Pi wants to run deploy --prod."
+            ])
+        case "approval_response":
+            let decision = object["decision"] as? String ?? "deny"
+            let responseText = decision == "approve" ? "Deployment approved" : "Deployment denied"
             emit([
                 "type": "turn_end",
                 "message": [
