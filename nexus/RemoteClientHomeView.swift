@@ -776,16 +776,16 @@ private struct RemoteSessionScreenView: View {
         currentSession.state == .ready
     }
 
-    private var focusedSessionSurfaceSupport: SessionSurfaceSupport? {
-        guard model.focusedSessionID == session.id else {
+    private var surfacePresentation: RemoteSessionSurfacePresentation? {
+        guard let screen else {
             return nil
         }
 
-        return model.focusedSessionSurfaceSupport
+        return remoteSessionSurfacePresentation(for: screen, isReady: isReady)
     }
 
     private var supportsFocusedSessionSurface: Bool {
-        focusedSessionSurfaceSupport == .supported
+        surfacePresentation?.surfaceSupport == .supported
     }
 
     private var isPerformingAction: Bool {
@@ -828,7 +828,7 @@ private struct RemoteSessionScreenView: View {
                 }
             }
 
-            if isReady, supportsFocusedSessionSurface {
+            if surfacePresentation?.showsAttachment == true {
                 Section("Attachment") {
                     LabeledContent("Mode", value: model.focusedSessionIsController ? "Controller" : "Viewer")
                     Text(model.focusedSessionIsController
@@ -852,12 +852,12 @@ private struct RemoteSessionScreenView: View {
                 }
             }
 
-            if screen != nil, focusedSessionSurfaceSupport == .unsupported {
-                Section("Session Surface") {
-                    Text("This iPhone can inspect this Session, but it cannot present or operate the shared activity surface yet.")
+            if let unsupportedCopy = surfacePresentation?.unsupportedCopy {
+                Section(unsupportedCopy.title) {
+                    Text(unsupportedCopy.summary)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                    Text("Open this Session on the paired Mac to use its primary Session surface.")
+                    Text(unsupportedCopy.recovery)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -896,7 +896,7 @@ private struct RemoteSessionScreenView: View {
                     }
                 }
 
-                if isReady {
+                if surfacePresentation?.showsInput == true {
                     Section("Input") {
                         TextField("Type into the terminal", text: $terminalDraft)
                             .textInputAutocapitalization(.never)

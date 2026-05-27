@@ -206,6 +206,57 @@ struct nexusTests {
         ))
     }
 
+    @MainActor
+    @Test func remoteSessionSurfacePresentationShowsUnsupportedGuidanceForStructuredCodexOnIPhone() {
+        let screen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .codex,
+                isDefault: true,
+                state: .ready
+            ),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [SessionActivityItem(kind: .status, text: "Codex shared Session stream connected")]
+        )
+
+        #expect(remoteSessionSurfacePresentation(for: screen, isReady: true) == RemoteSessionSurfacePresentation(
+            surfaceSupport: .unsupported,
+            showsTerminal: false,
+            showsAttachment: false,
+            showsInput: false,
+            unsupportedCopy: UnsupportedRemoteSessionSurfaceCopy(
+                title: "Unsupported Session Surface",
+                summary: "This iPhone can inspect this Codex Session, but it cannot present or operate its primary Session surface yet.",
+                recovery: "Open this Session on the paired Mac to use its primary Session surface."
+            )
+        ))
+    }
+
+    @MainActor
+    @Test func remoteSessionSurfacePresentationKeepsTerminalAffordancesForTerminalBackedCodexOnIPhone() {
+        let screen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .codex,
+                isDefault: true,
+                state: .ready
+            ),
+            primarySurface: .terminal,
+            transcript: "Codex remote ready"
+        )
+
+        #expect(remoteSessionSurfacePresentation(for: screen, isReady: true) == RemoteSessionSurfacePresentation(
+            surfaceSupport: .supported,
+            showsTerminal: true,
+            showsAttachment: true,
+            showsInput: true,
+            unsupportedCopy: nil
+        ))
+    }
+
     @Test func workspaceProviderCardNamedSessionSummaryUsesNamedSessionCopy() {
         let zero = WorkspaceProviderCard(
             provider: Provider(id: .claude),
