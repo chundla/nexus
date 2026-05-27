@@ -19,52 +19,99 @@ struct LocalShellCommandBuilder {
     }
 
     func candidateCommands(for shellCommand: String) -> [LocalShellCommand] {
-        shellCandidates().flatMap { shell in
-            shellProbeArguments().map { probeArgument in
-                LocalShellCommand(executable: shell, arguments: [probeArgument, shellCommand])
-            }
-        }
+        shellLaunchStrategies().map { $0.command(shellCommand) }
     }
 
     func launchCommand(for executable: String, arguments: [String] = []) -> LocalShellCommand {
-        let command = ([shellQuoted(executable)] + arguments.map(shellQuoted)).joined(separator: " ")
-        return LocalShellCommand(
-            executable: preferredShell(),
-            arguments: ["-lic", "exec \(command)"]
-        )
+        preferredShellLaunchStrategy().command(shellExecCommand(executable: executable, arguments: arguments))
     }
 
-    private func preferredShell() -> String {
-        shellCandidates().first(where: { fileManager.isExecutableFile(atPath: $0) }) ?? "/bin/sh"
+    private func shellExecCommand(executable: String, arguments: [String]) -> String {
+        (["exec", shellQuoted(executable)] + arguments.map(shellQuoted)).joined(separator: " ")
+    }
+
+    private func preferredShellLaunchStrategy() -> ShellLaunchStrategy {
+        shellLaunchStrategies().first(where: { fileManager.isExecutableFile(atPath: $0.executable) })
+            ?? ShellLaunchStrategy(
+                executable: "/bin/sh",
+                argumentsPrefix: ["-lc"],
+                commandWrapper: { $0 }
+            )
+    }
+
+    private func shellLaunchStrategies() -> [ShellLaunchStrategy] {
+        shellCandidates().flatMap(Self.strategies(for:))
     }
 
     private func shellCandidates() -> [String] {
-        var shells: [String] = []
-        var seen: Set<String> = []
-
-        for candidate in [
-            environment["SHELL"],
-            "/bin/zsh",
-            "/usr/bin/zsh",
-            "/bin/bash",
-            "/usr/bin/bash",
-            "/bin/sh"
-        ] {
-            guard let candidate, candidate.isEmpty == false, seen.insert(candidate).inserted else {
-                continue
-            }
-            shells.append(candidate)
-        }
-
-        return shells
+        ShellSupport.localShellCandidates(environment: environment, fileManager: fileManager)
     }
 
-    private func shellProbeArguments() -> [String] {
-        ["-lic", "-lc"]
+    private static func strategies(for shell: String) -> [ShellLaunchStrategy] {
+        switch ShellSupport.shellFamily(for: shell) {
+        case .cShell:
+            return [
+                ShellLaunchStrategy(
+                    executable: shell,
+                    argumentsPrefix: ["-i", "-c"],
+                    commandWrapper: Self.cShellWrappedCommand
+                ),
+                ShellLaunchStrategy(
+                    executable: shell,
+                    argumentsPrefix: ["-c"],
+                    commandWrapper: Self.cShellWrappedCommand
+                )
+            ]
+        case .fish:
+            return [
+                ShellLaunchStrategy(
+                    executable: shell,
+                    argumentsPrefix: ["-i", "-c"],
+                    commandWrapper: { $0 }
+                ),
+                ShellLaunchStrategy(
+                    executable: shell,
+                    argumentsPrefix: ["-l", "-c"],
+                    commandWrapper: { $0 }
+                ),
+                ShellLaunchStrategy(
+                    executable: shell,
+                    argumentsPrefix: ["-c"],
+                    commandWrapper: { $0 }
+                )
+            ]
+        case .posix:
+            return [
+                ShellLaunchStrategy(
+                    executable: shell,
+                    argumentsPrefix: ["-lic"],
+                    commandWrapper: { $0 }
+                ),
+                ShellLaunchStrategy(
+                    executable: shell,
+                    argumentsPrefix: ["-lc"],
+                    commandWrapper: { $0 }
+                )
+            ]
+        }
+    }
+
+    private static func cShellWrappedCommand(_ command: String) -> String {
+        "if ( -f ~/.login ) source ~/.login; \(command)"
     }
 
     private func shellQuoted(_ value: String) -> String {
         "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+}
+
+private struct ShellLaunchStrategy {
+    let executable: String
+    let argumentsPrefix: [String]
+    let commandWrapper: (String) -> String
+
+    func command(_ command: String) -> LocalShellCommand {
+        LocalShellCommand(executable: executable, arguments: argumentsPrefix + [commandWrapper(command)])
     }
 }
 #endif

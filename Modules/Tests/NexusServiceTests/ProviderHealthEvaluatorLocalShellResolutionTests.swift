@@ -64,6 +64,63 @@ struct ProviderHealthEvaluatorLocalShellResolutionTests {
         #expect(command.arguments == ["-lic", "exec '/tmp/fake-codex'"])
     }
 
+    @Test func localShellCommandBuilderWrapsLaunchesInInteractiveCShell() {
+        let command = LocalShellCommandBuilder(environment: ["SHELL": "/bin/csh"])
+            .launchCommand(for: "/tmp/fake-codex")
+
+        #expect(command.executable == "/bin/csh")
+        #expect(command.arguments == ["-i", "-c", "if ( -f ~/.login ) source ~/.login; exec '/tmp/fake-codex'"])
+    }
+
+    @Test func localCodexHealthResolvesExecutableFromInteractiveCShellWhenServicePathsMissIt() throws {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ProviderHealthEvaluatorLocalShellResolutionTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+
+        let workspaceFolder = tempRoot.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
+
+        let executablePath = tempRoot
+            .appendingPathComponent("bin", isDirectory: true)
+            .appendingPathComponent("codex", isDirectory: false)
+        try FileManager.default.createDirectory(at: executablePath.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "#!/bin/sh\nexit 0\n".write(to: executablePath, atomically: true, encoding: .utf8)
+        #expect(chmod(executablePath.path(percentEncoded: false), 0o755) == 0)
+
+        let wrappedCommand = "if ( -f ~/.login ) source ~/.login; command -v codex"
+        let wrappedVersionCommand = "if ( -f ~/.login ) source ~/.login; '\(executablePath.path(percentEncoded: false))' '--version'"
+        let wrappedHelpCommand = "if ( -f ~/.login ) source ~/.login; '\(executablePath.path(percentEncoded: false))' '--help'"
+        let shellBuilder = LocalShellCommandBuilder(environment: ["SHELL": "/bin/csh"])
+        let evaluator = ProviderHealthEvaluator(
+            executableResolver: TestExecutableResolver(executables: [:]),
+            commandRunner: TestCommandRunner(results: [
+                .init(executable: "/bin/csh", arguments: ["-i", "-c", wrappedCommand]): .success(stdout: "\(executablePath.path(percentEncoded: false))\n"),
+                .init(executable: "/bin/csh", arguments: ["-i", "-c", wrappedVersionCommand]): .success(stdout: "1.2.3\n"),
+                .init(executable: "/bin/csh", arguments: ["-i", "-c", wrappedHelpCommand]): .success(stdout: "Usage: codex\n")
+            ]),
+            localShellCommandBuilder: shellBuilder
+        )
+
+        let health = evaluator.healthSummary(
+            for: .codex,
+            workspace: Workspace(
+                id: UUID(),
+                name: "Local",
+                kind: .local,
+                folderPath: workspaceFolder.path(percentEncoded: false),
+                primaryGroupID: UUID()
+            ),
+            remoteContext: nil
+        )
+
+        #expect(health.state == .available)
+        #expect(health.summary == "Codex 1.2.3 is available")
+        #expect(health.resolvedExecutable == executablePath.path(percentEncoded: false))
+        #expect(health.version == "1.2.3")
+        #expect(health.launchability == .launchable)
+    }
+
     @Test func remoteCodexHealthUsesShellAwareDiscoveryForHomeInstalledExecutable() {
         let workspaceID = UUID()
         let hostID = UUID()
@@ -111,7 +168,9 @@ struct ProviderHealthEvaluatorLocalShellResolutionTests {
         #expect(runner.lastInvocation?.executable == "/usr/bin/ssh")
         #expect(runner.lastInvocation?.arguments.last?.contains("command -v codex") == true)
         #expect(runner.lastInvocation?.arguments.last?.contains("$HOME/.local/bin/codex") == true)
-        #expect(runner.lastInvocation?.arguments.last?.contains("for SHELL_ARGS in -lic -lc") == true)
+        #expect(runner.lastInvocation?.arguments.last?.contains("/bin/csh") == true)
+        #expect(runner.lastInvocation?.arguments.last?.contains("source ~/.login") == true)
+        #expect(runner.lastInvocation?.arguments.last?.contains("/opt/homebrew/bin/fish") == true)
     }
 }
 

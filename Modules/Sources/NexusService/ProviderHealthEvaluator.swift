@@ -498,13 +498,20 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
         let fallbackCandidates = [
             "$HOME/.local/bin/\(commandName)",
             "$HOME/bin/\(commandName)",
+            "$HOME/.volta/bin/\(commandName)",
+            "$HOME/.asdf/shims/\(commandName)",
+            "$HOME/.local/share/mise/shims/\(commandName)",
+            "$HOME/.nix-profile/bin/\(commandName)",
+            "$HOME/.bun/bin/\(commandName)",
+            "$HOME/.nvm/current/bin/\(commandName)",
             "/opt/homebrew/bin/\(commandName)",
             "/usr/local/bin/\(commandName)",
             "/usr/bin/\(commandName)",
             "/bin/\(commandName)"
         ].map { "\"\($0)\"" }.joined(separator: " ")
+        let shellCandidates = ShellSupport.remoteShellCandidateListScript()
 
-        return "cd \(shellQuoted(workspace.folderPath)) || { echo 'NEXUS_REMOTE_WORKSPACE_UNAVAILABLE' >&2; exit 1; }; command -v tmux >/dev/null 2>&1 || { echo 'NEXUS_REMOTE_TMUX_UNAVAILABLE' >&2; exit 1; }; \(resolveFunctionName)() { for shell in \"${SHELL:-}\" /bin/bash /usr/bin/bash /bin/sh /usr/bin/zsh /bin/zsh; do [ -n \"$shell\" ] || continue; [ -x \"$shell\" ] || continue; for SHELL_ARGS in -lic -lc; do CANDIDATE=\"$(\"$shell\" $SHELL_ARGS \(shellCommand) 2>/dev/null)\" || continue; [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; done; for CANDIDATE in \(fallbackCandidates); do [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; return 1; }; \(commandPathVariable)=\"$(\(resolveFunctionName))\" || { echo '\(notFoundMarker)' >&2; exit 1; }; [ -n \"$\(commandPathVariable)\" ] || { echo '\(notFoundMarker)' >&2; exit 1; }; printf '%s\\n' \"$\(commandPathVariable)\"; \"$\(commandPathVariable)\" --version; \"$\(commandPathVariable)\" --help >/dev/null 2>&1"
+        return "cd \(shellQuoted(workspace.folderPath)) || { echo 'NEXUS_REMOTE_WORKSPACE_UNAVAILABLE' >&2; exit 1; }; command -v tmux >/dev/null 2>&1 || { echo 'NEXUS_REMOTE_TMUX_UNAVAILABLE' >&2; exit 1; }; \(resolveFunctionName)() { for shell in \(shellCandidates); do [ -n \"$shell\" ] || continue; [ -x \"$shell\" ] || continue; case \"${shell##*/}\" in csh|tcsh) CANDIDATE=\"$(\"$shell\" -i -c \"if ( -f ~/.login ) source ~/.login; command -v \(commandName)\" 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -c \"if ( -f ~/.login ) source ~/.login; command -v \(commandName)\" 2>/dev/null)\" || continue ;; fish) CANDIDATE=\"$(\"$shell\" -i -c \"command -v \(commandName)\" 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -l -c \"command -v \(commandName)\" 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -c \"command -v \(commandName)\" 2>/dev/null)\" || continue ;; *) CANDIDATE=\"$(\"$shell\" -lic \(shellCommand) 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -lc \(shellCommand) 2>/dev/null)\" || continue ;; esac; [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; for CANDIDATE in \(fallbackCandidates); do [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; return 1; }; \(commandPathVariable)=\"$(\(resolveFunctionName))\" || { echo '\(notFoundMarker)' >&2; exit 1; }; [ -n \"$\(commandPathVariable)\" ] || { echo '\(notFoundMarker)' >&2; exit 1; }; printf '%s\\n' \"$\(commandPathVariable)\"; \"$\(commandPathVariable)\" --version; \"$\(commandPathVariable)\" --help >/dev/null 2>&1"
     }
 
     private func firstDiagnosticLine(stdout: String, stderr: String) -> String {
@@ -626,15 +633,25 @@ struct SystemProviderExecutableResolver: ProviderExecutableResolving {
             .split(separator: ":")
             .map(String.init)
 
-        let fallbackDirectories = homeDirectories.flatMap { [
-            $0 + "/.local/bin",
-            $0 + "/bin"
-        ] } + [
+        var homeFallbackDirectories: [String] = []
+        homeFallbackDirectories.reserveCapacity(homeDirectories.count * 8)
+        for homeDirectory in homeDirectories {
+            homeFallbackDirectories.append(homeDirectory + "/.local/bin")
+            homeFallbackDirectories.append(homeDirectory + "/bin")
+            homeFallbackDirectories.append(homeDirectory + "/.volta/bin")
+            homeFallbackDirectories.append(homeDirectory + "/.asdf/shims")
+            homeFallbackDirectories.append(homeDirectory + "/.local/share/mise/shims")
+            homeFallbackDirectories.append(homeDirectory + "/.nix-profile/bin")
+            homeFallbackDirectories.append(homeDirectory + "/.bun/bin")
+            homeFallbackDirectories.append(homeDirectory + "/.nvm/current/bin")
+        }
+        let systemFallbackDirectories = [
             "/opt/homebrew/bin",
             "/usr/local/bin",
             "/usr/bin",
             "/bin"
         ]
+        let fallbackDirectories = homeFallbackDirectories + systemFallbackDirectories
 
         var directories: [String] = []
         var seen: Set<String> = []

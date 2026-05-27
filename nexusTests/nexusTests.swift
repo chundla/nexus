@@ -1722,7 +1722,9 @@ struct nexusTests {
         let remoteLaunchCommand = try #require(launchArguments.last)
         #expect(remoteLaunchCommand.contains("cd '/srv/api'"))
         #expect(remoteLaunchCommand.contains("NEXUS_REMOTE_SHELL=\"$(for shell in \"${SHELL:-}\""))
-        #expect(remoteLaunchCommand.contains("tmux new-session -s 'nexus-01234567-89ab-cdef-0123-456789abcdef-runtime-2' \"$NEXUS_REMOTE_SHELL\" -lic"))
+        #expect(remoteLaunchCommand.contains("case \"${NEXUS_REMOTE_SHELL##*/}\" in csh|tcsh)"))
+        #expect(remoteLaunchCommand.contains("fish) exec tmux new-session -s 'nexus-01234567-89ab-cdef-0123-456789abcdef-runtime-2' \"$NEXUS_REMOTE_SHELL\" -i -c"))
+        #expect(remoteLaunchCommand.contains("*) exec tmux new-session -s 'nexus-01234567-89ab-cdef-0123-456789abcdef-runtime-2' \"$NEXUS_REMOTE_SHELL\" -lic"))
         #expect(remoteLaunchCommand.contains("/usr/local/bin/claude"))
         #expect(builder.recoverArguments(configuration: configuration) == [
             "-tt",
@@ -7028,13 +7030,21 @@ private func remoteCLIProbeScript(_ workspacePath: String, commandName: String) 
     let fallbackCandidates = [
         "$HOME/.local/bin/\(commandName)",
         "$HOME/bin/\(commandName)",
+        "$HOME/.volta/bin/\(commandName)",
+        "$HOME/.asdf/shims/\(commandName)",
+        "$HOME/.local/share/mise/shims/\(commandName)",
+        "$HOME/.nix-profile/bin/\(commandName)",
+        "$HOME/.bun/bin/\(commandName)",
+        "$HOME/.nvm/current/bin/\(commandName)",
         "/opt/homebrew/bin/\(commandName)",
         "/usr/local/bin/\(commandName)",
         "/usr/bin/\(commandName)",
         "/bin/\(commandName)"
     ].map { "\"\($0)\"" }.joined(separator: " ")
+    let shellCandidates = ["\"${SHELL:-}\"", "\"/bin/zsh\"", "\"/usr/bin/zsh\"", "\"/bin/bash\"", "\"/usr/bin/bash\"", "\"/bin/sh\"", "\"/usr/bin/sh\"", "\"/bin/ksh\"", "\"/usr/bin/ksh\"", "\"/bin/dash\"", "\"/usr/bin/dash\"", "\"/bin/csh\"", "\"/usr/bin/csh\"", "\"/bin/tcsh\"", "\"/usr/bin/tcsh\"", "\"/opt/homebrew/bin/fish\"", "\"/usr/local/bin/fish\"", "\"/usr/bin/fish\"", "\"/bin/fish\"", "$(grep '^/' /etc/shells 2>/dev/null)"]
+        .joined(separator: " ")
 
-    return "cd \(testShellQuoted(workspacePath)) || { echo 'NEXUS_REMOTE_WORKSPACE_UNAVAILABLE' >&2; exit 1; }; command -v tmux >/dev/null 2>&1 || { echo 'NEXUS_REMOTE_TMUX_UNAVAILABLE' >&2; exit 1; }; \(resolveFunctionName)() { for shell in \"${SHELL:-}\" /bin/bash /usr/bin/bash /bin/sh /usr/bin/zsh /bin/zsh; do [ -n \"$shell\" ] || continue; [ -x \"$shell\" ] || continue; for SHELL_ARGS in -lic -lc; do CANDIDATE=\"$(\"$shell\" $SHELL_ARGS \(shellCommand) 2>/dev/null)\" || continue; [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; done; for CANDIDATE in \(fallbackCandidates); do [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; return 1; }; \(commandPathVariable)=\"$(\(resolveFunctionName))\" || { echo '\(notFoundMarker)' >&2; exit 1; }; [ -n \"$\(commandPathVariable)\" ] || { echo '\(notFoundMarker)' >&2; exit 1; }; printf '%s\\n' \"$\(commandPathVariable)\"; \"$\(commandPathVariable)\" --version; \"$\(commandPathVariable)\" --help >/dev/null 2>&1"
+    return "cd \(testShellQuoted(workspacePath)) || { echo 'NEXUS_REMOTE_WORKSPACE_UNAVAILABLE' >&2; exit 1; }; command -v tmux >/dev/null 2>&1 || { echo 'NEXUS_REMOTE_TMUX_UNAVAILABLE' >&2; exit 1; }; \(resolveFunctionName)() { for shell in \(shellCandidates); do [ -n \"$shell\" ] || continue; [ -x \"$shell\" ] || continue; case \"${shell##*/}\" in csh|tcsh) CANDIDATE=\"$(\"$shell\" -i -c \"if ( -f ~/.login ) source ~/.login; command -v \(commandName)\" 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -c \"if ( -f ~/.login ) source ~/.login; command -v \(commandName)\" 2>/dev/null)\" || continue ;; fish) CANDIDATE=\"$(\"$shell\" -i -c \"command -v \(commandName)\" 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -l -c \"command -v \(commandName)\" 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -c \"command -v \(commandName)\" 2>/dev/null)\" || continue ;; *) CANDIDATE=\"$(\"$shell\" -lic \(shellCommand) 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -lc \(shellCommand) 2>/dev/null)\" || continue ;; esac; [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; for CANDIDATE in \(fallbackCandidates); do [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; return 1; }; \(commandPathVariable)=\"$(\(resolveFunctionName))\" || { echo '\(notFoundMarker)' >&2; exit 1; }; [ -n \"$\(commandPathVariable)\" ] || { echo '\(notFoundMarker)' >&2; exit 1; }; printf '%s\\n' \"$\(commandPathVariable)\"; \"$\(commandPathVariable)\" --version; \"$\(commandPathVariable)\" --help >/dev/null 2>&1"
 }
 
 private func testShellQuoted(_ value: String) -> String {

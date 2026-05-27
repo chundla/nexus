@@ -366,17 +366,21 @@ struct RemoteSessionCommandBuilder {
         }
         arguments += [
             host.sshTarget,
-            "cd \(shellQuoted(configuration.workingDirectory)) && NEXUS_REMOTE_SHELL=\"$(\(remoteShellResolutionCommand()))\"; [ -n \"$NEXUS_REMOTE_SHELL\" ] || { echo 'NEXUS_REMOTE_SHELL_NOT_FOUND' >&2; exit 1; }; exec tmux new-session -s \(shellQuoted(runtimeIdentifier)) \"$NEXUS_REMOTE_SHELL\" -lic \(shellQuoted(shellExecCommand(executable: configuration.executable, arguments: configuration.arguments)))"
+            "cd \(shellQuoted(configuration.workingDirectory)) && NEXUS_REMOTE_SHELL=\"$(\(remoteShellResolutionCommand()))\"; [ -n \"$NEXUS_REMOTE_SHELL\" ] || { echo 'NEXUS_REMOTE_SHELL_NOT_FOUND' >&2; exit 1; }; case \"${NEXUS_REMOTE_SHELL##*/}\" in csh|tcsh) exec tmux new-session -s \(shellQuoted(runtimeIdentifier)) \"$NEXUS_REMOTE_SHELL\" -i -c \(shellQuoted(cShellExecCommand(executable: configuration.executable, arguments: configuration.arguments))) ;; fish) exec tmux new-session -s \(shellQuoted(runtimeIdentifier)) \"$NEXUS_REMOTE_SHELL\" -i -c \(shellQuoted(shellExecCommand(executable: configuration.executable, arguments: configuration.arguments))) ;; *) exec tmux new-session -s \(shellQuoted(runtimeIdentifier)) \"$NEXUS_REMOTE_SHELL\" -lic \(shellQuoted(shellExecCommand(executable: configuration.executable, arguments: configuration.arguments))) ;; esac"
         ]
         return arguments
     }
 
     private func remoteShellResolutionCommand() -> String {
-        "for shell in \"${SHELL:-}\" /bin/zsh /usr/bin/zsh /bin/bash /usr/bin/bash /bin/sh; do [ -n \"$shell\" ] || continue; [ -x \"$shell\" ] || continue; printf '%s' \"$shell\"; break; done"
+        "for shell in \(ShellSupport.remoteShellCandidateListScript()); do [ -n \"$shell\" ] || continue; [ -x \"$shell\" ] || continue; printf '%s' \"$shell\"; break; done"
     }
 
     private func shellExecCommand(executable: String, arguments: [String]) -> String {
         (["exec", shellQuoted(executable)] + arguments.map(shellQuoted)).joined(separator: " ")
+    }
+
+    private func cShellExecCommand(executable: String, arguments: [String]) -> String {
+        "if ( -f ~/.login ) source ~/.login; \(shellExecCommand(executable: executable, arguments: arguments))"
     }
 
     func recoverArguments(configuration: SessionRuntimeLaunchConfiguration) -> [String] {
