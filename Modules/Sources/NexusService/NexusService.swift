@@ -811,8 +811,8 @@ struct RemoteRuntimeRecoveryFailureContext {
 
 struct ServiceProviderAdapter {
     let provider: Provider
-    let supportsDefaultSessionLaunch: Bool
-    let supportsNamedSessions: Bool
+    private let defaultSessionLaunchSupportEvaluator: (Workspace) -> Bool
+    private let namedSessionSupportEvaluator: (Workspace) -> Bool
     let healthSummaryEvaluator: (Workspace, RemoteWorkspaceHealthContext?, any ProviderHealthEvaluating) -> ProviderHealthSummary
     let initialTranscriptBuilder: (Workspace, NexusDomain.Host?, RemoteRuntimeLaunchMode) -> String
     let terminationStatusMessageBuilder: (Int32) -> String
@@ -824,6 +824,8 @@ struct ServiceProviderAdapter {
         supportsDefaultSessionLaunch: Bool,
         supportsNamedSessions: Bool,
         healthSummaryEvaluator: @escaping (Workspace, RemoteWorkspaceHealthContext?, any ProviderHealthEvaluating) -> ProviderHealthSummary,
+        defaultSessionLaunchSupportEvaluator: ((Workspace) -> Bool)? = nil,
+        namedSessionSupportEvaluator: ((Workspace) -> Bool)? = nil,
         initialTranscriptBuilder: ((Workspace, NexusDomain.Host?, RemoteRuntimeLaunchMode) -> String)? = nil,
         terminationStatusMessageBuilder: ((Int32) -> String)? = nil,
         remoteRuntimeRecoveryFailureEvaluator: ((RemoteRuntimeRecoveryFailureContext) -> (state: Session.State, message: String))? = nil,
@@ -831,8 +833,8 @@ struct ServiceProviderAdapter {
     ) {
         let provider = Provider(id: providerID)
         self.provider = provider
-        self.supportsDefaultSessionLaunch = supportsDefaultSessionLaunch
-        self.supportsNamedSessions = supportsNamedSessions
+        self.defaultSessionLaunchSupportEvaluator = defaultSessionLaunchSupportEvaluator ?? { _ in supportsDefaultSessionLaunch }
+        self.namedSessionSupportEvaluator = namedSessionSupportEvaluator ?? { _ in supportsNamedSessions }
         self.healthSummaryEvaluator = healthSummaryEvaluator
         self.initialTranscriptBuilder = initialTranscriptBuilder ?? { workspace, remoteHost, launchMode in
             if let remoteHost {
@@ -877,6 +879,14 @@ struct ServiceProviderAdapter {
             )
         }
         self.shouldReuseRemoteHealthSnapshot = shouldReuseRemoteHealthSnapshot
+    }
+
+    func supportsDefaultSessionLaunch(in workspace: Workspace) -> Bool {
+        defaultSessionLaunchSupportEvaluator(workspace)
+    }
+
+    func supportsNamedSessions(in workspace: Workspace) -> Bool {
+        namedSessionSupportEvaluator(workspace)
     }
 
     func healthSummary(
@@ -1067,7 +1077,9 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 supportsNamedSessions: false,
                 healthSummaryEvaluator: { workspace, remoteContext, providerHealthEvaluator in
                     providerHealthEvaluator.healthSummary(for: .codex, workspace: workspace, remoteContext: remoteContext)
-                }
+                },
+                defaultSessionLaunchSupportEvaluator: { $0.kind == .local },
+                namedSessionSupportEvaluator: { $0.kind == .local }
             ),
             .ibmBob: ServiceProviderAdapter(
                 providerID: .ibmBob,
@@ -1261,7 +1273,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             return WorkspaceProviderCard(
                 provider: Provider(id: providerID),
                 health: health,
-                capabilities: providerCapabilities(for: providerID, health: health, defaultSession: defaultSession),
+                capabilities: providerCapabilities(for: providerID, workspace: workspace, health: health, defaultSession: defaultSession),
                 defaultSession: try defaultSessionSummary(for: workspace, providerID: providerID),
                 alternateSessionCount: try metadataStore.listSessions(workspaceID: workspaceID, providerID: providerID)
                     .filter { $0.isDefault == false }
@@ -1294,7 +1306,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             workspace: workspace,
             provider: Provider(id: providerID),
             health: health,
-            capabilities: providerCapabilities(for: providerID, health: health, defaultSession: defaultSession),
+            capabilities: providerCapabilities(for: providerID, workspace: workspace, health: health, defaultSession: defaultSession),
             defaultSession: defaultSession,
             alternateSessions: sessions.filter { $0.isDefault == false && $0.state != .failed },
             failedSessions: sessions.filter { $0.isDefault == false && $0.state == .failed }
@@ -1388,34 +1400,37 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
 
     private func providerCapabilities(
         for providerID: ProviderID,
+        workspace: Workspace,
         health: ProviderHealthSummary,
         defaultSession: Session?
     ) -> ProviderCapabilities {
         let adapter = providerAdapter(for: providerID)
-        let canLaunchDefaultSession = adapter.supportsDefaultSessionLaunch && (defaultSession != nil || health.launchability == .launchable)
-        let canCreateNamedSession = adapter.supportsNamedSessions && health.launchability == .launchable
+        let supportsDefaultSessionLaunch = adapter.supportsDefaultSessionLaunch(in: workspace)
+        let supportsNamedSessions = adapter.supportsNamedSessions(in: workspace)
+        let canLaunchDefaultSession = supportsDefaultSessionLaunch && (defaultSession != nil || health.launchability == .launchable)
+        let canCreateNamedSession = supportsNamedSessions && health.launchability == .launchable
 
         return ProviderCapabilities(
             launchDefaultSession: ProviderCapability(
                 action: .launchDefaultSession,
-                isSupported: adapter.supportsDefaultSessionLaunch,
+                isSupported: supportsDefaultSessionLaunch,
                 isEnabled: canLaunchDefaultSession,
                 disabledReason: providerCapabilityDisabledReason(
                     action: .launchDefaultSession,
                     provider: adapter.provider,
-                    isSupported: adapter.supportsDefaultSessionLaunch,
+                    isSupported: supportsDefaultSessionLaunch,
                     health: health,
                     isEnabled: canLaunchDefaultSession
                 )
             ),
             createNamedSession: ProviderCapability(
                 action: .createNamedSession,
-                isSupported: adapter.supportsNamedSessions,
+                isSupported: supportsNamedSessions,
                 isEnabled: canCreateNamedSession,
                 disabledReason: providerCapabilityDisabledReason(
                     action: .createNamedSession,
                     provider: adapter.provider,
-                    isSupported: adapter.supportsNamedSessions,
+                    isSupported: supportsNamedSessions,
                     health: health,
                     isEnabled: canCreateNamedSession
                 )
@@ -1459,7 +1474,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             throw NexusMetadataStoreError.workspaceNotFound
         }
 
-        guard providerAdapter(for: providerID).supportsDefaultSessionLaunch else {
+        guard providerAdapter(for: providerID).supportsDefaultSessionLaunch(in: workspace) else {
             throw NexusMetadataStoreError.providerNotSupported
         }
 
@@ -1522,7 +1537,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             throw NexusMetadataStoreError.workspaceNotFound
         }
 
-        guard providerAdapter(for: providerID).supportsNamedSessions else {
+        guard providerAdapter(for: providerID).supportsNamedSessions(in: workspace) else {
             throw NexusMetadataStoreError.providerNotSupported
         }
 
@@ -1893,7 +1908,11 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     private func launchOrResumeSession(_ existingSession: Session, workspace: Workspace) throws -> Session {
-        guard providerAdapter(for: existingSession.providerID).supportsDefaultSessionLaunch else {
+        let adapter = providerAdapter(for: existingSession.providerID)
+        let isSupported = existingSession.isDefault
+            ? adapter.supportsDefaultSessionLaunch(in: workspace)
+            : adapter.supportsNamedSessions(in: workspace)
+        guard isSupported else {
             throw NexusMetadataStoreError.providerNotSupported
         }
 

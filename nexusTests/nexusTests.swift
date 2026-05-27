@@ -402,6 +402,8 @@ struct nexusTests {
         #expect(claudeCard.health.launchability == .launchable)
         #expect(codexCard.health.state == .notChecked)
         #expect(codexCard.health.summary == "Remote Codex execution is not implemented yet")
+        #expect(codexCard.capabilities.launchDefaultSession.isSupported == false)
+        #expect(codexCard.capabilities.createNamedSession.isSupported == false)
     }
 
     @Test func workspaceOverviewAndProviderDetailExposeProviderCapabilities() async throws {
@@ -414,10 +416,15 @@ struct nexusTests {
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
             providerHealthEvaluator: ProviderHealthEvaluator(
-                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+                executableResolver: StubExecutableResolver(executables: [
+                    "claude": "/tmp/fake-claude",
+                    "codex": "/tmp/fake-codex"
+                ]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(stdout: "Usage: codex\n")
                 ])
             )
         )
@@ -443,12 +450,12 @@ struct nexusTests {
         #expect(claudeDetail.capabilities.launchDefaultSession.isEnabled)
         #expect(claudeDetail.capabilities.createNamedSession.isEnabled)
 
-        #expect(codexCard.capabilities.launchDefaultSession.isSupported == false)
-        #expect(codexCard.capabilities.launchDefaultSession.isEnabled == false)
-        #expect(codexCard.capabilities.launchDefaultSession.disabledReason == "Codex cannot launch a Default Session on this Workspace yet.")
-        #expect(codexCard.capabilities.createNamedSession.isSupported == false)
-        #expect(codexCard.capabilities.createNamedSession.isEnabled == false)
-        #expect(codexCard.capabilities.createNamedSession.disabledReason == "Codex cannot create Named Sessions on this Workspace yet.")
+        #expect(codexCard.capabilities.launchDefaultSession.isSupported)
+        #expect(codexCard.capabilities.launchDefaultSession.isEnabled)
+        #expect(codexCard.capabilities.launchDefaultSession.disabledReason == nil)
+        #expect(codexCard.capabilities.createNamedSession.isSupported)
+        #expect(codexCard.capabilities.createNamedSession.isEnabled)
+        #expect(codexCard.capabilities.createNamedSession.disabledReason == nil)
         #expect(codexDetail.capabilities.launchDefaultSession == codexCard.capabilities.launchDefaultSession)
         #expect(codexDetail.capabilities.createNamedSession == codexCard.capabilities.createNamedSession)
     }
@@ -896,7 +903,7 @@ struct nexusTests {
         #expect(overview.workspace == workspace)
         #expect(overview.providerCards.map(\.provider.id) == [.codex, .claude, .ibmBob, .pi])
         #expect(overview.providerCards.map(\.defaultSession.state) == [.notCreated, .notCreated, .notCreated, .notCreated])
-        #expect(overview.providerCards.filter { $0.provider.id != .claude }.map(\.health.state) == [.notChecked, .notChecked, .notChecked])
+        #expect(overview.providerCards.filter { [.ibmBob, .pi].contains($0.provider.id) }.map(\.health.state) == [.notChecked, .notChecked])
     }
 
     @Test func workspaceOverviewShowsLaunchableClaudeHealthFromServiceOwnedAdapter() async throws {
@@ -934,6 +941,43 @@ struct nexusTests {
         #expect(claudeCard.health.version == "9.9.9 (Claude Code)")
         #expect(claudeCard.health.launchability == .launchable)
         #expect(claudeCard.health.diagnostics.isEmpty)
+    }
+
+    @Test func workspaceOverviewShowsLaunchableCodexHealthFromServiceOwnedAdapter() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(stdout: "Usage: codex\n")
+                ])
+            ),
+            sessionRuntimeManager: StubSessionRuntimeManager()
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+
+        let overview = try await client.getWorkspaceOverview(workspaceID: workspace.id)
+        let codexCard = try #require(overview.providerCards.first(where: { $0.provider.id == .codex }))
+
+        #expect(codexCard.health.state == .available)
+        #expect(codexCard.health.summary == "Codex 1.2.3 is available")
+        #expect(codexCard.health.resolvedExecutable == "/tmp/fake-codex")
+        #expect(codexCard.health.version == "1.2.3")
+        #expect(codexCard.health.launchability == .launchable)
+        #expect(codexCard.health.diagnostics.isEmpty)
     }
 
     @Test func workspaceOverviewShowsUnavailableClaudeHealthWhenExecutableCannotBeResolved() async throws {
@@ -982,6 +1026,47 @@ struct nexusTests {
         #expect(claudeCard.health.diagnostics.contains(where: {
             $0.code == "pathEnvironment" && $0.message.contains("/tmp/search-a:/tmp/search-b")
         }))
+    }
+
+    @Test func launchOrResumeDefaultSessionCreatesAndReusesCodexSessionOverIPC() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(stdout: "Usage: codex\n")
+                ])
+            ),
+            sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Codex ready")
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+
+        let firstSession = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .codex)
+        let secondSession = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .codex)
+        let overview = try await client.getWorkspaceOverview(workspaceID: workspace.id)
+        let codexCard = try #require(overview.providerCards.first(where: { $0.provider.id == .codex }))
+
+        #expect(firstSession.state == .ready)
+        #expect(firstSession.providerID == .codex)
+        #expect(firstSession.workspaceID == workspace.id)
+        #expect(firstSession.isDefault)
+        #expect(secondSession == firstSession)
+        #expect(codexCard.defaultSession.state == .ready)
+        #expect(codexCard.defaultSession.actionTitle == "Resume")
+        #expect(codexCard.defaultSession.sessionID == firstSession.id)
     }
 
     @Test func launchOrResumeDefaultSessionCreatesAndReusesClaudeSessionOverIPC() async throws {
@@ -2102,6 +2187,59 @@ struct nexusTests {
         #expect(providerDetail.alternateSessions.first?.name == "Session 1")
         #expect(providerDetail.failedSessions.isEmpty)
         #expect(claudeCard.alternateSessionCount == 1)
+    }
+
+    @Test func codexNamedSessionCanBeStoppedInspectedRelaunchedAndDeletedOverIPC() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(stdout: "Usage: codex\n")
+                ])
+            ),
+            sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Codex ready")
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+
+        let namedSession = try await client.createNamedSession(workspaceID: workspace.id, providerID: .codex, name: nil)
+        let stoppedSession = try await client.stopSession(sessionID: namedSession.id)
+        let stoppedScreen = try await client.getSessionScreen(sessionID: namedSession.id)
+        let relaunchedSession = try await client.launchOrResumeSession(sessionID: namedSession.id)
+        let relaunchedScreen = try await client.getSessionScreen(sessionID: namedSession.id)
+        _ = try await client.stopSession(sessionID: namedSession.id)
+        let deleted = try await client.deleteSessionRecord(sessionID: namedSession.id)
+        let providerDetail = try await client.getProviderDetail(workspaceID: workspace.id, providerID: .codex)
+
+        #expect(namedSession.providerID == .codex)
+        #expect(namedSession.isDefault == false)
+        #expect(namedSession.name == "Session 1")
+        #expect(stoppedSession.id == namedSession.id)
+        #expect(stoppedSession.state == .exited)
+        #expect(stoppedScreen.session.state == .exited)
+        #expect(stoppedScreen.transcript == "Codex ready")
+        #expect(relaunchedSession.id == namedSession.id)
+        #expect(relaunchedSession.state == .ready)
+        #expect(relaunchedScreen.session.state == .ready)
+        #expect(relaunchedScreen.transcript == "Codex ready")
+        #expect(deleted)
+        #expect(providerDetail.alternateSessions.isEmpty)
+        await #expect(throws: (any Error).self) {
+            _ = try await client.getSessionScreen(sessionID: namedSession.id)
+        }
     }
 
     @Test func stopSessionKeepsAlternateSessionRecordInspectableOverIPC() async throws {

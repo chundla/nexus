@@ -2764,26 +2764,26 @@ struct RemoteClientPairingModelTests {
             primaryGroupID: UUID()
         )
         let health = ProviderHealthSummary(
-            state: .available,
-            summary: "Codex available",
-            launchability: .launchable
+            state: .notChecked,
+            summary: "Health checks coming soon",
+            launchability: .notChecked
         )
         let detail = ProviderDetail(
             workspace: workspace,
-            provider: Provider(id: .codex),
+            provider: Provider(id: .pi),
             health: health,
             capabilities: ProviderCapabilities(
                 launchDefaultSession: ProviderCapability(
                     action: .launchDefaultSession,
                     isSupported: false,
                     isEnabled: false,
-                    disabledReason: "Codex cannot launch a Default Session on this Workspace yet."
+                    disabledReason: "Pi cannot launch a Default Session on this Workspace yet."
                 ),
                 createNamedSession: ProviderCapability(
                     action: .createNamedSession,
                     isSupported: false,
                     isEnabled: false,
-                    disabledReason: "Codex cannot create Named Sessions on this Workspace yet."
+                    disabledReason: "Pi cannot create Named Sessions on this Workspace yet."
                 )
             ),
             defaultSession: nil,
@@ -2799,7 +2799,7 @@ struct RemoteClientPairingModelTests {
 
         #expect(section.content == .empty)
         #expect(section.canCreateSession == false)
-        #expect(section.createDisabledReason == "Codex cannot create Named Sessions on this Workspace yet.")
+        #expect(section.createDisabledReason == "Pi cannot create Named Sessions on this Workspace yet.")
     }
 
     @Test func namedSessionSectionUsesServiceOwnedCapabilitiesInsteadOfProviderIDChecks() {

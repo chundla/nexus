@@ -68,8 +68,10 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
 
         switch providerID {
         case .claude:
-            return claudeHealthSummary(for: workspace)
-        case .codex, .ibmBob, .pi:
+            return localCLIHealthSummary(commandName: "claude", providerName: "Claude", workspace: workspace)
+        case .codex:
+            return localCLIHealthSummary(commandName: "codex", providerName: "Codex", workspace: workspace)
+        case .ibmBob, .pi:
             return ProviderHealthSummary(
                 state: .notChecked,
                 summary: "Health checks coming soon"
@@ -247,18 +249,18 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
         }
     }
 
-    private func claudeHealthSummary(for workspace: Workspace) -> ProviderHealthSummary {
-        let resolution = executableResolver.resolveExecutable(named: "claude")
+    private func localCLIHealthSummary(commandName: String, providerName: String, workspace: Workspace) -> ProviderHealthSummary {
+        let resolution = executableResolver.resolveExecutable(named: commandName)
         guard let executable = resolution.resolvedExecutable else {
             return ProviderHealthSummary(
                 state: .unavailable,
-                summary: "Claude executable was not found",
+                summary: "\(providerName) executable was not found",
                 launchability: .notLaunchable,
                 diagnostics: [
                     ProviderHealthDiagnostic(
                         severity: .error,
                         code: "executableNotFound",
-                        message: "Claude executable was not found in the service search paths."
+                        message: "\(providerName) executable was not found in the service search paths."
                     ),
                     ProviderHealthDiagnostic(
                         severity: .info,
@@ -280,7 +282,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
         }
 
         var diagnostics: [ProviderHealthDiagnostic] = []
-        let version = detectVersion(executable: executable, diagnostics: &diagnostics)
+        let version = detectVersion(executable: executable, providerName: providerName, diagnostics: &diagnostics)
 
         do {
             let launchProbe = try commandRunner.run(
@@ -292,7 +294,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
             guard launchProbe.exitStatus == 0 else {
                 return ProviderHealthSummary(
                     state: .misconfigured,
-                    summary: "Claude is installed but failed the launch probe",
+                    summary: "\(providerName) is installed but failed the launch probe",
                     resolvedExecutable: executable,
                     version: version,
                     launchability: .notLaunchable,
@@ -300,7 +302,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
                         ProviderHealthDiagnostic(
                             severity: .error,
                             code: "launchProbeFailed",
-                            message: launchProbeFailureMessage(stdout: launchProbe.stdout, stderr: launchProbe.stderr)
+                            message: launchProbeFailureMessage(stdout: launchProbe.stdout, stderr: launchProbe.stderr, providerName: providerName)
                         )
                     ]
                 )
@@ -308,7 +310,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
         } catch {
             return ProviderHealthSummary(
                 state: .misconfigured,
-                summary: "Claude is installed but failed the launch probe",
+                summary: "\(providerName) is installed but failed the launch probe",
                 resolvedExecutable: executable,
                 version: version,
                 launchability: .notLaunchable,
@@ -324,7 +326,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
 
         return ProviderHealthSummary(
             state: .available,
-            summary: version.map { "Claude \($0) is available" } ?? "Claude is available",
+            summary: version.map { "\(providerName) \($0) is available" } ?? "\(providerName) is available",
             resolvedExecutable: executable,
             version: version,
             launchability: .launchable,
@@ -332,7 +334,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
         )
     }
 
-    private func detectVersion(executable: String, diagnostics: inout [ProviderHealthDiagnostic]) -> String? {
+    private func detectVersion(executable: String, providerName: String, diagnostics: inout [ProviderHealthDiagnostic]) -> String? {
         do {
             let result = try commandRunner.run(executable: executable, arguments: ["--version"], currentDirectoryURL: nil)
             guard result.exitStatus == 0 else {
@@ -340,7 +342,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
                     ProviderHealthDiagnostic(
                         severity: .warning,
                         code: "versionUnavailable",
-                        message: launchProbeFailureMessage(stdout: result.stdout, stderr: result.stderr)
+                        message: launchProbeFailureMessage(stdout: result.stdout, stderr: result.stderr, providerName: providerName)
                     )
                 )
                 return nil
@@ -360,7 +362,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
                 ProviderHealthDiagnostic(
                     severity: .warning,
                     code: "versionUnavailable",
-                    message: "Claude did not return a version string."
+                    message: "\(providerName) did not return a version string."
                 )
             )
             return nil
@@ -447,14 +449,14 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
         return (.misconfigured, "Claude is installed but failed the remote launch probe", "remoteLaunchProbeFailed", nil)
     }
 
-    private func launchProbeFailureMessage(stdout: String, stderr: String) -> String {
+    private func launchProbeFailureMessage(stdout: String, stderr: String, providerName: String) -> String {
         let detail = firstDiagnosticLine(stdout: stdout, stderr: stderr)
 
         if detail.isEmpty == false {
             return detail
         }
 
-        return "Claude could not complete a basic launch probe."
+        return "\(providerName) could not complete a basic launch probe."
     }
 
     private func shellQuoted(_ value: String) -> String {
