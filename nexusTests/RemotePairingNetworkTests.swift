@@ -270,25 +270,17 @@ struct RemotePairingNetworkTests {
         )
         _ = try await client.revokePairedDevice(deviceID: try #require(pairedMac.pairedDeviceID))
 
-        var disconnectContinuation: AsyncStream<any Error>.Continuation?
-        let disconnectStream = AsyncStream<any Error> { continuation in
-            disconnectContinuation = continuation
+        do {
+            _ = try await remoteClient.observeSessionScreen(
+                for: pairedMac,
+                sessionID: session.id,
+                onUpdate: { _ in },
+                onDisconnect: { _ in }
+            )
+            Issue.record("Expected revoked Pairing to fail before starting Session screen observation")
+        } catch let error as RemotePairingHTTPError {
+            #expect(error == .pairingRevoked("Pair this iPhone again to browse this Paired Mac"))
         }
-        var disconnectIterator = disconnectStream.makeAsyncIterator()
-
-        let observation = try await remoteClient.observeSessionScreen(
-            for: pairedMac,
-            sessionID: session.id,
-            onUpdate: { _ in },
-            onDisconnect: { error in
-                disconnectContinuation?.yield(error)
-                disconnectContinuation?.finish()
-            }
-        )
-        let disconnectError = try #require(await disconnectIterator.next())
-        await observation.cancel()
-
-        #expect((disconnectError as? RemotePairingHTTPError) == .pairingRevoked("Pair this iPhone again to browse this Paired Mac"))
 
         let storeURL = rootURL.appendingPathComponent("Nexus.sqlite", isDirectory: false)
         let store = try NexusMetadataStore(storeURL: storeURL)
@@ -950,6 +942,10 @@ struct RemotePairingNetworkTests {
             }
         }
 
+        _ = try await waitForObservedScreen {
+            observedScreens.last
+        }
+
         _ = try await remoteClient.takeSessionControl(for: pairedMac, sessionID: session.id, columns: 44, rows: 12)
         _ = try await remoteClient.sendSessionText(for: pairedMac, sessionID: session.id, text: "654321")
         _ = try await remoteClient.sendSessionInputKey(for: pairedMac, sessionID: session.id, key: .enter)
@@ -1087,6 +1083,10 @@ struct RemotePairingNetworkTests {
             }
         }
 
+        _ = try await waitForObservedScreen {
+            observedScreens.last
+        }
+
         _ = try await remoteClient.takeSessionControl(for: pairedMac, sessionID: session.id, columns: 40, rows: 17)
         let responseScreen = try await remoteClient.sendSessionText(for: pairedMac, sessionID: session.id, text: "yooo")
 
@@ -1161,6 +1161,10 @@ struct RemotePairingNetworkTests {
             Task {
                 await observation.cancel()
             }
+        }
+
+        _ = try await waitForObservedScreen {
+            observedScreens.last
         }
 
         _ = try await remoteClient.takeSessionControl(for: pairedMac, sessionID: session.id, columns: 40, rows: 17)

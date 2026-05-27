@@ -815,6 +815,7 @@ private final class RemoteSessionScreenStream: @unchecked Sendable {
         let responseHead = "HTTP/1.1 200 OK\r\n"
             + "Content-Type: text/event-stream\r\n"
             + "Cache-Control: no-cache\r\n"
+            + "Transfer-Encoding: chunked\r\n"
             + "Connection: keep-alive\r\n"
             + "\r\n"
         connection.send(content: Data(responseHead.utf8), completion: .contentProcessed { [weak self] error in
@@ -830,8 +831,14 @@ private final class RemoteSessionScreenStream: @unchecked Sendable {
             return
         }
 
-        let payload = Data("data: \(body)\n\n".utf8)
-        connection.send(content: payload, completion: .contentProcessed { [weak self] error in
+        let payload = Data("data: \(body)\r\n\r\n".utf8)
+        let chunkPrefix = Data("\(String(payload.count, radix: 16))\r\n".utf8)
+        let chunkSuffix = Data("\r\n".utf8)
+        var chunk = Data()
+        chunk.append(chunkPrefix)
+        chunk.append(payload)
+        chunk.append(chunkSuffix)
+        connection.send(content: chunk, completion: .contentProcessed { [weak self] error in
             if error != nil {
                 self?.close()
             }

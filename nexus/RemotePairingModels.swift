@@ -43,10 +43,36 @@ struct RemoteWorkspaceCatalog: Codable, Equatable, Sendable {
 }
 
 struct RemotePairingHTTPClient {
-    private let session: URLSession
+    private final class SessionBox: @unchecked Sendable {
+        let session: URLSession
 
-    init(session: URLSession = .shared) {
-        self.session = session
+        init(session: URLSession) {
+            self.session = session
+        }
+
+        deinit {
+            session.invalidateAndCancel()
+        }
+    }
+
+    private let sessionBox: SessionBox
+
+    private var session: URLSession {
+        sessionBox.session
+    }
+
+    init(session: URLSession? = nil) {
+        self.sessionBox = SessionBox(session: session ?? Self.makeDefaultSession())
+    }
+
+    private static func makeDefaultSession() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.urlCache = nil
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
+        configuration.httpMaximumConnectionsPerHost = 8
+        return URLSession(configuration: configuration)
     }
 
     func fetchStatus(host: String, port: Int) async throws -> RemotePairedMacStatus {
@@ -229,6 +255,7 @@ struct RemotePairingHTTPClient {
             path: "/remote-client/sessions/\(sessionID.uuidString)/observe"
         )
         let session = self.session
+        let startup = ObservationStartupSignal()
         let task = Task.detached(priority: nil) {
             do {
                 let (bytes, response) = try await session.bytes(for: request)
@@ -244,39 +271,50 @@ struct RemotePairingHTTPClient {
                     throw Self.decodeRequestFailure(from: responseBody, statusCode: httpResponse.statusCode)
                 }
 
-                var eventLines: [String] = []
-                for try await line in bytes.lines {
+                var eventBuffer = Data()
+                var didDeliverInitialScreen = false
+
+                for try await byte in bytes {
                     if Task.isCancelled {
                         return
                     }
 
-                    if line.isEmpty {
+                    eventBuffer.append(byte)
+                    while let eventLines = Self.dequeueObservedEventLines(from: &eventBuffer) {
                         try Self.emitObservedScreen(from: eventLines, onUpdate: onUpdate)
-                        eventLines = []
-                        continue
+                        if didDeliverInitialScreen == false {
+                            didDeliverInitialScreen = true
+                            await startup.succeed()
+                        }
                     }
-
-                    guard line.hasPrefix("data:") else {
-                        continue
-                    }
-
-                    let value = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
-                    eventLines.append(value)
                 }
 
-                try Self.emitObservedScreen(from: eventLines, onUpdate: onUpdate)
+                if let eventLines = Self.dequeueTrailingObservedEventLines(from: eventBuffer) {
+                    try Self.emitObservedScreen(from: eventLines, onUpdate: onUpdate)
+                    if didDeliverInitialScreen == false {
+                        didDeliverInitialScreen = true
+                        await startup.succeed()
+                    }
+                }
+
+                if didDeliverInitialScreen == false {
+                    await startup.fail(RemotePairingHTTPObservationError.connectionClosed)
+                }
 
                 if Task.isCancelled == false {
                     onDisconnect(RemotePairingHTTPObservationError.connectionClosed)
                 }
             } catch is CancellationError {
+                await startup.fail(CancellationError())
             } catch {
+                await startup.fail(error)
                 if Task.isCancelled == false {
                     onDisconnect(error)
                 }
             }
         }
 
+        try await startup.wait()
         return RemoteSessionScreenHTTPObservation(task: task)
     }
 
@@ -313,6 +351,33 @@ struct RemotePairingHTTPClient {
         onUpdate(screen)
     }
 
+    private nonisolated static func dequeueObservedEventLines(from buffer: inout Data) -> [String]? {
+        guard let separatorRange = buffer.range(of: Data("\r\n\r\n".utf8)) ?? buffer.range(of: Data("\n\n".utf8)) else {
+            return nil
+        }
+
+        let eventData = buffer[..<separatorRange.lowerBound]
+        buffer.removeSubrange(..<separatorRange.upperBound)
+        return observedEventLines(from: Data(eventData))
+    }
+
+    private nonisolated static func dequeueTrailingObservedEventLines(from buffer: Data) -> [String]? {
+        observedEventLines(from: buffer)
+    }
+
+    private nonisolated static func observedEventLines(from data: Data) -> [String]? {
+        guard data.isEmpty == false,
+              let text = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+
+        let lines = text
+            .components(separatedBy: .newlines)
+            .filter { $0.hasPrefix("data:") }
+            .map { String($0.dropFirst(5)).trimmingCharacters(in: .whitespaces) }
+        return lines.isEmpty ? nil : lines
+    }
+
     private nonisolated static func decodeRequestFailure(from data: Data, statusCode: Int) -> RemotePairingHTTPError {
         let message = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["message"] as? String
             ?? HTTPURLResponse.localizedString(forStatusCode: statusCode)
@@ -334,6 +399,43 @@ private final class RemoteSessionScreenHTTPObservation: SessionScreenObservation
 
     func cancel() async {
         task.cancel()
+        _ = await task.result
+    }
+}
+
+private actor ObservationStartupSignal {
+    private var result: Result<Void, Error>?
+    private var continuations: [CheckedContinuation<Void, Error>] = []
+
+    func wait() async throws {
+        if let result {
+            return try result.get()
+        }
+
+        try await withCheckedThrowingContinuation { continuation in
+            continuations.append(continuation)
+        }
+    }
+
+    func succeed() {
+        complete(with: .success(()))
+    }
+
+    func fail(_ error: Error) {
+        complete(with: .failure(error))
+    }
+
+    private func complete(with result: Result<Void, Error>) {
+        guard self.result == nil else {
+            return
+        }
+
+        self.result = result
+        let continuations = self.continuations
+        self.continuations.removeAll()
+        for continuation in continuations {
+            continuation.resume(with: result)
+        }
     }
 }
 

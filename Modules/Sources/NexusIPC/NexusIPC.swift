@@ -122,6 +122,10 @@ public final class NexusIPCClient: NexusServiceClient, @unchecked Sendable {
         self.connection.resume()
     }
 
+    deinit {
+        connection.invalidate()
+    }
+
     nonisolated public static func connect(to endpoint: NSXPCListenerEndpoint) throws -> NexusIPCClient {
         NexusIPCClient(connection: NSXPCConnection(listenerEndpoint: endpoint))
     }
