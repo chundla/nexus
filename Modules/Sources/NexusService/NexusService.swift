@@ -80,9 +80,7 @@ protocol SessionRuntimeLaunching {
 
 protocol SessionRuntime: AnyObject {
     var state: Session.State { get }
-    var transcript: String { get }
-    var terminalColumns: Int { get }
-    var terminalRows: Int { get }
+    func sessionScreen(for session: Session) -> SessionScreen
     func setChangeHandler(_ handler: (@Sendable () -> Void)?)
     func stop() throws
     func sendInput(_ text: String) throws
@@ -234,12 +232,7 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Se
             return runtime
         }
 
-        return SessionScreen(
-            session: session,
-            transcript: runtime.transcript,
-            terminalColumns: runtime.terminalColumns,
-            terminalRows: runtime.terminalRows
-        )
+        return runtime.sessionScreen(for: session)
     }
 
     func addUpdateObserver(id observationID: UUID, for session: Session, observer: @escaping @Sendable () -> Void) {
@@ -272,12 +265,7 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Se
         }
 
         try runtime.sendInput(text)
-        return SessionScreen(
-            session: session,
-            transcript: runtime.transcript,
-            terminalColumns: runtime.terminalColumns,
-            terminalRows: runtime.terminalRows
-        )
+        return runtime.sessionScreen(for: session)
     }
 
     func sendText(_ text: String, to session: Session) throws -> SessionScreen {
@@ -289,12 +277,7 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Se
         }
 
         try runtime.sendText(text)
-        return SessionScreen(
-            session: session,
-            transcript: runtime.transcript,
-            terminalColumns: runtime.terminalColumns,
-            terminalRows: runtime.terminalRows
-        )
+        return runtime.sessionScreen(for: session)
     }
 
     func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool, to session: Session) throws -> SessionScreen {
@@ -306,12 +289,7 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Se
         }
 
         try runtime.sendInputKey(key, applicationCursorMode: applicationCursorMode)
-        return SessionScreen(
-            session: session,
-            transcript: runtime.transcript,
-            terminalColumns: runtime.terminalColumns,
-            terminalRows: runtime.terminalRows
-        )
+        return runtime.sessionScreen(for: session)
     }
 
     func resize(session: Session, columns: Int, rows: Int) throws -> SessionScreen {
@@ -323,12 +301,7 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Se
         }
 
         try runtime.resize(columns: columns, rows: rows)
-        return SessionScreen(
-            session: session,
-            transcript: runtime.transcript,
-            terminalColumns: runtime.terminalColumns,
-            terminalRows: runtime.terminalRows
-        )
+        return runtime.sessionScreen(for: session)
     }
 
     private func notifyUpdateObservers(for sessionID: UUID) {
@@ -617,28 +590,25 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
         return runtimeState
     }
 
-    var transcript: String {
-        lock.lock()
-        defer { lock.unlock() }
-        return storage
-    }
-
     private var terminalTranscript: String {
         lock.lock()
         defer { lock.unlock() }
         return terminalOutputStorage
     }
 
-    var terminalColumns: Int {
+    func sessionScreen(for session: Session) -> SessionScreen {
         lock.lock()
-        defer { lock.unlock() }
-        return columns
-    }
+        let transcript = storage
+        let terminalColumns = columns
+        let terminalRows = rows
+        lock.unlock()
 
-    var terminalRows: Int {
-        lock.lock()
-        defer { lock.unlock() }
-        return rows
+        return SessionScreen(
+            session: session,
+            transcript: transcript,
+            terminalColumns: terminalColumns,
+            terminalRows: terminalRows
+        )
     }
 
     func setChangeHandler(_ handler: (@Sendable () -> Void)?) {
@@ -746,10 +716,10 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
     private func cursorPositionReportResponses(for incomingText: String) -> [String] {
         let cprQueries = ["\u{001B}[6n", "\u{009B}6n"]
         let baseTranscript = terminalTranscript
-        let columns = terminalColumns
-        let rows = terminalRows
 
         lock.lock()
+        let columns = self.columns
+        let rows = self.rows
         let priorTail = pendingTerminalOutput
         lock.unlock()
 
@@ -2343,6 +2313,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             transcript: renderState.transcript,
             terminalColumns: screen.terminalColumns,
             terminalRows: screen.terminalRows,
+            activityItems: screen.activityItems,
             visibleLines: renderState.visibleLines,
             styledVisibleLines: renderState.styledVisibleLines,
             cursorRow: renderState.cursorRow,

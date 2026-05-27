@@ -154,12 +154,30 @@ public enum SessionController: Codable, Equatable, Sendable {
     case pairedDevice(UUID)
 }
 
+public struct SessionActivityItem: Codable, Equatable, Identifiable, Sendable {
+    public enum Kind: String, Codable, Sendable {
+        case status
+        case message
+    }
+
+    public let id: UUID
+    public let kind: Kind
+    public let text: String
+
+    public init(id: UUID = UUID(), kind: Kind, text: String) {
+        self.id = id
+        self.kind = kind
+        self.text = text
+    }
+}
+
 public struct SessionScreen: Codable, Equatable, Sendable {
     public let session: Session
     public let controller: SessionController
     public let transcript: String
     public let terminalColumns: Int
     public let terminalRows: Int
+    public let activityItems: [SessionActivityItem]
     public let visibleLines: [String]
     public let styledVisibleLines: [TerminalLine]
     public let cursorRow: Int
@@ -172,6 +190,7 @@ public struct SessionScreen: Codable, Equatable, Sendable {
         transcript: String,
         terminalColumns: Int = 80,
         terminalRows: Int = 24,
+        activityItems: [SessionActivityItem] = [],
         visibleLines: [String]? = nil,
         styledVisibleLines: [TerminalLine]? = nil,
         cursorRow: Int? = nil,
@@ -190,6 +209,7 @@ public struct SessionScreen: Codable, Equatable, Sendable {
         self.transcript = transcript
         self.terminalColumns = terminalColumns
         self.terminalRows = terminalRows
+        self.activityItems = activityItems
         self.visibleLines = resolvedVisibleLines
         self.styledVisibleLines = styledVisibleLines ?? resolvedVisibleLines.map(Self.defaultStyledLine)
         self.cursorRow = cursorRow ?? viewport.cursorRow
