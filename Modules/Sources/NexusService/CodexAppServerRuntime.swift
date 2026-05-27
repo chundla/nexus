@@ -13,6 +13,7 @@ protocol CodexAppServerTransporting: AnyObject {
 enum CodexAppServerRuntimeError: LocalizedError {
     case startupTimedOut
     case startupFailed(String)
+    case approvalRequestNotFound
 
     var errorDescription: String? {
         switch self {
@@ -20,8 +21,38 @@ enum CodexAppServerRuntimeError: LocalizedError {
             return "Codex app-server did not finish startup in time."
         case let .startupFailed(message):
             return message
+        case .approvalRequestNotFound:
+            return "Approval Request was not found for this Session."
         }
     }
+}
+
+private enum CodexJSONRPCRequestID: Sendable {
+    case string(String)
+    case number(Double)
+
+    init?(_ value: Any?) {
+        if let string = value as? String {
+            self = .string(string)
+        } else if let number = value as? NSNumber {
+            self = .number(number.doubleValue)
+        } else {
+            return nil
+        }
+    }
+
+    var jsonValue: Any {
+        switch self {
+        case let .string(string):
+            string
+        case let .number(number):
+            number
+        }
+    }
+}
+
+private struct PendingCodexApprovalRequest: Sendable {
+    let requestID: CodexJSONRPCRequestID
 }
 
 final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
@@ -50,6 +81,7 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
     private var transcript = ""
     private var activityItems: [SessionActivityItem] = []
     private var approvalRequests: [SessionApprovalRequest] = []
+    private var pendingApprovalRequests: [UUID: PendingCodexApprovalRequest] = [:]
     private var sessionLinkage: CodexSessionLinkage?
     private var changeHandler: (@Sendable () -> Void)?
     private var didRequestStop = false
@@ -184,7 +216,47 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
     func sendText(_ text: String) throws {}
     func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool) throws {}
     func respondToApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision) throws {
-        throw NexusSessionApprovalError.approvalRequestsUnavailable
+        let pendingApprovalRequest: PendingCodexApprovalRequest
+        let request: SessionApprovalRequest
+
+        lock.lock()
+        guard let resolvedPendingApprovalRequest = pendingApprovalRequests[approvalRequestID],
+              let index = approvalRequests.firstIndex(where: { $0.id == approvalRequestID && $0.state == .pending }) else {
+            lock.unlock()
+            throw CodexAppServerRuntimeError.approvalRequestNotFound
+        }
+        pendingApprovalRequest = resolvedPendingApprovalRequest
+        request = approvalRequests[index]
+        lock.unlock()
+
+        try transport.sendLine(
+            Self.jsonLine([
+                "jsonrpc": "2.0",
+                "id": pendingApprovalRequest.requestID.jsonValue,
+                "result": [
+                    "decision": decision == .approve ? "accept" : "decline"
+                ]
+            ])
+        )
+
+        lock.lock()
+        pendingApprovalRequests.removeValue(forKey: approvalRequestID)
+        if let index = approvalRequests.firstIndex(where: { $0.id == approvalRequestID }) {
+            approvalRequests[index] = SessionApprovalRequest(
+                id: request.id,
+                title: request.title,
+                text: request.text,
+                state: decision == .approve ? .approved : .denied
+            )
+        }
+        appendActivityItemLocked(
+            SessionActivityItem(
+                kind: .approvalDecision,
+                text: "\(decision == .approve ? "Approved" : "Denied"): \(request.title)"
+            )
+        )
+        lock.unlock()
+        notifyChange()
     }
 
     func resize(columns: Int, rows: Int) throws {
@@ -209,9 +281,59 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
                 lock.unlock()
                 notifyChange()
             }
+        case "item/commandExecution/requestApproval":
+            handleCommandExecutionApprovalRequest(
+                object["params"] as? [String: Any],
+                requestID: CodexJSONRPCRequestID(object["id"])
+            )
+        case "item/fileChange/requestApproval":
+            handleFileChangeApprovalRequest(
+                object["params"] as? [String: Any],
+                requestID: CodexJSONRPCRequestID(object["id"])
+            )
         default:
             return
         }
+    }
+
+    private func handleCommandExecutionApprovalRequest(_ params: [String: Any]?, requestID: CodexJSONRPCRequestID?) {
+        guard let requestID else {
+            return
+        }
+
+        let command = params.flatMap { string(for: "command", in: $0) }?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let reason = params.flatMap { string(for: "reason", in: $0) }?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = command?.isEmpty == false ? command! : (reason?.isEmpty == false ? reason! : "Approval Request")
+        let text = reason?.isEmpty == false ? reason! : title
+
+        registerApprovalRequest(
+            SessionApprovalRequest(title: title, text: text, state: .pending),
+            requestID: requestID
+        )
+    }
+
+    private func handleFileChangeApprovalRequest(_ params: [String: Any]?, requestID: CodexJSONRPCRequestID?) {
+        guard let requestID else {
+            return
+        }
+
+        let reason = params.flatMap { string(for: "reason", in: $0) }?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = "File changes need approval"
+        let text = reason?.isEmpty == false ? reason! : title
+
+        registerApprovalRequest(
+            SessionApprovalRequest(title: title, text: text, state: .pending),
+            requestID: requestID
+        )
+    }
+
+    private func registerApprovalRequest(_ approvalRequest: SessionApprovalRequest, requestID: CodexJSONRPCRequestID) {
+        lock.lock()
+        approvalRequests.append(approvalRequest)
+        pendingApprovalRequests[approvalRequest.id] = PendingCodexApprovalRequest(requestID: requestID)
+        appendActivityItemLocked(SessionActivityItem(kind: .approvalRequest, text: "Approval Request: \(approvalRequest.title)"))
+        lock.unlock()
+        notifyChange()
     }
 
     private func handleTermination(status: Int32) {

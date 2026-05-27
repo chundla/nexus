@@ -33,6 +33,114 @@ struct CodexAppServerRuntimeTests {
         #expect(screen.activityItems.map { $0.text } == ["Codex shared Session stream connected"])
         #expect(transport.sentMessages.compactMap { $0["method"] as? String } == ["initialize", "initialized", "thread/start"])
     }
+
+    @Test func surfacesPendingCommandApprovalRequestInSharedSessionStream() throws {
+        let transport = TestCodexAppServerTransport(threadID: "codex-thread-1")
+        let runtime = try CodexAppServerRuntime(
+            executable: "/tmp/fake-codex",
+            workingDirectory: "/tmp/workspace",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .codex,
+            isDefault: true,
+            state: .ready
+        )
+
+        transport.emitCommandApprovalRequest(
+            requestID: "approval-1",
+            itemID: "command-1",
+            command: "deploy --prod",
+            reason: "Codex needs approval to deploy to production."
+        )
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(screen.activityItems.map(\.kind) == [.status, .approvalRequest])
+        #expect(screen.activityItems.map(\.text) == [
+            "Codex shared Session stream connected",
+            "Approval Request: deploy --prod"
+        ])
+        #expect(screen.approvalRequests.count == 1)
+        #expect(screen.approvalRequests.first?.title == "deploy --prod")
+        #expect(screen.approvalRequests.first?.text == "Codex needs approval to deploy to production.")
+        #expect(screen.approvalRequests.first?.state == .pending)
+    }
+
+    @Test func approvingPendingCommandApprovalRequestUpdatesSharedStateAndRepliesToCodex() throws {
+        let transport = TestCodexAppServerTransport(threadID: "codex-thread-1")
+        let runtime = try CodexAppServerRuntime(
+            executable: "/tmp/fake-codex",
+            workingDirectory: "/tmp/workspace",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .codex,
+            isDefault: true,
+            state: .ready
+        )
+
+        transport.emitCommandApprovalRequest(
+            requestID: "approval-1",
+            itemID: "command-1",
+            command: "deploy --prod",
+            reason: "Codex needs approval to deploy to production."
+        )
+        let approvalRequest = try #require(runtime.sessionScreen(for: session).approvalRequests.first)
+
+        try runtime.respondToApprovalRequest(approvalRequest.id, decision: .approve)
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(screen.activityItems.suffix(2).map(\.text) == [
+            "Approval Request: deploy --prod",
+            "Approved: deploy --prod"
+        ])
+        #expect(screen.approvalRequests.first?.state == .approved)
+        #expect(transport.sentMessages.last?["id"] as? String == "approval-1")
+        #expect((transport.sentMessages.last?["result"] as? [String: String])?["decision"] == "accept")
+    }
+
+    @Test func denyingPendingFileChangeApprovalRequestUpdatesSharedStateAndRepliesToCodex() throws {
+        let transport = TestCodexAppServerTransport(threadID: "codex-thread-1")
+        let runtime = try CodexAppServerRuntime(
+            executable: "/tmp/fake-codex",
+            workingDirectory: "/tmp/workspace",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .codex,
+            isDefault: true,
+            state: .ready
+        )
+
+        transport.emitFileChangeApprovalRequest(
+            requestID: "approval-2",
+            itemID: "file-change-1",
+            reason: "Codex wants to write outside the Workspace."
+        )
+        let approvalRequest = try #require(runtime.sessionScreen(for: session).approvalRequests.first)
+
+        try runtime.respondToApprovalRequest(approvalRequest.id, decision: .deny)
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(screen.activityItems.suffix(2).map(\.text) == [
+            "Approval Request: File changes need approval",
+            "Denied: File changes need approval"
+        ])
+        #expect(screen.approvalRequests.first?.title == "File changes need approval")
+        #expect(screen.approvalRequests.first?.text == "Codex wants to write outside the Workspace.")
+        #expect(screen.approvalRequests.first?.state == .denied)
+        #expect(transport.sentMessages.last?["id"] as? String == "approval-2")
+        #expect((transport.sentMessages.last?["result"] as? [String: String])?["decision"] == "decline")
+    }
 }
 
 private final class TestCodexAppServerTransport: CodexAppServerTransporting, @unchecked Sendable {
@@ -108,6 +216,38 @@ private final class TestCodexAppServerTransport: CodexAppServerTransporting, @un
 
     func terminate() throws {
         terminationHandler?(0)
+    }
+
+    func emitCommandApprovalRequest(requestID: String, itemID: String, command: String, reason: String) {
+        stdoutLineHandler?(jsonLine([
+            "jsonrpc": "2.0",
+            "id": requestID,
+            "method": "item/commandExecution/requestApproval",
+            "params": [
+                "threadId": threadID,
+                "turnId": "turn-1",
+                "itemId": itemID,
+                "startedAtMs": 1,
+                "reason": reason,
+                "command": command,
+                "cwd": "/tmp/workspace"
+            ]
+        ]))
+    }
+
+    func emitFileChangeApprovalRequest(requestID: String, itemID: String, reason: String) {
+        stdoutLineHandler?(jsonLine([
+            "jsonrpc": "2.0",
+            "id": requestID,
+            "method": "item/fileChange/requestApproval",
+            "params": [
+                "threadId": threadID,
+                "turnId": "turn-1",
+                "itemId": itemID,
+                "startedAtMs": 1,
+                "reason": reason
+            ]
+        ]))
     }
 
     private func jsonLine(_ object: [String: Any]) -> String {
