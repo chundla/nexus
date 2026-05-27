@@ -111,6 +111,12 @@ final class NexusMetadataStore {
                 resolved_working_directory TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS pi_session_linkages (
+                session_id TEXT PRIMARY KEY NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                pi_session_id TEXT,
+                session_file TEXT
+            );
+
             CREATE TABLE IF NOT EXISTS recent_navigation (
                 target_key TEXT PRIMARY KEY NOT NULL,
                 target_kind TEXT NOT NULL,
@@ -881,6 +887,36 @@ final class NexusMetadataStore {
         }
     }
 
+    func piSessionLinkage(sessionID: UUID) throws -> PiSessionLinkage? {
+        try withLock {
+            try piSessionLinkageWithoutLock(sessionID: sessionID)
+        }
+    }
+
+    func savePiSessionLinkage(sessionID: UUID, linkage: PiSessionLinkage) throws {
+        guard linkage.isEmpty == false else {
+            return
+        }
+
+        try withLock {
+            let statement = try prepare(
+                """
+                INSERT INTO pi_session_linkages (session_id, pi_session_id, session_file)
+                VALUES (?, ?, ?)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    pi_session_id = excluded.pi_session_id,
+                    session_file = excluded.session_file;
+                """
+            )
+            defer { sqlite3_finalize(statement) }
+
+            try bind(sessionID.uuidString, at: 1, in: statement)
+            try bind(linkage.piSessionID, at: 2, in: statement)
+            try bind(linkage.sessionFile, at: 3, in: statement)
+            try stepDone(statement)
+        }
+    }
+
     func createDefaultSession(
         workspaceID: UUID,
         providerID: ProviderID,
@@ -1168,6 +1204,24 @@ final class NexusMetadataStore {
             return nil
         }
         return try readLaunchSnapshot(from: statement)
+    }
+
+    private func piSessionLinkageWithoutLock(sessionID: UUID) throws -> PiSessionLinkage? {
+        let statement = try prepare(
+            "SELECT pi_session_id, session_file FROM pi_session_linkages WHERE session_id = ? LIMIT 1;"
+        )
+        defer { sqlite3_finalize(statement) }
+
+        try bind(sessionID.uuidString, at: 1, in: statement)
+        guard sqlite3_step(statement) == SQLITE_ROW else {
+            return nil
+        }
+
+        let linkage = PiSessionLinkage(
+            piSessionID: readOptionalString(column: 0, from: statement),
+            sessionFile: readOptionalString(column: 1, from: statement)
+        )
+        return linkage.isEmpty ? nil : linkage
     }
 
     func session(id: UUID) throws -> Session? {

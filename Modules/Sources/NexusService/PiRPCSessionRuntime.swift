@@ -36,6 +36,12 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         return runtimeState
     }
 
+    var piSessionLinkage: PiSessionLinkage? {
+        lock.lock()
+        defer { lock.unlock() }
+        return sessionLinkage
+    }
+
     private let lock = NSLock()
     private let transport: any PiRPCTransporting
     private let terminationStatusMessageBuilder: (Int32) -> String
@@ -46,6 +52,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     private var activityItems: [SessionActivityItem] = []
     private var terminalColumns = 80
     private var terminalRows = 24
+    private var sessionLinkage: PiSessionLinkage?
     private var changeHandler: (@Sendable () -> Void)?
     private var isStreaming = false
     private var assistantTranscriptIndex: Int?
@@ -55,6 +62,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     init(
         executable: String,
         workingDirectory: String,
+        sessionLinkage: PiSessionLinkage? = nil,
         terminationStatusMessageBuilder: @escaping (Int32) -> String,
         transportFactory: TransportFactory = { executable, arguments, workingDirectory in
             try ProcessPiRPCTransport(
@@ -65,7 +73,8 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         }
     ) throws {
         self.terminationStatusMessageBuilder = terminationStatusMessageBuilder
-        self.transport = try transportFactory(executable, ["--mode", "rpc", "--no-session"], workingDirectory)
+        self.sessionLinkage = sessionLinkage
+        self.transport = try transportFactory(executable, Self.transportArguments(sessionLinkage: sessionLinkage), workingDirectory)
 
         let startupSemaphore = DispatchSemaphore(value: 0)
         let startupState = StartupState()
@@ -77,7 +86,10 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
                self.string(for: "type", in: response) == "response",
                self.string(for: "id", in: response) == self.startupResponseID {
                 if self.bool(for: "success", in: response) == true {
+                    self.lock.lock()
+                    self.updateSessionLinkageLocked(from: response)
                     self.appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"))
+                    self.lock.unlock()
                 } else {
                     let errorMessage = self.string(for: "error", in: response) ?? "Pi RPC startup failed."
                     startupState.error = PiRPCSessionRuntimeError.startupFailed(errorMessage)
@@ -308,6 +320,22 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         return lines.joined(separator: "\n")
     }
 
+    private func updateSessionLinkageLocked(from response: [String: Any]) {
+        guard let data = response["data"] as? [String: Any] else {
+            return
+        }
+
+        let linkage = PiSessionLinkage(
+            piSessionID: string(for: "sessionId", in: data),
+            sessionFile: string(for: "sessionFile", in: data)
+        )
+        guard linkage.isEmpty == false else {
+            return
+        }
+
+        sessionLinkage = linkage
+    }
+
     private func appendActivityItemLocked(_ item: SessionActivityItem) {
         let trimmedText = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmedText.isEmpty == false else {
@@ -358,6 +386,20 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         handler = changeHandler
         lock.unlock()
         handler?()
+    }
+
+    private static func transportArguments(sessionLinkage: PiSessionLinkage?) -> [String] {
+        var arguments = ["--mode", "rpc"]
+
+        if let sessionFile = sessionLinkage?.sessionFile?.trimmingCharacters(in: .whitespacesAndNewlines),
+           sessionFile.isEmpty == false {
+            arguments += ["--session", sessionFile]
+        } else if let piSessionID = sessionLinkage?.piSessionID?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  piSessionID.isEmpty == false {
+            arguments += ["--session", piSessionID]
+        }
+
+        return arguments
     }
 
     private static func jsonLine(_ object: [String: Any]) throws -> String {
