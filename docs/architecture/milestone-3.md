@@ -2,6 +2,9 @@
 
 ## Goal
 
+> **Historical note**
+> This document captures the intended scope and decisions for Milestone Three at the time it was written. For current terminology and rollout status, prefer `CONTEXT.md`, `ARCHITECTURE.md`, and the newest `docs/architecture/milestone-*.md` document.
+
 Prove the first iPhone-first Remote Client slice for Nexus by pairing an iPhone to a Mac over the local network and remotely browsing, attaching to, and controlling Mac-managed Sessions.
 
 ## Current rollout note

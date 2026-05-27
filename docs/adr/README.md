@@ -34,3 +34,5 @@ Initial set:
 26. Remote provider executable resolution uses shell-aware discovery on the Host
 27. Remote clients use a dedicated network API that reuses Nexus domain concepts rather than exposing local IPC directly
 28. Shared Session stream is canonical; terminal is an optional Session surface
+29. Session surface is explicit, and client support is separate from Provider Capability
+30. Provider-native continuation linkage lives on the Session Record, not the Launch Snapshot

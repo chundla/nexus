@@ -104,7 +104,7 @@ Minimum contract:
 - `isDefault: Bool`
 - `state: SessionState`
 - `launchSnapshotID`
-- `providerNativeSessionRef: String?`
+- `providerNativeLinkage`
 - `createdAt`
 - `updatedAt`
 - `lastAttachedAt`
@@ -113,7 +113,29 @@ Notes:
 - Default session exists conceptually per workspace+provider.
 - Additional named sessions are explicit.
 - Failed launches still create session records.
+- Provider-native continuation metadata lives on the Session Record as mutable adapter linkage rather than inside the immutable LaunchSnapshot.
 - Provider-native thread or conversation identifiers remain linkage metadata rather than public product language.
+- Shared Session contracts make the primary Session surface explicit rather than inferring it from Provider identity.
+
+### SessionSurface
+
+- `primaryKind: terminal | structured`
+- `secondaryCapabilities[]`
+
+Notes:
+- Every Session has one primary SessionSurface.
+- The same Provider may expose different SessionSurfaces on different targets or runtimes.
+
+### SessionSurfaceSupport
+
+- `clientKind`
+- `canPresentPrimarySurface`
+- `canOperatePrimarySurface`
+- `reason`
+
+Notes:
+- Separate from ProviderCapability.
+- Allows a client to inspect a Session it cannot yet fully present or operate.
 
 ### SessionStream
 
@@ -129,7 +151,7 @@ Service-owned shared activity model for every Session:
 - `attachments[]`
 
 Notes:
-- Present for every Session regardless of Provider runtime shape.
+- Present for every Session regardless of Provider runtime shape or primary SessionSurface.
 - Both terminal-backed and protocol-native runtimes project activity into this shared model.
 
 ### LaunchSnapshot
@@ -176,9 +198,11 @@ Optional service-owned runtime concept when a Provider exposes a terminal surfac
 - Host 1 -> many remote Workspaces
 - Workspace 1 -> many Sessions
 - Provider 1 -> many Sessions
+- Session 1 -> 1 primary SessionSurface
 - Session 1 -> 1 SessionStream
 - Session 1 -> 1 LaunchSnapshot
 - Session 1 -> 0..1 live TerminalSession
+- SessionSurface 1 -> many SessionSurfaceSupport assessments across clients
 
 ## Identity and uniqueness
 

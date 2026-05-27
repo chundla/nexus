@@ -2,6 +2,9 @@
 
 ## Goal
 
+> **Historical note**
+> This document captures the intended scope and decisions for Milestone Two at the time it was written. For current terminology and rollout status, prefer `CONTEXT.md`, `ARCHITECTURE.md`, and the newest `docs/architecture/milestone-*.md` document.
+
 Prove the Nexus remote-workspace architecture with a useful macOS-only remote slice centered on the Background Service.
 
 ## Historical note

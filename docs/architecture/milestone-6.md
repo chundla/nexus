@@ -2,6 +2,9 @@
 
 ## Goal
 
+> **Historical note**
+> This document captures the intended scope and decisions for Milestone Six at the time it was written. For current terminology and rollout status, prefer `CONTEXT.md`, `ARCHITECTURE.md`, and the newest `docs/architecture/milestone-*.md` document.
+
 Prove that Remote Client V1 is trustworthy enough for internal dogfooding by making reconnect and recovery behavior boringly reliable, clarifying health and failure states, and tightening interaction coherence across the existing iPhone-first surface.
 
 ## Success criteria

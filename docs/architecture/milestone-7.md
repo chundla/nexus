@@ -2,6 +2,9 @@
 
 ## Goal
 
+> **Historical note**
+> This document captures the intended scope and decisions for Milestone Seven at the time it was written. For current terminology and rollout status, prefer `CONTEXT.md`, `ARCHITECTURE.md`, and the newest `docs/architecture/milestone-*.md` document.
+
 Prove that Nexus is truly provider-general by making Codex a fully launchable Provider everywhere Claude already works, while moving Claude onto the same internal provider-adapter seam.
 
 ## Rollout status

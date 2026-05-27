@@ -1,3 +1,12 @@
+> **Historical note**
+> This PRD framed the original milestone-one product slice. It remains useful for the initial problem framing and product language, but later milestone docs and ADRs supersede its future-tense rollout assumptions.
+>
+> For current terminology and direction, prefer:
+> - `CONTEXT.md`
+> - `ARCHITECTURE.md`
+> - the newest `docs/architecture/milestone-*.md` document
+> - `docs/adr/`
+
 ## Problem Statement
 
 Developers who use multiple coding agent CLIs do not have a single workspace-centric control center for launching, resuming, switching, and managing those tools across their projects. Today they must remember per-tool commands, per-project locations, separate session histories, and different local versus remote execution contexts. This makes it slow and error-prone to move between Workspaces, compare Providers, recover failed launches, and maintain continuity across coding tasks.
@@ -127,9 +136,9 @@ Milestone one focuses on macOS with a Background Service as the source of truth,
 - The Workspace overview is provider-first.
 - Provider cards show all supported Providers, not just detected ones.
 - Nexus keeps Codex, Claude, IBM Bob, and Pi visible at the product level.
-- Current rollout status is that Claude and Codex are the **Launchable Providers** across local **Workspaces**, **Remote Workspaces**, and supported iPhone **Remote Client** flows.
-- Pi and IBM Bob remain visible **Providers** but are not launchable yet.
-- The service-owned provider-adapter seam is intended to lower the future cost of making Pi and IBM Bob launchable later without changing the workspace-first product model.
+- Later milestone docs supersede the provider-rollout details in this PRD.
+- This PRD should not be used as the current source of truth for which **Providers** are launchable or which **Session** presentation shape they use.
+- The service-owned provider-adapter seam is intended to lower the future cost of broadening provider support without changing the workspace-first product model.
 - Each Workspace + Provider pair has a default Session.
 - Selecting a Provider in a Workspace reuses the default Session by default.
 - Users can explicitly create additional named Sessions.

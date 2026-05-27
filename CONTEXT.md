@@ -92,6 +92,14 @@ _Avoid_: hidden feature flag, UI-only affordance
 A Session event that asks Nexus to collect an allow-or-deny decision for provider work before it continues.
 _Avoid_: auth prompt, provider popup
 
+**Session Surface**:
+The primary product-visible way Nexus presents and interacts with a Session, such as a terminal view or a structured activity view.
+_Avoid_: provider mode, renderer
+
+**Session Surface Support**:
+The status of whether a specific Nexus client can present and operate a Session's primary Session Surface.
+_Avoid_: Provider Capability, launchability
+
 **Workspace Availability**:
 The status of whether a Workspace's target location is currently accessible and usable.
 _Avoid_: host validation, provider health
@@ -152,6 +160,10 @@ _Avoid_: stop, close
 - A **Provider** has a separate **Provider Health** state for each Workspace target
 - A **Provider** exposes one or more **Provider Capabilities** for a specific **Workspace** target
 - A **Session** may emit zero or more **Approval Requests** while work is in progress
+- A **Session** always has one primary **Session Surface** and may expose additional secondary interaction capabilities
+- A **Session** always has a canonical shared activity stream regardless of its **Session Surface**
+- A **Session Surface** may have different **Session Surface Support** on different Nexus clients
+- The same **Provider** may expose different **Session Surfaces** on different **Workspace Targets** or runtimes
 - A remote **Provider Health** check resolves the **Provider** from the **Host** user's shell environments and records an absolute executable path for launch
 
 ## Example dialogue
@@ -182,6 +194,9 @@ _Avoid_: stop, close
 - "operable provider" was vague product language — resolved: use **Launchable Provider** when the issue is whether Nexus can start a **Session** now, based on current **Provider Health**.
 - Shared UI affordances should not infer action support from provider names alone — resolved: expose **Provider Capability** from the service rather than hardcoding Claude-specific checks in the UI.
 - Action support and launch readiness are different questions — resolved: **Provider Capability** explains whether Nexus supports an action on a target, while **Provider Health** explains whether it can succeed now.
+- **Provider Capability** could be mistaken for client UI support — resolved: **Provider Capability** stays Workspace-target-scoped, while **Session Surface Support** describes whether a client can present and operate a Session's primary **Session Surface**.
 - "session" could be mistaken for a terminal runtime — resolved: a **Session** is a provider-managed workstream; terminal I/O is only one possible presentation.
 - provider-native words like "thread" or "conversation" could leak into product language — resolved: Nexus keeps **Session** as the public concept and stores provider-native identifiers as adapter details.
+- a **Provider** identity could be mistaken for a fixed UI shape — resolved: **Session Surface** is chosen per Session/runtime context, so the same **Provider** may appear through different surfaces.
+- **Session Surface** could be mistaken for an exclusive all-or-nothing mode — resolved: a **Session** has one primary **Session Surface** and may still expose secondary capabilities.
 - approvals could be confused with provider login or auth — resolved: **Approval Request** is Session-time control over provider work, while provider authentication remains provider-native readiness/auth state.

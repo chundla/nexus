@@ -2,6 +2,9 @@
 
 ## Goal
 
+> **Historical note**
+> This document captures the intended scope and decisions for Milestone Eight at the time it was written. For current terminology and rollout status, prefer `CONTEXT.md`, `ARCHITECTURE.md`, and the newest `docs/architecture/milestone-*.md` document.
+
 Prove that protocol-native integrations make Nexus materially better by shipping Pi as the first local protocol-native **Launchable Provider**, introducing a shared Session stream and structured Session UI while keeping existing terminal-backed Providers stable.
 
 ## Rollout status

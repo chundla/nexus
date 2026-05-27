@@ -2,6 +2,9 @@
 
 ## Goal
 
+> **Historical note**
+> This document captures the intended scope and decisions for Milestone Four at the time it was written. For current terminology and rollout status, prefer `CONTEXT.md`, `ARCHITECTURE.md`, and the newest `docs/architecture/milestone-*.md` document.
+
 Prove that a trusted iPhone **Remote Client** can create and enter additional **Named Sessions** on an active **Paired Mac** while preserving the existing workspace-first, viewer-by-default model.
 
 ## Current rollout note

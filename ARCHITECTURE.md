@@ -2,6 +2,23 @@
 
 Nexus is the workspace-first control center for coding agent CLIs across local and remote environments.
 
+## How to read these docs
+
+- Start with `README.md` for a quick orientation.
+- Read `CONTEXT.md` for canonical product language.
+- Use this document for the stable high-level architecture.
+- Use `docs/architecture/milestone-*.md` for rollout slices; older milestone docs are historical snapshots.
+- `docs/architecture/milestone-9.md` is the latest rollout-planning document.
+- `docs/prd/nexus-workspace-first-control-center.md` is historical milestone-one product framing, not the source of truth for current rollout details.
+
+## Current documented rollout snapshot
+
+- The macOS app and **Background Service** are the primary build targets in this repo.
+- Nexus supports both terminal-backed and protocol-native **Sessions** behind one shared **Session** model.
+- Milestone Eight established local Pi as the first documented protocol-native **Provider** path.
+- Milestone Nine is the latest documented next-step plan and generalizes the protocol-native structured **Session** path to local Codex.
+- iPhone **Remote Client** behavior is documented in architecture and tested at shared-model/API boundaries, but this checkout does not contain a top-level iOS app target.
+
 ## Product shape
 
 - **Workspace-first**: Workspace is the primary object in the product and domain model.
@@ -19,6 +36,8 @@ Nexus is the workspace-first control center for coding agent CLIs across local a
 - **Launch Snapshot**: resolved launch configuration captured at session creation time.
 - **Host**: a saved remote SSH host profile.
 - **Provider Health**: adapter-reported health and diagnostics for a provider on a target.
+- **Session Surface**: the primary product-visible way a Session is presented and interacted with.
+- **Session Surface Support**: whether a specific client can present and operate a Session's primary surface.
 
 ## Platform model
 
@@ -90,6 +109,8 @@ Providers and transports may attach substate/diagnostics beneath these shared st
 
 The Background Service owns a canonical shared Session stream for every Session.
 
+Every **Session** has one primary **Session Surface** and may expose additional secondary capabilities. Clients must not infer that surface from **Provider** identity alone.
+
 Shared Session concepts:
 
 - user and assistant messages
@@ -123,6 +144,7 @@ Stored:
 - provider health snapshots
 - sessions
 - launch snapshots
+- provider-native continuation linkage on Session Records
 - recent/default mappings
 - diagnostics metadata
 
@@ -192,4 +214,5 @@ Milestone one proves the service-centered architecture with local-only execution
 - `docs/architecture/milestone-6.md`
 - `docs/architecture/milestone-7.md`
 - `docs/architecture/milestone-8.md`
+- `docs/architecture/milestone-9.md`
 - `docs/adr/`

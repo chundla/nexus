@@ -6,11 +6,13 @@ Prove the Nexus architecture with a useful macOS-only local-workspace slice cent
 
 ## Historical note
 
-Milestone One captured the first local provider slice. Current rollout status is:
+This document is a historical snapshot of Milestone One scope. It should not be used as the source of truth for current provider rollout status or current Session presentation shape.
 
-- Claude and Codex are the local **Launchable Providers** on supported **Workspaces**
-- Pi and IBM Bob remain visible **Providers** but are not launchable yet
-- the service-owned provider-adapter seam from Milestone Seven is intended to lower the future cost of making Pi and IBM Bob launchable later
+For current terminology and direction, prefer:
+
+- `CONTEXT.md`
+- `ARCHITECTURE.md`
+- the newest `docs/architecture/milestone-*.md` document
 
 ## Success criteria
 

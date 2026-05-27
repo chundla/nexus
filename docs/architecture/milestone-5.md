@@ -2,6 +2,9 @@
 
 ## Goal
 
+> **Historical note**
+> This document captures the intended scope and decisions for Milestone Five at the time it was written. For current terminology and rollout status, prefer `CONTEXT.md`, `ARCHITECTURE.md`, and the newest `docs/architecture/milestone-*.md` document.
+
 Prove that a trusted iPhone **Remote Client** can delete non-running **Session Records** on an active **Paired Mac** from iPhone **Provider detail** while preserving the existing workspace-first model and current **Pairing** trust boundary.
 
 ## Success criteria
