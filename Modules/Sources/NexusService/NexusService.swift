@@ -792,15 +792,33 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
     }
 }
 
-private struct ServiceProviderAdapter {
+struct ServiceProviderAdapter {
     let provider: Provider
     let supportsDefaultSessionLaunch: Bool
     let supportsNamedSessions: Bool
+    let healthSummaryEvaluator: (Workspace, RemoteWorkspaceHealthContext?, any ProviderHealthEvaluating) -> ProviderHealthSummary
+    let shouldReuseRemoteHealthSnapshot: (ProviderHealthSummary, RemoteWorkspaceHealthContext?) -> Bool
 
-    init(providerID: ProviderID, supportsDefaultSessionLaunch: Bool, supportsNamedSessions: Bool) {
+    init(
+        providerID: ProviderID,
+        supportsDefaultSessionLaunch: Bool,
+        supportsNamedSessions: Bool,
+        healthSummaryEvaluator: @escaping (Workspace, RemoteWorkspaceHealthContext?, any ProviderHealthEvaluating) -> ProviderHealthSummary,
+        shouldReuseRemoteHealthSnapshot: @escaping (ProviderHealthSummary, RemoteWorkspaceHealthContext?) -> Bool = { _, _ in false }
+    ) {
         self.provider = Provider(id: providerID)
         self.supportsDefaultSessionLaunch = supportsDefaultSessionLaunch
         self.supportsNamedSessions = supportsNamedSessions
+        self.healthSummaryEvaluator = healthSummaryEvaluator
+        self.shouldReuseRemoteHealthSnapshot = shouldReuseRemoteHealthSnapshot
+    }
+
+    func healthSummary(
+        for workspace: Workspace,
+        remoteContext: RemoteWorkspaceHealthContext?,
+        providerHealthEvaluator: any ProviderHealthEvaluating
+    ) -> ProviderHealthSummary {
+        healthSummaryEvaluator(workspace, remoteContext, providerHealthEvaluator)
     }
 }
 
@@ -818,6 +836,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     private let workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating
     private let sessionRuntimeManager: any SessionRuntimeManaging
     private let remoteAccessRuntime: RemoteAccessRuntime
+    private let providerAdapters: [ProviderID: ServiceProviderAdapter]
     private let sessionControllerRegistry = SessionControllerRegistry()
 
     private init(
@@ -828,7 +847,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         hostValidationEvaluator: any HostValidationEvaluating,
         workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating,
         sessionRuntimeManager: any SessionRuntimeManaging,
-        remoteAccessRuntime: RemoteAccessRuntime
+        remoteAccessRuntime: RemoteAccessRuntime,
+        providerAdapters: [ProviderID: ServiceProviderAdapter]
     ) {
         self.listener = listener
         self.storeURL = storeURL
@@ -838,6 +858,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         self.workspaceAvailabilityEvaluator = workspaceAvailabilityEvaluator
         self.sessionRuntimeManager = sessionRuntimeManager
         self.remoteAccessRuntime = remoteAccessRuntime
+        self.providerAdapters = providerAdapters
         super.init()
         self.listener.delegate = self
         self.listener.resume()
@@ -869,7 +890,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         hostValidationEvaluator: any HostValidationEvaluating = HostValidationEvaluator(),
         workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating = WorkspaceAvailabilityEvaluator(),
         sessionRuntimeManager: any SessionRuntimeManaging = InMemorySessionRuntimeManager(),
-        remoteAccessRuntime: RemoteAccessRuntime = RemoteAccessRuntime()
+        remoteAccessRuntime: RemoteAccessRuntime = RemoteAccessRuntime(),
+        providerAdapters: [ProviderID: ServiceProviderAdapter]? = nil
     ) throws -> NexusService {
         try bootstrap(
             rootURL: rootURL,
@@ -877,7 +899,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             hostValidationEvaluator: hostValidationEvaluator,
             workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
             sessionRuntimeManager: sessionRuntimeManager,
-            remoteAccessRuntime: remoteAccessRuntime
+            remoteAccessRuntime: remoteAccessRuntime,
+            providerAdapters: providerAdapters
         )
     }
 
@@ -903,7 +926,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         hostValidationEvaluator: any HostValidationEvaluating = HostValidationEvaluator(),
         workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating = WorkspaceAvailabilityEvaluator(),
         sessionRuntimeManager: any SessionRuntimeManaging = InMemorySessionRuntimeManager(),
-        remoteAccessRuntime: RemoteAccessRuntime = RemoteAccessRuntime()
+        remoteAccessRuntime: RemoteAccessRuntime = RemoteAccessRuntime(),
+        providerAdapters: [ProviderID: ServiceProviderAdapter]? = nil
     ) throws -> NexusService {
         try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
 
@@ -922,8 +946,68 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             hostValidationEvaluator: hostValidationEvaluator,
             workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
             sessionRuntimeManager: sessionRuntimeManager,
-            remoteAccessRuntime: remoteAccessRuntime
+            remoteAccessRuntime: remoteAccessRuntime,
+            providerAdapters: defaultProviderAdapters(overrides: providerAdapters)
         )
+    }
+
+    private static func defaultProviderAdapters(
+        overrides: [ProviderID: ServiceProviderAdapter]? = nil
+    ) -> [ProviderID: ServiceProviderAdapter] {
+        let defaults: [ProviderID: ServiceProviderAdapter] = [
+            .claude: ServiceProviderAdapter(
+                providerID: .claude,
+                supportsDefaultSessionLaunch: true,
+                supportsNamedSessions: true,
+                healthSummaryEvaluator: { workspace, remoteContext, providerHealthEvaluator in
+                    providerHealthEvaluator.healthSummary(for: .claude, workspace: workspace, remoteContext: remoteContext)
+                },
+                shouldReuseRemoteHealthSnapshot: { snapshot, remoteContext in
+                    guard snapshot.checkedAt != nil else {
+                        return false
+                    }
+
+                    let hostValidationAvailable = remoteContext?.hostValidation?.state == .available
+                    let workspaceAvailabilityAvailable = remoteContext?.workspaceAvailability?.state == .available
+
+                    if snapshot.state == .blocked {
+                        return hostValidationAvailable == false || workspaceAvailabilityAvailable == false
+                    }
+
+                    return hostValidationAvailable && workspaceAvailabilityAvailable
+                }
+            ),
+            .codex: ServiceProviderAdapter(
+                providerID: .codex,
+                supportsDefaultSessionLaunch: false,
+                supportsNamedSessions: false,
+                healthSummaryEvaluator: { workspace, remoteContext, providerHealthEvaluator in
+                    providerHealthEvaluator.healthSummary(for: .codex, workspace: workspace, remoteContext: remoteContext)
+                }
+            ),
+            .ibmBob: ServiceProviderAdapter(
+                providerID: .ibmBob,
+                supportsDefaultSessionLaunch: false,
+                supportsNamedSessions: false,
+                healthSummaryEvaluator: { workspace, remoteContext, providerHealthEvaluator in
+                    providerHealthEvaluator.healthSummary(for: .ibmBob, workspace: workspace, remoteContext: remoteContext)
+                }
+            ),
+            .pi: ServiceProviderAdapter(
+                providerID: .pi,
+                supportsDefaultSessionLaunch: false,
+                supportsNamedSessions: false,
+                healthSummaryEvaluator: { workspace, remoteContext, providerHealthEvaluator in
+                    providerHealthEvaluator.healthSummary(for: .pi, workspace: workspace, remoteContext: remoteContext)
+                }
+            )
+        ]
+
+        guard let overrides else {
+            return defaults
+        }
+
+        return defaults.merging(overrides) { _, override in override }
     }
 
     public func serviceStatus() -> NexusServiceStatus {
@@ -1178,17 +1262,27 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         remoteContext: RemoteWorkspaceHealthContext?,
         preferFreshRemoteCheck: Bool = false
     ) throws -> ProviderHealthSummary {
-        guard workspace.kind == .remote, providerID == .claude else {
-            return providerHealthEvaluator.healthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
+        let adapter = providerAdapter(for: providerID)
+
+        guard workspace.kind == .remote else {
+            return adapter.healthSummary(
+                for: workspace,
+                remoteContext: remoteContext,
+                providerHealthEvaluator: providerHealthEvaluator
+            )
         }
 
         if preferFreshRemoteCheck == false,
            let snapshot = try metadataStore.providerHealth(workspaceID: workspace.id, providerID: providerID),
-           shouldReuseRemoteProviderHealthSnapshot(snapshot, remoteContext: remoteContext) {
+           adapter.shouldReuseRemoteHealthSnapshot(snapshot, remoteContext) {
             return snapshot
         }
 
-        let evaluated = providerHealthEvaluator.healthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
+        let evaluated = adapter.healthSummary(
+            for: workspace,
+            remoteContext: remoteContext,
+            providerHealthEvaluator: providerHealthEvaluator
+        )
         return try metadataStore.saveProviderHealth(
             workspaceID: workspace.id,
             providerID: providerID,
@@ -1197,31 +1291,15 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         )
     }
 
-    private func shouldReuseRemoteProviderHealthSnapshot(
-        _ snapshot: ProviderHealthSummary,
-        remoteContext: RemoteWorkspaceHealthContext?
-    ) -> Bool {
-        guard snapshot.checkedAt != nil else {
-            return false
-        }
-
-        let hostValidationAvailable = remoteContext?.hostValidation?.state == .available
-        let workspaceAvailabilityAvailable = remoteContext?.workspaceAvailability?.state == .available
-
-        if snapshot.state == .blocked {
-            return hostValidationAvailable == false || workspaceAvailabilityAvailable == false
-        }
-
-        return hostValidationAvailable && workspaceAvailabilityAvailable
-    }
-
     private func providerAdapter(for providerID: ProviderID) -> ServiceProviderAdapter {
-        switch providerID {
-        case .claude:
-            return ServiceProviderAdapter(providerID: providerID, supportsDefaultSessionLaunch: true, supportsNamedSessions: true)
-        case .codex, .ibmBob, .pi:
-            return ServiceProviderAdapter(providerID: providerID, supportsDefaultSessionLaunch: false, supportsNamedSessions: false)
-        }
+        providerAdapters[providerID] ?? ServiceProviderAdapter(
+            providerID: providerID,
+            supportsDefaultSessionLaunch: false,
+            supportsNamedSessions: false,
+            healthSummaryEvaluator: { workspace, remoteContext, providerHealthEvaluator in
+                providerHealthEvaluator.healthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
+            }
+        )
     }
 
     private func providerCapabilities(
