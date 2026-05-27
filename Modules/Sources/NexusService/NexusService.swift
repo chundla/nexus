@@ -3303,11 +3303,12 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     private func interruptedSessionFailureMessage(for session: Session, workspace: Workspace?) -> String {
-        guard session.providerID == .pi, workspace?.kind == .local else {
+        guard workspace?.kind == .local,
+              staticSessionSurface(for: session) == .structuredActivityFeed else {
             return "Session interrupted because the background service restarted. Relaunch to create a new live runtime."
         }
 
-        return "Pi Session Record survived, but its live runtime was lost when the background service restarted. Relaunch to create a new live runtime."
+        return structuredInterruptedSessionFailureMessage(for: session.providerID)
     }
 }
 

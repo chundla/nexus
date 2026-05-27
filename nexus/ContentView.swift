@@ -1134,6 +1134,7 @@ struct ContentView: View {
     @ViewBuilder
     private func structuredSessionFeed(screen: SessionScreen, isReady: Bool) -> some View {
         let rows = structuredSessionActivityRows(for: screen)
+        let copy = structuredSessionPresentationCopy(for: screen)
         let pendingApprovalRequests = screen.approvalRequests.filter { $0.state == .pending }
 
         VStack(alignment: .leading, spacing: 12) {
@@ -1148,9 +1149,9 @@ struct ContentView: View {
             ScrollView {
                 if rows.isEmpty {
                     ContentUnavailableView(
-                        "No Session activity yet",
+                        copy.emptyStateTitle,
                         systemImage: "sparkles.rectangle.stack",
-                        description: Text("Send a prompt to start the Pi Session.")
+                        description: Text(copy.emptyStateDescription)
                     )
                     .frame(maxWidth: .infinity, minHeight: 240)
                 } else {
@@ -1166,7 +1167,7 @@ struct ContentView: View {
 
             if isReady {
                 HStack(alignment: .bottom, spacing: 12) {
-                    TextField("Send a prompt to Pi", text: $structuredSessionPrompt)
+                    TextField(copy.composerPlaceholder, text: $structuredSessionPrompt)
                         .textFieldStyle(.roundedBorder)
 
                     Button("Send") {

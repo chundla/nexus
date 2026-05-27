@@ -185,6 +185,27 @@ struct nexusTests {
         ])
     }
 
+    @MainActor
+    @Test func structuredSessionPresentationCopyUsesProviderDisplayName() {
+        let codexScreen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .codex,
+                isDefault: true,
+                state: .ready
+            ),
+            primarySurface: .structuredActivityFeed,
+            transcript: ""
+        )
+
+        #expect(structuredSessionPresentationCopy(for: codexScreen) == StructuredSessionPresentationCopy(
+            emptyStateTitle: "No Session activity yet",
+            emptyStateDescription: "Send a prompt to start the Codex Session.",
+            composerPlaceholder: "Send a prompt to Codex"
+        ))
+    }
+
     @Test func workspaceProviderCardNamedSessionSummaryUsesNamedSessionCopy() {
         let zero = WorkspaceProviderCard(
             provider: Provider(id: .claude),

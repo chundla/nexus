@@ -22,6 +22,12 @@ struct StructuredSessionActivityRow: Identifiable, Equatable {
     let emphasis: StructuredSessionActivityEmphasis
 }
 
+struct StructuredSessionPresentationCopy: Equatable {
+    let emptyStateTitle: String
+    let emptyStateDescription: String
+    let composerPlaceholder: String
+}
+
 func focusedSessionSurface(for screen: SessionScreen) -> FocusedSessionSurface {
     switch screen.primarySurface {
     case .terminal:
@@ -41,6 +47,14 @@ func structuredSessionActivityRows(for screen: SessionScreen) -> [StructuredSess
             emphasis: structuredSessionActivityEmphasis(for: item.kind)
         )
     }
+}
+
+func structuredSessionPresentationCopy(for screen: SessionScreen) -> StructuredSessionPresentationCopy {
+    StructuredSessionPresentationCopy(
+        emptyStateTitle: "No Session activity yet",
+        emptyStateDescription: "Send a prompt to start the \(screen.session.providerID.displayName) Session.",
+        composerPlaceholder: "Send a prompt to \(screen.session.providerID.displayName)"
+    )
 }
 
 private func structuredSessionActivityTitle(for kind: SessionActivityItem.Kind) -> String {
