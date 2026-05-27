@@ -879,6 +879,91 @@ struct RemotePairingNetworkTests {
         }
     }
 
+    @Test func remoteSessionObservationDeliversPostInputScreenOverDedicatedNetworkAPI() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let executableURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: false)
+        try #"""
+        #!/usr/bin/env python3
+        import sys
+
+        print("AUTH?", flush=True)
+        line = sys.stdin.readline().rstrip("\r\n")
+        print(f"AUTH:{line}", flush=True)
+        """#.write(to: executableURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: RemotePairingTestExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
+                commandRunner: RemotePairingTestCommandRunner(results: [
+                    RemotePairingTestCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    RemotePairingTestCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            )
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
+
+        _ = try await client.setRemoteAccessEnabled(true)
+        let pairing = try await client.startPairing()
+        _ = try await client.createWorkspaceGroup(name: "Client Work")
+        let workspace = try await client.createLocalWorkspace(
+            name: "Nexus",
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        _ = try await waitForSessionScreen(client: client, sessionID: session.id) { screen in
+            screen.transcript.contains("AUTH?")
+        }
+
+        let remoteClient = RemotePairingHTTPClient()
+        let pairedMac = try await remoteClient.completePairing(
+            host: server.displayHost,
+            port: server.port,
+            pairingCode: pairing.code,
+            deviceName: "Chris’s iPhone"
+        )
+
+        var observedScreens: [SessionScreen] = []
+        let observation = try await remoteClient.observeSessionScreen(
+            for: pairedMac,
+            sessionID: session.id,
+            onUpdate: { screen in
+                Task { @MainActor in
+                    observedScreens.append(screen)
+                }
+            },
+            onDisconnect: { _ in }
+        )
+        defer {
+            Task {
+                await observation.cancel()
+            }
+        }
+
+        _ = try await remoteClient.takeSessionControl(for: pairedMac, sessionID: session.id, columns: 44, rows: 12)
+        _ = try await remoteClient.sendSessionText(for: pairedMac, sessionID: session.id, text: "654321")
+        _ = try await remoteClient.sendSessionInputKey(for: pairedMac, sessionID: session.id, key: .enter)
+
+        let observedScreen = try await waitForObservedScreen {
+            observedScreens.last { $0.transcript.contains("AUTH:654321") }
+        }
+        let fetchedScreen = try await remoteClient.fetchSessionScreen(for: pairedMac, sessionID: session.id)
+
+        #expect(observedScreen.controller == .pairedDevice(pairedMac.pairedDeviceID!))
+        #expect(observedScreen.transcript.contains("AUTH:654321"))
+        #expect(fetchedScreen.transcript.contains("AUTH:654321"))
+    }
+
     @Test func remoteControllerCanSendTerminalTextAndReturnOverDedicatedNetworkAPI() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)
@@ -943,6 +1028,152 @@ struct RemotePairingNetworkTests {
         #expect(screen.transcript.contains("AUTH:654321"))
     }
 
+    @Test func remoteSessionObservationDeliversPartialEchoedInputOverDedicatedNetworkAPI() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: RemotePairingTestExecutableResolver(executables: ["claude": "/bin/cat"]),
+                commandRunner: RemotePairingTestCommandRunner(results: [
+                    RemotePairingTestCommandRunner.Invocation(executable: "/bin/cat", arguments: ["--version"]): .success(stdout: "cat (test)\n"),
+                    RemotePairingTestCommandRunner.Invocation(executable: "/bin/cat", arguments: ["--help"]): .success(stdout: "Usage: cat\n")
+                ])
+            )
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
+
+        _ = try await client.setRemoteAccessEnabled(true)
+        let pairing = try await client.startPairing()
+        _ = try await client.createWorkspaceGroup(name: "Client Work")
+        let workspace = try await client.createLocalWorkspace(
+            name: "Nexus",
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        _ = try await waitForSessionScreen(client: client, sessionID: session.id) { screen in
+            screen.session.state == .ready
+        }
+
+        let remoteClient = RemotePairingHTTPClient()
+        let pairedMac = try await remoteClient.completePairing(
+            host: server.displayHost,
+            port: server.port,
+            pairingCode: pairing.code,
+            deviceName: "Chris’s iPhone"
+        )
+
+        var observedScreens: [SessionScreen] = []
+        let observation = try await remoteClient.observeSessionScreen(
+            for: pairedMac,
+            sessionID: session.id,
+            onUpdate: { screen in
+                Task { @MainActor in
+                    observedScreens.append(screen)
+                }
+            },
+            onDisconnect: { _ in }
+        )
+        defer {
+            Task {
+                await observation.cancel()
+            }
+        }
+
+        _ = try await remoteClient.takeSessionControl(for: pairedMac, sessionID: session.id, columns: 40, rows: 17)
+        let responseScreen = try await remoteClient.sendSessionText(for: pairedMac, sessionID: session.id, text: "yooo")
+
+        let fetchedScreen = try await waitForSessionScreen(client: client, sessionID: session.id) { screen in
+            screen.transcript.contains("yooo")
+        }
+        let observedScreen = try await waitForObservedScreen {
+            observedScreens.last { $0.transcript.contains("yooo") }
+        }
+
+        #expect(responseScreen.controller == .pairedDevice(pairedMac.pairedDeviceID!))
+        #expect(fetchedScreen.transcript.contains("yooo"))
+        #expect(observedScreen.transcript.contains("yooo"))
+    }
+
+    @Test func remoteControllerSendTextResponseWaitsForDelayedEchoOverDedicatedNetworkAPI() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let delayedRuntimeManager = DelayedEchoSessionRuntimeManager(initialTranscript: "Ready\n> ayyy")
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: RemotePairingTestExecutableResolver(executables: ["claude": "/bin/cat"]),
+                commandRunner: RemotePairingTestCommandRunner(results: [
+                    RemotePairingTestCommandRunner.Invocation(executable: "/bin/cat", arguments: ["--version"]): .success(stdout: "cat (test)\n"),
+                    RemotePairingTestCommandRunner.Invocation(executable: "/bin/cat", arguments: ["--help"]): .success(stdout: "Usage: cat\n")
+                ])
+            ),
+            sessionRuntimeManager: delayedRuntimeManager
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
+
+        _ = try await client.setRemoteAccessEnabled(true)
+        let pairing = try await client.startPairing()
+        _ = try await client.createWorkspaceGroup(name: "Client Work")
+        let workspace = try await client.createLocalWorkspace(
+            name: "Nexus",
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        _ = try await waitForSessionScreen(client: client, sessionID: session.id) { screen in
+            screen.transcript.contains("> ayyy")
+        }
+
+        let remoteClient = RemotePairingHTTPClient()
+        let pairedMac = try await remoteClient.completePairing(
+            host: server.displayHost,
+            port: server.port,
+            pairingCode: pairing.code,
+            deviceName: "Chris’s iPhone"
+        )
+
+        var observedScreens: [SessionScreen] = []
+        let observation = try await remoteClient.observeSessionScreen(
+            for: pairedMac,
+            sessionID: session.id,
+            onUpdate: { screen in
+                Task { @MainActor in
+                    observedScreens.append(screen)
+                }
+            },
+            onDisconnect: { _ in }
+        )
+        defer {
+            Task {
+                await observation.cancel()
+            }
+        }
+
+        _ = try await remoteClient.takeSessionControl(for: pairedMac, sessionID: session.id, columns: 40, rows: 17)
+        let responseScreen = try await remoteClient.sendSessionText(for: pairedMac, sessionID: session.id, text: "yooo")
+        let observedScreen = try await waitForObservedScreen {
+            observedScreens.last { $0.transcript.contains("ayyyyooo") }
+        }
+
+        #expect(responseScreen.controller == .pairedDevice(pairedMac.pairedDeviceID!))
+        #expect(responseScreen.transcript.contains("ayyyyooo"))
+        #expect(observedScreen.transcript.contains("ayyyyooo"))
+    }
+
     @Test func completesFirstTimePairingOverDedicatedNetworkAPI() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)
@@ -969,6 +1200,27 @@ struct RemotePairingNetworkTests {
         #expect(pairedMac.port == server.port)
         #expect(pairedMac.pairedDeviceID != nil)
         #expect(pairedDevices.map(\.name) == ["Chris’s iPhone"])
+    }
+}
+
+@MainActor
+private func waitForObservedScreen(
+    timeoutNanoseconds: UInt64 = 3_000_000_000,
+    pollIntervalNanoseconds: UInt64 = 50_000_000,
+    latestMatch: @escaping @MainActor () -> SessionScreen?
+) async throws -> SessionScreen {
+    let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
+
+    while true {
+        if let screen = latestMatch() {
+            return screen
+        }
+
+        guard DispatchTime.now().uptimeNanoseconds < deadline else {
+            throw NSError(domain: "RemotePairingNetworkTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for observed Session screen update"])
+        }
+
+        try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
     }
 }
 
@@ -1029,5 +1281,168 @@ private struct RemotePairingTestCommandRunner: ProviderCommandRunning {
         case .success(let stdout, let stderr, let exitStatus):
             return ProviderCommandResult(exitStatus: exitStatus, stdout: stdout, stderr: stderr)
         }
+    }
+}
+
+private final class DelayedEchoSessionRuntimeManager: SessionRuntimeManaging, @unchecked Sendable {
+    private struct RuntimeRecord {
+        var transcript: String
+        var columns: Int = 80
+        var rows: Int = 24
+        var state: Session.State = .ready
+    }
+
+    private let lock = NSLock()
+    private let initialTranscript: String
+    private var runtimes: [UUID: RuntimeRecord] = [:]
+    private var updateObservers: [UUID: [UUID: @Sendable () -> Void]] = [:]
+    private var observedSessionIDs: [UUID: UUID] = [:]
+
+    init(initialTranscript: String) {
+        self.initialTranscript = initialTranscript
+    }
+
+    func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) throws {
+        lock.lock()
+        runtimes[session.id] = RuntimeRecord(transcript: initialTranscript)
+        lock.unlock()
+        notifyUpdateObservers(for: session.id)
+    }
+
+    func stop(session: Session) throws {
+        lock.lock()
+        if var runtime = runtimes[session.id] {
+            runtime.state = .exited
+            runtimes[session.id] = runtime
+        }
+        lock.unlock()
+        notifyUpdateObservers(for: session.id)
+    }
+
+    func remove(session: Session) {
+        lock.lock()
+        runtimes.removeValue(forKey: session.id)
+        updateObservers.removeValue(forKey: session.id)
+        observedSessionIDs = observedSessionIDs.filter { $0.value != session.id }
+        lock.unlock()
+    }
+
+    func hasRuntime(for session: Session) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return runtimes[session.id] != nil
+    }
+
+    func runtimeState(for session: Session) -> Session.State? {
+        lock.lock()
+        defer { lock.unlock() }
+        return runtimes[session.id]?.state
+    }
+
+    func sessionScreen(for session: Session) throws -> SessionScreen {
+        let runtime = try record(for: session)
+        return SessionScreen(
+            session: session,
+            transcript: runtime.transcript,
+            terminalColumns: runtime.columns,
+            terminalRows: runtime.rows
+        )
+    }
+
+    func addUpdateObserver(id: UUID, for session: Session, observer: @escaping @Sendable () -> Void) {
+        lock.lock()
+        updateObservers[session.id, default: [:]][id] = observer
+        observedSessionIDs[id] = session.id
+        lock.unlock()
+    }
+
+    func removeUpdateObserver(id: UUID) {
+        lock.lock()
+        guard let sessionID = observedSessionIDs.removeValue(forKey: id) else {
+            lock.unlock()
+            return
+        }
+
+        updateObservers[sessionID]?.removeValue(forKey: id)
+        if updateObservers[sessionID]?.isEmpty == true {
+            updateObservers.removeValue(forKey: sessionID)
+        }
+        lock.unlock()
+    }
+
+    func sendInput(_ text: String, to session: Session) throws -> SessionScreen {
+        let runtime = try record(for: session)
+        return SessionScreen(
+            session: session,
+            transcript: runtime.transcript + text,
+            terminalColumns: runtime.columns,
+            terminalRows: runtime.rows
+        )
+    }
+
+    func sendText(_ text: String, to session: Session) throws -> SessionScreen {
+        let runtime = try record(for: session)
+        DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(120)) { [weak self] in
+            guard let self else {
+                return
+            }
+
+            self.lock.lock()
+            guard var updatedRuntime = self.runtimes[session.id] else {
+                self.lock.unlock()
+                return
+            }
+            updatedRuntime.transcript += text
+            self.runtimes[session.id] = updatedRuntime
+            self.lock.unlock()
+            self.notifyUpdateObservers(for: session.id)
+        }
+
+        return SessionScreen(
+            session: session,
+            transcript: runtime.transcript,
+            terminalColumns: runtime.columns,
+            terminalRows: runtime.rows
+        )
+    }
+
+    func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool, to session: Session) throws -> SessionScreen {
+        try sessionScreen(for: session)
+    }
+
+    func resize(session: Session, columns: Int, rows: Int) throws -> SessionScreen {
+        lock.lock()
+        guard var runtime = runtimes[session.id] else {
+            lock.unlock()
+            throw NexusMetadataStoreError.sessionNotFound
+        }
+        runtime.columns = columns
+        runtime.rows = rows
+        runtimes[session.id] = runtime
+        lock.unlock()
+        notifyUpdateObservers(for: session.id)
+        return SessionScreen(
+            session: session,
+            transcript: runtime.transcript,
+            terminalColumns: runtime.columns,
+            terminalRows: runtime.rows
+        )
+    }
+
+    private func record(for session: Session) throws -> RuntimeRecord {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let runtime = runtimes[session.id] else {
+            throw NexusMetadataStoreError.sessionNotFound
+        }
+        return runtime
+    }
+
+    private func notifyUpdateObservers(for sessionID: UUID) {
+        let observers: [@Sendable () -> Void]
+        lock.lock()
+        observers = Array(updateObservers[sessionID, default: [:]].values)
+        lock.unlock()
+        observers.forEach { $0() }
     }
 }

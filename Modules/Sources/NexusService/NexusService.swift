@@ -1440,8 +1440,13 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             throw NexusMetadataStoreError.sessionNotReady
         }
 
-        _ = try claimMacController(for: resolvedSession)
-        return normalizedSessionScreen(try sessionRuntimeManager.sendText(text, to: resolvedSession))
+        let screenBeforeInput = try claimMacController(for: resolvedSession)
+        let responseScreen = normalizedSessionScreen(try sessionRuntimeManager.sendText(text, to: resolvedSession))
+        return stabilizedScreenAfterTerminalInput(
+            for: resolvedSession,
+            screenBeforeInput: screenBeforeInput,
+            immediateResponseScreen: responseScreen
+        )
     }
 
     func sendSessionInputKey(sessionID: UUID, key: SessionInputKey) throws -> SessionScreen {
@@ -1461,12 +1466,17 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             terminalRows: currentScreen.terminalRows
         )
 
-        return normalizedSessionScreen(
+        let responseScreen = normalizedSessionScreen(
             try sessionRuntimeManager.sendInputKey(
                 key,
                 applicationCursorMode: renderState.applicationCursorMode,
                 to: resolvedSession
             )
+        )
+        return stabilizedScreenAfterTerminalInput(
+            for: resolvedSession,
+            screenBeforeInput: currentScreen,
+            immediateResponseScreen: responseScreen
         )
     }
 
@@ -1518,24 +1528,35 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
 
     func sendRemoteSessionText(sessionID: UUID, pairedDeviceID: UUID, text: String) throws -> SessionScreen {
         let resolvedSession = try readyRemoteControlledSession(sessionID: sessionID, pairedDeviceID: pairedDeviceID)
-        return normalizedSessionScreen(try sessionRuntimeManager.sendText(text, to: resolvedSession))
+        let screenBeforeInput = normalizedSessionScreen(try sessionRuntimeManager.sessionScreen(for: resolvedSession))
+        let responseScreen = normalizedSessionScreen(try sessionRuntimeManager.sendText(text, to: resolvedSession))
+        return stabilizedScreenAfterTerminalInput(
+            for: resolvedSession,
+            screenBeforeInput: screenBeforeInput,
+            immediateResponseScreen: responseScreen
+        )
     }
 
     func sendRemoteSessionInputKey(sessionID: UUID, pairedDeviceID: UUID, key: SessionInputKey) throws -> SessionScreen {
         let resolvedSession = try readyRemoteControlledSession(sessionID: sessionID, pairedDeviceID: pairedDeviceID)
-        let currentScreen = try sessionRuntimeManager.sessionScreen(for: resolvedSession)
+        let currentScreen = normalizedSessionScreen(try sessionRuntimeManager.sessionScreen(for: resolvedSession))
         let renderState = TerminalRenderer.renderState(
             from: currentScreen.transcript,
             terminalColumns: currentScreen.terminalColumns,
             terminalRows: currentScreen.terminalRows
         )
 
-        return normalizedSessionScreen(
+        let responseScreen = normalizedSessionScreen(
             try sessionRuntimeManager.sendInputKey(
                 key,
                 applicationCursorMode: renderState.applicationCursorMode,
                 to: resolvedSession
             )
+        )
+        return stabilizedScreenAfterTerminalInput(
+            for: resolvedSession,
+            screenBeforeInput: currentScreen,
+            immediateResponseScreen: responseScreen
         )
     }
 
@@ -1575,6 +1596,36 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             rows: resizedScreen.terminalRows
         )
         return resizedScreen
+    }
+
+    private func stabilizedScreenAfterTerminalInput(
+        for session: Session,
+        screenBeforeInput: SessionScreen,
+        immediateResponseScreen: SessionScreen,
+        timeoutMicroseconds: useconds_t = 300_000,
+        pollIntervalMicroseconds: useconds_t = 20_000
+    ) -> SessionScreen {
+        guard immediateResponseScreen == screenBeforeInput else {
+            return immediateResponseScreen
+        }
+
+        let deadline = DispatchTime.now().uptimeNanoseconds + (UInt64(timeoutMicroseconds) * 1_000)
+        var latestScreen = immediateResponseScreen
+
+        while DispatchTime.now().uptimeNanoseconds < deadline {
+            usleep(pollIntervalMicroseconds)
+
+            guard let refreshedScreen = try? normalizedSessionScreen(sessionRuntimeManager.sessionScreen(for: session)) else {
+                break
+            }
+
+            latestScreen = refreshedScreen
+            if refreshedScreen != screenBeforeInput {
+                return refreshedScreen
+            }
+        }
+
+        return latestScreen
     }
 
     private func readyRemoteControlledSession(sessionID: UUID, pairedDeviceID: UUID) throws -> Session {

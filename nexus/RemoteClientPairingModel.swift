@@ -550,7 +550,11 @@ final class RemoteClientPairingModel {
 
         do {
             let screen = try await client.sendSessionText(for: pairedMac, sessionID: sessionID, text: text)
-            applyFocusedSessionInputResponse(screen, sessionID: sessionID, screenBeforeRequest: screenBeforeRequest)
+            applyFocusedSessionInputResponse(
+                screen,
+                sessionID: sessionID,
+                screenBeforeRequest: screenBeforeRequest
+            )
         } catch {
             throw loggedRemoteActionError(
                 error,
@@ -574,7 +578,11 @@ final class RemoteClientPairingModel {
 
         do {
             let screen = try await client.sendSessionInputKey(for: pairedMac, sessionID: sessionID, key: key)
-            applyFocusedSessionInputResponse(screen, sessionID: sessionID, screenBeforeRequest: screenBeforeRequest)
+            applyFocusedSessionInputResponse(
+                screen,
+                sessionID: sessionID,
+                screenBeforeRequest: screenBeforeRequest
+            )
         } catch {
             throw loggedRemoteActionError(
                 error,
@@ -597,9 +605,11 @@ final class RemoteClientPairingModel {
         let currentScreen = focusedSessionScreen
         let receivedObservedUpdateDuringRequest = currentScreen != nil && currentScreen != screenBeforeRequest
 
-        if focusedSessionObservation == nil
+        let shouldApplyResponse = focusedSessionObservation == nil
             || currentScreen?.session.id != sessionID
-            || receivedObservedUpdateDuringRequest == false {
+            || receivedObservedUpdateDuringRequest == false
+
+        if shouldApplyResponse {
             focusedSessionScreen = screen
         }
 
