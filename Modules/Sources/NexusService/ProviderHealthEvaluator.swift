@@ -106,8 +106,10 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
 
         switch providerID {
         case .claude:
-            return remoteClaudeHealthSummary(for: workspace, host: remoteContext.host)
-        case .codex, .ibmBob, .pi:
+            return remoteCLIHealthSummary(commandName: "claude", providerName: "Claude", workspace: workspace, host: remoteContext.host)
+        case .codex:
+            return remoteCLIHealthSummary(commandName: "codex", providerName: "Codex", workspace: workspace, host: remoteContext.host)
+        case .ibmBob, .pi:
             return ProviderHealthSummary(
                 state: .notChecked,
                 summary: "Remote \(providerName) execution is not implemented yet",
@@ -186,17 +188,26 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
         )
     }
 
-    private func remoteClaudeHealthSummary(for workspace: Workspace, host: NexusDomain.Host) -> ProviderHealthSummary {
+    private func remoteCLIHealthSummary(
+        commandName: String,
+        providerName: String,
+        workspace: Workspace,
+        host: NexusDomain.Host
+    ) -> ProviderHealthSummary {
         do {
             let result = try commandRunner.run(
                 executable: "/usr/bin/ssh",
-                arguments: remoteClaudeHealthProbeArguments(for: workspace, host: host),
+                arguments: remoteCLIHealthProbeArguments(commandName: commandName, workspace: workspace, host: host),
                 currentDirectoryURL: nil
             )
 
             guard result.exitStatus == 0 else {
                 let detail = firstDiagnosticLine(stdout: result.stdout, stderr: result.stderr)
-                let classification = classifyRemoteClaudeFailure(detail: detail)
+                let classification = classifyRemoteCLIProbeFailure(
+                    detail: detail,
+                    providerName: providerName,
+                    notFoundMarker: remoteExecutableNotFoundMarker(commandName: commandName)
+                )
                 return ProviderHealthSummary(
                     state: classification.state,
                     summary: classification.summary,
@@ -221,7 +232,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
 
             return ProviderHealthSummary(
                 state: .available,
-                summary: version.map { "Claude \($0) is available" } ?? "Claude is available",
+                summary: version.map { "\(providerName) \($0) is available" } ?? "\(providerName) is available",
                 resolvedExecutable: executable,
                 version: version,
                 launchability: .launchable,
@@ -229,14 +240,14 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
                     ProviderHealthDiagnostic(
                         severity: .info,
                         code: "remoteProbe",
-                        message: "Validated remote Claude launch prerequisites on \(host.name) for \(workspace.folderPath)."
+                        message: "Validated remote \(providerName) launch prerequisites on \(host.name) for \(workspace.folderPath)."
                     )
                 ]
             )
         } catch {
             return ProviderHealthSummary(
                 state: .unavailable,
-                summary: "Remote Claude health check failed before the SSH probe completed",
+                summary: "Remote \(providerName) health check failed before the SSH probe completed",
                 launchability: .notLaunchable,
                 diagnostics: [
                     ProviderHealthDiagnostic(
@@ -378,7 +389,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
         }
     }
 
-    private func remoteClaudeHealthProbeArguments(for workspace: Workspace, host: NexusDomain.Host) -> [String] {
+    private func remoteCLIHealthProbeArguments(commandName: String, workspace: Workspace, host: NexusDomain.Host) -> [String] {
         var arguments = [
             "-o", "BatchMode=yes",
             "-o", "ConnectTimeout=5"
@@ -386,12 +397,25 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
         if let port = host.port {
             arguments += ["-p", String(port)]
         }
-        arguments += [host.sshTarget, remoteClaudeHealthProbeScript(for: workspace)]
+        arguments += [host.sshTarget, remoteCLIHealthProbeScript(commandName: commandName, workspace: workspace)]
         return arguments
     }
 
-    private func remoteClaudeHealthProbeScript(for workspace: Workspace) -> String {
-        "cd \(shellQuoted(workspace.folderPath)) || { echo 'NEXUS_REMOTE_WORKSPACE_UNAVAILABLE' >&2; exit 1; }; command -v tmux >/dev/null 2>&1 || { echo 'NEXUS_REMOTE_TMUX_UNAVAILABLE' >&2; exit 1; }; resolve_claude_path() { for shell in \"${SHELL:-}\" /bin/bash /usr/bin/bash /bin/sh /usr/bin/zsh /bin/zsh; do [ -n \"$shell\" ] || continue; [ -x \"$shell\" ] || continue; CANDIDATE=\"$(\"$shell\" -lc \(shellQuoted("command -v claude")) 2>/dev/null)\" || continue; [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; for CANDIDATE in \"$HOME/.local/bin/claude\" \"$HOME/bin/claude\" /opt/homebrew/bin/claude /usr/local/bin/claude /usr/bin/claude /bin/claude; do [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; return 1; }; CLAUDE_PATH=\"$(resolve_claude_path)\" || { echo 'NEXUS_REMOTE_CLAUDE_NOT_FOUND' >&2; exit 1; }; [ -n \"$CLAUDE_PATH\" ] || { echo 'NEXUS_REMOTE_CLAUDE_NOT_FOUND' >&2; exit 1; }; printf '%s\\n' \"$CLAUDE_PATH\"; \"$CLAUDE_PATH\" --version; \"$CLAUDE_PATH\" --help >/dev/null 2>&1"
+    private func remoteCLIHealthProbeScript(commandName: String, workspace: Workspace) -> String {
+        let commandPathVariable = "\(commandName.uppercased())_PATH"
+        let resolveFunctionName = "resolve_\(commandName)_path"
+        let notFoundMarker = remoteExecutableNotFoundMarker(commandName: commandName)
+        let shellCommand = shellQuoted("command -v \(commandName)")
+        let fallbackCandidates = [
+            "$HOME/.local/bin/\(commandName)",
+            "$HOME/bin/\(commandName)",
+            "/opt/homebrew/bin/\(commandName)",
+            "/usr/local/bin/\(commandName)",
+            "/usr/bin/\(commandName)",
+            "/bin/\(commandName)"
+        ].map { "\"\($0)\"" }.joined(separator: " ")
+
+        return "cd \(shellQuoted(workspace.folderPath)) || { echo 'NEXUS_REMOTE_WORKSPACE_UNAVAILABLE' >&2; exit 1; }; command -v tmux >/dev/null 2>&1 || { echo 'NEXUS_REMOTE_TMUX_UNAVAILABLE' >&2; exit 1; }; \(resolveFunctionName)() { for shell in \"${SHELL:-}\" /bin/bash /usr/bin/bash /bin/sh /usr/bin/zsh /bin/zsh; do [ -n \"$shell\" ] || continue; [ -x \"$shell\" ] || continue; CANDIDATE=\"$(\"$shell\" -lc \(shellCommand) 2>/dev/null)\" || continue; [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; for CANDIDATE in \(fallbackCandidates); do [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; return 1; }; \(commandPathVariable)=\"$(\(resolveFunctionName))\" || { echo '\(notFoundMarker)' >&2; exit 1; }; [ -n \"$\(commandPathVariable)\" ] || { echo '\(notFoundMarker)' >&2; exit 1; }; printf '%s\\n' \"$\(commandPathVariable)\"; \"$\(commandPathVariable)\" --version; \"$\(commandPathVariable)\" --help >/dev/null 2>&1"
     }
 
     private func firstDiagnosticLine(stdout: String, stderr: String) -> String {
@@ -403,26 +427,34 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
             .first(where: { $0.isEmpty == false }) ?? ""
     }
 
-    private func classifyRemoteClaudeFailure(detail: String) -> (state: ProviderHealthSummary.State, summary: String, code: String, message: String?) {
+    private func remoteExecutableNotFoundMarker(commandName: String) -> String {
+        "NEXUS_REMOTE_\(commandName.uppercased())_NOT_FOUND"
+    }
+
+    private func classifyRemoteCLIProbeFailure(
+        detail: String,
+        providerName: String,
+        notFoundMarker: String
+    ) -> (state: ProviderHealthSummary.State, summary: String, code: String, message: String?) {
         let normalized = detail.lowercased()
 
         if normalized.contains("nexus_remote_workspace_unavailable") {
             return (
                 .unavailable,
-                "Claude is unavailable on the Remote Workspace",
+                "\(providerName) is unavailable on the Remote Workspace",
                 "remoteWorkspaceUnavailable",
                 "The Remote Workspace path is unavailable on the Host."
             )
         }
 
-        if normalized.contains("nexus_remote_claude_not_found")
+        if normalized.contains(notFoundMarker.lowercased())
             || normalized.contains("command not found")
             || normalized.contains("no such file") {
             return (
                 .unavailable,
-                "Claude is unavailable on the Remote Workspace",
+                "\(providerName) is unavailable on the Remote Workspace",
                 "remoteExecutableNotFound",
-                "Claude executable was not found in the remote shell environments Nexus checked."
+                "\(providerName) executable was not found in the remote shell environments Nexus checked."
             )
         }
 
@@ -432,7 +464,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
             || normalized.contains("tmux") {
             return (
                 .misconfigured,
-                "Remote Claude launch prerequisites are misconfigured",
+                "Remote \(providerName) launch prerequisites are misconfigured",
                 "remoteLaunchMisconfigured",
                 normalized.contains("nexus_remote_tmux_unavailable") ? "tmux is not available in the remote shell." : nil
             )
@@ -443,10 +475,10 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
             || normalized.contains("connection refused")
             || normalized.contains("network is unreachable")
             || normalized.contains("no route to host") {
-            return (.unavailable, "Remote Claude is currently unavailable", "remoteUnavailable", nil)
+            return (.unavailable, "Remote \(providerName) is currently unavailable", "remoteUnavailable", nil)
         }
 
-        return (.misconfigured, "Claude is installed but failed the remote launch probe", "remoteLaunchProbeFailed", nil)
+        return (.misconfigured, "\(providerName) is installed but failed the remote launch probe", "remoteLaunchProbeFailed", nil)
     }
 
     private func launchProbeFailureMessage(stdout: String, stderr: String, providerName: String) -> String {

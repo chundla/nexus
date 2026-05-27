@@ -1073,13 +1073,25 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             ),
             .codex: ServiceProviderAdapter(
                 providerID: .codex,
-                supportsDefaultSessionLaunch: false,
-                supportsNamedSessions: false,
+                supportsDefaultSessionLaunch: true,
+                supportsNamedSessions: true,
                 healthSummaryEvaluator: { workspace, remoteContext, providerHealthEvaluator in
                     providerHealthEvaluator.healthSummary(for: .codex, workspace: workspace, remoteContext: remoteContext)
                 },
-                defaultSessionLaunchSupportEvaluator: { $0.kind == .local },
-                namedSessionSupportEvaluator: { $0.kind == .local }
+                shouldReuseRemoteHealthSnapshot: { snapshot, remoteContext in
+                    guard snapshot.checkedAt != nil else {
+                        return false
+                    }
+
+                    let hostValidationAvailable = remoteContext?.hostValidation?.state == .available
+                    let workspaceAvailabilityAvailable = remoteContext?.workspaceAvailability?.state == .available
+
+                    if snapshot.state == .blocked {
+                        return hostValidationAvailable == false || workspaceAvailabilityAvailable == false
+                    }
+
+                    return hostValidationAvailable && workspaceAvailabilityAvailable
+                }
             ),
             .ibmBob: ServiceProviderAdapter(
                 providerID: .ibmBob,
