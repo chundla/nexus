@@ -6141,6 +6141,166 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelKeepsTerminalBackedProvidersOnTerminalSurfacesAlongsidePiSessionSurfaces() async throws {
+        final class CompatibilityStaticSessionRuntime: SessionRuntime, @unchecked Sendable {
+            var state: Session.State = .ready
+            var piSessionLinkage: PiSessionLinkage? { nil }
+
+            private let transcript: String
+            private let activityItems: [SessionActivityItem]
+
+            init(transcript: String, activityItems: [SessionActivityItem] = []) {
+                self.transcript = transcript
+                self.activityItems = activityItems
+            }
+
+            func sessionScreen(for session: Session) -> SessionScreen {
+                SessionScreen(
+                    session: Session(
+                        id: session.id,
+                        workspaceID: session.workspaceID,
+                        providerID: session.providerID,
+                        name: session.name,
+                        isDefault: session.isDefault,
+                        state: state,
+                        failureMessage: session.failureMessage
+                    ),
+                    transcript: transcript,
+                    activityItems: activityItems
+                )
+            }
+
+            func setChangeHandler(_ handler: (@Sendable () -> Void)?) {}
+            func stop() throws { state = .exited }
+            func sendInput(_ text: String) throws {}
+            func sendText(_ text: String) throws {}
+            func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool) throws {}
+            func respondToApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision) throws {}
+            func resize(columns: Int, rows: Int) throws {}
+        }
+
+        struct CompatibilitySessionRuntimeLauncher: SessionRuntimeLaunching {
+            func makeRuntime(
+                session: Session,
+                workspace: Workspace,
+                launchConfiguration: SessionRuntimeLaunchConfiguration
+            ) throws -> any SessionRuntime {
+                switch session.providerID {
+                case .claude:
+                    CompatibilityStaticSessionRuntime(transcript: "Claude ready")
+                case .codex:
+                    CompatibilityStaticSessionRuntime(transcript: "Codex ready")
+                case .pi:
+                    CompatibilityStaticSessionRuntime(
+                        transcript: "",
+                        activityItems: [SessionActivityItem(kind: .status, text: "Pi shared Session stream connected")]
+                    )
+                case .ibmBob:
+                    CompatibilityStaticSessionRuntime(transcript: "")
+                }
+            }
+        }
+
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: [
+                    "claude": "/tmp/fake-claude",
+                    "codex": "/tmp/fake-codex",
+                    "pi": "/tmp/fake-pi"
+                ]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-claude' '--version'"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-claude' '--help'"]): .success(stdout: "Usage: claude\n"),
+                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-codex' '--version'"]): .success(stdout: "1.2.3\n"),
+                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-codex' '--help'"]): .success(stdout: "Usage: codex\n"),
+                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
+                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                ]),
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+            ),
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: CompatibilitySessionRuntimeLauncher())
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+        try await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
+        try await model.loadProviderDetail(workspaceID: workspace.id, providerID: .codex)
+        try await model.loadProviderDetail(workspaceID: workspace.id, providerID: .pi)
+
+        let claudeSession = try await model.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let initialClaudeScreen = try #require(model.focusedSessionScreen)
+        #expect(initialClaudeScreen.session.id == claudeSession.id)
+        #expect(focusedSessionSurface(for: initialClaudeScreen) == .terminal)
+        #expect(initialClaudeScreen.transcript == "Claude ready")
+
+        let piSession = try await model.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+        let piScreen = try #require(model.focusedSessionScreen)
+        #expect(piScreen.session.id == piSession.id)
+        #expect(focusedSessionSurface(for: piScreen) == .structuredActivityFeed)
+        #expect(piScreen.activityItems.map(\.text) == ["Pi shared Session stream connected"])
+
+        try await model.focusSession(sessionID: claudeSession.id)
+        try await model.loadSessionScreen(sessionID: claudeSession.id)
+        let resumedClaudeScreen = try #require(model.focusedSessionScreen)
+        #expect(resumedClaudeScreen.session.id == claudeSession.id)
+        #expect(focusedSessionSurface(for: resumedClaudeScreen) == .terminal)
+        #expect(resumedClaudeScreen.transcript == "Claude ready")
+
+        let codexSession = try await model.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .codex)
+        let codexScreen = try #require(model.focusedSessionScreen)
+        #expect(codexScreen.session.id == codexSession.id)
+        #expect(focusedSessionSurface(for: codexScreen) == .terminal)
+        #expect(codexScreen.transcript == "Codex ready")
+
+        try await model.focusSession(sessionID: piSession.id)
+        try await model.loadSessionScreen(sessionID: piSession.id)
+        let refocusedPiScreen = try #require(model.focusedSessionScreen)
+        #expect(refocusedPiScreen.session.id == piSession.id)
+        #expect(focusedSessionSurface(for: refocusedPiScreen) == .structuredActivityFeed)
+        #expect(refocusedPiScreen.activityItems.map(\.text) == ["Pi shared Session stream connected"])
+
+        let overview = try #require(model.workspaceOverview(for: workspace.id))
+        let claudeCard = try #require(overview.providerCards.first(where: { $0.provider.id == .claude }))
+        let codexCard = try #require(overview.providerCards.first(where: { $0.provider.id == .codex }))
+        let piCard = try #require(overview.providerCards.first(where: { $0.provider.id == .pi }))
+        let claudeDetail = try #require(model.providerDetail(for: workspace.id, providerID: .claude))
+        let codexDetail = try #require(model.providerDetail(for: workspace.id, providerID: .codex))
+        let piDetail = try #require(model.providerDetail(for: workspace.id, providerID: .pi))
+
+        #expect(claudeCard.defaultSession.state == .ready)
+        #expect(claudeCard.defaultSession.actionTitle == "Resume")
+        #expect(codexCard.defaultSession.state == .ready)
+        #expect(codexCard.defaultSession.actionTitle == "Resume")
+        #expect(piCard.defaultSession.state == .ready)
+        #expect(piCard.defaultSession.actionTitle == "Resume")
+
+        #expect(claudeDetail.capabilities.launchDefaultSession.isEnabled)
+        #expect(claudeDetail.capabilities.createNamedSession.isEnabled)
+        #expect(claudeDetail.defaultSession?.id == claudeSession.id)
+        #expect(codexDetail.capabilities.launchDefaultSession.isEnabled)
+        #expect(codexDetail.capabilities.createNamedSession.isEnabled)
+        #expect(codexDetail.defaultSession?.id == codexSession.id)
+        #expect(piDetail.capabilities.launchDefaultSession.isEnabled)
+        #expect(piDetail.capabilities.createNamedSession.isEnabled)
+        #expect(piDetail.defaultSession?.id == piSession.id)
+    }
+
+    @MainActor
     @Test func appModelShowsInterruptedPiRestartCopyForInspectableLostRuntimeSession() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)
