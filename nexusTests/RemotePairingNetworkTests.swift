@@ -1572,6 +1572,10 @@ private final class DelayedEchoSessionRuntimeManager: SessionRuntimeManaging, @u
         return runtimes[session.id]?.state
     }
 
+    func piSessionLinkage(for session: Session) -> PiSessionLinkage? {
+        nil
+    }
+
     func sessionScreen(for session: Session) throws -> SessionScreen {
         let runtime = try record(for: session)
         return SessionScreen(

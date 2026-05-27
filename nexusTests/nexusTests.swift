@@ -115,6 +115,70 @@ struct nexusTests {
         #expect(gridSize.rows == 20)
     }
 
+    @MainActor
+    @Test func focusedSessionSurfaceUsesStructuredActivityFeedForPiSessionsAndTerminalSurfaceForTerminalProviders() {
+        let piScreen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            ),
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .status, text: "Pi shared Session stream connected")
+            ]
+        )
+        let claudeScreen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .claude,
+                isDefault: true,
+                state: .ready
+            ),
+            transcript: "Claude ready"
+        )
+
+        #expect(focusedSessionSurface(for: piScreen) == .structuredActivityFeed)
+        #expect(focusedSessionSurface(for: claudeScreen) == .terminal)
+    }
+
+    @MainActor
+    @Test func structuredSessionActivityRowsDescribeSharedSessionActivityKinds() {
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let screen = SessionScreen(
+            session: session,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .status, text: "Connected"),
+                SessionActivityItem(kind: .message, text: "Pi: hello"),
+                SessionActivityItem(kind: .progress, text: "Gathering context"),
+                SessionActivityItem(kind: .command, text: "git status"),
+                SessionActivityItem(kind: .diff, text: "Edited ContentView.swift"),
+                SessionActivityItem(kind: .error, text: "Provider request failed"),
+                SessionActivityItem(kind: .completion, text: "Turn complete")
+            ]
+        )
+
+        #expect(structuredSessionActivityRows(for: screen) == [
+            StructuredSessionActivityRow(id: screen.activityItems[0].id, title: "Status", systemImage: "dot.radiowaves.left.and.right", text: "Connected", emphasis: .neutral),
+            StructuredSessionActivityRow(id: screen.activityItems[1].id, title: "Message", systemImage: "message", text: "Pi: hello", emphasis: .accent),
+            StructuredSessionActivityRow(id: screen.activityItems[2].id, title: "Progress", systemImage: "hourglass", text: "Gathering context", emphasis: .accent),
+            StructuredSessionActivityRow(id: screen.activityItems[3].id, title: "Command", systemImage: "terminal", text: "git status", emphasis: .neutral),
+            StructuredSessionActivityRow(id: screen.activityItems[4].id, title: "Diff", systemImage: "square.and.pencil", text: "Edited ContentView.swift", emphasis: .accent),
+            StructuredSessionActivityRow(id: screen.activityItems[5].id, title: "Error", systemImage: "exclamationmark.triangle", text: "Provider request failed", emphasis: .critical),
+            StructuredSessionActivityRow(id: screen.activityItems[6].id, title: "Completion", systemImage: "checkmark.circle", text: "Turn complete", emphasis: .success)
+        ])
+    }
+
     @Test func workspaceProviderCardNamedSessionSummaryUsesNamedSessionCopy() {
         let zero = WorkspaceProviderCard(
             provider: Provider(id: .claude),
@@ -6020,6 +6084,59 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelLaunchOrResumePiSessionFocusesStructuredActivityFeed() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let launcher = ProcessSessionRuntimeLauncher(piRuntimeFactory: { launchConfiguration, _, _ in
+            try PiRPCSessionRuntime(
+                executable: launchConfiguration.executable,
+                workingDirectory: launchConfiguration.workingDirectory,
+                terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
+                transportFactory: { _, _, _ in
+                    NexusTestsPiRPCTransport(promptResponseText: "world")
+                }
+            )
+        })
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
+                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                ]),
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+            ),
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+        _ = try await model.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+        try await model.sendInputToFocusedSession("hello")
+
+        let screen = try #require(model.focusedSessionScreen)
+        #expect(focusedSessionSurface(for: screen) == .structuredActivityFeed)
+        #expect(screen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "You: hello",
+            "Pi: world"
+        ])
+    }
+
+    @MainActor
     @Test func appModelLaunchOrResumeDefaultSessionRefreshesWorkspaceOverview() async throws {
         let workspaceFolderURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -7139,6 +7256,88 @@ struct StubCommandRunner: ProviderCommandRunning {
     }
 }
 
+private final class NexusTestsPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
+    private let promptResponseText: String
+    private var stdoutLineHandler: (@Sendable (String) -> Void)?
+    private var terminationHandler: (@Sendable (Int32) -> Void)?
+
+    init(promptResponseText: String = "") {
+        self.promptResponseText = promptResponseText
+    }
+
+    func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
+        stdoutLineHandler = handler
+    }
+
+    func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?) {
+        terminationHandler = handler
+    }
+
+    func start() throws {}
+
+    func sendLine(_ line: String) throws {
+        guard let data = line.data(using: .utf8),
+              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = object["type"] as? String else {
+            return
+        }
+
+        switch type {
+        case "get_state":
+            emit([
+                "id": object["id"] as? String ?? "state",
+                "type": "response",
+                "command": "get_state",
+                "success": true,
+                "data": [
+                    "sessionId": "pi-session-1"
+                ]
+            ])
+        case "prompt":
+            emit([
+                "type": "response",
+                "command": "prompt",
+                "success": true
+            ])
+            guard promptResponseText.isEmpty == false else {
+                return
+            }
+            emit([
+                "type": "message_update",
+                "assistantMessageEvent": [
+                    "type": "text_delta",
+                    "delta": promptResponseText
+                ]
+            ])
+            emit([
+                "type": "turn_end",
+                "message": [
+                    "content": [
+                        [
+                            "type": "text",
+                            "text": promptResponseText
+                        ]
+                    ]
+                ]
+            ])
+        default:
+            return
+        }
+    }
+
+    func terminate() throws {
+        terminationHandler?(0)
+    }
+
+    private func emit(_ object: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: object),
+              let line = String(data: data, encoding: .utf8) else {
+            return
+        }
+        stdoutLineHandler?(line)
+    }
+}
+
 struct StubHostValidationEvaluator: HostValidationEvaluating {
     let resultsByTarget: [String: HostValidationResult]
 
@@ -7210,6 +7409,10 @@ private final class StubSessionRuntimeManager: SessionRuntimeManaging {
 
     func runtimeState(for session: Session) -> Session.State? {
         states[session.id]
+    }
+
+    func piSessionLinkage(for session: Session) -> PiSessionLinkage? {
+        nil
     }
 
     func sessionScreen(for session: Session) throws -> SessionScreen {

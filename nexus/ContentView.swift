@@ -20,6 +20,7 @@ struct ContentView: View {
     @State private var isShowingWorkspaceGroupPicker = false
     @State private var terminalViewportSize: CGSize = .zero
     @State private var terminalFocusToken = UUID()
+    @State private var structuredSessionPrompt = ""
     @State private var presentedError: PresentedError?
 
     private let terminalLayout = TerminalViewportLayout.live
@@ -524,6 +525,7 @@ struct ContentView: View {
             if let screen {
                 let isReady = screen.session.state == .ready
                 let isRemote = context?.isRemote == true
+                let surface = focusedSessionSurface(for: screen)
 
                 Text("\(screen.session.providerID.displayName) Session")
                     .font(.title2)
@@ -557,7 +559,7 @@ struct ContentView: View {
                 }
 
                 HStack {
-                    Text("Terminal: \(screen.terminalColumns) × \(screen.terminalRows)")
+                    Text(surface == .terminal ? "Terminal: \(screen.terminalColumns) × \(screen.terminalRows)" : "Shared Session activity")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -577,51 +579,10 @@ struct ContentView: View {
                     }
                 }
 
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(Array(screen.styledVisibleLines.enumerated()), id: \.offset) { index, line in
-                            terminalLineView(line, row: index, screen: screen)
-                        }
-                    }
-                    .padding(.horizontal, terminalLayout.contentPadding.width)
-                    .padding(.vertical, terminalLayout.contentPadding.height)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(terminalBackgroundColor)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(.quaternary)
-                }
-                .background {
-                    GeometryReader { proxy in
-                        Color.clear
-                            .onAppear {
-                                terminalViewportSize = proxy.size
-                                reportTerminalSize(proxy.size)
-                                if isReady {
-                                    terminalFocusToken = UUID()
-                                }
-                            }
-                            .onChange(of: proxy.size) { _, newSize in
-                                terminalViewportSize = newSize
-                                reportTerminalSize(newSize)
-                            }
-                    }
-                }
-                .background {
-                    SessionTerminalKeyCaptureView(
-                        isEnabled: isReady,
-                        focusToken: terminalFocusToken,
-                        onText: handleTerminalTypedText,
-                        onKey: handleTerminalInputKey
-                    )
-                    .frame(width: 0, height: 0)
-                }
-                .onTapGesture {
-                    terminalFocusToken = UUID()
-                    reportTerminalSize(terminalViewportSize)
+                if surface == .structuredActivityFeed {
+                    structuredSessionFeed(screen: screen, isReady: isReady)
+                } else {
+                    terminalSessionFeed(screen: screen, isReady: isReady)
                 }
 
                 if isRemote {
@@ -651,6 +612,9 @@ struct ContentView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onChange(of: sessionID) { _, _ in
+            structuredSessionPrompt = ""
+        }
     }
 
     private func providerCard(workspaceID: UUID, card: WorkspaceProviderCard) -> some View {
@@ -1111,6 +1075,150 @@ struct ContentView: View {
         Task {
             do {
                 try await appModel.sendInputKeyToFocusedSession(key)
+            } catch {
+                presentedError = PresentedError(message: error.localizedDescription)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func terminalSessionFeed(screen: SessionScreen, isReady: Bool) -> some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(screen.styledVisibleLines.enumerated()), id: \.offset) { index, line in
+                    terminalLineView(line, row: index, screen: screen)
+                }
+            }
+            .padding(.horizontal, terminalLayout.contentPadding.width)
+            .padding(.vertical, terminalLayout.contentPadding.height)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(terminalBackgroundColor)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(.quaternary)
+        }
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear {
+                        terminalViewportSize = proxy.size
+                        reportTerminalSize(proxy.size)
+                        if isReady {
+                            terminalFocusToken = UUID()
+                        }
+                    }
+                    .onChange(of: proxy.size) { _, newSize in
+                        terminalViewportSize = newSize
+                        reportTerminalSize(newSize)
+                    }
+            }
+        }
+        .background {
+            SessionTerminalKeyCaptureView(
+                isEnabled: isReady,
+                focusToken: terminalFocusToken,
+                onText: handleTerminalTypedText,
+                onKey: handleTerminalInputKey
+            )
+            .frame(width: 0, height: 0)
+        }
+        .onTapGesture {
+            terminalFocusToken = UUID()
+            reportTerminalSize(terminalViewportSize)
+        }
+    }
+
+    @ViewBuilder
+    private func structuredSessionFeed(screen: SessionScreen, isReady: Bool) -> some View {
+        let rows = structuredSessionActivityRows(for: screen)
+
+        VStack(alignment: .leading, spacing: 12) {
+            ScrollView {
+                if rows.isEmpty {
+                    ContentUnavailableView(
+                        "No Session activity yet",
+                        systemImage: "sparkles.rectangle.stack",
+                        description: Text("Send a prompt to start the Pi Session.")
+                    )
+                    .frame(maxWidth: .infinity, minHeight: 240)
+                } else {
+                    LazyVStack(alignment: .leading, spacing: 10) {
+                        ForEach(rows) { row in
+                            structuredSessionActivityRowView(row)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            if isReady {
+                HStack(alignment: .bottom, spacing: 12) {
+                    TextField("Send a prompt to Pi", text: $structuredSessionPrompt)
+                        .textFieldStyle(.roundedBorder)
+
+                    Button("Send") {
+                        sendStructuredSessionPrompt()
+                    }
+                    .disabled(structuredSessionPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+        .padding(12)
+        .background(.quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func structuredSessionActivityRowView(_ row: StructuredSessionActivityRow) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: row.systemImage)
+                .foregroundStyle(structuredSessionActivityColor(for: row.emphasis))
+                .frame(width: 16)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(row.title)
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+                Text(row.text)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.background, in: RoundedRectangle(cornerRadius: 10))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(structuredSessionActivityColor(for: row.emphasis).opacity(0.15))
+        }
+    }
+
+    private func structuredSessionActivityColor(for emphasis: StructuredSessionActivityEmphasis) -> Color {
+        switch emphasis {
+        case .neutral:
+            .secondary
+        case .accent:
+            .accentColor
+        case .critical:
+            .red
+        case .success:
+            .green
+        }
+    }
+
+    private func sendStructuredSessionPrompt() {
+        let prompt = structuredSessionPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard prompt.isEmpty == false else {
+            return
+        }
+
+        Task { @MainActor in
+            do {
+                try await appModel.sendInputToFocusedSession(prompt)
+                structuredSessionPrompt = ""
             } catch {
                 presentedError = PresentedError(message: error.localizedDescription)
             }

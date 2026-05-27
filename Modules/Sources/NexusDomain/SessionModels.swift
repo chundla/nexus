@@ -158,6 +158,11 @@ public struct SessionActivityItem: Codable, Equatable, Identifiable, Sendable {
     public enum Kind: String, Codable, Sendable {
         case status
         case message
+        case progress
+        case command
+        case diff
+        case error
+        case completion
     }
 
     public let id: UUID
