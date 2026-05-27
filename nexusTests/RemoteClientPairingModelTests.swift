@@ -2634,14 +2634,17 @@ struct RemoteClientPairingModelTests {
             workspace: workspace,
             provider: Provider(id: .claude),
             health: health,
+            capabilities: ProviderCapabilities(
+                launchDefaultSession: ProviderCapability(action: .launchDefaultSession, isSupported: true, isEnabled: true),
+                createNamedSession: ProviderCapability(action: .createNamedSession, isSupported: true, isEnabled: true)
+            ),
             defaultSession: nil,
             alternateSessions: [],
             failedSessions: []
         )
 
         let section = RemoteNamedSessionsSectionState(
-            providerID: .claude,
-            providerHealth: health,
+            capabilities: detail.capabilities,
             detail: detail,
             errorMessage: nil
         )
@@ -2668,14 +2671,17 @@ struct RemoteClientPairingModelTests {
             workspace: workspace,
             provider: Provider(id: .claude),
             health: health,
+            capabilities: ProviderCapabilities(
+                launchDefaultSession: ProviderCapability(action: .launchDefaultSession, isSupported: true, isEnabled: false, disabledReason: "Claude blocked by Host Validation"),
+                createNamedSession: ProviderCapability(action: .createNamedSession, isSupported: true, isEnabled: false, disabledReason: "Claude blocked by Host Validation")
+            ),
             defaultSession: nil,
             alternateSessions: [],
             failedSessions: []
         )
 
         let section = RemoteNamedSessionsSectionState(
-            providerID: .claude,
-            providerHealth: health,
+            capabilities: detail.capabilities,
             detail: detail,
             errorMessage: nil
         )
@@ -2728,14 +2734,17 @@ struct RemoteClientPairingModelTests {
             workspace: workspace,
             provider: Provider(id: .claude),
             health: health,
+            capabilities: ProviderCapabilities(
+                launchDefaultSession: ProviderCapability(action: .launchDefaultSession, isSupported: true, isEnabled: false, disabledReason: "Claude is unavailable on this Workspace."),
+                createNamedSession: ProviderCapability(action: .createNamedSession, isSupported: true, isEnabled: false, disabledReason: "Claude is unavailable on this Workspace.")
+            ),
             defaultSession: nil,
             alternateSessions: [readySession, exitedSession, interruptedSession],
             failedSessions: []
         )
 
         let section = RemoteNamedSessionsSectionState(
-            providerID: .claude,
-            providerHealth: health,
+            capabilities: detail.capabilities,
             detail: detail,
             errorMessage: nil
         )
@@ -2763,21 +2772,79 @@ struct RemoteClientPairingModelTests {
             workspace: workspace,
             provider: Provider(id: .codex),
             health: health,
+            capabilities: ProviderCapabilities(
+                launchDefaultSession: ProviderCapability(
+                    action: .launchDefaultSession,
+                    isSupported: false,
+                    isEnabled: false,
+                    disabledReason: "Codex cannot launch a Default Session on this Workspace yet."
+                ),
+                createNamedSession: ProviderCapability(
+                    action: .createNamedSession,
+                    isSupported: false,
+                    isEnabled: false,
+                    disabledReason: "Codex cannot create Named Sessions on this Workspace yet."
+                )
+            ),
             defaultSession: nil,
             alternateSessions: [],
             failedSessions: []
         )
 
         let section = RemoteNamedSessionsSectionState(
-            providerID: .codex,
-            providerHealth: health,
+            capabilities: detail.capabilities,
             detail: detail,
             errorMessage: nil
         )
 
         #expect(section.content == .empty)
         #expect(section.canCreateSession == false)
-        #expect(section.createDisabledReason == "This Provider is not supported on iPhone yet.")
+        #expect(section.createDisabledReason == "Codex cannot create Named Sessions on this Workspace yet.")
+    }
+
+    @Test func namedSessionSectionUsesServiceOwnedCapabilitiesInsteadOfProviderIDChecks() {
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: UUID()
+        )
+        let health = ProviderHealthSummary(
+            state: .notChecked,
+            summary: "Health checks coming soon",
+            launchability: .notChecked
+        )
+        let detail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .codex),
+            health: health,
+            capabilities: ProviderCapabilities(
+                launchDefaultSession: ProviderCapability(
+                    action: .launchDefaultSession,
+                    isSupported: true,
+                    isEnabled: true
+                ),
+                createNamedSession: ProviderCapability(
+                    action: .createNamedSession,
+                    isSupported: true,
+                    isEnabled: true
+                )
+            ),
+            defaultSession: nil,
+            alternateSessions: [],
+            failedSessions: []
+        )
+
+        let section = RemoteNamedSessionsSectionState(
+            capabilities: detail.capabilities,
+            detail: detail,
+            errorMessage: nil
+        )
+
+        #expect(section.content == .empty)
+        #expect(section.canCreateSession)
+        #expect(section.createDisabledReason == nil)
     }
 }
 

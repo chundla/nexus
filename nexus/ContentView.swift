@@ -437,7 +437,7 @@ struct ContentView: View {
                                 }
                             }
                         }
-                        .disabled(providerID != .claude)
+                        .disabled(detail.capabilities.launchDefaultSession.isEnabled == false)
                     }
 
                     Divider()
@@ -457,7 +457,7 @@ struct ContentView: View {
                                     }
                                 }
                             }
-                            .disabled(providerID != .claude)
+                            .disabled(detail.capabilities.createNamedSession.isEnabled == false)
                         }
 
                         if detail.alternateSessions.isEmpty {
@@ -715,7 +715,7 @@ struct ContentView: View {
                         }
                     }
                 }
-                .disabled(card.provider.id != .claude)
+                .disabled(card.capabilities.launchDefaultSession.isEnabled == false)
 
                 Button("Details") {
                     selection = .provider(workspaceID, card.provider.id)

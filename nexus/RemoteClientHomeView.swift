@@ -509,14 +509,17 @@ private struct RemoteProviderDetailView: View {
         detail?.health ?? providerCard.health
     }
 
+    private var defaultSessionCapability: ProviderCapability {
+        detail?.capabilities.launchDefaultSession ?? providerCard.capabilities.launchDefaultSession
+    }
+
     private var defaultSessionSection: RemoteDefaultSessionSectionState {
         RemoteDefaultSessionSectionState(detail: detail)
     }
 
     private var namedSessionsSection: RemoteNamedSessionsSectionState {
         RemoteNamedSessionsSectionState(
-            providerID: providerCard.provider.id,
-            providerHealth: providerHealth,
+            capabilities: detail?.capabilities ?? providerCard.capabilities,
             detail: detail,
             errorMessage: errorMessage
         )
@@ -583,7 +586,14 @@ private struct RemoteProviderDetailView: View {
                 Button(isLaunchingDefaultSession ? "Working…" : defaultSessionActionTitle) {
                     launchDefaultSession()
                 }
-                .disabled(isLaunchingDefaultSession || providerCard.provider.id != .claude)
+                .disabled(isLaunchingDefaultSession || defaultSessionCapability.isEnabled == false)
+
+                if let disabledReason = defaultSessionCapability.disabledReason,
+                   defaultSessionCapability.isEnabled == false {
+                    Text(disabledReason)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Section("Named Sessions") {

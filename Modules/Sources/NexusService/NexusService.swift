@@ -792,6 +792,18 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
     }
 }
 
+private struct ServiceProviderAdapter {
+    let provider: Provider
+    let supportsDefaultSessionLaunch: Bool
+    let supportsNamedSessions: Bool
+
+    init(providerID: ProviderID, supportsDefaultSessionLaunch: Bool, supportsNamedSessions: Bool) {
+        self.provider = Provider(id: providerID)
+        self.supportsDefaultSessionLaunch = supportsDefaultSessionLaunch
+        self.supportsNamedSessions = supportsNamedSessions
+    }
+}
+
 public final class NexusService: NSObject, NexusEmbeddedServiceSession, @unchecked Sendable {
     public let listener: NSXPCListener
     public let storeURL: URL
@@ -1076,9 +1088,12 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         }
 
         let providerCards = try ProviderID.allCases.map { providerID in
-            WorkspaceProviderCard(
+            let health = try providerHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
+            let defaultSession = try metadataStore.defaultSession(workspaceID: workspaceID, providerID: providerID)
+            return WorkspaceProviderCard(
                 provider: Provider(id: providerID),
-                health: try providerHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext),
+                health: health,
+                capabilities: providerCapabilities(for: providerID, health: health, defaultSession: defaultSession),
                 defaultSession: try defaultSessionSummary(for: workspace, providerID: providerID),
                 alternateSessionCount: try metadataStore.listSessions(workspaceID: workspaceID, providerID: providerID)
                     .filter { $0.isDefault == false }
@@ -1104,12 +1119,15 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         }
         let sessions = try metadataStore.listSessions(workspaceID: workspaceID, providerID: providerID)
             .map(reconcileSessionRuntimeState)
+        let health = try providerHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
+        let defaultSession = sessions.first(where: \.isDefault)
 
         return ProviderDetail(
             workspace: workspace,
             provider: Provider(id: providerID),
-            health: try providerHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext),
-            defaultSession: sessions.first(where: \.isDefault),
+            health: health,
+            capabilities: providerCapabilities(for: providerID, health: health, defaultSession: defaultSession),
+            defaultSession: defaultSession,
             alternateSessions: sessions.filter { $0.isDefault == false && $0.state != .failed },
             failedSessions: sessions.filter { $0.isDefault == false && $0.state == .failed }
         )
@@ -1197,6 +1215,75 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         return hostValidationAvailable && workspaceAvailabilityAvailable
     }
 
+    private func providerAdapter(for providerID: ProviderID) -> ServiceProviderAdapter {
+        switch providerID {
+        case .claude:
+            return ServiceProviderAdapter(providerID: providerID, supportsDefaultSessionLaunch: true, supportsNamedSessions: true)
+        case .codex, .ibmBob, .pi:
+            return ServiceProviderAdapter(providerID: providerID, supportsDefaultSessionLaunch: false, supportsNamedSessions: false)
+        }
+    }
+
+    private func providerCapabilities(
+        for providerID: ProviderID,
+        health: ProviderHealthSummary,
+        defaultSession: Session?
+    ) -> ProviderCapabilities {
+        let adapter = providerAdapter(for: providerID)
+        let canLaunchDefaultSession = adapter.supportsDefaultSessionLaunch && (defaultSession != nil || health.launchability == .launchable)
+        let canCreateNamedSession = adapter.supportsNamedSessions && health.launchability == .launchable
+
+        return ProviderCapabilities(
+            launchDefaultSession: ProviderCapability(
+                action: .launchDefaultSession,
+                isSupported: adapter.supportsDefaultSessionLaunch,
+                isEnabled: canLaunchDefaultSession,
+                disabledReason: providerCapabilityDisabledReason(
+                    action: .launchDefaultSession,
+                    provider: adapter.provider,
+                    isSupported: adapter.supportsDefaultSessionLaunch,
+                    health: health,
+                    isEnabled: canLaunchDefaultSession
+                )
+            ),
+            createNamedSession: ProviderCapability(
+                action: .createNamedSession,
+                isSupported: adapter.supportsNamedSessions,
+                isEnabled: canCreateNamedSession,
+                disabledReason: providerCapabilityDisabledReason(
+                    action: .createNamedSession,
+                    provider: adapter.provider,
+                    isSupported: adapter.supportsNamedSessions,
+                    health: health,
+                    isEnabled: canCreateNamedSession
+                )
+            )
+        )
+    }
+
+    private func providerCapabilityDisabledReason(
+        action: ProviderCapability.Action,
+        provider: Provider,
+        isSupported: Bool,
+        health: ProviderHealthSummary,
+        isEnabled: Bool
+    ) -> String? {
+        guard isEnabled == false else {
+            return nil
+        }
+
+        guard isSupported else {
+            switch action {
+            case .launchDefaultSession:
+                return "\(provider.displayName) cannot launch a Default Session on this Workspace yet."
+            case .createNamedSession:
+                return "\(provider.displayName) cannot create Named Sessions on this Workspace yet."
+            }
+        }
+
+        return health.summary
+    }
+
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: UUID?) throws -> Workspace {
         try metadataStore.createLocalWorkspace(name: name, folderPath: folderPath, primaryGroupID: primaryGroupID)
     }
@@ -1210,7 +1297,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             throw NexusMetadataStoreError.workspaceNotFound
         }
 
-        guard providerID == .claude else {
+        guard providerAdapter(for: providerID).supportsDefaultSessionLaunch else {
             throw NexusMetadataStoreError.providerNotSupported
         }
 
@@ -1273,7 +1360,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             throw NexusMetadataStoreError.workspaceNotFound
         }
 
-        guard providerID == .claude else {
+        guard providerAdapter(for: providerID).supportsNamedSessions else {
             throw NexusMetadataStoreError.providerNotSupported
         }
 
@@ -1644,7 +1731,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     private func launchOrResumeSession(_ existingSession: Session, workspace: Workspace) throws -> Session {
-        guard existingSession.providerID == .claude else {
+        guard providerAdapter(for: existingSession.providerID).supportsDefaultSessionLaunch else {
             throw NexusMetadataStoreError.providerNotSupported
         }
 

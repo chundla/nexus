@@ -107,11 +107,19 @@ struct RemotePairingNetworkTests {
             deviceName: "Chris’s iPhone"
         )
         let catalog = try await remoteClient.fetchCatalog(for: pairedMac)
+        let claudeCard = try #require(
+            catalog.workspaceOverviews
+                .first(where: { $0.workspace.id == workspace.id })?
+                .providerCards
+                .first(where: { $0.provider.id == .claude })
+        )
 
         #expect(catalog.workspaceGroups == [group])
         #expect(catalog.recentNavigation.map(\.target) == [.workspace(workspace.id)])
         #expect(catalog.workspaceOverviews.map(\.workspace.id) == [workspace.id])
         #expect(catalog.workspaceOverviews.first?.providerCards.isEmpty == false)
+        #expect(claudeCard.capabilities.launchDefaultSession.isEnabled == false)
+        #expect(claudeCard.capabilities.launchDefaultSession.disabledReason == claudeCard.health.summary)
     }
 
     @Test func revokedPairingReturnsProductShapedRecoveryErrorOverDedicatedNetworkAPI() async throws {
@@ -329,6 +337,10 @@ struct RemotePairingNetworkTests {
         #expect(detail.defaultSession == nil)
         #expect(detail.alternateSessions.isEmpty)
         #expect(detail.failedSessions.isEmpty)
+        #expect(detail.capabilities.launchDefaultSession.isEnabled == false)
+        #expect(detail.capabilities.launchDefaultSession.disabledReason == detail.health.summary)
+        #expect(detail.capabilities.createNamedSession.isEnabled == false)
+        #expect(detail.capabilities.createNamedSession.disabledReason == detail.health.summary)
     }
 
     @Test func launchesRemoteDefaultSessionOverDedicatedNetworkAPI() async throws {

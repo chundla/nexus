@@ -404,6 +404,100 @@ struct nexusTests {
         #expect(codexCard.health.summary == "Remote Codex execution is not implemented yet")
     }
 
+    @Test func workspaceOverviewAndProviderDetailExposeProviderCapabilities() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            )
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+
+        let overview = try await client.getWorkspaceOverview(workspaceID: workspace.id)
+        let claudeCard = try #require(overview.providerCards.first(where: { $0.provider.id == .claude }))
+        let codexCard = try #require(overview.providerCards.first(where: { $0.provider.id == .codex }))
+        let claudeDetail = try await client.getProviderDetail(workspaceID: workspace.id, providerID: .claude)
+        let codexDetail = try await client.getProviderDetail(workspaceID: workspace.id, providerID: .codex)
+
+        #expect(claudeCard.capabilities.launchDefaultSession.isSupported)
+        #expect(claudeCard.capabilities.launchDefaultSession.isEnabled)
+        #expect(claudeCard.capabilities.launchDefaultSession.disabledReason == nil)
+        #expect(claudeCard.capabilities.createNamedSession.isSupported)
+        #expect(claudeCard.capabilities.createNamedSession.isEnabled)
+        #expect(claudeDetail.capabilities.launchDefaultSession.isEnabled)
+        #expect(claudeDetail.capabilities.createNamedSession.isEnabled)
+
+        #expect(codexCard.capabilities.launchDefaultSession.isSupported == false)
+        #expect(codexCard.capabilities.launchDefaultSession.isEnabled == false)
+        #expect(codexCard.capabilities.launchDefaultSession.disabledReason == "Codex cannot launch a Default Session on this Workspace yet.")
+        #expect(codexCard.capabilities.createNamedSession.isSupported == false)
+        #expect(codexCard.capabilities.createNamedSession.isEnabled == false)
+        #expect(codexCard.capabilities.createNamedSession.disabledReason == "Codex cannot create Named Sessions on this Workspace yet.")
+        #expect(codexDetail.capabilities.launchDefaultSession == codexCard.capabilities.launchDefaultSession)
+        #expect(codexDetail.capabilities.createNamedSession == codexCard.capabilities.createNamedSession)
+    }
+
+    @Test func existingDefaultSessionKeepsLaunchCapabilityEnabledWhenProviderHealthBecomesUnavailable() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let resolver = MutableExecutableResolver(executables: ["claude": "/tmp/fake-claude"])
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: resolver,
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                ])
+            ),
+            sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+
+        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        resolver.executables = [:]
+
+        let overview = try await client.getWorkspaceOverview(workspaceID: workspace.id)
+        let claudeCard = try #require(overview.providerCards.first(where: { $0.provider.id == .claude }))
+        let detail = try await client.getProviderDetail(workspaceID: workspace.id, providerID: .claude)
+
+        #expect(session.state == .ready)
+        #expect(claudeCard.health.launchability == .notLaunchable)
+        #expect(claudeCard.capabilities.launchDefaultSession.isEnabled)
+        #expect(claudeCard.capabilities.launchDefaultSession.disabledReason == nil)
+        #expect(claudeCard.capabilities.createNamedSession.isEnabled == false)
+        #expect(claudeCard.capabilities.createNamedSession.disabledReason == claudeCard.health.summary)
+        #expect(detail.capabilities.launchDefaultSession.isEnabled)
+        #expect(detail.capabilities.createNamedSession.isEnabled == false)
+        #expect(detail.capabilities.createNamedSession.disabledReason == detail.health.summary)
+    }
+
     @Test func remoteClaudeProviderHealthPersistsAcrossServiceBootstrap() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)
@@ -6118,6 +6212,26 @@ struct StubExecutableResolver: ProviderExecutableResolving {
     var searchedDirectories: [String] = ["/tmp/search-a", "/tmp/search-b"]
     var homeDirectories: [String] = ["/tmp/home"]
     var pathEnvironment: String? = "/tmp/search-a:/tmp/search-b"
+
+    func resolveExecutable(named command: String) -> ProviderExecutableResolution {
+        ProviderExecutableResolution(
+            resolvedExecutable: executables[command],
+            searchedDirectories: searchedDirectories,
+            homeDirectories: homeDirectories,
+            pathEnvironment: pathEnvironment
+        )
+    }
+}
+
+final class MutableExecutableResolver: ProviderExecutableResolving {
+    var executables: [String: String]
+    var searchedDirectories: [String] = ["/tmp/search-a", "/tmp/search-b"]
+    var homeDirectories: [String] = ["/tmp/home"]
+    var pathEnvironment: String? = "/tmp/search-a:/tmp/search-b"
+
+    init(executables: [String: String]) {
+        self.executables = executables
+    }
 
     func resolveExecutable(named command: String) -> ProviderExecutableResolution {
         ProviderExecutableResolution(

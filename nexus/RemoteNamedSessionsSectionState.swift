@@ -33,12 +33,12 @@ struct RemoteNamedSessionsSectionState: Equatable {
     let deletableSessionIDs: Set<UUID>
 
     init(
-        providerID: ProviderID,
-        providerHealth: ProviderHealthSummary,
+        capabilities: ProviderCapabilities,
         detail: ProviderDetail?,
         errorMessage: String?
     ) {
-        canCreateSession = providerID == .claude && providerHealth.launchability == .launchable
+        let createCapability = detail?.capabilities.createNamedSession ?? capabilities.createNamedSession
+        canCreateSession = createCapability.isEnabled
 
         if let detail {
             content = detail.alternateSessions.isEmpty ? .empty : .sessions(detail.alternateSessions)
@@ -51,19 +51,15 @@ struct RemoteNamedSessionsSectionState: Equatable {
             deletableSessionIDs = []
         }
 
-        guard providerID == .claude else {
-            createDisabledReason = "This Provider is not supported on iPhone yet."
-            return
-        }
-        guard providerHealth.launchability != .launchable else {
+        if canCreateSession {
             createDisabledReason = nil
-            return
-        }
-        if detail == nil, errorMessage == nil, providerHealth.launchability == .notChecked {
+        } else if let disabledReason = createCapability.disabledReason {
+            createDisabledReason = disabledReason
+        } else if detail == nil, errorMessage == nil {
             createDisabledReason = "Loading Provider detail…"
-            return
+        } else {
+            createDisabledReason = nil
         }
-        createDisabledReason = providerHealth.summary
     }
 
     private static func canDeleteSessionRecord(_ session: Session) -> Bool {

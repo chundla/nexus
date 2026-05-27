@@ -253,6 +253,38 @@ public struct ProviderHealthSummary: Codable, Equatable, Sendable {
     }
 }
 
+public struct ProviderCapability: Codable, Equatable, Sendable {
+    public let action: Action
+    public let isSupported: Bool
+    public let isEnabled: Bool
+    public let disabledReason: String?
+
+    public init(action: Action, isSupported: Bool, isEnabled: Bool, disabledReason: String? = nil) {
+        self.action = action
+        self.isSupported = isSupported
+        self.isEnabled = isEnabled
+        self.disabledReason = disabledReason
+    }
+
+    public enum Action: String, Codable, Sendable {
+        case launchDefaultSession
+        case createNamedSession
+    }
+}
+
+public struct ProviderCapabilities: Codable, Equatable, Sendable {
+    public let launchDefaultSession: ProviderCapability
+    public let createNamedSession: ProviderCapability
+
+    public init(
+        launchDefaultSession: ProviderCapability = ProviderCapability(action: .launchDefaultSession, isSupported: false, isEnabled: false),
+        createNamedSession: ProviderCapability = ProviderCapability(action: .createNamedSession, isSupported: false, isEnabled: false)
+    ) {
+        self.launchDefaultSession = launchDefaultSession
+        self.createNamedSession = createNamedSession
+    }
+}
+
 public struct ProviderDefaultSessionSummary: Codable, Equatable, Sendable {
     public let state: State
     public let summary: String
@@ -278,17 +310,20 @@ public struct ProviderDefaultSessionSummary: Codable, Equatable, Sendable {
 public struct WorkspaceProviderCard: Codable, Equatable, Identifiable, Sendable {
     public let provider: Provider
     public let health: ProviderHealthSummary
+    public let capabilities: ProviderCapabilities
     public let defaultSession: ProviderDefaultSessionSummary
     public let alternateSessionCount: Int
 
     public init(
         provider: Provider,
         health: ProviderHealthSummary,
+        capabilities: ProviderCapabilities = ProviderCapabilities(),
         defaultSession: ProviderDefaultSessionSummary,
         alternateSessionCount: Int = 0
     ) {
         self.provider = provider
         self.health = health
+        self.capabilities = capabilities
         self.defaultSession = defaultSession
         self.alternateSessionCount = alternateSessionCount
     }
@@ -307,6 +342,7 @@ public struct ProviderDetail: Codable, Equatable, Sendable {
     public let workspace: Workspace
     public let provider: Provider
     public let health: ProviderHealthSummary
+    public let capabilities: ProviderCapabilities
     public let defaultSession: Session?
     public let alternateSessions: [Session]
     public let failedSessions: [Session]
@@ -315,6 +351,7 @@ public struct ProviderDetail: Codable, Equatable, Sendable {
         workspace: Workspace,
         provider: Provider,
         health: ProviderHealthSummary,
+        capabilities: ProviderCapabilities = ProviderCapabilities(),
         defaultSession: Session?,
         alternateSessions: [Session],
         failedSessions: [Session]
@@ -322,6 +359,7 @@ public struct ProviderDetail: Codable, Equatable, Sendable {
         self.workspace = workspace
         self.provider = provider
         self.health = health
+        self.capabilities = capabilities
         self.defaultSession = defaultSession
         self.alternateSessions = alternateSessions
         self.failedSessions = failedSessions
