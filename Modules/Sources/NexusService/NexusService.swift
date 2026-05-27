@@ -45,6 +45,7 @@ enum RemoteRuntimeLaunchMode {
 
 struct SessionRuntimeLaunchConfiguration {
     let executable: String
+    let arguments: [String]
     let workingDirectory: String
     let remoteHost: NexusDomain.Host?
     let remoteRuntimeIdentifier: String?
@@ -54,6 +55,7 @@ struct SessionRuntimeLaunchConfiguration {
 
     init(
         executable: String,
+        arguments: [String] = [],
         workingDirectory: String,
         remoteHost: NexusDomain.Host?,
         remoteRuntimeIdentifier: String? = nil,
@@ -62,6 +64,7 @@ struct SessionRuntimeLaunchConfiguration {
         terminationStatusMessageBuilder: @escaping (Int32) -> String = { _ in "" }
     ) {
         self.executable = executable
+        self.arguments = arguments
         self.workingDirectory = workingDirectory
         self.remoteHost = remoteHost
         self.remoteRuntimeIdentifier = remoteRuntimeIdentifier
@@ -363,9 +366,17 @@ struct RemoteSessionCommandBuilder {
         }
         arguments += [
             host.sshTarget,
-            "cd \(shellQuoted(configuration.workingDirectory)) && exec tmux new-session -s \(shellQuoted(runtimeIdentifier)) \(shellQuoted(configuration.executable))"
+            "cd \(shellQuoted(configuration.workingDirectory)) && NEXUS_REMOTE_SHELL=\"$(\(remoteShellResolutionCommand()))\"; [ -n \"$NEXUS_REMOTE_SHELL\" ] || { echo 'NEXUS_REMOTE_SHELL_NOT_FOUND' >&2; exit 1; }; exec tmux new-session -s \(shellQuoted(runtimeIdentifier)) \"$NEXUS_REMOTE_SHELL\" -lic \(shellQuoted(shellExecCommand(executable: configuration.executable, arguments: configuration.arguments)))"
         ]
         return arguments
+    }
+
+    private func remoteShellResolutionCommand() -> String {
+        "for shell in \"${SHELL:-}\" /bin/zsh /usr/bin/zsh /bin/bash /usr/bin/bash /bin/sh; do [ -n \"$shell\" ] || continue; [ -x \"$shell\" ] || continue; printf '%s' \"$shell\"; break; done"
+    }
+
+    private func shellExecCommand(executable: String, arguments: [String]) -> String {
+        (["exec", shellQuoted(executable)] + arguments.map(shellQuoted)).joined(separator: " ")
     }
 
     func recoverArguments(configuration: SessionRuntimeLaunchConfiguration) -> [String] {
@@ -411,6 +422,11 @@ struct RemoteSessionCommandBuilder {
 
 final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
     private let remoteSessionCommandBuilder = RemoteSessionCommandBuilder()
+    private let localShellCommandBuilder: LocalShellCommandBuilder
+
+    init(localShellCommandBuilder: LocalShellCommandBuilder = LocalShellCommandBuilder()) {
+        self.localShellCommandBuilder = localShellCommandBuilder
+    }
 
     func makeRuntime(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) throws -> any SessionRuntime {
         if let remoteHost = launchConfiguration.remoteHost,
@@ -438,9 +454,13 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
             )
         }
 
+        let localLaunchCommand = localShellCommandBuilder.launchCommand(
+            for: launchConfiguration.executable,
+            arguments: launchConfiguration.arguments
+        )
         return try ProcessSessionRuntime(
-            executable: launchConfiguration.executable,
-            arguments: [],
+            executable: localLaunchCommand.executable,
+            arguments: localLaunchCommand.arguments,
             workingDirectory: launchConfiguration.workingDirectory,
             initialTranscript: launchConfiguration.initialTranscript,
             terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder
@@ -1045,6 +1065,35 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         )
     }
 
+    private static func shouldReuseRemoteCLIHealthSnapshot(
+        _ snapshot: ProviderHealthSummary,
+        remoteContext: RemoteWorkspaceHealthContext?
+    ) -> Bool {
+        guard snapshot.checkedAt != nil else {
+            return false
+        }
+
+        let hostValidationAvailable = remoteContext?.hostValidation?.state == .available
+        let workspaceAvailabilityAvailable = remoteContext?.workspaceAvailability?.state == .available
+
+        if snapshot.state == .blocked {
+            return hostValidationAvailable == false || workspaceAvailabilityAvailable == false
+        }
+
+        guard hostValidationAvailable && workspaceAvailabilityAvailable else {
+            return false
+        }
+
+        switch snapshot.state {
+        case .available:
+            return true
+        case .unavailable, .misconfigured, .notChecked:
+            return false
+        case .blocked:
+            return false
+        }
+    }
+
     private static func defaultProviderAdapters(
         overrides: [ProviderID: ServiceProviderAdapter]? = nil
     ) -> [ProviderID: ServiceProviderAdapter] {
@@ -1057,18 +1106,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                     providerHealthEvaluator.healthSummary(for: .claude, workspace: workspace, remoteContext: remoteContext)
                 },
                 shouldReuseRemoteHealthSnapshot: { snapshot, remoteContext in
-                    guard snapshot.checkedAt != nil else {
-                        return false
-                    }
-
-                    let hostValidationAvailable = remoteContext?.hostValidation?.state == .available
-                    let workspaceAvailabilityAvailable = remoteContext?.workspaceAvailability?.state == .available
-
-                    if snapshot.state == .blocked {
-                        return hostValidationAvailable == false || workspaceAvailabilityAvailable == false
-                    }
-
-                    return hostValidationAvailable && workspaceAvailabilityAvailable
+                    shouldReuseRemoteCLIHealthSnapshot(snapshot, remoteContext: remoteContext)
                 }
             ),
             .codex: ServiceProviderAdapter(
@@ -1079,18 +1117,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                     providerHealthEvaluator.healthSummary(for: .codex, workspace: workspace, remoteContext: remoteContext)
                 },
                 shouldReuseRemoteHealthSnapshot: { snapshot, remoteContext in
-                    guard snapshot.checkedAt != nil else {
-                        return false
-                    }
-
-                    let hostValidationAvailable = remoteContext?.hostValidation?.state == .available
-                    let workspaceAvailabilityAvailable = remoteContext?.workspaceAvailability?.state == .available
-
-                    if snapshot.state == .blocked {
-                        return hostValidationAvailable == false || workspaceAvailabilityAvailable == false
-                    }
-
-                    return hostValidationAvailable && workspaceAvailabilityAvailable
+                    shouldReuseRemoteCLIHealthSnapshot(snapshot, remoteContext: remoteContext)
                 }
             ),
             .ibmBob: ServiceProviderAdapter(

@@ -38,13 +38,16 @@ protocol ProviderHealthEvaluating {
 struct ProviderHealthEvaluator: ProviderHealthEvaluating {
     let executableResolver: any ProviderExecutableResolving
     let commandRunner: any ProviderCommandRunning
+    let localShellCommandBuilder: LocalShellCommandBuilder
 
     init(
         executableResolver: any ProviderExecutableResolving = SystemProviderExecutableResolver(),
-        commandRunner: any ProviderCommandRunning = SystemProviderCommandRunner()
+        commandRunner: any ProviderCommandRunning = SystemProviderCommandRunner(),
+        localShellCommandBuilder: LocalShellCommandBuilder = LocalShellCommandBuilder()
     ) {
         self.executableResolver = executableResolver
         self.commandRunner = commandRunner
+        self.localShellCommandBuilder = localShellCommandBuilder
     }
 
     func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext? = nil) -> [WorkspaceProviderCard] {
@@ -261,7 +264,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
     }
 
     private func localCLIHealthSummary(commandName: String, providerName: String, workspace: Workspace) -> ProviderHealthSummary {
-        let resolution = executableResolver.resolveExecutable(named: commandName)
+        let resolution = resolvedLocalExecutable(named: commandName)
         guard let executable = resolution.resolvedExecutable else {
             return ProviderHealthSummary(
                 state: .unavailable,
@@ -293,10 +296,10 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
         }
 
         var diagnostics: [ProviderHealthDiagnostic] = []
-        let version = detectVersion(executable: executable, providerName: providerName, diagnostics: &diagnostics)
+        let version = detectLocalVersion(executable: executable, providerName: providerName, diagnostics: &diagnostics)
 
         do {
-            let launchProbe = try commandRunner.run(
+            let launchProbe = try runLocalCommandThroughShell(
                 executable: executable,
                 arguments: ["--help"],
                 currentDirectoryURL: URL(fileURLWithPath: workspace.folderPath, isDirectory: true)
@@ -345,9 +348,95 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
         )
     }
 
-    private func detectVersion(executable: String, providerName: String, diagnostics: inout [ProviderHealthDiagnostic]) -> String? {
+    private func resolvedLocalExecutable(named commandName: String) -> ProviderExecutableResolution {
+        let resolution = executableResolver.resolveExecutable(named: commandName)
+        guard resolution.resolvedExecutable == nil else {
+            return resolution
+        }
+
+        guard let shellResolvedExecutable = resolveExecutableViaLocalShell(named: commandName) else {
+            return resolution
+        }
+
+        return ProviderExecutableResolution(
+            resolvedExecutable: shellResolvedExecutable,
+            searchedDirectories: resolution.searchedDirectories,
+            homeDirectories: resolution.homeDirectories,
+            pathEnvironment: resolution.pathEnvironment
+        )
+    }
+
+    private func resolveExecutableViaLocalShell(named commandName: String) -> String? {
+        let shellCommand = "command -v \(commandName)"
+
+        for command in localShellCommandBuilder.candidateCommands(for: shellCommand) {
+            do {
+                let result = try commandRunner.run(
+                    executable: command.executable,
+                    arguments: command.arguments,
+                    currentDirectoryURL: nil
+                )
+                guard result.exitStatus == 0 else {
+                    continue
+                }
+
+                let candidate = result.stdout
+                    .split(whereSeparator: \.isNewline)
+                    .map(String.init)
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .first(where: { $0.hasPrefix("/") })
+
+                if let candidate, FileManager.default.isExecutableFile(atPath: candidate) {
+                    return candidate
+                }
+            } catch {
+                continue
+            }
+        }
+
+        return nil
+    }
+
+    private func runLocalCommandThroughShell(
+        executable: String,
+        arguments: [String],
+        currentDirectoryURL: URL?
+    ) throws -> ProviderCommandResult {
+        var lastResult: ProviderCommandResult?
+        var lastError: Error?
+
+        for command in localShellCommandBuilder.candidateCommands(
+            for: ([shellQuoted(executable)] + arguments.map(shellQuoted)).joined(separator: " ")
+        ) {
+            do {
+                let result = try commandRunner.run(
+                    executable: command.executable,
+                    arguments: command.arguments,
+                    currentDirectoryURL: currentDirectoryURL
+                )
+                if result.exitStatus == 0 {
+                    return result
+                }
+                lastResult = result
+            } catch {
+                lastError = error
+            }
+        }
+
+        if let lastResult {
+            return lastResult
+        }
+
+        throw lastError ?? NSError(
+            domain: "ProviderHealthEvaluator",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "Local shell launch probe failed before the command completed."]
+        )
+    }
+
+    private func detectLocalVersion(executable: String, providerName: String, diagnostics: inout [ProviderHealthDiagnostic]) -> String? {
         do {
-            let result = try commandRunner.run(executable: executable, arguments: ["--version"], currentDirectoryURL: nil)
+            let result = try runLocalCommandThroughShell(executable: executable, arguments: ["--version"], currentDirectoryURL: nil)
             guard result.exitStatus == 0 else {
                 diagnostics.append(
                     ProviderHealthDiagnostic(
@@ -415,7 +504,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
             "/bin/\(commandName)"
         ].map { "\"\($0)\"" }.joined(separator: " ")
 
-        return "cd \(shellQuoted(workspace.folderPath)) || { echo 'NEXUS_REMOTE_WORKSPACE_UNAVAILABLE' >&2; exit 1; }; command -v tmux >/dev/null 2>&1 || { echo 'NEXUS_REMOTE_TMUX_UNAVAILABLE' >&2; exit 1; }; \(resolveFunctionName)() { for shell in \"${SHELL:-}\" /bin/bash /usr/bin/bash /bin/sh /usr/bin/zsh /bin/zsh; do [ -n \"$shell\" ] || continue; [ -x \"$shell\" ] || continue; CANDIDATE=\"$(\"$shell\" -lc \(shellCommand) 2>/dev/null)\" || continue; [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; for CANDIDATE in \(fallbackCandidates); do [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; return 1; }; \(commandPathVariable)=\"$(\(resolveFunctionName))\" || { echo '\(notFoundMarker)' >&2; exit 1; }; [ -n \"$\(commandPathVariable)\" ] || { echo '\(notFoundMarker)' >&2; exit 1; }; printf '%s\\n' \"$\(commandPathVariable)\"; \"$\(commandPathVariable)\" --version; \"$\(commandPathVariable)\" --help >/dev/null 2>&1"
+        return "cd \(shellQuoted(workspace.folderPath)) || { echo 'NEXUS_REMOTE_WORKSPACE_UNAVAILABLE' >&2; exit 1; }; command -v tmux >/dev/null 2>&1 || { echo 'NEXUS_REMOTE_TMUX_UNAVAILABLE' >&2; exit 1; }; \(resolveFunctionName)() { for shell in \"${SHELL:-}\" /bin/bash /usr/bin/bash /bin/sh /usr/bin/zsh /bin/zsh; do [ -n \"$shell\" ] || continue; [ -x \"$shell\" ] || continue; for SHELL_ARGS in -lic -lc; do CANDIDATE=\"$(\"$shell\" $SHELL_ARGS \(shellCommand) 2>/dev/null)\" || continue; [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; done; for CANDIDATE in \(fallbackCandidates); do [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; return 1; }; \(commandPathVariable)=\"$(\(resolveFunctionName))\" || { echo '\(notFoundMarker)' >&2; exit 1; }; [ -n \"$\(commandPathVariable)\" ] || { echo '\(notFoundMarker)' >&2; exit 1; }; printf '%s\\n' \"$\(commandPathVariable)\"; \"$\(commandPathVariable)\" --version; \"$\(commandPathVariable)\" --help >/dev/null 2>&1"
     }
 
     private func firstDiagnosticLine(stdout: String, stderr: String) -> String {

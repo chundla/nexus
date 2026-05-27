@@ -1701,7 +1701,7 @@ struct nexusTests {
         #expect(detail.health.resolvedExecutable == "/home/chundla/.local/bin/claude")
     }
 
-    @Test func remoteSessionCommandBuilderUsesPortPathAndRuntimeIdentifier() {
+    @Test func remoteSessionCommandBuilderUsesPortPathAndRuntimeIdentifier() throws {
         let host = NexusDomain.Host(id: UUID(), name: "Build Server", sshTarget: "build-box", port: 2222)
         let configuration = SessionRuntimeLaunchConfiguration(
             executable: "/usr/local/bin/claude",
@@ -1711,14 +1711,19 @@ struct nexusTests {
         )
         let builder = RemoteSessionCommandBuilder()
 
-        #expect(builder.launchArguments(configuration: configuration) == [
+        let launchArguments = builder.launchArguments(configuration: configuration)
+        #expect(launchArguments.prefix(8) == [
             "-tt",
             "-o", "BatchMode=yes",
             "-o", "ConnectTimeout=5",
             "-p", "2222",
-            "build-box",
-            "cd '/srv/api' && exec tmux new-session -s 'nexus-01234567-89ab-cdef-0123-456789abcdef-runtime-2' '/usr/local/bin/claude'"
+            "build-box"
         ])
+        let remoteLaunchCommand = try #require(launchArguments.last)
+        #expect(remoteLaunchCommand.contains("cd '/srv/api'"))
+        #expect(remoteLaunchCommand.contains("NEXUS_REMOTE_SHELL=\"$(for shell in \"${SHELL:-}\""))
+        #expect(remoteLaunchCommand.contains("tmux new-session -s 'nexus-01234567-89ab-cdef-0123-456789abcdef-runtime-2' \"$NEXUS_REMOTE_SHELL\" -lic"))
+        #expect(remoteLaunchCommand.contains("/usr/local/bin/claude"))
         #expect(builder.recoverArguments(configuration: configuration) == [
             "-tt",
             "-o", "BatchMode=yes",
@@ -7029,7 +7034,7 @@ private func remoteCLIProbeScript(_ workspacePath: String, commandName: String) 
         "/bin/\(commandName)"
     ].map { "\"\($0)\"" }.joined(separator: " ")
 
-    return "cd \(testShellQuoted(workspacePath)) || { echo 'NEXUS_REMOTE_WORKSPACE_UNAVAILABLE' >&2; exit 1; }; command -v tmux >/dev/null 2>&1 || { echo 'NEXUS_REMOTE_TMUX_UNAVAILABLE' >&2; exit 1; }; \(resolveFunctionName)() { for shell in \"${SHELL:-}\" /bin/bash /usr/bin/bash /bin/sh /usr/bin/zsh /bin/zsh; do [ -n \"$shell\" ] || continue; [ -x \"$shell\" ] || continue; CANDIDATE=\"$(\"$shell\" -lc \(shellCommand) 2>/dev/null)\" || continue; [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; for CANDIDATE in \(fallbackCandidates); do [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; return 1; }; \(commandPathVariable)=\"$(\(resolveFunctionName))\" || { echo '\(notFoundMarker)' >&2; exit 1; }; [ -n \"$\(commandPathVariable)\" ] || { echo '\(notFoundMarker)' >&2; exit 1; }; printf '%s\\n' \"$\(commandPathVariable)\"; \"$\(commandPathVariable)\" --version; \"$\(commandPathVariable)\" --help >/dev/null 2>&1"
+    return "cd \(testShellQuoted(workspacePath)) || { echo 'NEXUS_REMOTE_WORKSPACE_UNAVAILABLE' >&2; exit 1; }; command -v tmux >/dev/null 2>&1 || { echo 'NEXUS_REMOTE_TMUX_UNAVAILABLE' >&2; exit 1; }; \(resolveFunctionName)() { for shell in \"${SHELL:-}\" /bin/bash /usr/bin/bash /bin/sh /usr/bin/zsh /bin/zsh; do [ -n \"$shell\" ] || continue; [ -x \"$shell\" ] || continue; for SHELL_ARGS in -lic -lc; do CANDIDATE=\"$(\"$shell\" $SHELL_ARGS \(shellCommand) 2>/dev/null)\" || continue; [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; done; for CANDIDATE in \(fallbackCandidates); do [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; return 1; }; \(commandPathVariable)=\"$(\(resolveFunctionName))\" || { echo '\(notFoundMarker)' >&2; exit 1; }; [ -n \"$\(commandPathVariable)\" ] || { echo '\(notFoundMarker)' >&2; exit 1; }; printf '%s\\n' \"$\(commandPathVariable)\"; \"$\(commandPathVariable)\" --version; \"$\(commandPathVariable)\" --help >/dev/null 2>&1"
 }
 
 private func testShellQuoted(_ value: String) -> String {
