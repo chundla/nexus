@@ -5,17 +5,15 @@ import NexusDomain
 import Testing
 
 struct RemoteProtocolSessionCommandBuilderTests {
-    @Test func launchBridgeExitsAndSurfacesStartupFailureWhenProviderDiesBeforeInitialization() throws {
-        let fixture = try makeFailingRemoteBridgeFixture()
-        let result = try runProcess(executable: fixture.runnerURL.path(percentEncoded: false), timeout: 2)
-
-        #expect(result.timedOut == false)
-        #expect(result.exitStatus == 1)
-        #expect(result.stderr.contains("remote startup exploded"))
-    }
-
     @Test func codexRuntimeSurfacesRemoteBridgeStartupFailureInsteadOfTimingOut() throws {
-        let fixture = try makeFailingRemoteBridgeFixture()
+        let fixture = try makeRemoteBridgeFixture(
+            createWorkspace: true,
+            codexScript: """
+            #!/bin/sh
+            echo 'remote startup exploded' >&2
+            exit 1
+            """
+        )
 
         #expect {
             try CodexAppServerRuntime(
@@ -34,14 +32,69 @@ struct RemoteProtocolSessionCommandBuilderTests {
             error.localizedDescription == "remote startup exploded"
         }
     }
+
+    @Test func codexRuntimeSurfacesSilentProviderExitFromBootstrapLogInsteadOfFallback() throws {
+        let fixture = try makeRemoteBridgeFixture(
+            createWorkspace: true,
+            codexScript: """
+            #!/bin/sh
+            exit 1
+            """
+        )
+
+        #expect {
+            try CodexAppServerRuntime(
+                executable: "/usr/bin/ssh",
+                workingDirectory: fixture.workspaceURL.path(percentEncoded: false),
+                terminationStatusMessageBuilder: { _ in "" },
+                transportFactory: { _, _, _ in
+                    try ProcessCodexAppServerTransport(
+                        executable: fixture.runnerURL.path(percentEncoded: false),
+                        arguments: [],
+                        workingDirectory: nil
+                    )
+                }
+            )
+        } throws: { error in
+            error.localizedDescription == "NEXUS_REMOTE_PROVIDER_EXITED_WITH_STATUS:1"
+        }
+    }
+
+    @Test func codexRuntimeSurfacesMissingWorkingDirectoryBeforeTimeout() throws {
+        let fixture = try makeRemoteBridgeFixture(
+            createWorkspace: false,
+            codexScript: """
+            #!/bin/sh
+            echo 'should not launch codex' >&2
+            exit 1
+            """
+        )
+
+        #expect {
+            try CodexAppServerRuntime(
+                executable: "/usr/bin/ssh",
+                workingDirectory: fixture.workspaceURL.path(percentEncoded: false),
+                terminationStatusMessageBuilder: { _ in "" },
+                transportFactory: { _, _, _ in
+                    try ProcessCodexAppServerTransport(
+                        executable: fixture.runnerURL.path(percentEncoded: false),
+                        arguments: [],
+                        workingDirectory: nil
+                    )
+                }
+            )
+        } throws: { error in
+            error.localizedDescription.contains("NEXUS_REMOTE_WORKING_DIRECTORY_NOT_FOUND: \(fixture.workspaceURL.path(percentEncoded: false))")
+        }
+    }
 }
 
-private struct FailingRemoteBridgeFixture {
+private struct RemoteBridgeFixture {
     let runnerURL: URL
     let workspaceURL: URL
 }
 
-private func makeFailingRemoteBridgeFixture() throws -> FailingRemoteBridgeFixture {
+private func makeRemoteBridgeFixture(createWorkspace: Bool, codexScript: String) throws -> RemoteBridgeFixture {
     let rootURL = FileManager.default.temporaryDirectory
         .appendingPathComponent("NexusServiceTests", isDirectory: true)
         .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -49,7 +102,9 @@ private func makeFailingRemoteBridgeFixture() throws -> FailingRemoteBridgeFixtu
     let workspaceURL = rootURL.appendingPathComponent("workspace", isDirectory: true)
     let binURL = rootURL.appendingPathComponent("bin", isDirectory: true)
     try FileManager.default.createDirectory(at: homeURL, withIntermediateDirectories: true)
-    try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+    if createWorkspace {
+        try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+    }
     try FileManager.default.createDirectory(at: binURL, withIntermediateDirectories: true)
 
     let fakeTmuxURL = binURL.appendingPathComponent("tmux", isDirectory: false)
@@ -81,9 +136,9 @@ private func makeFailingRemoteBridgeFixture() throws -> FailingRemoteBridgeFixtu
                   ;;
               esac
             done
-            run_command="$1"
+            shell_command="$1"
             (
-              /bin/sh -c "$run_command"
+              /bin/sh -lc "$shell_command"
               rm -f "$state_dir/$session.pid"
             ) &
             printf '%s\n' "$!" > "$state_dir/$session.pid"
@@ -118,11 +173,7 @@ private func makeFailingRemoteBridgeFixture() throws -> FailingRemoteBridgeFixtu
     let fakeCodexURL = binURL.appendingPathComponent("codex", isDirectory: false)
     try writeExecutableScript(
         path: fakeCodexURL.path(percentEncoded: false),
-        content: """
-        #!/bin/sh
-        echo 'remote startup exploded' >&2
-        exit 1
-        """
+        content: codexScript
     )
 
     let host = NexusDomain.Host(id: UUID(), name: "Build Server", sshTarget: "build-box", port: 2222)
@@ -149,45 +200,7 @@ private func makeFailingRemoteBridgeFixture() throws -> FailingRemoteBridgeFixtu
         """
     )
 
-    return FailingRemoteBridgeFixture(runnerURL: runnerURL, workspaceURL: workspaceURL)
-}
-
-private struct ProcessRunResult {
-    let exitStatus: Int32
-    let stdout: String
-    let stderr: String
-    let timedOut: Bool
-}
-
-private func runProcess(executable: String, timeout: TimeInterval) throws -> ProcessRunResult {
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: executable)
-
-    let stdoutPipe = Pipe()
-    let stderrPipe = Pipe()
-    process.standardOutput = stdoutPipe
-    process.standardError = stderrPipe
-
-    let semaphore = DispatchSemaphore(value: 0)
-    process.terminationHandler = { _ in semaphore.signal() }
-
-    try process.run()
-
-    let completed = semaphore.wait(timeout: .now() + timeout) == .success
-    if completed == false {
-        process.terminate()
-        _ = semaphore.wait(timeout: .now() + 1)
-    }
-
-    let stdout = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-    let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-
-    return ProcessRunResult(
-        exitStatus: process.terminationStatus,
-        stdout: stdout.trimmingCharacters(in: .whitespacesAndNewlines),
-        stderr: stderr.trimmingCharacters(in: .whitespacesAndNewlines),
-        timedOut: completed == false
-    )
+    return RemoteBridgeFixture(runnerURL: runnerURL, workspaceURL: workspaceURL)
 }
 
 private func writeExecutableScript(path: String, content: String) throws {
