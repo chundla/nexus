@@ -208,6 +208,124 @@ struct NexusServiceRemoteIBMBobStructuredSessionTests {
         ])
     }
 
+    @Test func remoteIBMBobDefaultAndNamedSessionsResumeOnlyTheirOwnStoredContinuity() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let transportHarness = RemoteIBMBobTransportHarness(turns: [
+            .init(stdoutLines: [
+                #"{"type":"status","text":"Default turn started","session_id":"bob-default"}"#,
+                #"{"type":"message","text":"Default first reply"}"#,
+                #"{"type":"completion","text":"Default first complete"}"#
+            ]),
+            .init(stdoutLines: [
+                #"{"type":"status","text":"Review turn started","session_id":"bob-review"}"#,
+                #"{"type":"message","text":"Review first reply"}"#,
+                #"{"type":"completion","text":"Review first complete"}"#
+            ]),
+            .init(stdoutLines: [
+                #"{"type":"status","text":"Follow Up turn started","session_id":"bob-follow-up"}"#,
+                #"{"type":"message","text":"Follow Up first reply"}"#,
+                #"{"type":"completion","text":"Follow Up first complete"}"#
+            ]),
+            .init(stdoutLines: [
+                #"{"type":"status","text":"Follow Up resumed turn started"}"#,
+                #"{"type":"message","text":"Follow Up second reply"}"#,
+                #"{"type":"completion","text":"Follow Up second complete"}"#
+            ]),
+            .init(stdoutLines: [
+                #"{"type":"status","text":"Default resumed turn started"}"#,
+                #"{"type":"message","text":"Default second reply"}"#,
+                #"{"type":"completion","text":"Default second complete"}"#
+            ]),
+            .init(stdoutLines: [
+                #"{"type":"status","text":"Review resumed turn started"}"#,
+                #"{"type":"message","text":"Review second reply"}"#,
+                #"{"type":"completion","text":"Review second complete"}"#
+            ])
+        ])
+        func makeService() throws -> NexusService {
+            try makeRemoteIBMBobService(rootURL: rootURL, transportHarness: transportHarness)
+        }
+
+        let service = try makeService()
+        let group = try service.createWorkspaceGroup(name: "Remote")
+        let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
+        _ = try service.validateHost(hostID: host.id)
+        let workspace = try service.createRemoteWorkspace(
+            name: "Remote Bob",
+            hostID: host.id,
+            remotePath: "/srv/bob",
+            primaryGroupID: group.id
+        )
+
+        let defaultSession = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
+        let reviewSession = try service.createNamedSession(workspaceID: workspace.id, providerID: .ibmBob, name: "Review")
+        let followUpSession = try service.createNamedSession(workspaceID: workspace.id, providerID: .ibmBob, name: "Follow Up")
+        _ = try service.sendSessionInput(sessionID: defaultSession.id, text: "default first")
+        _ = try service.sendSessionInput(sessionID: reviewSession.id, text: "review first")
+        _ = try service.sendSessionInput(sessionID: followUpSession.id, text: "follow up first")
+
+        let restartedService = try makeService()
+        let followUpSecondResponse = try restartedService.sendSessionInput(sessionID: followUpSession.id, text: "follow up second")
+        let defaultSecondResponse = try restartedService.sendSessionInput(sessionID: defaultSession.id, text: "default second")
+        let reviewSecondResponse = try restartedService.sendSessionInput(sessionID: reviewSession.id, text: "review second")
+        let launches = transportHarness.launches()
+        #expect(launches.count == 6)
+        let followUpResumeLaunch = launches[3]
+        let defaultResumeLaunch = launches[4]
+        let reviewResumeLaunch = launches[5]
+        let metadataStore = try NexusMetadataStore(storeURL: restartedService.storeURL)
+        let defaultMetadata = try metadataStore.sessionRecordAdapterMetadata(sessionID: defaultSession.id)
+        let reviewMetadata = try metadataStore.sessionRecordAdapterMetadata(sessionID: reviewSession.id)
+        let followUpMetadata = try metadataStore.sessionRecordAdapterMetadata(sessionID: followUpSession.id)
+
+        #expect(defaultMetadata?.ibmBobSessionLinkage?.sessionID == "bob-default")
+        #expect(reviewMetadata?.ibmBobSessionLinkage?.sessionID == "bob-review")
+        #expect(followUpMetadata?.ibmBobSessionLinkage?.sessionID == "bob-follow-up")
+
+        let followUpResumeCommand = try #require(followUpResumeLaunch.arguments.last)
+        #expect(followUpResumeCommand.contains("--resume"))
+        #expect(followUpResumeCommand.contains("bob-follow-up"))
+        #expect(followUpResumeCommand.contains("bob-default") == false)
+        #expect(followUpResumeCommand.contains("bob-review") == false)
+        #expect(followUpResumeCommand.contains("latest") == false)
+
+        let defaultResumeCommand = try #require(defaultResumeLaunch.arguments.last)
+        #expect(defaultResumeCommand.contains("--resume"))
+        #expect(defaultResumeCommand.contains("bob-default"))
+        #expect(defaultResumeCommand.contains("bob-review") == false)
+        #expect(defaultResumeCommand.contains("bob-follow-up") == false)
+        #expect(defaultResumeCommand.contains("latest") == false)
+
+        let reviewResumeCommand = try #require(reviewResumeLaunch.arguments.last)
+        #expect(reviewResumeCommand.contains("--resume"))
+        #expect(reviewResumeCommand.contains("bob-review"))
+        #expect(reviewResumeCommand.contains("bob-default") == false)
+        #expect(reviewResumeCommand.contains("bob-follow-up") == false)
+        #expect(reviewResumeCommand.contains("latest") == false)
+
+        #expect(followUpSecondResponse.activityItems.suffix(4).map(\.text) == [
+            "You: follow up second",
+            "Follow Up resumed turn started",
+            "Follow Up second reply",
+            "Follow Up second complete"
+        ])
+        #expect(defaultSecondResponse.activityItems.suffix(4).map(\.text) == [
+            "You: default second",
+            "Default resumed turn started",
+            "Default second reply",
+            "Default second complete"
+        ])
+        #expect(reviewSecondResponse.activityItems.suffix(4).map(\.text) == [
+            "You: review second",
+            "Review resumed turn started",
+            "Review second reply",
+            "Review second complete"
+        ])
+    }
+
     @Test func remoteControllerSeesSharedRemoteIBMBobActivityAndMacCanReopenSameReadyHistory() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)
