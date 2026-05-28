@@ -548,7 +548,7 @@ struct RemotePairingNetworkTests {
 
         #expect(screen.session.id == session.id)
         #expect(screen.primarySurface == .structuredActivityFeed)
-        #expect(sessionSurfaceSupport(for: screen, on: .remoteClient) == .unsupported)
+        #expect(sessionSurfaceSupport(for: screen, on: .remoteClient, workspaceKind: .local) == .supported)
     }
 
     @Test func createsCodexNamedSessionOverDedicatedNetworkAPIWithoutDefaultSession() async throws {

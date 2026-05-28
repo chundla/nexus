@@ -171,7 +171,14 @@ final class RemoteClientPairingModel {
             return nil
         }
 
-        return sessionSurfaceSupport(for: focusedSessionScreen, on: .remoteClient)
+        return sessionSurfaceSupport(
+            for: focusedSessionScreen,
+            on: .remoteClient,
+            workspaceKind: workspaceKind(
+                for: focusedSessionScreen.session.workspaceID,
+                providerID: focusedSessionScreen.session.providerID
+            )
+        )
     }
 
     init(client: any RemotePairingClient, store: any PairedMacStore) {
@@ -247,6 +254,15 @@ final class RemoteClientPairingModel {
 
     func providerCard(workspaceID: UUID, providerID: ProviderID) -> WorkspaceProviderCard? {
         workspaceOverview(id: workspaceID)?.providerCards.first(where: { $0.provider.id == providerID })
+    }
+
+    func workspaceKind(for workspaceID: UUID, providerID: ProviderID? = nil) -> Workspace.Kind? {
+        if let providerID,
+           let detail = providerDetail(for: workspaceID, providerID: providerID) {
+            return detail.workspace.kind
+        }
+
+        return workspaceOverview(id: workspaceID)?.workspace.kind
     }
 
     func resolvedSession(workspaceID: UUID, providerID: ProviderID, sessionID: UUID) -> Session? {

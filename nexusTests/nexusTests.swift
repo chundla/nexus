@@ -207,7 +207,7 @@ struct nexusTests {
     }
 
     @MainActor
-    @Test func remoteSessionSurfacePresentationShowsUnsupportedGuidanceForStructuredCodexOnIPhone() {
+    @Test func remoteSessionSurfacePresentationSupportsExistingStructuredCodexSessionsOnIPhone() {
         let screen = SessionScreen(
             session: Session(
                 id: UUID(),
@@ -221,18 +221,42 @@ struct nexusTests {
             activityItems: [SessionActivityItem(kind: .status, text: "Codex shared Session stream connected")]
         )
 
-        #expect(remoteSessionSurfacePresentation(for: screen, isReady: true) == RemoteSessionSurfacePresentation(
-            surfaceSupport: .unsupported,
+        #expect(remoteSessionSurfacePresentation(for: screen, isReady: true, workspaceKind: .remote) == RemoteSessionSurfacePresentation(
+            surfaceSupport: .supported,
             showsTerminal: false,
-            showsAttachment: false,
+            showsStructuredActivity: true,
+            showsAttachment: true,
             showsInput: false,
             relaunchIsEnabled: true,
             relaunchDisabledReason: nil,
-            unsupportedCopy: UnsupportedRemoteSessionSurfaceCopy(
-                title: "Unsupported Session Surface",
-                summary: "This iPhone can inspect this Codex Session, but it cannot present or operate its primary Session surface yet.",
-                recovery: "Open this Session on the paired Mac to use its primary Session surface."
-            )
+            unsupportedCopy: nil
+        ))
+    }
+
+    @MainActor
+    @Test func remoteSessionSurfacePresentationSupportsExistingStructuredLocalPiSessionsOnIPhone() {
+        let screen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            ),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [SessionActivityItem(kind: .status, text: "Pi shared Session stream connected")]
+        )
+
+        #expect(remoteSessionSurfacePresentation(for: screen, isReady: true, workspaceKind: .local) == RemoteSessionSurfacePresentation(
+            surfaceSupport: .supported,
+            showsTerminal: false,
+            showsStructuredActivity: true,
+            showsAttachment: true,
+            showsInput: false,
+            relaunchIsEnabled: true,
+            relaunchDisabledReason: nil,
+            unsupportedCopy: nil
         ))
     }
 
@@ -250,9 +274,10 @@ struct nexusTests {
             transcript: "Codex remote ready"
         )
 
-        #expect(remoteSessionSurfacePresentation(for: screen, isReady: true) == RemoteSessionSurfacePresentation(
+        #expect(remoteSessionSurfacePresentation(for: screen, isReady: true, workspaceKind: .remote) == RemoteSessionSurfacePresentation(
             surfaceSupport: .supported,
             showsTerminal: true,
+            showsStructuredActivity: false,
             showsAttachment: true,
             showsInput: true,
             relaunchIsEnabled: true,
@@ -293,30 +318,31 @@ struct nexusTests {
     }
 
     @MainActor
-    @Test func remoteSessionSurfacePresentationDisablesRelaunchForUnsupportedStructuredCodexOnIPhone() {
+    @Test func remoteSessionSurfacePresentationKeepsRemotePiStructuredSessionsUnsupportedOnIPhone() {
         let screen = SessionScreen(
             session: Session(
                 id: UUID(),
                 workspaceID: UUID(),
-                providerID: .codex,
+                providerID: .pi,
                 isDefault: true,
                 state: .interrupted,
-                failureMessage: "Bridge lost"
+                failureMessage: "Remote Pi remains unsupported"
             ),
             primarySurface: .structuredActivityFeed,
             transcript: ""
         )
 
-        #expect(remoteSessionSurfacePresentation(for: screen, isReady: false) == RemoteSessionSurfacePresentation(
+        #expect(remoteSessionSurfacePresentation(for: screen, isReady: false, workspaceKind: .remote) == RemoteSessionSurfacePresentation(
             surfaceSupport: .unsupported,
             showsTerminal: false,
+            showsStructuredActivity: false,
             showsAttachment: false,
             showsInput: false,
             relaunchIsEnabled: false,
             relaunchDisabledReason: "Open this Session on the paired Mac to relaunch it because this iPhone cannot operate its primary Session surface yet.",
             unsupportedCopy: UnsupportedRemoteSessionSurfaceCopy(
                 title: "Unsupported Session Surface",
-                summary: "This iPhone can inspect this Codex Session, but it cannot present or operate its primary Session surface yet.",
+                summary: "This iPhone can inspect this Pi Session, but it cannot present or operate its primary Session surface yet.",
                 recovery: "Open this Session on the paired Mac to use its primary Session surface."
             )
         ))

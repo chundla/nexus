@@ -1,4 +1,3 @@
-#if os(macOS)
 import Foundation
 import NexusDomain
 
@@ -117,4 +116,3 @@ private func structuredSessionActivityEmphasis(for kind: SessionActivityItem.Kin
         .success
     }
 }
-#endif

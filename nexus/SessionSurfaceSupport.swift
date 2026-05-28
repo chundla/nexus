@@ -15,6 +15,7 @@ struct UnsupportedRemoteSessionSurfaceCopy: Equatable {
 struct RemoteSessionSurfacePresentation: Equatable {
     let surfaceSupport: SessionSurfaceSupport
     let showsTerminal: Bool
+    let showsStructuredActivity: Bool
     let showsAttachment: Bool
     let showsInput: Bool
     let relaunchIsEnabled: Bool
@@ -53,8 +54,25 @@ struct RemoteProviderActionState: Equatable {
     }
 }
 
-func sessionSurfaceSupport(for screen: SessionScreen, on client: SessionSurfaceClient) -> SessionSurfaceSupport {
-    sessionSurfaceSupport(for: screen.primarySurface, on: client)
+func sessionSurfaceSupport(
+    for screen: SessionScreen,
+    on client: SessionSurfaceClient,
+    workspaceKind: Workspace.Kind? = nil
+) -> SessionSurfaceSupport {
+    switch client {
+    case .mac:
+        .supported
+    case .remoteClient:
+        switch screen.primarySurface {
+        case .terminal:
+            .supported
+        case .structuredActivityFeed:
+            structuredRemoteClientSessionSurfaceSupport(
+                providerID: screen.session.providerID,
+                workspaceKind: workspaceKind
+            )
+        }
+    }
 }
 
 func sessionSurfaceSupport(for primarySurface: SessionSurface, on client: SessionSurfaceClient) -> SessionSurfaceSupport {
@@ -71,8 +89,12 @@ func sessionSurfaceSupport(for primarySurface: SessionSurface, on client: Sessio
     }
 }
 
-func remoteSessionSurfacePresentation(for screen: SessionScreen, isReady: Bool) -> RemoteSessionSurfacePresentation {
-    let support = sessionSurfaceSupport(for: screen, on: .remoteClient)
+func remoteSessionSurfacePresentation(
+    for screen: SessionScreen,
+    isReady: Bool,
+    workspaceKind: Workspace.Kind? = nil
+) -> RemoteSessionSurfacePresentation {
+    let support = sessionSurfaceSupport(for: screen, on: .remoteClient, workspaceKind: workspaceKind)
     let unsupportedCopy: UnsupportedRemoteSessionSurfaceCopy?
 
     if support == .unsupported {
@@ -96,13 +118,31 @@ func remoteSessionSurfacePresentation(for screen: SessionScreen, isReady: Bool) 
         relaunchDisabledReason = "Open this Session on the paired Mac to relaunch it because this iPhone cannot operate its primary Session surface yet."
     }
 
+    let showsTerminal = support == .supported && screen.primarySurface == .terminal
+    let showsStructuredActivity = support == .supported && screen.primarySurface == .structuredActivityFeed
+
     return RemoteSessionSurfacePresentation(
         surfaceSupport: support,
-        showsTerminal: support == .supported,
+        showsTerminal: showsTerminal,
+        showsStructuredActivity: showsStructuredActivity,
         showsAttachment: isReady && support == .supported,
-        showsInput: isReady && support == .supported,
+        showsInput: isReady && showsTerminal,
         relaunchIsEnabled: relaunchIsEnabled,
         relaunchDisabledReason: relaunchDisabledReason,
         unsupportedCopy: unsupportedCopy
     )
+}
+
+private func structuredRemoteClientSessionSurfaceSupport(
+    providerID: ProviderID,
+    workspaceKind: Workspace.Kind?
+) -> SessionSurfaceSupport {
+    switch providerID {
+    case .codex:
+        .supported
+    case .pi:
+        workspaceKind == .local ? .supported : .unsupported
+    case .claude, .ibmBob:
+        .unsupported
+    }
 }

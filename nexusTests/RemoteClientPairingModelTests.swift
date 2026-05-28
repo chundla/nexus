@@ -543,7 +543,7 @@ struct RemoteClientPairingModelTests {
         #expect(model.focusedSessionErrorMessage == nil)
     }
 
-    @Test func focusedRemoteSessionSurfaceSupportUsesExplicitPrimarySurfaceInsteadOfProviderIdentity() async throws {
+    @Test func focusedRemoteSessionSurfaceSupportAllowsExistingStructuredLocalPiSessionsOnIPhone() async throws {
         let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
@@ -558,7 +558,7 @@ struct RemoteClientPairingModelTests {
         let session = Session(
             id: UUID(),
             workspaceID: workspace.id,
-            providerID: .claude,
+            providerID: .pi,
             isDefault: true,
             state: .ready
         )
@@ -573,7 +573,8 @@ struct RemoteClientPairingModelTests {
             session: session,
             primarySurface: .structuredActivityFeed,
             transcript: "",
-            activityItems: [SessionActivityItem(kind: .status, text: "Structured session")]
+            activityItems: [SessionActivityItem(kind: .status, text: "Pi shared Session stream connected")],
+            approvalRequests: [SessionApprovalRequest(title: "Deploy", text: "Deploy to production?", state: .pending)]
         )
         let store = UserDefaultsPairedMacStore(defaults: defaults)
         try store.savePairedMacs([pairedMac])
@@ -582,6 +583,66 @@ struct RemoteClientPairingModelTests {
         let model = RemoteClientPairingModel(
             client: StubRemotePairingClient(result: pairedMac, sessionScreen: screen),
             store: store
+        )
+        model.catalog = RemoteWorkspaceCatalog(
+            workspaceGroups: [],
+            recentNavigation: [],
+            workspaceOverviews: [WorkspaceOverview(workspace: workspace, providerCards: [])]
+        )
+
+        await model.focusRemoteSession(sessionID: session.id)
+        await Task.yield()
+
+        #expect(model.focusedSessionScreen == screen)
+        #expect(model.focusedSessionScreen?.approvalRequests == screen.approvalRequests)
+        #expect(model.focusedSessionSurfaceSupport == .supported)
+    }
+
+    @Test func focusedRemoteSessionSurfaceSupportKeepsExistingStructuredRemotePiSessionsUnsupportedOnIPhone() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus Remote",
+            kind: .remote,
+            folderPath: "/srv/nexus",
+            primaryGroupID: UUID(),
+            remoteHostID: UUID()
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let screen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [SessionActivityItem(kind: .status, text: "Pi shared Session stream connected")]
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let model = RemoteClientPairingModel(
+            client: StubRemotePairingClient(result: pairedMac, sessionScreen: screen),
+            store: store
+        )
+        model.catalog = RemoteWorkspaceCatalog(
+            workspaceGroups: [],
+            recentNavigation: [],
+            workspaceOverviews: [WorkspaceOverview(workspace: workspace, providerCards: [])]
         )
 
         await model.focusRemoteSession(sessionID: session.id)

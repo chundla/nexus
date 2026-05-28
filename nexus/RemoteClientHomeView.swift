@@ -793,7 +793,14 @@ private struct RemoteSessionScreenView: View {
             return nil
         }
 
-        return remoteSessionSurfacePresentation(for: screen, isReady: isReady)
+        return remoteSessionSurfacePresentation(
+            for: screen,
+            isReady: isReady,
+            workspaceKind: model.workspaceKind(
+                for: currentSession.workspaceID,
+                providerID: currentSession.providerID
+            )
+        )
     }
 
     private var supportsFocusedSessionSurface: Bool {
@@ -813,6 +820,18 @@ private struct RemoteSessionScreenView: View {
         default:
             model.focusedSessionIsController ? "Return to Viewer" : "Take Controller"
         }
+    }
+
+    private var controllerDescription: String {
+        guard screen?.primarySurface == .structuredActivityFeed else {
+            return model.focusedSessionIsController
+                ? "This iPhone is the Controller for terminal input and terminal size."
+                : "Take Controller to send terminal input from this iPhone."
+        }
+
+        return model.focusedSessionIsController
+            ? "This iPhone is the Controller for Session-writing actions."
+            : "Viewer mode keeps this iPhone attached without Session-writing authority."
     }
 
     var body: some View {
@@ -850,9 +869,7 @@ private struct RemoteSessionScreenView: View {
             if surfacePresentation?.showsAttachment == true {
                 Section("Attachment") {
                     LabeledContent("Mode", value: model.focusedSessionIsController ? "Controller" : "Viewer")
-                    Text(model.focusedSessionIsController
-                         ? "This iPhone is the Controller for terminal input and terminal size."
-                         : "Take Controller to send terminal input from this iPhone.")
+                    Text(controllerDescription)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
 
@@ -879,6 +896,18 @@ private struct RemoteSessionScreenView: View {
                     Text(unsupportedCopy.recovery)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                }
+            } else if surfacePresentation?.showsStructuredActivity == true {
+                Section("Shared Activity") {
+                    if let screen {
+                        structuredSessionContent(screen)
+                    } else if let errorMessage = model.focusedSessionErrorMessage {
+                        Text(errorMessage)
+                            .foregroundStyle(.orange)
+                    } else {
+                        Text("Loading Session screen…")
+                            .foregroundStyle(.secondary)
+                    }
                 }
             } else {
                 Section("Terminal") {
@@ -1081,6 +1110,100 @@ private struct RemoteSessionScreenView: View {
             }
         }
         .disabled(model.focusedSessionIsController == false || isPerformingAction)
+    }
+
+    @ViewBuilder
+    private func structuredSessionContent(_ screen: SessionScreen) -> some View {
+        let copy = structuredSessionPresentationCopy(for: screen)
+        let rows = structuredSessionActivityRows(for: screen)
+        let pendingApprovalRequests = screen.approvalRequests.filter { $0.state == .pending }
+
+        VStack(alignment: .leading, spacing: 12) {
+            if pendingApprovalRequests.isEmpty == false {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(pendingApprovalRequests) { request in
+                        structuredSessionApprovalRequestView(request)
+                    }
+                }
+            }
+
+            if rows.isEmpty {
+                ContentUnavailableView(
+                    copy.emptyStateTitle,
+                    systemImage: "sparkles.rectangle.stack",
+                    description: Text(copy.emptyStateDescription)
+                )
+                .frame(maxWidth: .infinity, minHeight: 220)
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(rows) { row in
+                        structuredSessionActivityRowView(row)
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func structuredSessionActivityRowView(_ row: StructuredSessionActivityRow) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: row.systemImage)
+                .foregroundStyle(structuredSessionActivityColor(for: row.emphasis))
+                .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(row.title)
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+                Text(row.text)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(structuredSessionActivityColor(for: row.emphasis).opacity(0.15))
+        }
+    }
+
+    private func structuredSessionApprovalRequestView(_ request: SessionApprovalRequest) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Approval Request", systemImage: "hand.raised.fill")
+                .font(.headline)
+                .foregroundStyle(.accent)
+
+            Text(request.title)
+                .font(.subheadline)
+                .fontWeight(.semibold)
+
+            Text(request.text)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.accentColor.opacity(0.2))
+        }
+    }
+
+    private func structuredSessionActivityColor(for emphasis: StructuredSessionActivityEmphasis) -> Color {
+        switch emphasis {
+        case .neutral:
+            .secondary
+        case .accent:
+            .accentColor
+        case .critical:
+            .red
+        case .success:
+            .green
+        }
     }
 
     private var terminalCellWidth: CGFloat { 8.5 }
