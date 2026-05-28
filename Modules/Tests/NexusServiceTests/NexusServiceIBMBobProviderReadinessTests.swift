@@ -196,6 +196,244 @@ struct NexusServiceIBMBobProviderReadinessTests {
         #expect(providerCard.capabilities.createNamedSession.isSupported)
         #expect(providerCard.capabilities.createNamedSession.isEnabled)
     }
+
+    @Test func remoteIBMBobProviderHealthUsesPassiveRemoteProbeWithoutTmuxGating() throws {
+        let workspaceID = UUID()
+        let hostID = UUID()
+        let host = NexusDomain.Host(id: hostID, name: "Build Server", sshTarget: "build-box")
+        let commandRunner = SequentialBobCommandRunner(results: [
+            .success(stdout: "/tmp/fake-bob\n3.4.5\n"),
+            .success(stdout: "[]\n")
+        ])
+        let evaluator = ProviderHealthEvaluator(
+            executableResolver: BobStubExecutableResolver(executables: [:]),
+            commandRunner: commandRunner,
+            localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+        )
+
+        let health = evaluator.healthSummary(
+            for: .ibmBob,
+            workspace: Workspace(
+                id: workspaceID,
+                name: "Remote Bob",
+                kind: .remote,
+                folderPath: "/srv/bob",
+                primaryGroupID: UUID(),
+                remoteHostID: hostID
+            ),
+            remoteContext: RemoteWorkspaceHealthContext(
+                host: host,
+                hostValidation: HostValidationSnapshot(
+                    hostID: hostID,
+                    state: .available,
+                    summary: "Host is available",
+                    checkedAt: Date()
+                ),
+                workspaceAvailability: WorkspaceAvailabilitySnapshot(
+                    workspaceID: workspaceID,
+                    state: .available,
+                    summary: "Workspace is available",
+                    checkedAt: Date()
+                )
+            )
+        )
+        let resolutionProbe = try #require(commandRunner.invocations.first)
+        let readinessProbe = try #require(commandRunner.invocations.last)
+
+        #expect(health.state == .available)
+        #expect(health.summary == "IBM Bob 3.4.5 is available")
+        #expect(health.resolvedExecutable == "/tmp/fake-bob")
+        #expect(health.version == "3.4.5")
+        #expect(health.launchability == .launchable)
+        #expect(health.diagnostics == [
+            ProviderHealthDiagnostic(
+                severity: .info,
+                code: "remoteProbe",
+                message: "Validated remote IBM Bob launch prerequisites on Build Server for /srv/bob."
+            )
+        ])
+        #expect(resolutionProbe.executable == "/usr/bin/ssh")
+        #expect(resolutionProbe.arguments.last?.contains("command -v bob") == true)
+        #expect(resolutionProbe.arguments.last?.contains("$HOME/.local/bin/bob") == true)
+        #expect(resolutionProbe.arguments.last?.contains("tmux") == false)
+        #expect(readinessProbe.executable == "/usr/bin/ssh")
+        #expect(readinessProbe.arguments.last?.contains("--list-sessions") == true)
+        #expect(readinessProbe.arguments.last?.contains("tmux") == false)
+    }
+
+    @Test func remoteIBMBobBlocksLaunchabilityWhenPassiveProbeReportsLicenseRequirement() {
+        let workspaceID = UUID()
+        let hostID = UUID()
+        let host = NexusDomain.Host(id: hostID, name: "Build Server", sshTarget: "build-box")
+        let evaluator = ProviderHealthEvaluator(
+            executableResolver: BobStubExecutableResolver(executables: [:]),
+            commandRunner: SequentialBobCommandRunner(results: [
+                .success(stdout: "/tmp/fake-bob\n3.4.5\n"),
+                .success(
+                    stdout: "",
+                    stderr: "You must accept the IBM Bob license before continuing.\n",
+                    exitStatus: 1
+                )
+            ]),
+            localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+        )
+
+        let health = evaluator.healthSummary(
+            for: .ibmBob,
+            workspace: Workspace(
+                id: workspaceID,
+                name: "Remote Bob",
+                kind: .remote,
+                folderPath: "/srv/bob",
+                primaryGroupID: UUID(),
+                remoteHostID: hostID
+            ),
+            remoteContext: RemoteWorkspaceHealthContext(
+                host: host,
+                hostValidation: HostValidationSnapshot(
+                    hostID: hostID,
+                    state: .available,
+                    summary: "Host is available",
+                    checkedAt: Date()
+                ),
+                workspaceAvailability: WorkspaceAvailabilitySnapshot(
+                    workspaceID: workspaceID,
+                    state: .available,
+                    summary: "Workspace is available",
+                    checkedAt: Date()
+                )
+            )
+        )
+
+        #expect(health.state == .misconfigured)
+        #expect(health.summary == "IBM Bob requires license acceptance")
+        #expect(health.resolvedExecutable == "/tmp/fake-bob")
+        #expect(health.version == "3.4.5")
+        #expect(health.launchability == .notLaunchable)
+        #expect(health.diagnostics == [
+            ProviderHealthDiagnostic(
+                severity: .error,
+                code: "licenseRequired",
+                message: "You must accept the IBM Bob license before continuing."
+            )
+        ])
+    }
+
+    @Test func remoteIBMBobRequiresAuthenticationWhenPassiveProbeReportsLoginFailure() {
+        let workspaceID = UUID()
+        let hostID = UUID()
+        let host = NexusDomain.Host(id: hostID, name: "Build Server", sshTarget: "build-box")
+        let evaluator = ProviderHealthEvaluator(
+            executableResolver: BobStubExecutableResolver(executables: [:]),
+            commandRunner: SequentialBobCommandRunner(results: [
+                .success(stdout: "/tmp/fake-bob\n3.4.5\n"),
+                .success(
+                    stdout: "",
+                    stderr: "bob login required before listing sessions.\n",
+                    exitStatus: 1
+                )
+            ]),
+            localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+        )
+
+        let health = evaluator.healthSummary(
+            for: .ibmBob,
+            workspace: Workspace(
+                id: workspaceID,
+                name: "Remote Bob",
+                kind: .remote,
+                folderPath: "/srv/bob",
+                primaryGroupID: UUID(),
+                remoteHostID: hostID
+            ),
+            remoteContext: RemoteWorkspaceHealthContext(
+                host: host,
+                hostValidation: HostValidationSnapshot(
+                    hostID: hostID,
+                    state: .available,
+                    summary: "Host is available",
+                    checkedAt: Date()
+                ),
+                workspaceAvailability: WorkspaceAvailabilitySnapshot(
+                    workspaceID: workspaceID,
+                    state: .available,
+                    summary: "Workspace is available",
+                    checkedAt: Date()
+                )
+            )
+        )
+
+        #expect(health.state == .unavailable)
+        #expect(health.summary == "IBM Bob requires authentication on the Remote Workspace")
+        #expect(health.resolvedExecutable == "/tmp/fake-bob")
+        #expect(health.version == "3.4.5")
+        #expect(health.launchability == .notLaunchable)
+        #expect(health.diagnostics == [
+            ProviderHealthDiagnostic(
+                severity: .error,
+                code: "authenticationRequired",
+                message: "bob login required before listing sessions."
+            )
+        ])
+    }
+
+    @Test func remoteIBMBobKeepsLaunchabilityWhenPassiveProbeIsInconclusive() {
+        let workspaceID = UUID()
+        let hostID = UUID()
+        let host = NexusDomain.Host(id: hostID, name: "Build Server", sshTarget: "build-box")
+        let evaluator = ProviderHealthEvaluator(
+            executableResolver: BobStubExecutableResolver(executables: [:]),
+            commandRunner: SequentialBobCommandRunner(results: [
+                .success(stdout: "/tmp/fake-bob\n3.4.5\n"),
+                .success(
+                    stdout: "",
+                    stderr: "Could not confirm IBM Bob readiness from the passive session list probe.\n",
+                    exitStatus: 1
+                )
+            ]),
+            localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+        )
+
+        let health = evaluator.healthSummary(
+            for: .ibmBob,
+            workspace: Workspace(
+                id: workspaceID,
+                name: "Remote Bob",
+                kind: .remote,
+                folderPath: "/srv/bob",
+                primaryGroupID: UUID(),
+                remoteHostID: hostID
+            ),
+            remoteContext: RemoteWorkspaceHealthContext(
+                host: host,
+                hostValidation: HostValidationSnapshot(
+                    hostID: hostID,
+                    state: .available,
+                    summary: "Host is available",
+                    checkedAt: Date()
+                ),
+                workspaceAvailability: WorkspaceAvailabilitySnapshot(
+                    workspaceID: workspaceID,
+                    state: .available,
+                    summary: "Workspace is available",
+                    checkedAt: Date()
+                )
+            )
+        )
+
+        #expect(health.state == .available)
+        #expect(health.summary == "IBM Bob 3.4.5 is available")
+        #expect(health.resolvedExecutable == "/tmp/fake-bob")
+        #expect(health.version == "3.4.5")
+        #expect(health.launchability == .launchable)
+        #expect(health.diagnostics == [
+            ProviderHealthDiagnostic(
+                severity: .warning,
+                code: "passiveProbeInconclusive",
+                message: "Could not confirm IBM Bob readiness from the passive session list probe."
+            )
+        ])
+    }
 }
 
 private struct BobStubExecutableResolver: ProviderExecutableResolving {
@@ -247,4 +485,35 @@ private final class RecordingBobCommandRunner: ProviderCommandRunning, @unchecke
         }
     }
 }
+
+private final class SequentialBobCommandRunner: ProviderCommandRunning, @unchecked Sendable {
+    struct Invocation: Equatable {
+        let executable: String
+        let arguments: [String]
+        let currentDirectoryURL: URL?
+    }
+
+    typealias StubbedResult = RecordingBobCommandRunner.StubbedResult
+
+    private let results: [StubbedResult]
+    private(set) var invocations: [Invocation] = []
+
+    init(results: [StubbedResult]) {
+        self.results = results
+    }
+
+    func run(executable: String, arguments: [String], currentDirectoryURL: URL?) throws -> ProviderCommandResult {
+        invocations.append(Invocation(executable: executable, arguments: arguments, currentDirectoryURL: currentDirectoryURL))
+        let index = invocations.count - 1
+        guard results.indices.contains(index) else {
+            throw NSError(domain: "SequentialBobCommandRunner", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing sequential stub #\(index) for \(executable) \(arguments)"])
+        }
+
+        switch results[index] {
+        case let .success(stdout, stderr, exitStatus):
+            return ProviderCommandResult(exitStatus: exitStatus, stdout: stdout, stderr: stderr)
+        }
+    }
+}
+
 #endif

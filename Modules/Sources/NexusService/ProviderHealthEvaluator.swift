@@ -172,17 +172,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, @unchecked Sendable {
         case .pi:
             return await remotePiHealthSummary(workspace: workspace, host: remoteContext.host)
         case .ibmBob:
-            return ProviderHealthSummary(
-                state: .notChecked,
-                summary: "Remote \(providerName) execution is not implemented yet",
-                diagnostics: [
-                    ProviderHealthDiagnostic(
-                        severity: .warning,
-                        code: "remoteExecutionNotImplemented",
-                        message: "Nexus shows \(providerName) on Remote Workspaces, but remote execution for this Provider is not implemented in this milestone."
-                    )
-                ]
-            )
+            return await remoteIBMBobHealthSummary(workspace: workspace, host: remoteContext.host)
         }
     }
 
@@ -602,6 +592,169 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, @unchecked Sendable {
                 ]
             )
         }
+    }
+
+    private func remoteIBMBobHealthSummary(workspace: Workspace, host: NexusDomain.Host) async -> ProviderHealthSummary {
+        let resolutionResult: ProviderCommandResult
+        do {
+            resolutionResult = try commandRunner.run(
+                executable: "/usr/bin/ssh",
+                arguments: remoteIBMBobExecutableResolutionArguments(workspace: workspace, host: host),
+                currentDirectoryURL: nil
+            )
+        } catch {
+            return ProviderHealthSummary(
+                state: .unavailable,
+                summary: "Remote IBM Bob health check failed before the SSH probe completed",
+                launchability: .notLaunchable,
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .error,
+                        code: "sshLaunchFailed",
+                        message: error.localizedDescription
+                    )
+                ]
+            )
+        }
+
+        guard resolutionResult.exitStatus == 0 else {
+            let detail = firstDiagnosticLine(stdout: resolutionResult.stdout, stderr: resolutionResult.stderr)
+            let classification = classifyRemoteCLIProbeFailure(
+                detail: detail,
+                providerName: "IBM Bob",
+                notFoundMarker: remoteExecutableNotFoundMarker(commandName: "bob")
+            )
+            return ProviderHealthSummary(
+                state: classification.state,
+                summary: classification.summary,
+                launchability: .notLaunchable,
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .error,
+                        code: classification.code,
+                        message: classification.message ?? (detail.isEmpty ? classification.summary : detail)
+                    )
+                ]
+            )
+        }
+
+        let outputLines = resolutionResult.stdout
+            .split(whereSeparator: \.isNewline)
+            .map(String.init)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.isEmpty == false }
+        guard let executable = outputLines.first else {
+            return ProviderHealthSummary(
+                state: .misconfigured,
+                summary: "IBM Bob executable resolution returned no executable path",
+                launchability: .notLaunchable,
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .error,
+                        code: "remoteExecutableResolutionFailed",
+                        message: "The remote IBM Bob executable resolution probe did not return an executable path."
+                    )
+                ]
+            )
+        }
+        let version = outputLines.dropFirst().first
+
+        let readinessProbe: ProviderCommandResult
+        do {
+            readinessProbe = try commandRunner.run(
+                executable: "/usr/bin/ssh",
+                arguments: remoteIBMBobPassiveProbeArguments(executable: executable, workspace: workspace, host: host),
+                currentDirectoryURL: nil
+            )
+        } catch {
+            return ProviderHealthSummary(
+                state: .unavailable,
+                summary: "Remote IBM Bob health check failed before the passive readiness probe completed",
+                resolvedExecutable: executable,
+                version: version,
+                launchability: .notLaunchable,
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .error,
+                        code: "sshLaunchFailed",
+                        message: error.localizedDescription
+                    )
+                ]
+            )
+        }
+
+        guard readinessProbe.exitStatus == 0 else {
+            let detail = firstDiagnosticLine(stdout: readinessProbe.stdout, stderr: readinessProbe.stderr)
+            let bobClassification = classifyLocalIBMBobPassiveProbeFailure(detail: detail)
+            if bobClassification.code != "passiveProbeInconclusive" {
+                return ProviderHealthSummary(
+                    state: bobClassification.state,
+                    summary: remoteIBMBobBlockedSummary(for: bobClassification.code),
+                    resolvedExecutable: executable,
+                    version: version,
+                    launchability: bobClassification.launchability,
+                    diagnostics: [
+                        ProviderHealthDiagnostic(
+                            severity: bobClassification.severity,
+                            code: bobClassification.code,
+                            message: bobClassification.message
+                        )
+                    ]
+                )
+            }
+
+            let genericClassification = classifyRemoteCLIProbeFailure(
+                detail: detail,
+                providerName: "IBM Bob",
+                notFoundMarker: remoteExecutableNotFoundMarker(commandName: "bob")
+            )
+            if genericClassification.code != "remoteLaunchProbeFailed" {
+                return ProviderHealthSummary(
+                    state: genericClassification.state,
+                    summary: genericClassification.summary,
+                    resolvedExecutable: executable,
+                    version: version,
+                    launchability: .notLaunchable,
+                    diagnostics: [
+                        ProviderHealthDiagnostic(
+                            severity: .error,
+                            code: genericClassification.code,
+                            message: genericClassification.message ?? (detail.isEmpty ? genericClassification.summary : detail)
+                        )
+                    ]
+                )
+            }
+
+            return ProviderHealthSummary(
+                state: .available,
+                summary: version.map { "IBM Bob \($0) is available" } ?? "IBM Bob is available",
+                resolvedExecutable: executable,
+                version: version,
+                launchability: .launchable,
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .warning,
+                        code: bobClassification.code,
+                        message: bobClassification.message
+                    )
+                ]
+            )
+        }
+
+        return ProviderHealthSummary(
+            state: .available,
+            summary: version.map { "IBM Bob \($0) is available" } ?? "IBM Bob is available",
+            resolvedExecutable: executable,
+            version: version,
+            launchability: .launchable,
+            diagnostics: [
+                ProviderHealthDiagnostic(
+                    severity: .info,
+                    code: "remoteProbe",
+                    message: "Validated remote IBM Bob launch prerequisites on \(host.name) for \(workspace.folderPath)."
+                )
+            ]
+        )
     }
 
     private func localCodexHealthSummary(workspace: Workspace) async -> ProviderHealthSummary {
@@ -1042,6 +1195,58 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, @unchecked Sendable {
         return "cd \(shellQuoted(workspace.folderPath)) || { echo 'NEXUS_REMOTE_WORKSPACE_UNAVAILABLE' >&2; exit 1; }; \(resolveFunctionName)() { for shell in \(shellCandidates); do [ -n \"$shell\" ] || continue; [ -x \"$shell\" ] || continue; case \"${shell##*/}\" in csh|tcsh) CANDIDATE=\"$(\"$shell\" -i -c \"if ( -f ~/.login ) source ~/.login; command -v pi\" 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -c \"if ( -f ~/.login ) source ~/.login; command -v pi\" 2>/dev/null)\" || continue ;; fish) CANDIDATE=\"$(\"$shell\" -i -c \"command -v pi\" 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -l -c \"command -v pi\" 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -c \"command -v pi\" 2>/dev/null)\" || continue ;; *) CANDIDATE=\"$(\"$shell\" -lic \(shellCommand) 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -lc \(shellCommand) 2>/dev/null)\" || continue ;; esac; [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; for CANDIDATE in \(fallbackCandidates); do [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; return 1; }; \(commandPathVariable)=\"$(\(resolveFunctionName))\" || { echo '\(notFoundMarker)' >&2; exit 1; }; [ -n \"$\(commandPathVariable)\" ] || { echo '\(notFoundMarker)' >&2; exit 1; }; printf '%s\\n' \"$\(commandPathVariable)\"; \"$\(commandPathVariable)\" --version"
     }
 
+    private func remoteIBMBobExecutableResolutionArguments(workspace: Workspace, host: NexusDomain.Host) -> [String] {
+        var arguments = [
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=5"
+        ]
+        if let port = host.port {
+            arguments += ["-p", String(port)]
+        }
+        arguments += [host.sshTarget, remoteIBMBobExecutableResolutionScript(workspace: workspace)]
+        return arguments
+    }
+
+    private func remoteIBMBobExecutableResolutionScript(workspace: Workspace) -> String {
+        let commandPathVariable = "BOB_PATH"
+        let resolveFunctionName = "resolve_bob_path"
+        let notFoundMarker = remoteExecutableNotFoundMarker(commandName: "bob")
+        let shellCommand = shellQuoted("command -v bob")
+        let fallbackCandidates = [
+            "$HOME/.local/bin/bob",
+            "$HOME/bin/bob",
+            "$HOME/.volta/bin/bob",
+            "$HOME/.asdf/shims/bob",
+            "$HOME/.local/share/mise/shims/bob",
+            "$HOME/.nix-profile/bin/bob",
+            "$HOME/.bun/bin/bob",
+            "$HOME/.nvm/current/bin/bob",
+            "/opt/homebrew/bin/bob",
+            "/usr/local/bin/bob",
+            "/usr/bin/bob",
+            "/bin/bob"
+        ].map { "\"\($0)\"" }.joined(separator: " ")
+        let shellCandidates = ShellSupport.remoteShellCandidateListScript()
+
+        return "cd \(shellQuoted(workspace.folderPath)) || { echo 'NEXUS_REMOTE_WORKSPACE_UNAVAILABLE' >&2; exit 1; }; \(resolveFunctionName)() { for shell in \(shellCandidates); do [ -n \"$shell\" ] || continue; [ -x \"$shell\" ] || continue; case \"${shell##*/}\" in csh|tcsh) CANDIDATE=\"$(\"$shell\" -i -c \"if ( -f ~/.login ) source ~/.login; command -v bob\" 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -c \"if ( -f ~/.login ) source ~/.login; command -v bob\" 2>/dev/null)\" || continue ;; fish) CANDIDATE=\"$(\"$shell\" -i -c \"command -v bob\" 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -l -c \"command -v bob\" 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -c \"command -v bob\" 2>/dev/null)\" || continue ;; *) CANDIDATE=\"$(\"$shell\" -lic \(shellCommand) 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -lc \(shellCommand) 2>/dev/null)\" || continue ;; esac; [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; for CANDIDATE in \(fallbackCandidates); do [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; return 1; }; \(commandPathVariable)=\"$(\(resolveFunctionName))\" || { echo '\(notFoundMarker)' >&2; exit 1; }; [ -n \"$\(commandPathVariable)\" ] || { echo '\(notFoundMarker)' >&2; exit 1; }; printf '%s\\n' \"$\(commandPathVariable)\"; \"$\(commandPathVariable)\" --version"
+    }
+
+    private func remoteIBMBobPassiveProbeArguments(executable: String, workspace: Workspace, host: NexusDomain.Host) -> [String] {
+        var arguments = [
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=5"
+        ]
+        if let port = host.port {
+            arguments += ["-p", String(port)]
+        }
+        arguments += [host.sshTarget, remoteIBMBobPassiveProbeScript(executable: executable, workspace: workspace)]
+        return arguments
+    }
+
+    private func remoteIBMBobPassiveProbeScript(executable: String, workspace: Workspace) -> String {
+        "cd \(shellQuoted(workspace.folderPath)) || { echo 'NEXUS_REMOTE_WORKSPACE_UNAVAILABLE' >&2; exit 1; }; exec \(shellQuoted(executable)) '--list-sessions'"
+    }
+
     private func remoteCLIHealthProbeArguments(commandName: String, workspace: Workspace, host: NexusDomain.Host) -> [String] {
         var arguments = [
             "-o", "BatchMode=yes",
@@ -1139,6 +1344,19 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, @unchecked Sendable {
         }
 
         return (.misconfigured, "\(providerName) is installed but failed the remote launch probe", "remoteLaunchProbeFailed", nil)
+    }
+
+    private func remoteIBMBobBlockedSummary(for code: String) -> String {
+        switch code {
+        case "licenseRequired":
+            "IBM Bob requires license acceptance"
+        case "authenticationRequired":
+            "IBM Bob requires authentication on the Remote Workspace"
+        case "setupRequired":
+            "IBM Bob requires setup on the Remote Workspace"
+        default:
+            "IBM Bob is unavailable on the Remote Workspace"
+        }
     }
 
     private func classifyLocalIBMBobPassiveProbeFailure(detail: String) -> (
