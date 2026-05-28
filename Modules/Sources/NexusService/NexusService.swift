@@ -1943,6 +1943,10 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             return resolvedSession
         }
 
+        if try stopRequiresActiveIBMBobTurn(resolvedSession), sessionRuntimeManager.hasRuntime(for: resolvedSession) == false {
+            throw IBMBobSessionRuntimeError.noActiveTurnToStop
+        }
+
         try sessionRuntimeManager.stop(session: resolvedSession)
         guard let updatedSession = try metadataStore.session(id: sessionID) else {
             throw NexusMetadataStoreError.sessionNotFound
@@ -3861,13 +3865,26 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     private func sessionMayRemainReadyWithoutRuntime(_ session: Session, workspace: Workspace?) throws -> Bool {
-        guard session.providerID == .ibmBob,
-              workspace?.kind == .local,
-              try persistedPrimarySurface(for: session, workspace: workspace) == .structuredActivityFeed else {
+        guard try stopRequiresActiveIBMBobTurn(session, workspace: workspace) else {
             return false
         }
 
         return try metadataStore.sessionRecordAdapterMetadata(sessionID: session.id)?.ibmBobTurnInProgress != true
+    }
+
+    private func stopRequiresActiveIBMBobTurn(_ session: Session, workspace: Workspace? = nil) throws -> Bool {
+        let resolvedWorkspace = if let workspace {
+            workspace
+        } else {
+            try metadataStore.workspace(id: session.workspaceID)
+        }
+
+        guard session.providerID == .ibmBob,
+              resolvedWorkspace?.kind == .local else {
+            return false
+        }
+
+        return try persistedPrimarySurface(for: session, workspace: resolvedWorkspace) == .structuredActivityFeed
     }
 
     private func interruptedSessionFailureMessage(for session: Session, workspace: Workspace?) throws -> String {

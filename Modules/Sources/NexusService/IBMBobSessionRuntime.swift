@@ -10,13 +10,16 @@ protocol IBMBobTransporting: AnyObject {
     func terminate() throws
 }
 
-enum IBMBobSessionRuntimeError: LocalizedError {
+enum IBMBobSessionRuntimeError: LocalizedError, Equatable {
     case busy
+    case noActiveTurnToStop
 
     var errorDescription: String? {
         switch self {
         case .busy:
             return "IBM Bob is already handling a prompt. Wait for the current turn to finish before sending another one."
+        case .noActiveTurnToStop:
+            return "IBM Bob has no active turn to stop."
         }
     }
 }
@@ -119,18 +122,17 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
     }
 
     func stop() throws {
-        let transport: (any IBMBobTransporting)?
+        let transport: any IBMBobTransporting
         lock.lock()
-        runtimeState = .exited
+        guard isStreaming, let activeTransport else {
+            lock.unlock()
+            throw IBMBobSessionRuntimeError.noActiveTurnToStop
+        }
         didRequestStop = true
-        isStreaming = false
         transport = activeTransport
-        activeTransport = nil
-        activeTurn = nil
         lock.unlock()
 
-        try transport?.terminate()
-        notifyChange()
+        try transport.terminate()
     }
 
     func sendInput(_ text: String) throws {
@@ -280,9 +282,13 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
         } else if shouldAppendError {
             runtimeState = .failed
             activityItems.append(SessionActivityItem(kind: .error, text: errorText))
-        } else if requestedStop == false {
+        } else {
             runtimeState = .ready
+            if requestedStop {
+                activityItems.append(SessionActivityItem(kind: .status, text: "IBM Bob turn stopped."))
+            }
         }
+        stderrLines = []
         lock.unlock()
 
         if let retryPrompt {
@@ -291,7 +297,7 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
             return
         }
 
-        if shouldNotify {
+        if shouldNotify || requestedStop {
             notifyChange()
         }
     }

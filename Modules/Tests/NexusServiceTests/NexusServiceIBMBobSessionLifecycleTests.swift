@@ -73,7 +73,7 @@ struct NexusServiceIBMBobSessionLifecycleTests {
         #expect(providerDetail.alternateSessions.map(\.name) == ["Session 1", "Session 2"])
     }
 
-    @Test func localIBMBobStoppedDefaultSessionRelaunchesBackToIdleStructuredScreen() throws {
+    @Test func localIBMBobIdleReadySessionRejectsStopAndStaysResumable() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -89,20 +89,23 @@ struct NexusServiceIBMBobSessionLifecycleTests {
         )
 
         let launchedSession = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
-        let stoppedSession = try service.stopSession(sessionID: launchedSession.id)
-        let stoppedOverview = try service.getWorkspaceOverview(workspaceID: workspace.id)
-        let relaunchedSession = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
-        let relaunchedScreen = try service.getSessionScreen(sessionID: relaunchedSession.id)
 
-        let providerCard = try #require(stoppedOverview.providerCards.first(where: { $0.provider.id == .ibmBob }))
+        do {
+            _ = try service.stopSession(sessionID: launchedSession.id)
+            Issue.record("Expected idle ready IBM Bob Session to reject Stop Session")
+        } catch let error as IBMBobSessionRuntimeError {
+            #expect(error == .noActiveTurnToStop)
+        }
 
-        #expect(stoppedSession.state == .exited)
-        #expect(providerCard.defaultSession.state == .exited)
-        #expect(providerCard.defaultSession.actionTitle == "Relaunch")
-        #expect(relaunchedSession.id == launchedSession.id)
-        #expect(relaunchedScreen.session.state == .ready)
-        #expect(relaunchedScreen.primarySurface == .structuredActivityFeed)
-        #expect(relaunchedScreen.activityItems.map(\.text) == ["IBM Bob Session ready. Send a prompt to start IBM Bob."])
+        let idleScreen = try service.getSessionScreen(sessionID: launchedSession.id)
+        let overview = try service.getWorkspaceOverview(workspaceID: workspace.id)
+        let providerCard = try #require(overview.providerCards.first(where: { $0.provider.id == .ibmBob }))
+
+        #expect(idleScreen.session.state == .ready)
+        #expect(idleScreen.primarySurface == .structuredActivityFeed)
+        #expect(idleScreen.activityItems.map(\.text) == ["IBM Bob Session ready. Send a prompt to start IBM Bob."])
+        #expect(providerCard.defaultSession.state == .ready)
+        #expect(providerCard.defaultSession.actionTitle == "Resume")
     }
 }
 

@@ -401,6 +401,190 @@ struct NexusServiceIBMBobPromptFlowTests {
         ])
     }
 
+    @Test func localIBMBobRejectsSecondPromptWhileActiveTurnIsStillStreaming() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
+
+        let transportHarness = InFlightIBMBobTransportHarness(turns: [
+            .init(initialStdoutLines: [
+                #"{"type":"status","text":"Bob turn started","session_id":"bob-session-1"}"#,
+                #"{"type":"message","text":"Partial reply"}"#
+            ])
+        ])
+        let launcher = ProcessSessionRuntimeLauncher(ibmBobTransportFactory: { executable, arguments, workingDirectory in
+            try transportHarness.makeTransport(executable: executable, arguments: arguments, workingDirectory: workingDirectory)
+        })
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: IBMBobPromptStubExecutableResolver(executables: ["bob": "/tmp/fake-bob"]),
+                commandRunner: IBMBobPromptStubCommandRunner(results: [
+                    .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--version'"]): .success(stdout: "3.4.5\n"),
+                    .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--list-sessions'"]): .success(stdout: "[]\n")
+                ]),
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+            ),
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+        )
+
+        let group = try service.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try service.createLocalWorkspace(
+            name: "Local Bob",
+            folderPath: workspaceFolder.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
+        let partialScreen = try service.sendSessionInput(sessionID: session.id, text: "first")
+
+        do {
+            _ = try service.sendSessionInput(sessionID: session.id, text: "second")
+            Issue.record("Expected active IBM Bob turn to reject a second prompt")
+        } catch let error as IBMBobSessionRuntimeError {
+            #expect(error == .busy)
+        }
+
+        let unchangedScreen = try service.getSessionScreen(sessionID: session.id)
+
+        #expect(partialScreen.activityItems.map(\.text) == [
+            "IBM Bob Session ready. Send a prompt to start IBM Bob.",
+            "You: first",
+            "Bob turn started",
+            "Partial reply"
+        ])
+        #expect(unchangedScreen.activityItems == partialScreen.activityItems)
+    }
+
+    @Test func localIBMBobStopSessionInterruptsOnlyActiveTurnAndPreservesPartialHistory() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
+
+        let transportHarness = InFlightIBMBobTransportHarness(turns: [
+            .init(initialStdoutLines: [
+                #"{"type":"status","text":"Bob turn started","session_id":"bob-session-1"}"#,
+                #"{"type":"message","text":"Partial reply"}"#
+            ])
+        ])
+        let launcher = ProcessSessionRuntimeLauncher(ibmBobTransportFactory: { executable, arguments, workingDirectory in
+            try transportHarness.makeTransport(executable: executable, arguments: arguments, workingDirectory: workingDirectory)
+        })
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: IBMBobPromptStubExecutableResolver(executables: ["bob": "/tmp/fake-bob"]),
+                commandRunner: IBMBobPromptStubCommandRunner(results: [
+                    .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--version'"]): .success(stdout: "3.4.5\n"),
+                    .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--list-sessions'"]): .success(stdout: "[]\n")
+                ]),
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+            ),
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+        )
+
+        let group = try service.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try service.createLocalWorkspace(
+            name: "Local Bob",
+            folderPath: workspaceFolder.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
+        let partialScreen = try service.sendSessionInput(sessionID: session.id, text: "first")
+        let stoppedSession = try service.stopSession(sessionID: session.id)
+        let stoppedScreen = try service.getSessionScreen(sessionID: session.id)
+        let metadataStore = try NexusMetadataStore(storeURL: service.storeURL)
+        let metadata = try metadataStore.sessionRecordAdapterMetadata(sessionID: session.id)
+
+        #expect(partialScreen.activityItems.map(\.text) == [
+            "IBM Bob Session ready. Send a prompt to start IBM Bob.",
+            "You: first",
+            "Bob turn started",
+            "Partial reply"
+        ])
+        #expect(stoppedSession.id == session.id)
+        #expect(stoppedSession.state == .ready)
+        #expect(stoppedScreen.session.state == .ready)
+        #expect(stoppedScreen.activityItems.map(\.kind).suffix(3) == [.status, .message, .status])
+        #expect(stoppedScreen.activityItems.map(\.text) == [
+            "IBM Bob Session ready. Send a prompt to start IBM Bob.",
+            "You: first",
+            "Bob turn started",
+            "Partial reply",
+            "IBM Bob turn stopped."
+        ])
+        #expect(metadata?.ibmBobTurnInProgress == false)
+        #expect(metadata?.ibmBobPersistedActivityItems?.map(\.text) == stoppedScreen.activityItems.map(\.text))
+    }
+
+    @Test func localIBMBobRestartedIdleReadySessionStillRejectsStopWithoutActiveTurn() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
+
+        let transportHarness = IBMBobServiceTransportHarness(turns: [
+            .init(stdoutLines: [
+                #"{"type":"status","text":"Bob turn started","session_id":"bob-session-1"}"#,
+                #"{"type":"message","text":"First reply"}"#,
+                #"{"type":"completion","text":"First turn complete"}"#
+            ])
+        ])
+        func makeService() throws -> NexusService {
+            let launcher = ProcessSessionRuntimeLauncher(ibmBobTransportFactory: { executable, arguments, workingDirectory in
+                try transportHarness.makeTransport(executable: executable, arguments: arguments, workingDirectory: workingDirectory)
+            })
+            return try NexusService.bootstrapForTests(
+                rootURL: rootURL,
+                providerHealthEvaluator: ProviderHealthEvaluator(
+                    executableResolver: IBMBobPromptStubExecutableResolver(executables: ["bob": "/tmp/fake-bob"]),
+                    commandRunner: IBMBobPromptStubCommandRunner(results: [
+                        .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--version'"]): .success(stdout: "3.4.5\n"),
+                        .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--list-sessions'"]): .success(stdout: "[]\n")
+                    ]),
+                    localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+                ),
+                sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+            )
+        }
+
+        let service = try makeService()
+        let group = try service.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try service.createLocalWorkspace(
+            name: "Local Bob",
+            folderPath: workspaceFolder.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
+        _ = try service.sendSessionInput(sessionID: session.id, text: "first")
+
+        let restartedService = try makeService()
+
+        do {
+            _ = try restartedService.stopSession(sessionID: session.id)
+            Issue.record("Expected restarted idle IBM Bob Session to reject Stop Session")
+        } catch let error as IBMBobSessionRuntimeError {
+            #expect(error == .noActiveTurnToStop)
+        }
+
+        let restartedScreen = try restartedService.getSessionScreen(sessionID: session.id)
+
+        #expect(restartedScreen.session.state == .ready)
+        #expect(restartedScreen.activityItems.suffix(4).map(\.text) == [
+            "You: first",
+            "Bob turn started",
+            "First reply",
+            "First turn complete"
+        ])
+    }
+
     @Test func localIBMBobInFlightTurnBecomesInterruptedAfterServiceRestartWhileKeepingPartialHistoryInspectable() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)
