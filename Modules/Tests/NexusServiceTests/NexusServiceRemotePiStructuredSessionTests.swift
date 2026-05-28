@@ -82,6 +82,188 @@ struct NexusServiceRemotePiStructuredSessionTests {
         #expect(resumedLaunch.arguments.last?.contains("tmux new-session") == false)
     }
 
+    @Test func remotePiFreshRelaunchFallsBackToNewSessionWhenPersistedLinkageIsRejected() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let transportHarness = RemotePiTransportHarness()
+        func makeService() throws -> NexusService {
+            try makeRemotePiService(rootURL: rootURL, transportHarness: transportHarness)
+        }
+
+        let service = try makeService()
+        let group = try service.createWorkspaceGroup(name: "Remote")
+        let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: nil)
+        _ = try service.validateHost(hostID: host.id)
+        let workspace = try service.createRemoteWorkspace(
+            name: "Remote Pi",
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+
+        let firstSession = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+        let firstLaunch = try #require(transportHarness.launches().last)
+
+        transportHarness.failNextAttachStartup(message: "NEXUS_REMOTE_RUNTIME_NOT_FOUND")
+        transportHarness.rejectNextFreshLaunchLinkedSession(message: "Invalid Pi session linkage")
+
+        let restartedService = try makeService()
+        let resumedSession = try restartedService.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+        let resumedScreen = try restartedService.getSessionScreen(sessionID: resumedSession.id)
+        let launches = transportHarness.launches()
+        let recoveryAttempt = try #require(launches.dropFirst().first)
+        let failedFreshLaunch = try #require(launches.dropFirst(2).first)
+        let fallbackLaunch = try #require(launches.last)
+        let metadataStore = try NexusMetadataStore(storeURL: restartedService.storeURL)
+        let metadata = try metadataStore.sessionRecordAdapterMetadata(sessionID: resumedSession.id)
+
+        #expect(firstSession.id == resumedSession.id)
+        #expect(resumedScreen.session.state == .ready)
+        #expect(resumedScreen.primarySurface == .structuredActivityFeed)
+        #expect(launches.count == 4)
+        #expect(recoveryAttempt.arguments.last?.contains("tmux has-session") == true)
+        #expect(failedFreshLaunch.arguments.last?.contains("tmux new-session") == true)
+        #expect(failedFreshLaunch.sessionFile == firstLaunch.sessionFile)
+        #expect(fallbackLaunch.arguments.last?.contains("tmux new-session") == true)
+        #expect(fallbackLaunch.sessionFile != firstLaunch.sessionFile)
+        #expect(metadata?.piSessionLinkage?.sessionFile == fallbackLaunch.sessionFile)
+    }
+
+    @Test func remotePiNamedSessionUsesStructuredSurfaceAndOwnSessionLinkageAlongsideDefaultSession() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let transportHarness = RemotePiTransportHarness()
+        func makeService() throws -> NexusService {
+            try makeRemotePiService(rootURL: rootURL, transportHarness: transportHarness)
+        }
+
+        let service = try makeService()
+        let group = try service.createWorkspaceGroup(name: "Remote")
+        let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: nil)
+        _ = try service.validateHost(hostID: host.id)
+        let workspace = try service.createRemoteWorkspace(
+            name: "Remote Pi",
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+
+        let defaultSession = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+        let namedSession = try service.createNamedSession(workspaceID: workspace.id, providerID: .pi, name: "Review")
+        let detail = try service.getProviderDetail(workspaceID: workspace.id, providerID: .pi)
+        let namedScreen = try service.getSessionScreen(sessionID: namedSession.id)
+
+        let restartedService = try makeService()
+        let resumedNamedSession = try restartedService.launchOrResumeSession(sessionID: namedSession.id)
+        let resumedNamedScreen = try restartedService.getSessionScreen(sessionID: namedSession.id)
+        let launches = transportHarness.launches()
+        let defaultLaunch = try #require(launches.first)
+        let namedLaunch = try #require(launches.dropFirst().first)
+        let resumedNamedLaunch = try #require(launches.last)
+        let metadataStore = try NexusMetadataStore(storeURL: restartedService.storeURL)
+        let metadata = try metadataStore.sessionRecordAdapterMetadata(sessionID: resumedNamedSession.id)
+
+        #expect(detail.defaultSession?.id == defaultSession.id)
+        #expect(detail.alternateSessions.map(\.id) == [namedSession.id])
+        #expect(detail.failedSessions.isEmpty)
+        #expect(namedScreen.primarySurface == .structuredActivityFeed)
+        #expect(namedScreen.activityItems.map(\.text) == ["Pi shared Session stream connected"])
+        #expect(resumedNamedSession.id == namedSession.id)
+        #expect(resumedNamedScreen.primarySurface == .structuredActivityFeed)
+        #expect(resumedNamedScreen.activityItems.map(\.text) == ["Pi shared Session stream connected"])
+        #expect(launches.count == 3)
+        #expect(defaultLaunch.sessionFile != namedLaunch.sessionFile)
+        #expect(namedLaunch.sessionFile == resumedNamedLaunch.sessionFile)
+        #expect(metadata?.piSessionLinkage?.sessionFile == namedLaunch.sessionFile)
+    }
+
+    @Test func remotePiNamedSessionCanBeStoppedRelaunchedAndDeleted() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let transportHarness = RemotePiTransportHarness()
+        func makeService() throws -> NexusService {
+            try makeRemotePiService(rootURL: rootURL, transportHarness: transportHarness)
+        }
+
+        let service = try makeService()
+        let group = try service.createWorkspaceGroup(name: "Remote")
+        let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: nil)
+        _ = try service.validateHost(hostID: host.id)
+        let workspace = try service.createRemoteWorkspace(
+            name: "Remote Pi",
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+
+        let namedSession = try service.createNamedSession(workspaceID: workspace.id, providerID: .pi, name: "Review")
+        let firstLaunch = try #require(transportHarness.launches().last)
+        let stoppedSession = try service.stopSession(sessionID: namedSession.id)
+        let stoppedRecord = try service.getSessionRecord(sessionID: namedSession.id)
+
+        let restartedService = try makeService()
+        let relaunchedSession = try restartedService.launchOrResumeSession(sessionID: namedSession.id)
+        let metadataStore = try NexusMetadataStore(storeURL: restartedService.storeURL)
+        let metadata = try metadataStore.sessionRecordAdapterMetadata(sessionID: relaunchedSession.id)
+        _ = try restartedService.stopSession(sessionID: namedSession.id)
+        let deleted = try restartedService.deleteSessionRecord(sessionID: namedSession.id)
+        let detail = try restartedService.getProviderDetail(workspaceID: workspace.id, providerID: .pi)
+        let launches = transportHarness.launches()
+        let resumedLaunch = try #require(launches.last)
+
+        #expect(namedSession.name == "Review")
+        #expect(namedSession.isDefault == false)
+        #expect(stoppedSession.id == namedSession.id)
+        #expect(stoppedSession.state == .exited)
+        #expect(stoppedRecord.state == .exited)
+        #expect(relaunchedSession.id == namedSession.id)
+        #expect(relaunchedSession.state == .ready)
+        #expect(firstLaunch.sessionFile == resumedLaunch.sessionFile)
+        #expect(metadata?.piSessionLinkage?.sessionFile == firstLaunch.sessionFile)
+        #expect(deleted)
+        #expect(detail.alternateSessions.isEmpty)
+
+        do {
+            _ = try restartedService.getSessionScreen(sessionID: namedSession.id)
+            Issue.record("Expected deleted remote Pi Session Record to be unavailable")
+        } catch {
+        }
+    }
+
+    @Test func remotePiFailedNamedSessionAppearsInProviderDetailFailedSessionRecords() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let transportHarness = RemotePiTransportHarness()
+        transportHarness.failNextFreshLaunch(message: "Pi RPC startup failed")
+        let service = try makeRemotePiService(rootURL: rootURL, transportHarness: transportHarness)
+
+        let group = try service.createWorkspaceGroup(name: "Remote")
+        let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: nil)
+        _ = try service.validateHost(hostID: host.id)
+        let workspace = try service.createRemoteWorkspace(
+            name: "Remote Pi",
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+
+        let failedSession = try service.createNamedSession(workspaceID: workspace.id, providerID: .pi, name: "Review")
+        let detail = try service.getProviderDetail(workspaceID: workspace.id, providerID: .pi)
+
+        #expect(failedSession.state == .failed)
+        #expect(detail.defaultSession == nil)
+        #expect(detail.alternateSessions.isEmpty)
+        #expect(detail.failedSessions.map(\.id) == [failedSession.id])
+    }
+
     @Test func remotePiBridgeLossLeavesInterruptedInspectableSessionUntilExplicitResume() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)
@@ -123,7 +305,47 @@ struct NexusServiceRemotePiStructuredSessionTests {
 }
 
 private func makeRemotePiService(rootURL: URL, transportHarness: RemotePiTransportHarness) throws -> NexusService {
-    let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: transportHarness.makeTransport)
+    let remoteProtocolSessionCommandBuilder = RemoteProtocolSessionCommandBuilder()
+    let launcher = ProcessSessionRuntimeLauncher(
+        remoteProtocolNativeRuntimeFactories: [
+            .pi: { launchConfiguration, _, _ in
+                guard let remoteHost = launchConfiguration.remoteHost,
+                      let runtimeIdentifier = launchConfiguration.remoteRuntimeIdentifier else {
+                    throw NSError(
+                        domain: "RemotePiStructuredSessionTests",
+                        code: 1,
+                        userInfo: [NSLocalizedDescriptionKey: "Remote Pi launch requires a Host and runtime identifier."]
+                    )
+                }
+
+                let bridgeArguments = remoteProtocolSessionCommandBuilder.bridgeArguments(
+                    host: remoteHost,
+                    runtimeIdentifier: runtimeIdentifier,
+                    workingDirectory: launchConfiguration.workingDirectory,
+                    executable: launchConfiguration.executable,
+                    providerArguments: PiRPCSessionRuntime.transportArguments(
+                        sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.piSessionLinkage
+                    ),
+                    launchMode: launchConfiguration.remoteRuntimeLaunchMode
+                )
+
+                return try PiRPCSessionRuntime(
+                    executable: "/usr/bin/ssh",
+                    workingDirectory: launchConfiguration.workingDirectory,
+                    sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.piSessionLinkage,
+                    terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
+                    unexpectedTerminationState: .interrupted,
+                    unexpectedTerminationMessageBuilder: { _ in
+                        "Pi Session stream disconnected. Relaunch to reconnect to the tmux-backed remote runtime."
+                    },
+                    stopHandler: {},
+                    transportFactory: { _, _, _ in
+                        try transportHarness.makeTransport(executable: "/usr/bin/ssh", arguments: bridgeArguments, workingDirectory: nil)
+                    }
+                )
+            }
+        ]
+    )
 
     return try NexusService.bootstrapForTests(
         rootURL: rootURL,
@@ -197,17 +419,59 @@ private final class RemotePiTransportHarness: @unchecked Sendable {
     struct Launch: Sendable {
         let executable: String
         let arguments: [String]
+        let sessionID: String
+        let sessionFile: String
+    }
+
+    private struct SessionState {
+        let sessionID: String
+        let sessionFile: String
     }
 
     private let lock = NSLock()
+    private var nextSessionNumber = 0
+    private var sessionsByID: [String: SessionState] = [:]
+    private var sessionsByFile: [String: SessionState] = [:]
+    private var sessionsByRuntimeIdentifier: [String: SessionState] = [:]
     private var recordedLaunches: [Launch] = []
     private var activeTransports: [RemotePiTransport] = []
+    private var nextAttachStartupFailures: [String] = []
+    private var nextFreshLaunchStartupFailures: [String] = []
+    private var nextFreshLaunchLinkedSessionFailures: [String] = []
 
     func makeTransport(executable: String, arguments: [String], workingDirectory: String?) throws -> any PiRPCTransporting {
         lock.lock()
-        recordedLaunches.append(Launch(executable: executable, arguments: arguments))
+        let sessionArgument = sessionArgument(in: arguments)
+        let runtimeIdentifier = runtimeIdentifier(in: arguments)
+        let session = currentSession(for: sessionArgument, runtimeIdentifier: runtimeIdentifier)
+        let startupFailureMessage: String?
+        if arguments.last?.contains("tmux has-session") == true, nextAttachStartupFailures.isEmpty == false {
+            startupFailureMessage = nextAttachStartupFailures.removeFirst()
+        } else if arguments.last?.contains("tmux new-session") == true,
+                  nextFreshLaunchStartupFailures.isEmpty == false {
+            startupFailureMessage = nextFreshLaunchStartupFailures.removeFirst()
+        } else if arguments.last?.contains("tmux new-session") == true,
+                  sessionArgument != nil,
+                  nextFreshLaunchLinkedSessionFailures.isEmpty == false {
+            startupFailureMessage = nextFreshLaunchLinkedSessionFailures.removeFirst()
+        } else {
+            startupFailureMessage = nil
+        }
+        recordedLaunches.append(
+            Launch(
+                executable: executable,
+                arguments: arguments,
+                sessionID: session.sessionID,
+                sessionFile: session.sessionFile
+            )
+        )
         lock.unlock()
-        let transport = RemotePiTransport()
+
+        let transport = RemotePiTransport(
+            sessionID: session.sessionID,
+            sessionFile: session.sessionFile,
+            startupFailureMessage: startupFailureMessage
+        )
         register(transport)
         return transport
     }
@@ -216,6 +480,24 @@ private final class RemotePiTransportHarness: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return recordedLaunches
+    }
+
+    func failNextAttachStartup(message: String) {
+        lock.lock()
+        nextAttachStartupFailures.append(message)
+        lock.unlock()
+    }
+
+    func failNextFreshLaunch(message: String) {
+        lock.lock()
+        nextFreshLaunchStartupFailures.append(message)
+        lock.unlock()
+    }
+
+    func rejectNextFreshLaunchLinkedSession(message: String) {
+        lock.lock()
+        nextFreshLaunchLinkedSessionFailures.append(message)
+        lock.unlock()
     }
 
     func disconnectLatestTransport(status: Int32) {
@@ -230,11 +512,91 @@ private final class RemotePiTransportHarness: @unchecked Sendable {
         activeTransports.append(transport)
         lock.unlock()
     }
+
+    private func currentSession(for sessionArgument: String?, runtimeIdentifier: String?) -> SessionState {
+        if let sessionArgument {
+            if let session = sessionsByFile[sessionArgument] ?? sessionsByID[sessionArgument] {
+                if let runtimeIdentifier {
+                    sessionsByRuntimeIdentifier[runtimeIdentifier] = session
+                }
+                return session
+            }
+
+            let session = SessionState(
+                sessionID: sessionArgument.hasSuffix(".jsonl") ? "pi-session-unknown" : sessionArgument,
+                sessionFile: sessionArgument.hasSuffix(".jsonl") ? sessionArgument : "/tmp/\(sessionArgument).jsonl"
+            )
+            sessionsByID[session.sessionID] = session
+            sessionsByFile[session.sessionFile] = session
+            if let runtimeIdentifier {
+                sessionsByRuntimeIdentifier[runtimeIdentifier] = session
+            }
+            return session
+        }
+
+        if let runtimeIdentifier,
+           let session = sessionsByRuntimeIdentifier[runtimeIdentifier] {
+            return session
+        }
+
+        nextSessionNumber += 1
+        let sessionID = "pi-session-\(nextSessionNumber)"
+        let sessionFile = "/tmp/\(sessionID).jsonl"
+        let session = SessionState(sessionID: sessionID, sessionFile: sessionFile)
+        sessionsByID[sessionID] = session
+        sessionsByFile[sessionFile] = session
+        if let runtimeIdentifier {
+            sessionsByRuntimeIdentifier[runtimeIdentifier] = session
+        }
+        return session
+    }
+
+    private func sessionArgument(in arguments: [String]) -> String? {
+        guard let command = arguments.last,
+              let sessionFlagRange = command.range(of: "\"--session\" \"") else {
+            return nil
+        }
+
+        let remainder = command[sessionFlagRange.upperBound...]
+        guard let closingQuote = remainder.firstIndex(of: "\"") else {
+            return nil
+        }
+        return String(remainder[..<closingQuote])
+    }
+
+    private func runtimeIdentifier(in arguments: [String]) -> String? {
+        guard let command = arguments.last else {
+            return nil
+        }
+
+        for marker in ["tmux new-session -d -s '", "tmux has-session -t '"] {
+            guard let range = command.range(of: marker) else {
+                continue
+            }
+
+            let remainder = command[range.upperBound...]
+            guard let closingQuote = remainder.firstIndex(of: "'") else {
+                continue
+            }
+            return String(remainder[..<closingQuote])
+        }
+
+        return nil
+    }
 }
 
 private final class RemotePiTransport: PiRPCTransporting, @unchecked Sendable {
+    private let sessionID: String
+    private let sessionFile: String
+    private let startupFailureMessage: String?
     private var stdoutLineHandler: (@Sendable (String) -> Void)?
     private var terminationHandler: (@Sendable (Int32) -> Void)?
+
+    init(sessionID: String, sessionFile: String, startupFailureMessage: String?) {
+        self.sessionID = sessionID
+        self.sessionFile = sessionFile
+        self.startupFailureMessage = startupFailureMessage
+    }
 
     func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
         stdoutLineHandler = handler
@@ -253,13 +615,23 @@ private final class RemotePiTransport: PiRPCTransporting, @unchecked Sendable {
             return
         }
 
+        if let startupFailureMessage {
+            emit([
+                "id": object["id"] as? String ?? "state",
+                "type": "response",
+                "success": false,
+                "error": startupFailureMessage
+            ])
+            return
+        }
+
         emit([
             "id": object["id"] as? String ?? "state",
             "type": "response",
             "success": true,
             "data": [
-                "sessionId": "pi-session-1",
-                "sessionFile": "/tmp/pi-session-1.jsonl"
+                "sessionId": sessionID,
+                "sessionFile": sessionFile
             ]
         ])
     }

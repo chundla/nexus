@@ -45,6 +45,11 @@ enum RemoteRuntimeLaunchMode {
     case attachExisting
 }
 
+private enum SessionRecordAdapterMetadataLaunchSource {
+    case stored
+    case explicit(SessionRecordAdapterMetadata?)
+}
+
 struct SessionRuntimeLaunchConfiguration {
     let executable: String
     let arguments: [String]
@@ -2373,7 +2378,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         _ session: Session,
         workspace: Workspace,
         launchSnapshot: LaunchSnapshot,
-        forceFreshRemoteRuntime: Bool = false
+        forceFreshRemoteRuntime: Bool = false,
+        sessionRecordAdapterMetadataSource: SessionRecordAdapterMetadataLaunchSource = .stored
     ) throws -> Session {
         do {
             try sessionRuntimeManager.launchOrResume(
@@ -2384,6 +2390,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                     workspace: workspace,
                     launchSnapshot: launchSnapshot,
                     forceFreshRemoteRuntime: forceFreshRemoteRuntime,
+                    sessionRecordAdapterMetadataSource: sessionRecordAdapterMetadataSource,
                     remoteRuntimeLaunchMode: .launchNew
                 )
             )
@@ -2397,11 +2404,65 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             try persistPrimarySurfaceIfNeeded(for: session, primarySurface: screen.primarySurface)
             return session
         } catch {
+            if try shouldRetryFreshPiLaunchWithoutPersistedLinkage(
+                for: session,
+                workspace: workspace,
+                forceFreshRemoteRuntime: forceFreshRemoteRuntime,
+                sessionRecordAdapterMetadataSource: sessionRecordAdapterMetadataSource,
+                error: error
+            ) {
+                return try launchSession(
+                    session,
+                    workspace: workspace,
+                    launchSnapshot: launchSnapshot,
+                    forceFreshRemoteRuntime: true,
+                    sessionRecordAdapterMetadataSource: .explicit(nil)
+                )
+            }
+
             return try metadataStore.updateSession(
                 id: session.id,
                 state: .failed,
                 failureMessage: error.localizedDescription
             )
+        }
+    }
+
+    private func shouldRetryFreshPiLaunchWithoutPersistedLinkage(
+        for session: Session,
+        workspace: Workspace,
+        forceFreshRemoteRuntime: Bool,
+        sessionRecordAdapterMetadataSource: SessionRecordAdapterMetadataLaunchSource,
+        error: Error
+    ) throws -> Bool {
+        guard session.providerID == .pi,
+              workspace.kind == .remote,
+              forceFreshRemoteRuntime else {
+            return false
+        }
+
+        guard let metadata = try resolvedSessionRecordAdapterMetadata(
+            for: session,
+            source: sessionRecordAdapterMetadataSource
+        ), metadata.piSessionLinkage != nil else {
+            return false
+        }
+
+        let normalized = error.localizedDescription.lowercased()
+        return normalized.contains("invalid pi session")
+            || normalized.contains("invalid session")
+            || normalized.contains("session not found")
+    }
+
+    private func resolvedSessionRecordAdapterMetadata(
+        for session: Session,
+        source: SessionRecordAdapterMetadataLaunchSource
+    ) throws -> SessionRecordAdapterMetadata? {
+        switch source {
+        case .stored:
+            try metadataStore.sessionRecordAdapterMetadata(sessionID: session.id)
+        case let .explicit(metadata):
+            metadata
         }
     }
 
@@ -2454,6 +2515,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         workspace: Workspace,
         launchSnapshot: LaunchSnapshot,
         forceFreshRemoteRuntime: Bool,
+        sessionRecordAdapterMetadataSource: SessionRecordAdapterMetadataLaunchSource = .stored,
         remoteRuntimeLaunchMode: RemoteRuntimeLaunchMode
     ) throws -> SessionRuntimeLaunchConfiguration {
         let adapter = providerAdapter(for: session.providerID)
@@ -2477,7 +2539,10 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             remoteHost: remoteHost,
             remoteRuntimeIdentifier: resolvedRemoteRuntimeIdentifier,
             remoteRuntimeLaunchMode: remoteRuntimeLaunchMode,
-            sessionRecordAdapterMetadata: try metadataStore.sessionRecordAdapterMetadata(sessionID: session.id),
+            sessionRecordAdapterMetadata: try resolvedSessionRecordAdapterMetadata(
+                for: session,
+                source: sessionRecordAdapterMetadataSource
+            ),
             initialTranscript: adapter.initialTranscript(
                 for: workspace,
                 remoteHost: remoteHost,
