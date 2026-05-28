@@ -470,7 +470,8 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
         ibmBobTransportFactory: IBMBobSessionRuntime.TransportFactory? = nil,
         localProtocolNativeRuntimeFactories: [ProviderID: ProtocolNativeRuntimeFactory]? = nil,
         remoteProtocolNativeRuntimeFactories: [ProviderID: ProtocolNativeRuntimeFactory] = [:],
-        remoteProtocolSessionCommandBuilder: RemoteProtocolSessionCommandBuilder = RemoteProtocolSessionCommandBuilder()
+        remoteProtocolSessionCommandBuilder: RemoteProtocolSessionCommandBuilder = RemoteProtocolSessionCommandBuilder(),
+        remoteIBMBobCommandBuilder: RemoteIBMBobCommandBuilder = RemoteIBMBobCommandBuilder()
     ) {
         let resolvedPiTransportFactory: PiRPCSessionRuntime.TransportFactory = piTransportFactory ?? { executable, arguments, workingDirectory in
             try ProcessPiRPCTransport(
@@ -614,11 +615,12 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
                     )
                 },
                 .ibmBob: { launchConfiguration, _, _ in
-                    guard let remoteHost = launchConfiguration.remoteHost else {
+                    guard let remoteHost = launchConfiguration.remoteHost,
+                          let runtimeIdentifier = launchConfiguration.remoteRuntimeIdentifier else {
                         throw NSError(
                             domain: "ProcessSessionRuntimeLauncher",
                             code: 1,
-                            userInfo: [NSLocalizedDescriptionKey: "Remote IBM Bob launch requires a Host."]
+                            userInfo: [NSLocalizedDescriptionKey: "Remote IBM Bob launch requires a Host and runtime identifier."]
                         )
                     }
 
@@ -630,8 +632,9 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
                         transportFactory: { executable, arguments, workingDirectory in
                             try resolvedIBMBobTransportFactory(
                                 "/usr/bin/ssh",
-                                Self.remoteIBMBobArguments(
+                                remoteIBMBobCommandBuilder.bridgeArguments(
                                     host: remoteHost,
+                                    runtimeIdentifier: runtimeIdentifier,
                                     workingDirectory: workingDirectory ?? launchConfiguration.workingDirectory,
                                     executable: executable,
                                     providerArguments: arguments
@@ -694,40 +697,6 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
             initialTranscript: launchConfiguration.initialTranscript,
             terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder
         )
-    }
-
-    private static func remoteIBMBobArguments(
-        host: NexusDomain.Host,
-        workingDirectory: String,
-        executable: String,
-        providerArguments: [String]
-    ) -> [String] {
-        var arguments = ["-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5"]
-        if let port = host.port {
-            arguments += ["-p", String(port)]
-        }
-        arguments += [
-            host.sshTarget,
-            remoteIBMBobCommand(
-                workingDirectory: workingDirectory,
-                executable: executable,
-                providerArguments: providerArguments
-            )
-        ]
-        return arguments
-    }
-
-    private static func remoteIBMBobCommand(
-        workingDirectory: String,
-        executable: String,
-        providerArguments: [String]
-    ) -> String {
-        let command = ([shellQuoted(executable)] + providerArguments.map(shellQuoted)).joined(separator: " ")
-        return "cd \(shellQuoted(workingDirectory)) && exec \(command)"
-    }
-
-    private static func shellQuoted(_ value: String) -> String {
-        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
 
     private static func runCommand(executable: String, arguments: [String]) throws {

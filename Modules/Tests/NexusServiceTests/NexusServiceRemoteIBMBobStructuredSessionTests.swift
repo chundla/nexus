@@ -108,6 +108,148 @@ struct NexusServiceRemoteIBMBobStructuredSessionTests {
         #expect(detail.alternateSessions.map(\.name) == ["Session 1", "Session 2"])
         #expect(transportHarness.launches().isEmpty)
     }
+
+    @Test func remoteIBMBobDefaultPromptRunsOnHostThroughTmuxAndReturnsToReadyWithPersistedHistory() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let transportHarness = RemoteIBMBobTransportHarness(turns: [
+            .init(stdoutLines: [
+                #"{"type":"status","text":"Bob turn started","session_id":"bob-session-1"}"#,
+                #"{"type":"message","text":"Hello from remote Bob"}"#,
+                #"{"type":"completion","text":"Remote Bob turn complete"}"#
+            ])
+        ])
+        let service = try makeRemoteIBMBobService(rootURL: rootURL, transportHarness: transportHarness)
+
+        let group = try service.createWorkspaceGroup(name: "Remote")
+        let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
+        _ = try service.validateHost(hostID: host.id)
+        let workspace = try service.createRemoteWorkspace(
+            name: "Remote Bob",
+            hostID: host.id,
+            remotePath: "/srv/bob",
+            primaryGroupID: group.id
+        )
+
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
+        let responseScreen = try service.sendSessionInput(sessionID: session.id, text: "ship it")
+        let persistedScreen = try service.getSessionScreen(sessionID: session.id)
+        let metadataStore = try NexusMetadataStore(storeURL: service.storeURL)
+        let metadata = try metadataStore.sessionRecordAdapterMetadata(sessionID: session.id)
+        let launch = try #require(transportHarness.launches().first)
+        let remoteCommand = try #require(launch.arguments.last)
+
+        #expect(responseScreen.session.state == .ready)
+        #expect(responseScreen.primarySurface == .structuredActivityFeed)
+        #expect(responseScreen.activityItems.map(\.text) == [
+            "IBM Bob Session ready. Send a prompt to start IBM Bob.",
+            "You: ship it",
+            "Bob turn started",
+            "Hello from remote Bob",
+            "Remote Bob turn complete"
+        ])
+        #expect(persistedScreen.activityItems == responseScreen.activityItems)
+        #expect(metadata?.ibmBobSessionLinkage?.sessionID == "bob-session-1")
+        #expect(launch.executable == "/usr/bin/ssh")
+        #expect(launch.arguments.contains("build-box"))
+        #expect(remoteCommand.contains("tmux new-session"))
+        #expect(remoteCommand.contains("/tmp/fake-bob"))
+        #expect(remoteCommand.contains("--approval-mode"))
+    }
+
+    @Test func remoteIBMBobLaterPromptResumesFromExactStoredSessionIdentifier() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let transportHarness = RemoteIBMBobTransportHarness(turns: [
+            .init(stdoutLines: [
+                #"{"type":"status","text":"Bob turn started","session_id":"bob-session-1"}"#,
+                #"{"type":"message","text":"First reply"}"#,
+                #"{"type":"completion","text":"First turn complete"}"#
+            ]),
+            .init(stdoutLines: [
+                #"{"type":"status","text":"Bob resumed turn started"}"#,
+                #"{"type":"message","text":"Second reply"}"#,
+                #"{"type":"completion","text":"Second turn complete"}"#
+            ])
+        ])
+        let service = try makeRemoteIBMBobService(rootURL: rootURL, transportHarness: transportHarness)
+
+        let group = try service.createWorkspaceGroup(name: "Remote")
+        let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
+        _ = try service.validateHost(hostID: host.id)
+        let workspace = try service.createRemoteWorkspace(
+            name: "Remote Bob",
+            hostID: host.id,
+            remotePath: "/srv/bob",
+            primaryGroupID: group.id
+        )
+
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
+        _ = try service.sendSessionInput(sessionID: session.id, text: "first")
+        let secondResponse = try service.sendSessionInput(sessionID: session.id, text: "second")
+        let metadataStore = try NexusMetadataStore(storeURL: service.storeURL)
+        let metadata = try metadataStore.sessionRecordAdapterMetadata(sessionID: session.id)
+        let secondLaunch = try #require(transportHarness.launches().last)
+        let secondRemoteCommand = try #require(secondLaunch.arguments.last)
+
+        #expect(metadata?.ibmBobSessionLinkage?.sessionID == "bob-session-1")
+        #expect(secondRemoteCommand.contains("--resume"))
+        #expect(secondRemoteCommand.contains("bob-session-1"))
+        #expect(secondRemoteCommand.contains("latest") == false)
+        #expect(secondResponse.activityItems.suffix(4).map(\.text) == [
+            "You: second",
+            "Bob resumed turn started",
+            "Second reply",
+            "Second turn complete"
+        ])
+    }
+
+    @Test func remoteControllerSeesSharedRemoteIBMBobActivityAndMacCanReopenSameReadyHistory() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let transportHarness = RemoteIBMBobTransportHarness(turns: [
+            .init(stdoutLines: [
+                #"{"type":"status","text":"Bob turn started","session_id":"bob-session-1"}"#,
+                #"{"type":"message","text":"Hello from remote Bob"}"#,
+                #"{"type":"completion","text":"Remote Bob turn complete"}"#
+            ])
+        ])
+        let service = try makeRemoteIBMBobService(rootURL: rootURL, transportHarness: transportHarness)
+
+        let group = try service.createWorkspaceGroup(name: "Remote")
+        let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
+        _ = try service.validateHost(hostID: host.id)
+        let workspace = try service.createRemoteWorkspace(
+            name: "Remote Bob",
+            hostID: host.id,
+            remotePath: "/srv/bob",
+            primaryGroupID: group.id
+        )
+
+        let pairedDeviceID = UUID()
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
+        _ = try service.takeRemoteSessionControl(sessionID: session.id, pairedDeviceID: pairedDeviceID, columns: 44, rows: 12)
+        let remoteScreen = try service.sendRemoteSessionInput(sessionID: session.id, pairedDeviceID: pairedDeviceID, text: "ship it")
+        let macScreen = try service.getSessionScreen(sessionID: session.id)
+
+        #expect(remoteScreen.controller == .pairedDevice(pairedDeviceID))
+        #expect(remoteScreen.session.state == .ready)
+        #expect(remoteScreen.activityItems.map(\.text) == [
+            "IBM Bob Session ready. Send a prompt to start IBM Bob.",
+            "You: ship it",
+            "Bob turn started",
+            "Hello from remote Bob",
+            "Remote Bob turn complete"
+        ])
+        #expect(macScreen.activityItems == remoteScreen.activityItems)
+        #expect(macScreen.session.state == .ready)
+    }
 }
 
 private func makeRemoteIBMBobService(rootURL: URL, transportHarness: RemoteIBMBobTransportHarness) throws -> NexusService {
@@ -186,6 +328,18 @@ private struct RemoteIBMBobAvailableWorkspaceAvailabilityEvaluator: WorkspaceAva
 }
 
 private final class RemoteIBMBobTransportHarness: @unchecked Sendable {
+    struct Turn {
+        let stdoutLines: [String]
+        let stderrLines: [String]
+        let terminationStatus: Int32
+
+        init(stdoutLines: [String], stderrLines: [String] = [], terminationStatus: Int32 = 0) {
+            self.stdoutLines = stdoutLines
+            self.stderrLines = stderrLines
+            self.terminationStatus = terminationStatus
+        }
+    }
+
     struct Launch: Equatable {
         let executable: String
         let arguments: [String]
@@ -193,13 +347,20 @@ private final class RemoteIBMBobTransportHarness: @unchecked Sendable {
     }
 
     private let lock = NSLock()
+    private let turns: [Turn]
     private var recordedLaunches: [Launch] = []
+
+    init(turns: [Turn] = []) {
+        self.turns = turns
+    }
 
     func makeTransport(executable: String, arguments: [String], workingDirectory: String?) throws -> any IBMBobTransporting {
         lock.lock()
         recordedLaunches.append(Launch(executable: executable, arguments: arguments, workingDirectory: workingDirectory))
+        let launchIndex = recordedLaunches.count - 1
+        let turn = turns.isEmpty ? Turn(stdoutLines: []) : turns[min(launchIndex, turns.count - 1)]
         lock.unlock()
-        return RemoteIBMBobSynchronousTransport()
+        return RemoteIBMBobSynchronousTransport(turn: turn)
     }
 
     func launches() -> [Launch] {
@@ -210,10 +371,37 @@ private final class RemoteIBMBobTransportHarness: @unchecked Sendable {
 }
 
 private final class RemoteIBMBobSynchronousTransport: IBMBobTransporting, @unchecked Sendable {
-    func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {}
-    func setStderrLineHandler(_ handler: (@Sendable (String) -> Void)?) {}
-    func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?) {}
-    func start() throws {}
+    private let turn: RemoteIBMBobTransportHarness.Turn
+    private var stdoutLineHandler: (@Sendable (String) -> Void)?
+    private var stderrLineHandler: (@Sendable (String) -> Void)?
+    private var terminationHandler: (@Sendable (Int32) -> Void)?
+
+    init(turn: RemoteIBMBobTransportHarness.Turn = .init(stdoutLines: [])) {
+        self.turn = turn
+    }
+
+    func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
+        stdoutLineHandler = handler
+    }
+
+    func setStderrLineHandler(_ handler: (@Sendable (String) -> Void)?) {
+        stderrLineHandler = handler
+    }
+
+    func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?) {
+        terminationHandler = handler
+    }
+
+    func start() throws {
+        for line in turn.stdoutLines {
+            stdoutLineHandler?(line)
+        }
+        for line in turn.stderrLines {
+            stderrLineHandler?(line)
+        }
+        terminationHandler?(turn.terminationStatus)
+    }
+
     func terminate() throws {}
 }
 #endif
