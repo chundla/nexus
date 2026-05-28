@@ -73,8 +73,10 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
 
     var sessionRecordAdapterMetadata: SessionRecordAdapterMetadata? {
         lock.lock()
-        defer { lock.unlock() }
-        return sessionLinkage?.sessionRecordAdapterMetadata
+        let sessionID = sessionLinkage?.sessionID
+        let snapshotActivityItems = activityItems
+        lock.unlock()
+        return SessionRecordAdapterMetadata.ibmBob(sessionID: sessionID, activityItems: snapshotActivityItems)
     }
 
     func sessionScreen(for session: Session) -> SessionScreen {
@@ -261,6 +263,7 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
         shouldNotify = shouldAppendError || requestedStop == false
         retryPrompt = shouldRetryFresh ? activeTurn?.prompt : nil
         if shouldRetryFresh {
+            runtimeState = .ready
             sessionLinkage = nil
             activityItems.append(
                 SessionActivityItem(
@@ -269,7 +272,10 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
                 )
             )
         } else if shouldAppendError {
+            runtimeState = .failed
             activityItems.append(SessionActivityItem(kind: .error, text: errorText))
+        } else if requestedStop == false {
+            runtimeState = .ready
         }
         lock.unlock()
 
@@ -289,11 +295,33 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
         announceUserMessage: Bool,
         sessionLinkage: IBMBobSessionLinkage?
     ) throws {
-        let transport = try transportFactory(
-            executable,
-            Self.launchArguments(prompt: prompt, sessionLinkage: sessionLinkage),
-            workingDirectory
-        )
+        lock.lock()
+        guard isStreaming == false else {
+            lock.unlock()
+            throw IBMBobSessionRuntimeError.busy
+        }
+        draft = ""
+        didRequestStop = false
+        stderrLines = []
+        runtimeState = .ready
+        if announceUserMessage {
+            transcriptEntries.append("> \(prompt)")
+            activityItems.append(SessionActivityItem(kind: .message, text: "You: \(prompt)"))
+        }
+        lock.unlock()
+        notifyChange()
+
+        let transport: any IBMBobTransporting
+        do {
+            transport = try transportFactory(
+                executable,
+                Self.launchArguments(prompt: prompt, sessionLinkage: sessionLinkage),
+                workingDirectory
+            )
+        } catch {
+            failPromptLaunch(error.localizedDescription)
+            return
+        }
 
         transport.setStdoutLineHandler { [weak self] line in
             self?.handleStdoutLine(line)
@@ -306,33 +334,33 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
         }
 
         lock.lock()
-        guard isStreaming == false else {
-            lock.unlock()
-            throw IBMBobSessionRuntimeError.busy
-        }
-        draft = ""
-        didRequestStop = false
         isStreaming = true
-        stderrLines = []
         activeTransport = transport
         activeTurn = ActiveTurn(prompt: prompt, resumedSessionID: sessionLinkage?.sessionID)
-        if announceUserMessage {
-            transcriptEntries.append("> \(prompt)")
-            activityItems.append(SessionActivityItem(kind: .message, text: "You: \(prompt)"))
-        }
         lock.unlock()
         notifyChange()
 
         do {
             try transport.start()
         } catch {
-            lock.lock()
-            isStreaming = false
-            activeTransport = nil
-            activeTurn = nil
-            lock.unlock()
-            throw error
+            failPromptLaunch(error.localizedDescription)
         }
+    }
+
+    private func failPromptLaunch(_ message: String) {
+        let resolvedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "IBM Bob failed to start."
+            : message.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        lock.lock()
+        didRequestStop = false
+        isStreaming = false
+        activeTransport = nil
+        activeTurn = nil
+        runtimeState = .failed
+        activityItems.append(SessionActivityItem(kind: .error, text: resolvedMessage))
+        lock.unlock()
+        notifyChange()
     }
 
     private func retryFreshPrompt(_ prompt: String) {

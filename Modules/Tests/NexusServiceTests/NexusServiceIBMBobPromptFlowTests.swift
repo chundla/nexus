@@ -5,6 +5,157 @@ import NexusDomain
 import Testing
 
 struct NexusServiceIBMBobPromptFlowTests {
+    @Test func localIBMBobFailedFirstPromptBecomesInspectableFailedDefaultSessionRecord() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
+
+        let transportHarness = IBMBobServiceTransportHarness(turns: [
+            .init(stdoutLines: [], stderrLines: ["Bob startup failed"], terminationStatus: 1)
+        ])
+        let launcher = ProcessSessionRuntimeLauncher(ibmBobTransportFactory: { executable, arguments, workingDirectory in
+            try transportHarness.makeTransport(executable: executable, arguments: arguments, workingDirectory: workingDirectory)
+        })
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: IBMBobPromptStubExecutableResolver(executables: ["bob": "/tmp/fake-bob"]),
+                commandRunner: IBMBobPromptStubCommandRunner(results: [
+                    .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--version'"]): .success(stdout: "3.4.5\n"),
+                    .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--list-sessions'"]): .success(stdout: "[]\n")
+                ]),
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+            ),
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+        )
+
+        let group = try service.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try service.createLocalWorkspace(
+            name: "Local Bob",
+            folderPath: workspaceFolder.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
+        let responseScreen = try service.sendSessionInput(sessionID: session.id, text: "ship it")
+        let failedSession = try service.getSessionRecord(sessionID: session.id)
+        let failedScreen = try service.getSessionScreen(sessionID: session.id)
+        let overview = try service.getWorkspaceOverview(workspaceID: workspace.id)
+        let providerCard = try #require(overview.providerCards.first(where: { $0.provider.id == .ibmBob }))
+
+        #expect(responseScreen.session.state == .failed)
+        #expect(failedSession.id == session.id)
+        #expect(failedSession.state == .failed)
+        #expect(failedSession.failureMessage == "Bob startup failed")
+        #expect(failedScreen.activityItems.map(\.text) == [
+            "IBM Bob Session ready. Send a prompt to start IBM Bob.",
+            "You: ship it",
+            "Bob startup failed"
+        ])
+        #expect(providerCard.defaultSession.state == .failed)
+        #expect(providerCard.defaultSession.actionTitle == "Relaunch")
+    }
+
+    @Test func localIBMBobRelaunchReturnsFailedSessionRecordToReadyWithoutReplayingPrompt() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
+
+        let transportHarness = IBMBobServiceTransportHarness(turns: [
+            .init(stdoutLines: [], stderrLines: ["Bob startup failed"], terminationStatus: 1)
+        ])
+        let launcher = ProcessSessionRuntimeLauncher(ibmBobTransportFactory: { executable, arguments, workingDirectory in
+            try transportHarness.makeTransport(executable: executable, arguments: arguments, workingDirectory: workingDirectory)
+        })
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: IBMBobPromptStubExecutableResolver(executables: ["bob": "/tmp/fake-bob"]),
+                commandRunner: IBMBobPromptStubCommandRunner(results: [
+                    .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--version'"]): .success(stdout: "3.4.5\n"),
+                    .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--list-sessions'"]): .success(stdout: "[]\n")
+                ]),
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+            ),
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+        )
+
+        let group = try service.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try service.createLocalWorkspace(
+            name: "Local Bob",
+            folderPath: workspaceFolder.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
+        _ = try service.sendSessionInput(sessionID: session.id, text: "ship it")
+
+        let relaunchedSession = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
+        let relaunchedScreen = try service.getSessionScreen(sessionID: session.id)
+
+        #expect(relaunchedSession.id == session.id)
+        #expect(relaunchedSession.state == .ready)
+        #expect(relaunchedScreen.session.state == .ready)
+        #expect(relaunchedScreen.activityItems.map(\.text) == ["IBM Bob Session ready. Send a prompt to start IBM Bob."])
+        #expect(transportHarness.launches.count == 1)
+    }
+
+    @Test func localIBMBobFailedResumeMovesNamedSessionIntoFailedSessionRecords() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
+
+        let transportHarness = IBMBobServiceTransportHarness(turns: [
+            .init(stdoutLines: [
+                #"{"type":"status","text":"Bob turn started","session_id":"bob-session-1"}"#,
+                #"{"type":"message","text":"First reply"}"#,
+                #"{"type":"completion","text":"First turn complete"}"#
+            ]),
+            .init(stdoutLines: [], stderrLines: ["Bob resume failed"], terminationStatus: 1)
+        ])
+        let launcher = ProcessSessionRuntimeLauncher(ibmBobTransportFactory: { executable, arguments, workingDirectory in
+            try transportHarness.makeTransport(executable: executable, arguments: arguments, workingDirectory: workingDirectory)
+        })
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: IBMBobPromptStubExecutableResolver(executables: ["bob": "/tmp/fake-bob"]),
+                commandRunner: IBMBobPromptStubCommandRunner(results: [
+                    .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--version'"]): .success(stdout: "3.4.5\n"),
+                    .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--list-sessions'"]): .success(stdout: "[]\n")
+                ]),
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+            ),
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+        )
+
+        let group = try service.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try service.createLocalWorkspace(
+            name: "Local Bob",
+            folderPath: workspaceFolder.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+
+        let namedSession = try service.createNamedSession(workspaceID: workspace.id, providerID: .ibmBob, name: "Review")
+        _ = try service.sendSessionInput(sessionID: namedSession.id, text: "first")
+        let failedScreen = try service.sendSessionInput(sessionID: namedSession.id, text: "second")
+        let providerDetail = try service.getProviderDetail(workspaceID: workspace.id, providerID: .ibmBob)
+        let resumedLaunch = try #require(transportHarness.launches.last)
+
+        #expect(failedScreen.session.state == .failed)
+        #expect(failedScreen.activityItems.suffix(2).map(\.text) == ["You: second", "Bob resume failed"])
+        #expect(resumedLaunch.arguments.contains("--resume"))
+        #expect(resumedLaunch.arguments.contains("bob-session-1"))
+        #expect(providerDetail.alternateSessions.isEmpty)
+        #expect(providerDetail.failedSessions.map(\.id) == [namedSession.id])
+    }
+
     @Test func localIBMBobPromptRunsThroughSharedStructuredSessionSurface() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)
@@ -115,7 +266,13 @@ struct NexusServiceIBMBobPromptFlowTests {
         let secondLaunch = try #require(transportHarness.launches.last)
 
         #expect(metadata?.providerID == .ibmBob)
-        #expect(metadata?.values == ["bobSessionID": "bob-session-1"])
+        #expect(metadata?.ibmBobSessionLinkage?.sessionID == "bob-session-1")
+        #expect(metadata?.ibmBobPersistedActivityItems?.suffix(4).map(\.text) == [
+            "You: second",
+            "Bob resumed turn started",
+            "Second reply",
+            "Second turn complete"
+        ])
         #expect(secondLaunch.arguments.contains("--resume"))
         #expect(secondLaunch.arguments.contains("bob-session-1"))
         #expect(secondLaunch.arguments.contains("latest") == false)
@@ -184,7 +341,14 @@ struct NexusServiceIBMBobPromptFlowTests {
         #expect(failedResumeLaunch.arguments.contains("--resume"))
         #expect(failedResumeLaunch.arguments.contains("bob-session-1"))
         #expect(fallbackLaunch.arguments.contains("--resume") == false)
-        #expect(metadata?.values == ["bobSessionID": "bob-session-2"])
+        #expect(metadata?.ibmBobSessionLinkage?.sessionID == "bob-session-2")
+        #expect(metadata?.ibmBobPersistedActivityItems?.suffix(5).map(\.text) == [
+            "You: second",
+            "Stored IBM Bob continuity was unavailable. Started a fresh Bob conversation on this Session.",
+            "Fresh Bob turn started",
+            "Recovered reply",
+            "Recovered turn complete"
+        ])
         #expect(recoveredResponse.activityItems.suffix(5).map(\.kind) == [.message, .status, .status, .message, .completion])
         #expect(recoveredResponse.activityItems.suffix(5).map(\.text) == [
             "You: second",

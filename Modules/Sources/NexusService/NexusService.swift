@@ -1269,6 +1269,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         super.init()
         self.sessionRuntimeManager.setRuntimeChangeHandler { [weak self] sessionID in
             self?.persistRuntimeLinkageAfterRuntimeChange(sessionID: sessionID)
+            self?.persistSessionStateAfterRuntimeChange(sessionID: sessionID)
         }
         self.listener.delegate = self
         self.listener.resume()
@@ -2594,6 +2595,63 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         try? persistRuntimeLinkageIfNeeded(for: session)
     }
 
+    private func persistSessionStateAfterRuntimeChange(sessionID: UUID) {
+        guard let session = (try? metadataStore.session(id: sessionID)) ?? nil,
+              let runtimeState = sessionRuntimeManager.runtimeState(for: session),
+              runtimeState != .ready else {
+            return
+        }
+
+        _ = try? updatedSessionForRuntimeState(session, runtimeState: runtimeState)
+    }
+
+    private func updatedSessionForRuntimeState(_ session: Session, runtimeState: Session.State) throws -> Session {
+        switch runtimeState {
+        case .ready:
+            return session
+        case .failed:
+            return try metadataStore.updateSession(
+                id: session.id,
+                state: .failed,
+                failureMessage: runtimeFailureMessage(for: session) ?? "Session failed"
+            )
+        case .interrupted:
+            let runtimeTranscript = try? sessionRuntimeManager.sessionScreen(for: session).transcript
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let fallbackFailureMessage = try interruptedSessionFailureMessage(
+                for: session,
+                workspace: metadataStore.workspace(id: session.workspaceID)
+            )
+            let failureMessage = runtimeTranscript.flatMap { $0.isEmpty ? nil : $0 } ?? fallbackFailureMessage
+            return try metadataStore.updateSession(
+                id: session.id,
+                state: .interrupted,
+                failureMessage: failureMessage
+            )
+        case .exited:
+            return try metadataStore.updateSession(
+                id: session.id,
+                state: .exited,
+                failureMessage: "Session exited. Relaunch to start a new live runtime."
+            )
+        }
+    }
+
+    private func runtimeFailureMessage(for session: Session) -> String? {
+        guard let screen = try? sessionRuntimeManager.sessionScreen(for: session) else {
+            return nil
+        }
+
+        if let errorText = screen.activityItems.last(where: { $0.kind == .error })?.text
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           errorText.isEmpty == false {
+            return errorText
+        }
+
+        let transcript = screen.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        return transcript.isEmpty ? nil : transcript
+    }
+
     private func persistPrimarySurfaceIfNeeded(for session: Session, primarySurface: SessionSurface) throws {
         guard let launchSnapshot = try metadataStore.launchSnapshot(sessionID: session.id),
               launchSnapshot.primarySurface != primarySurface else {
@@ -2676,14 +2734,24 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     private func staticSessionScreen(for session: Session, transcript: String) throws -> SessionScreen {
         let terminalSize = try metadataStore.sessionTerminalSize(id: session.id)
         let primarySurface = try persistedPrimarySurface(for: session)
+        let persistedActivityItems = try persistedStructuredActivityItems(for: session)
         return normalizedSessionScreen(
             SessionScreen(
                 session: session,
                 primarySurface: primarySurface,
-                transcript: transcript,
+                transcript: staticSessionTranscript(
+                    fallbackTranscript: transcript,
+                    primarySurface: primarySurface,
+                    persistedActivityItems: persistedActivityItems
+                ),
                 terminalColumns: terminalSize.columns,
                 terminalRows: terminalSize.rows,
-                activityItems: staticSessionActivityItems(for: session, transcript: transcript, primarySurface: primarySurface)
+                activityItems: staticSessionActivityItems(
+                    for: session,
+                    transcript: transcript,
+                    primarySurface: primarySurface,
+                    persistedActivityItems: persistedActivityItems
+                )
             )
         )
     }
@@ -2705,9 +2773,49 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         return providerAdapter(for: session.providerID).primarySurface(in: resolvedWorkspace)
     }
 
-    private func staticSessionActivityItems(for session: Session, transcript: String, primarySurface: SessionSurface) -> [SessionActivityItem] {
+    private func persistedStructuredActivityItems(for session: Session) throws -> [SessionActivityItem]? {
+        try metadataStore.sessionRecordAdapterMetadata(sessionID: session.id)?.ibmBobPersistedActivityItems
+    }
+
+    private func staticSessionTranscript(
+        fallbackTranscript: String,
+        primarySurface: SessionSurface,
+        persistedActivityItems: [SessionActivityItem]?
+    ) -> String {
         guard primarySurface == .structuredActivityFeed,
-              transcript.isEmpty == false else {
+              let persistedActivityItems,
+              persistedActivityItems.isEmpty == false else {
+            return fallbackTranscript
+        }
+
+        let transcriptLines = persistedActivityItems.compactMap { item -> String? in
+            guard item.kind == .message else {
+                return nil
+            }
+            if item.text.hasPrefix("You: ") {
+                return "> \(item.text.dropFirst(5))"
+            }
+            return item.text
+        }
+
+        return transcriptLines.isEmpty ? fallbackTranscript : transcriptLines.joined(separator: "\n")
+    }
+
+    private func staticSessionActivityItems(
+        for session: Session,
+        transcript: String,
+        primarySurface: SessionSurface,
+        persistedActivityItems: [SessionActivityItem]?
+    ) -> [SessionActivityItem] {
+        guard primarySurface == .structuredActivityFeed else {
+            return []
+        }
+
+        if let persistedActivityItems, persistedActivityItems.isEmpty == false {
+            return persistedActivityItems
+        }
+
+        guard transcript.isEmpty == false else {
             return []
         }
 
@@ -3698,26 +3806,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 return session
             }
 
-            if runtimeState == .interrupted {
-                let runtimeTranscript = try? sessionRuntimeManager.sessionScreen(for: session).transcript
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                let fallbackFailureMessage = try interruptedSessionFailureMessage(
-                    for: session,
-                    workspace: metadataStore.workspace(id: session.workspaceID)
-                )
-                let failureMessage = runtimeTranscript.flatMap { $0.isEmpty ? nil : $0 } ?? fallbackFailureMessage
-                return try metadataStore.updateSession(
-                    id: session.id,
-                    state: .interrupted,
-                    failureMessage: failureMessage
-                )
-            }
-
-            return try metadataStore.updateSession(
-                id: session.id,
-                state: .exited,
-                failureMessage: "Session exited. Relaunch to start a new live runtime."
-            )
+            return try updatedSessionForRuntimeState(session, runtimeState: runtimeState)
         }
 
         guard sessionRuntimeManager.hasRuntime(for: session) == false else {
