@@ -24,6 +24,7 @@ public enum NexusEmbeddedServiceBootstrap {
 }
 
 protocol SessionRuntimeManaging: AnyObject {
+    func setRuntimeChangeHandler(_ handler: (@Sendable (UUID) -> Void)?)
     func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) throws
     func stop(session: Session) throws
     func remove(session: Session)
@@ -193,9 +194,16 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Se
     private var runtimes: [UUID: any SessionRuntime] = [:]
     private var updateObservers: [UUID: [UUID: @Sendable () -> Void]] = [:]
     private var observedSessionIDs: [UUID: UUID] = [:]
+    private var runtimeChangeHandler: (@Sendable (UUID) -> Void)?
 
     init(launcher: any SessionRuntimeLaunching = ProcessSessionRuntimeLauncher()) {
         self.launcher = launcher
+    }
+
+    func setRuntimeChangeHandler(_ handler: (@Sendable (UUID) -> Void)?) {
+        lock.lock()
+        runtimeChangeHandler = handler
+        lock.unlock()
     }
 
     func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) throws {
@@ -212,13 +220,13 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Se
 
         let runtime = try launcher.makeRuntime(session: session, workspace: workspace, launchConfiguration: launchConfiguration)
         runtime.setChangeHandler { [weak self] in
-            self?.notifyUpdateObservers(for: session.id)
+            self?.notifyRuntimeChange(for: session.id)
         }
 
         try withLock {
             runtimes[session.id] = runtime
         }
-        notifyUpdateObservers(for: session.id)
+        notifyRuntimeChange(for: session.id)
     }
 
     func stop(session: Session) throws {
@@ -230,7 +238,7 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Se
         }
 
         try runtime.stop()
-        notifyUpdateObservers(for: session.id)
+        notifyRuntimeChange(for: session.id)
     }
 
     func remove(session: Session) {
@@ -351,12 +359,15 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Se
         return runtime.sessionScreen(for: session)
     }
 
-    private func notifyUpdateObservers(for sessionID: UUID) {
+    private func notifyRuntimeChange(for sessionID: UUID) {
+        let runtimeChangeHandler: (@Sendable (UUID) -> Void)?
         let observers: [@Sendable () -> Void]
         lock.lock()
+        runtimeChangeHandler = self.runtimeChangeHandler
         observers = Array(updateObservers[sessionID, default: [:]].values)
         lock.unlock()
 
+        runtimeChangeHandler?(sessionID)
         for observer in observers {
             observer()
         }
@@ -507,6 +518,7 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
                 try IBMBobSessionRuntime(
                     executable: launchConfiguration.executable,
                     workingDirectory: launchConfiguration.workingDirectory,
+                    sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.ibmBobSessionLinkage,
                     terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
                     transportFactory: resolvedIBMBobTransportFactory
                 )
@@ -1255,6 +1267,9 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         self.remoteAccessRuntime = remoteAccessRuntime
         self.providerAdapters = providerAdapters
         super.init()
+        self.sessionRuntimeManager.setRuntimeChangeHandler { [weak self] sessionID in
+            self?.persistRuntimeLinkageAfterRuntimeChange(sessionID: sessionID)
+        }
         self.listener.delegate = self
         self.listener.resume()
     }
@@ -2569,6 +2584,14 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         }
 
         try metadataStore.saveSessionRecordAdapterMetadata(sessionID: session.id, metadata: metadata)
+    }
+
+    private func persistRuntimeLinkageAfterRuntimeChange(sessionID: UUID) {
+        guard let session = (try? metadataStore.session(id: sessionID)) ?? nil else {
+            return
+        }
+
+        try? persistRuntimeLinkageIfNeeded(for: session)
     }
 
     private func persistPrimarySurfaceIfNeeded(for session: Session, primarySurface: SessionSurface) throws {

@@ -29,6 +29,7 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
     private let terminationStatusMessageBuilder: (Int32) -> String
     private let transportFactory: TransportFactory
     private let lock = NSLock()
+    private var sessionLinkage: IBMBobSessionLinkage?
     private var runtimeState: Session.State = .ready
     private var terminalColumns = 80
     private var terminalRows = 24
@@ -39,6 +40,7 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
     ]
     private var changeHandler: (@Sendable () -> Void)?
     private var activeTransport: (any IBMBobTransporting)?
+    private var activeTurn: ActiveTurn?
     private var isStreaming = false
     private var stderrLines: [String] = []
     private var didRequestStop = false
@@ -46,6 +48,7 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
     init(
         executable: String,
         workingDirectory: String,
+        sessionLinkage: IBMBobSessionLinkage? = nil,
         terminationStatusMessageBuilder: @escaping (Int32) -> String,
         transportFactory: @escaping TransportFactory = { executable, arguments, workingDirectory in
             try ProcessIBMBobTransport(
@@ -57,6 +60,7 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
     ) throws {
         self.executable = executable
         self.workingDirectory = workingDirectory
+        self.sessionLinkage = sessionLinkage
         self.terminationStatusMessageBuilder = terminationStatusMessageBuilder
         self.transportFactory = transportFactory
     }
@@ -68,7 +72,9 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
     }
 
     var sessionRecordAdapterMetadata: SessionRecordAdapterMetadata? {
-        nil
+        lock.lock()
+        defer { lock.unlock() }
+        return sessionLinkage?.sessionRecordAdapterMetadata
     }
 
     func sessionScreen(for session: Session) -> SessionScreen {
@@ -112,6 +118,7 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
         isStreaming = false
         transport = activeTransport
         activeTransport = nil
+        activeTurn = nil
         lock.unlock()
 
         try transport?.terminate()
@@ -177,55 +184,29 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
             return
         }
 
-        let transport: any IBMBobTransporting
-        do {
-            transport = try transportFactory(executable, Self.launchArguments(prompt: trimmed), workingDirectory)
-        } catch {
-            throw error
-        }
-
-        transport.setStdoutLineHandler { [weak self] line in
-            self?.handleStdoutLine(line)
-        }
-        transport.setStderrLineHandler { [weak self] line in
-            self?.handleStderrLine(line)
-        }
-        transport.setTerminationHandler { [weak self] status in
-            self?.handleTermination(status: status)
-        }
-
         lock.lock()
-        guard isStreaming == false else {
-            lock.unlock()
-            throw IBMBobSessionRuntimeError.busy
-        }
-        draft = ""
-        didRequestStop = false
-        isStreaming = true
-        stderrLines = []
-        activeTransport = transport
-        transcriptEntries.append("> \(trimmed)")
-        activityItems.append(SessionActivityItem(kind: .message, text: "You: \(trimmed)"))
+        let sessionLinkage = self.sessionLinkage
         lock.unlock()
-        notifyChange()
-
-        do {
-            try transport.start()
-        } catch {
-            lock.lock()
-            isStreaming = false
-            activeTransport = nil
-            lock.unlock()
-            throw error
-        }
+        try startPrompt(
+            trimmed,
+            announceUserMessage: true,
+            sessionLinkage: sessionLinkage
+        )
     }
 
     private func handleStdoutLine(_ line: String) {
-        guard let event = bobEvent(from: line) else {
+        guard let object = jsonObject(from: line) else {
             return
         }
 
         lock.lock()
+        if let sessionID = resolvedSessionID(from: object) {
+            sessionLinkage = IBMBobSessionLinkage(sessionID: sessionID)
+        }
+        guard let event = bobEvent(from: object) else {
+            lock.unlock()
+            return
+        }
         switch event.kind {
         case .status:
             activityItems.append(SessionActivityItem(kind: .status, text: event.text))
@@ -262,23 +243,119 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
         let shouldAppendError: Bool
         let errorText: String
         let shouldNotify: Bool
+        let retryPrompt: String?
 
         lock.lock()
         let requestedStop = didRequestStop
+        let activeTurn = self.activeTurn
+        errorText = resolvedTerminationErrorTextLocked(status: status)
+        let shouldRetryFresh = requestedStop == false
+            && status != 0
+            && activeTurn?.resumedSessionID != nil
+            && shouldRetryFreshTurnAfterInvalidContinuity(errorText)
         didRequestStop = false
         isStreaming = false
         activeTransport = nil
-        shouldAppendError = requestedStop == false && status != 0
-        errorText = resolvedTerminationErrorTextLocked(status: status)
+        self.activeTurn = nil
+        shouldAppendError = requestedStop == false && status != 0 && shouldRetryFresh == false
         shouldNotify = shouldAppendError || requestedStop == false
-        if shouldAppendError {
+        retryPrompt = shouldRetryFresh ? activeTurn?.prompt : nil
+        if shouldRetryFresh {
+            sessionLinkage = nil
+            activityItems.append(
+                SessionActivityItem(
+                    kind: .status,
+                    text: "Stored IBM Bob continuity was unavailable. Started a fresh Bob conversation on this Session."
+                )
+            )
+        } else if shouldAppendError {
             activityItems.append(SessionActivityItem(kind: .error, text: errorText))
         }
         lock.unlock()
 
+        if let retryPrompt {
+            notifyChange()
+            retryFreshPrompt(retryPrompt)
+            return
+        }
+
         if shouldNotify {
             notifyChange()
         }
+    }
+
+    private func startPrompt(
+        _ prompt: String,
+        announceUserMessage: Bool,
+        sessionLinkage: IBMBobSessionLinkage?
+    ) throws {
+        let transport = try transportFactory(
+            executable,
+            Self.launchArguments(prompt: prompt, sessionLinkage: sessionLinkage),
+            workingDirectory
+        )
+
+        transport.setStdoutLineHandler { [weak self] line in
+            self?.handleStdoutLine(line)
+        }
+        transport.setStderrLineHandler { [weak self] line in
+            self?.handleStderrLine(line)
+        }
+        transport.setTerminationHandler { [weak self] status in
+            self?.handleTermination(status: status)
+        }
+
+        lock.lock()
+        guard isStreaming == false else {
+            lock.unlock()
+            throw IBMBobSessionRuntimeError.busy
+        }
+        draft = ""
+        didRequestStop = false
+        isStreaming = true
+        stderrLines = []
+        activeTransport = transport
+        activeTurn = ActiveTurn(prompt: prompt, resumedSessionID: sessionLinkage?.sessionID)
+        if announceUserMessage {
+            transcriptEntries.append("> \(prompt)")
+            activityItems.append(SessionActivityItem(kind: .message, text: "You: \(prompt)"))
+        }
+        lock.unlock()
+        notifyChange()
+
+        do {
+            try transport.start()
+        } catch {
+            lock.lock()
+            isStreaming = false
+            activeTransport = nil
+            activeTurn = nil
+            lock.unlock()
+            throw error
+        }
+    }
+
+    private func retryFreshPrompt(_ prompt: String) {
+        do {
+            try startPrompt(
+                prompt,
+                announceUserMessage: false,
+                sessionLinkage: nil
+            )
+        } catch {
+            lock.lock()
+            activityItems.append(SessionActivityItem(kind: .error, text: error.localizedDescription))
+            lock.unlock()
+            notifyChange()
+        }
+    }
+
+    private func shouldRetryFreshTurnAfterInvalidContinuity(_ errorText: String) -> Bool {
+        let normalized = errorText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalized.contains("invalid bob session")
+            || normalized.contains("invalid session")
+            || normalized.contains("session not found")
+            || normalized.contains("resume") && normalized.contains("not found")
     }
 
     private func resolvedTerminationErrorTextLocked(status: Int32) -> String {
@@ -303,10 +380,16 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
         handler?()
     }
 
-    private func bobEvent(from line: String) -> BobEvent? {
+    private func jsonObject(from line: String) -> [String: Any]? {
         guard let data = line.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let rawType = stringValue(in: object, keys: ["type", "event"])?.lowercased() else {
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return object
+    }
+
+    private func bobEvent(from object: [String: Any]) -> BobEvent? {
+        guard let rawType = stringValue(in: object, keys: ["type", "event"])?.lowercased() else {
             return nil
         }
 
@@ -340,23 +423,49 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
         }
     }
 
+    private func resolvedSessionID(from object: [String: Any]) -> String? {
+        if let sessionID = stringValue(in: object, keys: ["session_id", "sessionId", "conversation_id", "conversationId"]) {
+            return sessionID
+        }
+
+        if let session = object["session"] as? [String: Any],
+           let sessionID = stringValue(in: session, keys: ["id", "session_id", "sessionId"]) {
+            return sessionID
+        }
+
+        return nil
+    }
+
     private func stringValue(in object: [String: Any], keys: [String]) -> String? {
         for key in keys {
             if let value = object[key] as? String {
-                return value.trimmingCharacters(in: .whitespacesAndNewlines)
+                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.isEmpty == false {
+                    return trimmed
+                }
             }
         }
         return nil
     }
 
-    private static func launchArguments(prompt: String) -> [String] {
-        [
+    private static func launchArguments(prompt: String, sessionLinkage: IBMBobSessionLinkage?) -> [String] {
+        var arguments = [
             "-o", "stream-json",
             "--chat-mode", "advanced",
             "--hide-intermediary-output",
-            "--approval-mode", "yolo",
-            prompt
+            "--approval-mode", "yolo"
         ]
+        if let sessionID = sessionLinkage?.sessionID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           sessionID.isEmpty == false {
+            arguments += ["--resume", sessionID]
+        }
+        arguments.append(prompt)
+        return arguments
+    }
+
+    private struct ActiveTurn {
+        let prompt: String
+        let resumedSessionID: String?
     }
 
     private struct BobEvent {
