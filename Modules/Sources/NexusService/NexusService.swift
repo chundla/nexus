@@ -493,6 +493,13 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
                     terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
                     transportFactory: resolvedCodexTransportFactory
                 )
+            },
+            .ibmBob: { _, _, _ in
+                IdleStructuredSessionRuntime(
+                    activityItems: [
+                        SessionActivityItem(kind: .status, text: "IBM Bob Session ready. Send a prompt to start IBM Bob.")
+                    ]
+                )
             }
         ]
 
@@ -999,6 +1006,82 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
     }
 }
 
+final class IdleStructuredSessionRuntime: SessionRuntime, @unchecked Sendable {
+    private let lock = NSLock()
+    private var runtimeState: Session.State = .ready
+    private var columns = 80
+    private var rows = 24
+    private var changeHandler: (@Sendable () -> Void)?
+    private let activityItems: [SessionActivityItem]
+
+    init(activityItems: [SessionActivityItem]) {
+        self.activityItems = activityItems
+    }
+
+    var state: Session.State {
+        lock.lock()
+        defer { lock.unlock() }
+        return runtimeState
+    }
+
+    var sessionRecordAdapterMetadata: SessionRecordAdapterMetadata? {
+        nil
+    }
+
+    func sessionScreen(for session: Session) -> SessionScreen {
+        lock.lock()
+        let terminalColumns = columns
+        let terminalRows = rows
+        let state = runtimeState
+        lock.unlock()
+
+        return SessionScreen(
+            session: Session(
+                id: session.id,
+                workspaceID: session.workspaceID,
+                providerID: session.providerID,
+                name: session.name,
+                isDefault: session.isDefault,
+                state: state,
+                failureMessage: session.failureMessage
+            ),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            terminalColumns: terminalColumns,
+            terminalRows: terminalRows,
+            activityItems: activityItems
+        )
+    }
+
+    func setChangeHandler(_ handler: (@Sendable () -> Void)?) {
+        lock.lock()
+        changeHandler = handler
+        lock.unlock()
+    }
+
+    func stop() throws {
+        lock.lock()
+        runtimeState = .exited
+        let handler = changeHandler
+        lock.unlock()
+        handler?()
+    }
+
+    func sendInput(_ text: String) throws {}
+    func sendText(_ text: String) throws {}
+    func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool) throws {}
+    func respondToApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision) throws {}
+
+    func resize(columns: Int, rows: Int) throws {
+        lock.lock()
+        self.columns = columns
+        self.rows = rows
+        let handler = changeHandler
+        lock.unlock()
+        handler?()
+    }
+}
+
 struct RemoteRuntimeRecoveryFailureContext {
     let detail: String
     let normalizedDetail: String
@@ -1317,7 +1400,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                     providerHealthEvaluator.healthSummary(for: .ibmBob, workspace: workspace, remoteContext: remoteContext)
                 },
                 defaultSessionLaunchSupportEvaluator: { $0.kind == .local },
-                namedSessionSupportEvaluator: { $0.kind == .local }
+                namedSessionSupportEvaluator: { $0.kind == .local },
+                primarySurfaceEvaluator: { _ in .structuredActivityFeed }
             ),
             .pi: ServiceProviderAdapter(
                 providerID: .pi,
