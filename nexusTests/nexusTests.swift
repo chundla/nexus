@@ -288,7 +288,7 @@ struct nexusTests {
             activityItems: [SessionActivityItem(kind: .status, text: "Codex shared Session stream connected")]
         )
 
-        #expect(remoteSessionSurfacePresentation(for: screen, isReady: true, workspaceKind: .remote) == RemoteSessionSurfacePresentation(
+        #expect(remoteSessionSurfacePresentation(for: screen, isReady: true) == RemoteSessionSurfacePresentation(
             surfaceSupport: .supported,
             showsTerminal: false,
             showsStructuredActivity: true,
@@ -315,7 +315,7 @@ struct nexusTests {
             activityItems: [SessionActivityItem(kind: .status, text: "Pi shared Session stream connected")]
         )
 
-        #expect(remoteSessionSurfacePresentation(for: screen, isReady: true, workspaceKind: .local) == RemoteSessionSurfacePresentation(
+        #expect(remoteSessionSurfacePresentation(for: screen, isReady: true) == RemoteSessionSurfacePresentation(
             surfaceSupport: .supported,
             showsTerminal: false,
             showsStructuredActivity: true,
@@ -341,7 +341,7 @@ struct nexusTests {
             transcript: "Codex remote ready"
         )
 
-        #expect(remoteSessionSurfacePresentation(for: screen, isReady: true, workspaceKind: .remote) == RemoteSessionSurfacePresentation(
+        #expect(remoteSessionSurfacePresentation(for: screen, isReady: true) == RemoteSessionSurfacePresentation(
             surfaceSupport: .supported,
             showsTerminal: true,
             showsStructuredActivity: false,
@@ -362,8 +362,7 @@ struct nexusTests {
                 isEnabled: true
             ),
             provider: Provider(id: .pi),
-            prelaunchPrimarySurface: .structuredActivityFeed,
-            workspaceKind: .local
+            prelaunchPrimarySurface: .structuredActivityFeed
         )
 
         #expect(launchState == RemoteProviderActionState(
@@ -381,8 +380,7 @@ struct nexusTests {
                 isEnabled: true
             ),
             provider: Provider(id: .codex),
-            prelaunchPrimarySurface: .structuredActivityFeed,
-            workspaceKind: .remote
+            prelaunchPrimarySurface: .structuredActivityFeed
         )
 
         #expect(createState == RemoteProviderActionState(
@@ -400,8 +398,7 @@ struct nexusTests {
                 isEnabled: true
             ),
             provider: Provider(id: .pi),
-            prelaunchPrimarySurface: .structuredActivityFeed,
-            workspaceKind: .remote
+            prelaunchPrimarySurface: .structuredActivityFeed
         )
 
         #expect(launchState == RemoteProviderActionState(
@@ -420,8 +417,7 @@ struct nexusTests {
                 disabledReason: "Codex requires signing in on the paired Mac before launch."
             ),
             provider: Provider(id: .codex),
-            prelaunchPrimarySurface: .structuredActivityFeed,
-            workspaceKind: .remote
+            prelaunchPrimarySurface: .structuredActivityFeed
         )
 
         #expect(launchState == RemoteProviderActionState(
@@ -445,7 +441,7 @@ struct nexusTests {
             transcript: ""
         )
 
-        #expect(remoteSessionSurfacePresentation(for: screen, isReady: false, workspaceKind: .remote) == RemoteSessionSurfacePresentation(
+        #expect(remoteSessionSurfacePresentation(for: screen, isReady: false) == RemoteSessionSurfacePresentation(
             surfaceSupport: .supported,
             showsTerminal: false,
             showsStructuredActivity: true,

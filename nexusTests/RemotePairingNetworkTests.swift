@@ -548,7 +548,7 @@ struct RemotePairingNetworkTests {
 
         #expect(screen.session.id == session.id)
         #expect(screen.primarySurface == .structuredActivityFeed)
-        #expect(sessionSurfaceSupport(for: screen, on: .remoteClient, workspaceKind: .local) == .supported)
+        #expect(sessionSurfaceSupport(for: screen, on: .remoteClient) == .supported)
     }
 
     @Test func failedStructuredCodexSessionScreenStaysInspectableOverDedicatedNetworkAPI() async throws {
@@ -598,7 +598,7 @@ struct RemotePairingNetworkTests {
         #expect(screen.transcript == "Codex executable was not found in the service search paths.")
         #expect(screen.activityItems.map(\.kind) == [.error])
         #expect(screen.activityItems.map(\.text) == ["Codex executable was not found in the service search paths."])
-        #expect(sessionSurfaceSupport(for: screen, on: .remoteClient, workspaceKind: .local) == .supported)
+        #expect(sessionSurfaceSupport(for: screen, on: .remoteClient) == .supported)
     }
 
     @Test func remoteControllerApprovesStructuredApprovalRequestOverDedicatedNetworkAPI() async throws {

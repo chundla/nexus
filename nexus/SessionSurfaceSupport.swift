@@ -30,8 +30,7 @@ struct RemoteProviderActionState: Equatable {
     init(
         capability: ProviderCapability,
         provider: Provider,
-        prelaunchPrimarySurface: SessionSurface,
-        workspaceKind: Workspace.Kind? = nil
+        prelaunchPrimarySurface: SessionSurface
     ) {
         if capability.isEnabled == false {
             self.init(isEnabled: false, disabledReason: capability.disabledReason)
@@ -41,8 +40,7 @@ struct RemoteProviderActionState: Equatable {
         if remoteClientSupportsProviderAction(
             capability.action,
             providerID: provider.id,
-            prelaunchPrimarySurface: prelaunchPrimarySurface,
-            workspaceKind: workspaceKind
+            prelaunchPrimarySurface: prelaunchPrimarySurface
         ) == false {
             let disabledReason: String
             switch capability.action {
@@ -66,8 +64,7 @@ struct RemoteProviderActionState: Equatable {
 
 func sessionSurfaceSupport(
     for screen: SessionScreen,
-    on client: SessionSurfaceClient,
-    workspaceKind: Workspace.Kind? = nil
+    on client: SessionSurfaceClient
 ) -> SessionSurfaceSupport {
     switch client {
     case .mac:
@@ -77,10 +74,7 @@ func sessionSurfaceSupport(
         case .terminal:
             .supported
         case .structuredActivityFeed:
-            structuredRemoteClientSessionSurfaceSupport(
-                providerID: screen.session.providerID,
-                workspaceKind: workspaceKind
-            )
+            structuredRemoteClientSessionSurfaceSupport(providerID: screen.session.providerID)
         }
     }
 }
@@ -101,10 +95,9 @@ func sessionSurfaceSupport(for primarySurface: SessionSurface, on client: Sessio
 
 func remoteSessionSurfacePresentation(
     for screen: SessionScreen,
-    isReady: Bool,
-    workspaceKind: Workspace.Kind? = nil
+    isReady: Bool
 ) -> RemoteSessionSurfacePresentation {
-    let support = sessionSurfaceSupport(for: screen, on: .remoteClient, workspaceKind: workspaceKind)
+    let support = sessionSurfaceSupport(for: screen, on: .remoteClient)
     let unsupportedCopy: UnsupportedRemoteSessionSurfaceCopy?
 
     if support == .unsupported {
@@ -146,8 +139,7 @@ func remoteSessionSurfacePresentation(
 private func remoteClientSupportsProviderAction(
     _ action: ProviderCapability.Action,
     providerID: ProviderID,
-    prelaunchPrimarySurface: SessionSurface,
-    workspaceKind: Workspace.Kind?
+    prelaunchPrimarySurface: SessionSurface
 ) -> Bool {
     switch prelaunchPrimarySurface {
     case .terminal:
@@ -155,22 +147,15 @@ private func remoteClientSupportsProviderAction(
     case .structuredActivityFeed:
         switch action {
         case .launchDefaultSession:
-            structuredRemoteClientSessionSurfaceSupport(
-                providerID: providerID,
-                workspaceKind: workspaceKind
-            ) == .supported
+            structuredRemoteClientSessionSurfaceSupport(providerID: providerID) == .supported
         case .createNamedSession:
-            structuredRemoteClientSessionSurfaceSupport(
-                providerID: providerID,
-                workspaceKind: workspaceKind
-            ) == .supported
+            structuredRemoteClientSessionSurfaceSupport(providerID: providerID) == .supported
         }
     }
 }
 
 private func structuredRemoteClientSessionSurfaceSupport(
-    providerID: ProviderID,
-    workspaceKind: Workspace.Kind?
+    providerID: ProviderID
 ) -> SessionSurfaceSupport {
     switch providerID {
     case .codex, .pi:

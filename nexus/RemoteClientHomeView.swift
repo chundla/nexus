@@ -513,8 +513,7 @@ private struct RemoteProviderDetailView: View {
         RemoteProviderActionState(
             capability: detail?.capabilities.launchDefaultSession ?? providerCard.capabilities.launchDefaultSession,
             provider: detail?.provider ?? providerCard.provider,
-            prelaunchPrimarySurface: detail?.prelaunchPrimarySurface ?? providerCard.prelaunchPrimarySurface,
-            workspaceKind: detail?.workspace.kind ?? overview.workspace.kind
+            prelaunchPrimarySurface: detail?.prelaunchPrimarySurface ?? providerCard.prelaunchPrimarySurface
         )
     }
 
@@ -522,8 +521,7 @@ private struct RemoteProviderDetailView: View {
         RemoteProviderActionState(
             capability: detail?.capabilities.createNamedSession ?? providerCard.capabilities.createNamedSession,
             provider: detail?.provider ?? providerCard.provider,
-            prelaunchPrimarySurface: detail?.prelaunchPrimarySurface ?? providerCard.prelaunchPrimarySurface,
-            workspaceKind: detail?.workspace.kind ?? overview.workspace.kind
+            prelaunchPrimarySurface: detail?.prelaunchPrimarySurface ?? providerCard.prelaunchPrimarySurface
         )
     }
 
@@ -799,11 +797,7 @@ private struct RemoteSessionScreenView: View {
 
         return remoteSessionSurfacePresentation(
             for: screen,
-            isReady: isReady,
-            workspaceKind: model.workspaceKind(
-                for: currentSession.workspaceID,
-                providerID: currentSession.providerID
-            )
+            isReady: isReady
         )
     }
 
