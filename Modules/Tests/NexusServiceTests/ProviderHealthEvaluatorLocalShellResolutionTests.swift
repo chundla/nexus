@@ -482,14 +482,14 @@ private final class RecordingRemoteCodexTransportFactory: @unchecked Sendable {
 
 private final class ImmediateReadyRemoteCodexTransport: CodexAppServerTransporting, @unchecked Sendable {
     private var stdoutLineHandler: (@Sendable (String) -> Void)?
-    private var terminationHandler: (@Sendable (Int32) -> Void)?
+    private var terminationHandler: (@Sendable (CodexAppServerTermination) -> Void)?
     private(set) var sentLines: [String] = []
 
     func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
         stdoutLineHandler = handler
     }
 
-    func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?) {
+    func setTerminationHandler(_ handler: (@Sendable (CodexAppServerTermination) -> Void)?) {
         terminationHandler = handler
     }
 
@@ -501,7 +501,7 @@ private final class ImmediateReadyRemoteCodexTransport: CodexAppServerTransporti
     }
 
     func terminate() throws {
-        terminationHandler?(0)
+        terminationHandler?(CodexAppServerTermination(status: 0, stderr: nil))
     }
 }
 #endif

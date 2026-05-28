@@ -244,7 +244,7 @@ private final class PersistentCodexTransportHarness: @unchecked Sendable {
 private final class PersistentTestCodexAppServerTransport: CodexAppServerTransporting, @unchecked Sendable {
     private let harness: PersistentCodexTransportHarness
     private var stdoutLineHandler: (@Sendable (String) -> Void)?
-    private var terminationHandler: (@Sendable (Int32) -> Void)?
+    private var terminationHandler: (@Sendable (CodexAppServerTermination) -> Void)?
 
     init(harness: PersistentCodexTransportHarness) {
         self.harness = harness
@@ -254,7 +254,7 @@ private final class PersistentTestCodexAppServerTransport: CodexAppServerTranspo
         stdoutLineHandler = handler
     }
 
-    func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?) {
+    func setTerminationHandler(_ handler: (@Sendable (CodexAppServerTermination) -> Void)?) {
         terminationHandler = handler
     }
 
@@ -314,7 +314,7 @@ private final class PersistentTestCodexAppServerTransport: CodexAppServerTranspo
     }
 
     func terminate() throws {
-        terminationHandler?(0)
+        terminationHandler?(CodexAppServerTermination(status: 0, stderr: nil))
     }
 
     private func emit(_ object: [String: Any]) {

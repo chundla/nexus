@@ -2,9 +2,14 @@
 import Foundation
 import NexusDomain
 
+struct CodexAppServerTermination: Sendable {
+    let status: Int32
+    let stderr: String?
+}
+
 protocol CodexAppServerTransporting: AnyObject {
     func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?)
-    func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?)
+    func setTerminationHandler(_ handler: (@Sendable (CodexAppServerTermination) -> Void)?)
     func start() throws
     func sendLine(_ line: String) throws
     func terminate() throws
@@ -181,11 +186,11 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
                 self.handleNotification(object)
             }
         }
-        transport.setTerminationHandler { [weak self] status in
-            if startupState.recordUnexpectedTerminationIfNeeded(status: status) {
+        transport.setTerminationHandler { [weak self] termination in
+            if startupState.recordUnexpectedTerminationIfNeeded(termination: termination) {
                 startupSemaphore.signal()
             }
-            self?.handleTermination(status: status)
+            self?.handleTermination(status: termination.status)
         }
 
         try transport.start()
@@ -702,7 +707,7 @@ private final class CodexStartupState: @unchecked Sendable {
         lock.unlock()
     }
 
-    func recordUnexpectedTerminationIfNeeded(status: Int32) -> Bool {
+    func recordUnexpectedTerminationIfNeeded(termination: CodexAppServerTermination) -> Bool {
         lock.lock()
         defer { lock.unlock() }
 
@@ -710,9 +715,14 @@ private final class CodexStartupState: @unchecked Sendable {
             return false
         }
         if resolvedError == nil {
-            let message = status == 0
-                ? "Codex app-server exited before startup completed."
-                : "Codex app-server exited with status \(status) before startup completed."
+            let stderr = termination.stderr?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let message = if let stderr, stderr.isEmpty == false {
+                stderr
+            } else if termination.status == 0 {
+                "Codex app-server exited before startup completed."
+            } else {
+                "Codex app-server exited with status \(termination.status) before startup completed."
+            }
             resolvedError = CodexAppServerRuntimeError.startupFailed(message)
         }
         return true
@@ -730,12 +740,13 @@ final class ProcessCodexAppServerTransport: CodexAppServerTransporting, @uncheck
     private let workingDirectory: String?
     private let lock = NSLock()
     private var stdoutLineHandler: (@Sendable (String) -> Void)?
-    private var terminationHandler: (@Sendable (Int32) -> Void)?
+    private var terminationHandler: (@Sendable (CodexAppServerTermination) -> Void)?
     private var process: Process?
     private var stdinHandle: FileHandle?
     private var stdoutHandle: FileHandle?
     private var stderrHandle: FileHandle?
     private var stdoutBuffer = Data()
+    private var stderrBuffer = Data()
 
     init(executable: String, arguments: [String], workingDirectory: String?) throws {
         self.executable = executable
@@ -749,7 +760,7 @@ final class ProcessCodexAppServerTransport: CodexAppServerTransporting, @uncheck
         lock.unlock()
     }
 
-    func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?) {
+    func setTerminationHandler(_ handler: (@Sendable (CodexAppServerTermination) -> Void)?) {
         lock.lock()
         terminationHandler = handler
         lock.unlock()
@@ -788,11 +799,13 @@ final class ProcessCodexAppServerTransport: CodexAppServerTransporting, @uncheck
         }
 
         let stderrHandle = stderrPipe.fileHandleForReading
-        stderrHandle.readabilityHandler = { handle in
+        stderrHandle.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
-            if data.isEmpty {
+            guard data.isEmpty == false else {
                 handle.readabilityHandler = nil
+                return
             }
+            self?.consumeStderr(data)
         }
 
         lock.lock()
@@ -915,14 +928,25 @@ final class ProcessCodexAppServerTransport: CodexAppServerTransporting, @uncheck
         }
     }
 
+    private func consumeStderr(_ data: Data) {
+        lock.lock()
+        stderrBuffer.append(data)
+        lock.unlock()
+    }
+
     private func handleTermination(_ status: Int32) {
-        let handler: (@Sendable (Int32) -> Void)?
+        let handler: (@Sendable (CodexAppServerTermination) -> Void)?
+        let stderr: String?
         lock.lock()
         stdoutHandle?.readabilityHandler = nil
         stderrHandle?.readabilityHandler = nil
         handler = terminationHandler
+        let stderrText = String(data: stderrBuffer, encoding: .utf8)?
+            .replacingOccurrences(of: "\r", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        stderr = stderrText?.isEmpty == false ? stderrText : nil
         lock.unlock()
-        handler?(status)
+        handler?(CodexAppServerTermination(status: status, stderr: stderr))
     }
 }
 #endif

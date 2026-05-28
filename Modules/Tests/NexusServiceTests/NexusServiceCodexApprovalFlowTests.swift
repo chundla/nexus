@@ -118,7 +118,7 @@ private final class CodexApprovalTransportHarness: @unchecked Sendable {
 private final class ApprovalFlowTestCodexTransport: CodexAppServerTransporting, @unchecked Sendable {
     private let threadID: String
     private var stdoutLineHandler: (@Sendable (String) -> Void)?
-    private var terminationHandler: (@Sendable (Int32) -> Void)?
+    private var terminationHandler: (@Sendable (CodexAppServerTermination) -> Void)?
     private(set) var sentMessages: [[String: Any]] = []
 
     init(threadID: String) {
@@ -129,7 +129,7 @@ private final class ApprovalFlowTestCodexTransport: CodexAppServerTransporting, 
         stdoutLineHandler = handler
     }
 
-    func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?) {
+    func setTerminationHandler(_ handler: (@Sendable (CodexAppServerTermination) -> Void)?) {
         terminationHandler = handler
     }
 
@@ -187,7 +187,7 @@ private final class ApprovalFlowTestCodexTransport: CodexAppServerTransporting, 
     }
 
     func terminate() throws {
-        terminationHandler?(0)
+        terminationHandler?(CodexAppServerTermination(status: 0, stderr: nil))
     }
 
     func emitCommandApprovalRequest(requestID: String, itemID: String, command: String, reason: String) {

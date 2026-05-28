@@ -941,6 +941,10 @@ struct RemoteRuntimeRecoveryFailureContext {
     let normalizedDetail: String
     let runtimeIdentifier: String
     let hostName: String
+
+    var isMissingRemoteRuntime: Bool {
+        normalizedDetail.contains("nexus_remote_runtime_not_found") || normalizedDetail.contains("can't find session")
+    }
 }
 
 struct ServiceProviderAdapter {
@@ -989,7 +993,7 @@ struct ServiceProviderAdapter {
             "\n[\(provider.displayName) exited with status \(status)]\n"
         }
         self.remoteRuntimeRecoveryFailureEvaluator = remoteRuntimeRecoveryFailureEvaluator ?? { context in
-            if context.normalizedDetail.contains("nexus_remote_runtime_not_found") || context.normalizedDetail.contains("can't find session") {
+            if context.isMissingRemoteRuntime {
                 return (
                     state: .failed,
                     message: "Known remote runtime '\(context.runtimeIdentifier)' is no longer available on \(context.hostName). Relaunch to create a new remote runtime."
@@ -2254,7 +2258,17 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             try persistPrimarySurfaceIfNeeded(for: readySession, primarySurface: screen.primarySurface)
             return readySession
         } catch {
-            let failure = try remoteRuntimeRecoveryFailure(for: error, session: readySession, workspace: workspace)
+            let failureContext = try remoteRuntimeRecoveryFailureContext(for: error, session: readySession, workspace: workspace)
+            if failureContext.isMissingRemoteRuntime {
+                return try launchSession(
+                    readySession,
+                    workspace: workspace,
+                    launchSnapshot: launchSnapshot,
+                    forceFreshRemoteRuntime: true
+                )
+            }
+
+            let failure = providerAdapter(for: readySession.providerID).remoteRuntimeRecoveryFailure(for: failureContext)
             return try metadataStore.updateSession(
                 id: readySession.id,
                 state: failure.state,
@@ -2322,16 +2336,24 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         session: Session,
         workspace: Workspace
     ) throws -> (state: Session.State, message: String) {
+        providerAdapter(for: session.providerID).remoteRuntimeRecoveryFailure(
+            for: try remoteRuntimeRecoveryFailureContext(for: error, session: session, workspace: workspace)
+        )
+    }
+
+    private func remoteRuntimeRecoveryFailureContext(
+        for error: Error,
+        session: Session,
+        workspace: Workspace
+    ) throws -> RemoteRuntimeRecoveryFailureContext {
         let detail = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
         let runtimeIdentifier = try remoteRuntimeIdentifier(for: session, forceNew: false)
         let hostName = try workspace.remoteHostID.flatMap { try metadataStore.host(id: $0)?.name } ?? workspace.name
-        return providerAdapter(for: session.providerID).remoteRuntimeRecoveryFailure(
-            for: RemoteRuntimeRecoveryFailureContext(
-                detail: detail,
-                normalizedDetail: detail.lowercased(),
-                runtimeIdentifier: runtimeIdentifier,
-                hostName: hostName
-            )
+        return RemoteRuntimeRecoveryFailureContext(
+            detail: detail,
+            normalizedDetail: detail.lowercased(),
+            runtimeIdentifier: runtimeIdentifier,
+            hostName: hostName
         )
     }
 

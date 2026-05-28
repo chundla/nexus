@@ -284,6 +284,27 @@ struct CodexAppServerRuntimeTests {
         }
     }
 
+    @Test func processCodexAppServerTransportSurfacesStartupStderrBeforeTimingOut() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+
+        let scriptURL = rootURL.appendingPathComponent("failing-codex", isDirectory: false)
+        try "#!/bin/sh\necho 'NEXUS_REMOTE_RUNTIME_NOT_FOUND' >&2\nexit 1\n".write(to: scriptURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+        #expect {
+            try CodexAppServerRuntime(
+                executable: scriptURL.path,
+                workingDirectory: rootURL.path(percentEncoded: false),
+                terminationStatusMessageBuilder: { _ in "" }
+            )
+        } throws: { error in
+            error.localizedDescription == "NEXUS_REMOTE_RUNTIME_NOT_FOUND"
+        }
+    }
+
     @Test func processCodexAppServerTransportLaunchesSiblingInterpreterForEnvShebangScripts() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)
@@ -343,13 +364,13 @@ private final class LockedValue<Value>: @unchecked Sendable {
 
 private final class ResumeMissingRolloutThenStartCodexTransport: CodexAppServerTransporting, @unchecked Sendable {
     private var stdoutLineHandler: (@Sendable (String) -> Void)?
-    private var terminationHandler: (@Sendable (Int32) -> Void)?
+    private var terminationHandler: (@Sendable (CodexAppServerTermination) -> Void)?
 
     func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
         stdoutLineHandler = handler
     }
 
-    func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?) {
+    func setTerminationHandler(_ handler: (@Sendable (CodexAppServerTermination) -> Void)?) {
         terminationHandler = handler
     }
 
@@ -407,7 +428,7 @@ private final class ResumeMissingRolloutThenStartCodexTransport: CodexAppServerT
     }
 
     func terminate() throws {
-        terminationHandler?(0)
+        terminationHandler?(CodexAppServerTermination(status: 0, stderr: nil))
     }
 
     private func jsonLine(_ object: [String: Any]) -> String {
@@ -418,13 +439,13 @@ private final class ResumeMissingRolloutThenStartCodexTransport: CodexAppServerT
 
 private final class StartupThreadRPCErrorCodexTransport: CodexAppServerTransporting, @unchecked Sendable {
     private var stdoutLineHandler: (@Sendable (String) -> Void)?
-    private var terminationHandler: (@Sendable (Int32) -> Void)?
+    private var terminationHandler: (@Sendable (CodexAppServerTermination) -> Void)?
 
     func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
         stdoutLineHandler = handler
     }
 
-    func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?) {
+    func setTerminationHandler(_ handler: (@Sendable (CodexAppServerTermination) -> Void)?) {
         terminationHandler = handler
     }
 
@@ -461,7 +482,7 @@ private final class StartupThreadRPCErrorCodexTransport: CodexAppServerTransport
     }
 
     func terminate() throws {
-        terminationHandler?(0)
+        terminationHandler?(CodexAppServerTermination(status: 0, stderr: nil))
     }
 
     private func jsonLine(_ object: [String: Any]) -> String {
@@ -472,13 +493,13 @@ private final class StartupThreadRPCErrorCodexTransport: CodexAppServerTransport
 
 private final class ExitDuringThreadStartCodexTransport: CodexAppServerTransporting, @unchecked Sendable {
     private var stdoutLineHandler: (@Sendable (String) -> Void)?
-    private var terminationHandler: (@Sendable (Int32) -> Void)?
+    private var terminationHandler: (@Sendable (CodexAppServerTermination) -> Void)?
 
     func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
         stdoutLineHandler = handler
     }
 
-    func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?) {
+    func setTerminationHandler(_ handler: (@Sendable (CodexAppServerTermination) -> Void)?) {
         terminationHandler = handler
     }
 
@@ -502,7 +523,7 @@ private final class ExitDuringThreadStartCodexTransport: CodexAppServerTransport
                 ]
             ]))
         case "thread/start":
-            terminationHandler?(127)
+            terminationHandler?(CodexAppServerTermination(status: 127, stderr: nil))
         default:
             break
         }
@@ -521,7 +542,7 @@ private final class TestCodexAppServerTransport: CodexAppServerTransporting, @un
     private let omitThreadIDFromStartResponse: Bool
     private let completedAgentMessageText: String?
     private var stdoutLineHandler: (@Sendable (String) -> Void)?
-    private var terminationHandler: (@Sendable (Int32) -> Void)?
+    private var terminationHandler: (@Sendable (CodexAppServerTermination) -> Void)?
     private(set) var sentMessages: [[String: Any]] = []
 
     init(threadID: String, omitThreadIDFromStartResponse: Bool = false, completedAgentMessageText: String? = nil) {
@@ -534,7 +555,7 @@ private final class TestCodexAppServerTransport: CodexAppServerTransporting, @un
         stdoutLineHandler = handler
     }
 
-    func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?) {
+    func setTerminationHandler(_ handler: (@Sendable (CodexAppServerTermination) -> Void)?) {
         terminationHandler = handler
     }
 
@@ -658,7 +679,7 @@ private final class TestCodexAppServerTransport: CodexAppServerTransporting, @un
     }
 
     func terminate() throws {
-        terminationHandler?(0)
+        terminationHandler?(CodexAppServerTermination(status: 0, stderr: nil))
     }
 
     func emitCommandApprovalRequest(requestID: String, itemID: String, command: String, reason: String) {

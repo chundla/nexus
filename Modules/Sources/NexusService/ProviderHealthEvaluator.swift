@@ -883,12 +883,13 @@ struct CodexAppServerReadinessProbe: CodexReadinessProbing {
                 semaphore.signal()
             }
         }
-        transport.setTerminationHandler { status in
-            if status != 0, state.error == nil {
+        transport.setTerminationHandler { termination in
+            if termination.status != 0, state.error == nil {
+                let detail = termination.stderr?.trimmingCharacters(in: .whitespacesAndNewlines)
                 state.error = NSError(
                     domain: "CodexAppServerReadinessProbe",
-                    code: Int(status),
-                    userInfo: [NSLocalizedDescriptionKey: "Codex app-server exited before readiness completed."]
+                    code: Int(termination.status),
+                    userInfo: [NSLocalizedDescriptionKey: detail?.isEmpty == false ? detail! : "Codex app-server exited before readiness completed."]
                 )
                 semaphore.signal()
             }
@@ -975,12 +976,13 @@ struct SSHRemoteCodexAppServerReadinessProbe: RemoteCodexReadinessProbing {
                 semaphore.signal()
             }
         }
-        transport.setTerminationHandler { status in
-            if status != 0, state.error == nil {
+        transport.setTerminationHandler { termination in
+            if termination.status != 0, state.error == nil {
+                let detail = termination.stderr?.trimmingCharacters(in: .whitespacesAndNewlines)
                 state.error = NSError(
                     domain: "SSHRemoteCodexAppServerReadinessProbe",
-                    code: Int(status),
-                    userInfo: [NSLocalizedDescriptionKey: "Codex app-server exited before remote readiness completed."]
+                    code: Int(termination.status),
+                    userInfo: [NSLocalizedDescriptionKey: detail?.isEmpty == false ? detail! : "Codex app-server exited before remote readiness completed."]
                 )
                 semaphore.signal()
             }
