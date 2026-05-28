@@ -226,6 +226,8 @@ struct nexusTests {
             showsTerminal: false,
             showsAttachment: false,
             showsInput: false,
+            relaunchIsEnabled: true,
+            relaunchDisabledReason: nil,
             unsupportedCopy: UnsupportedRemoteSessionSurfaceCopy(
                 title: "Unsupported Session Surface",
                 summary: "This iPhone can inspect this Codex Session, but it cannot present or operate its primary Session surface yet.",
@@ -253,7 +255,70 @@ struct nexusTests {
             showsTerminal: true,
             showsAttachment: true,
             showsInput: true,
+            relaunchIsEnabled: true,
+            relaunchDisabledReason: nil,
             unsupportedCopy: nil
+        ))
+    }
+
+    @MainActor
+    @Test func remoteProviderActionStateDisablesUnsupportedStructuredLaunchAndCreateOnIPhone() {
+        let launchState = RemoteProviderActionState(
+            capability: ProviderCapability(
+                action: .launchDefaultSession,
+                isSupported: true,
+                isEnabled: true
+            ),
+            provider: Provider(id: .codex),
+            prelaunchPrimarySurface: .structuredActivityFeed
+        )
+        let createState = RemoteProviderActionState(
+            capability: ProviderCapability(
+                action: .createNamedSession,
+                isSupported: true,
+                isEnabled: true
+            ),
+            provider: Provider(id: .codex),
+            prelaunchPrimarySurface: .structuredActivityFeed
+        )
+
+        #expect(launchState == RemoteProviderActionState(
+            isEnabled: false,
+            disabledReason: "Open this Workspace on the paired Mac to launch Codex because this iPhone cannot operate its primary Session surface yet."
+        ))
+        #expect(createState == RemoteProviderActionState(
+            isEnabled: false,
+            disabledReason: "Open this Workspace on the paired Mac to create a Codex Named Session because this iPhone cannot operate its primary Session surface yet."
+        ))
+    }
+
+    @MainActor
+    @Test func remoteSessionSurfacePresentationDisablesRelaunchForUnsupportedStructuredCodexOnIPhone() {
+        let screen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .codex,
+                isDefault: true,
+                state: .interrupted,
+                failureMessage: "Bridge lost"
+            ),
+            primarySurface: .structuredActivityFeed,
+            transcript: ""
+        )
+
+        #expect(remoteSessionSurfacePresentation(for: screen, isReady: false) == RemoteSessionSurfacePresentation(
+            surfaceSupport: .unsupported,
+            showsTerminal: false,
+            showsAttachment: false,
+            showsInput: false,
+            relaunchIsEnabled: false,
+            relaunchDisabledReason: "Open this Session on the paired Mac to relaunch it because this iPhone cannot operate its primary Session surface yet.",
+            unsupportedCopy: UnsupportedRemoteSessionSurfaceCopy(
+                title: "Unsupported Session Surface",
+                summary: "This iPhone can inspect this Codex Session, but it cannot present or operate its primary Session surface yet.",
+                recovery: "Open this Session on the paired Mac to use its primary Session surface."
+            )
         ))
     }
 

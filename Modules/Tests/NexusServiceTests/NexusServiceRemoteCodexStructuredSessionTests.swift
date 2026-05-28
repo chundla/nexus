@@ -5,6 +5,36 @@ import NexusDomain
 import Testing
 
 struct NexusServiceRemoteCodexStructuredSessionTests {
+    @Test func remoteCodexPrelaunchPrimarySurfaceIsStructuredInOverviewAndDetail() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let transportHarness = RemoteCodexTransportHarness()
+        let service = try makeRemoteCodexService(rootURL: rootURL, transportHarness: transportHarness)
+
+        let group = try service.createWorkspaceGroup(name: "Remote")
+        let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
+        _ = try service.validateHost(hostID: host.id)
+        let workspace = try service.createRemoteWorkspace(
+            name: "Remote Codex",
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+
+        let overview = try service.getWorkspaceOverview(workspaceID: workspace.id)
+        let codexCard = try #require(overview.providerCards.first(where: { $0.provider.id == .codex }))
+        let detail = try service.getProviderDetail(workspaceID: workspace.id, providerID: .codex)
+
+        #expect(codexCard.prelaunchPrimarySurface == .structuredActivityFeed)
+        #expect(detail.prelaunchPrimarySurface == .structuredActivityFeed)
+        #expect(detail.defaultSession == nil)
+        #expect(detail.health.summary == "Codex 1.2.3 is available")
+        #expect(detail.capabilities.launchDefaultSession.isEnabled)
+        #expect(detail.capabilities.createNamedSession.isEnabled)
+    }
+
     @Test func remoteCodexDefaultSessionLaunchesStructuredSurfaceThroughSSHBridge() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)

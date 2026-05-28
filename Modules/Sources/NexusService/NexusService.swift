@@ -1241,9 +1241,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 healthSummaryEvaluator: { workspace, remoteContext, providerHealthEvaluator in
                     providerHealthEvaluator.healthSummary(for: .codex, workspace: workspace, remoteContext: remoteContext)
                 },
-                primarySurfaceEvaluator: { workspace in
-                    workspace.kind == .local ? .structuredActivityFeed : .terminal
-                },
+                primarySurfaceEvaluator: { _ in .structuredActivityFeed },
                 shouldReuseRemoteHealthSnapshot: { snapshot, remoteContext in
                     shouldReuseRemoteCLIHealthSnapshot(snapshot, remoteContext: remoteContext)
                 }
@@ -1444,6 +1442,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 provider: Provider(id: providerID),
                 health: health,
                 capabilities: providerCapabilities(for: providerID, workspace: workspace, health: health, defaultSession: defaultSession),
+                prelaunchPrimarySurface: providerAdapter(for: providerID).primarySurface(in: workspace),
                 defaultSession: try defaultSessionSummary(for: workspace, providerID: providerID),
                 alternateSessionCount: try metadataStore.listSessions(workspaceID: workspaceID, providerID: providerID)
                     .filter { $0.isDefault == false }
@@ -1477,6 +1476,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             provider: Provider(id: providerID),
             health: health,
             capabilities: providerCapabilities(for: providerID, workspace: workspace, health: health, defaultSession: defaultSession),
+            prelaunchPrimarySurface: providerAdapter(for: providerID).primarySurface(in: workspace),
             defaultSession: defaultSession,
             alternateSessions: sessions.filter { $0.isDefault == false && $0.state != .failed },
             failedSessions: sessions.filter { $0.isDefault == false && $0.state == .failed }

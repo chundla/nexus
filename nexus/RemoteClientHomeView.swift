@@ -509,8 +509,20 @@ private struct RemoteProviderDetailView: View {
         detail?.health ?? providerCard.health
     }
 
-    private var defaultSessionCapability: ProviderCapability {
-        detail?.capabilities.launchDefaultSession ?? providerCard.capabilities.launchDefaultSession
+    private var defaultSessionActionState: RemoteProviderActionState {
+        RemoteProviderActionState(
+            capability: detail?.capabilities.launchDefaultSession ?? providerCard.capabilities.launchDefaultSession,
+            provider: detail?.provider ?? providerCard.provider,
+            prelaunchPrimarySurface: detail?.prelaunchPrimarySurface ?? providerCard.prelaunchPrimarySurface
+        )
+    }
+
+    private var createNamedSessionActionState: RemoteProviderActionState {
+        RemoteProviderActionState(
+            capability: detail?.capabilities.createNamedSession ?? providerCard.capabilities.createNamedSession,
+            provider: detail?.provider ?? providerCard.provider,
+            prelaunchPrimarySurface: detail?.prelaunchPrimarySurface ?? providerCard.prelaunchPrimarySurface
+        )
     }
 
     private var defaultSessionSection: RemoteDefaultSessionSectionState {
@@ -586,10 +598,10 @@ private struct RemoteProviderDetailView: View {
                 Button(isLaunchingDefaultSession ? "Working…" : defaultSessionActionTitle) {
                     launchDefaultSession()
                 }
-                .disabled(isLaunchingDefaultSession || defaultSessionCapability.isEnabled == false)
+                .disabled(isLaunchingDefaultSession || defaultSessionActionState.isEnabled == false)
 
-                if let disabledReason = defaultSessionCapability.disabledReason,
-                   defaultSessionCapability.isEnabled == false {
+                if let disabledReason = defaultSessionActionState.disabledReason,
+                   defaultSessionActionState.isEnabled == false {
                     Text(disabledReason)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -627,10 +639,10 @@ private struct RemoteProviderDetailView: View {
                 Button(isCreatingNamedSession ? "Creating…" : "Create Session") {
                     createNamedSession()
                 }
-                .disabled(isCreatingNamedSession || namedSessionsSection.canCreateSession == false)
+                .disabled(isCreatingNamedSession || createNamedSessionActionState.isEnabled == false)
 
-                if let disabledReason = namedSessionsSection.createDisabledReason,
-                   namedSessionsSection.canCreateSession == false {
+                if let disabledReason = createNamedSessionActionState.disabledReason,
+                   createNamedSessionActionState.isEnabled == false {
                     Text(disabledReason)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -824,7 +836,14 @@ private struct RemoteSessionScreenView: View {
                     Button(isPerformingAction ? "Relaunching…" : "Relaunch Session") {
                         relaunchSession()
                     }
-                    .disabled(isPerformingAction)
+                    .disabled(isPerformingAction || surfacePresentation?.relaunchIsEnabled == false)
+
+                    if let disabledReason = surfacePresentation?.relaunchDisabledReason,
+                       surfacePresentation?.relaunchIsEnabled == false {
+                        Text(disabledReason)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
 

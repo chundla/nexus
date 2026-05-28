@@ -311,6 +311,7 @@ public struct WorkspaceProviderCard: Codable, Equatable, Identifiable, Sendable 
     public let provider: Provider
     public let health: ProviderHealthSummary
     public let capabilities: ProviderCapabilities
+    public let prelaunchPrimarySurface: SessionSurface
     public let defaultSession: ProviderDefaultSessionSummary
     public let alternateSessionCount: Int
 
@@ -318,12 +319,14 @@ public struct WorkspaceProviderCard: Codable, Equatable, Identifiable, Sendable 
         provider: Provider,
         health: ProviderHealthSummary,
         capabilities: ProviderCapabilities = ProviderCapabilities(),
+        prelaunchPrimarySurface: SessionSurface = .terminal,
         defaultSession: ProviderDefaultSessionSummary,
         alternateSessionCount: Int = 0
     ) {
         self.provider = provider
         self.health = health
         self.capabilities = capabilities
+        self.prelaunchPrimarySurface = prelaunchPrimarySurface
         self.defaultSession = defaultSession
         self.alternateSessionCount = alternateSessionCount
     }
@@ -343,6 +346,7 @@ public struct ProviderDetail: Codable, Equatable, Sendable {
     public let provider: Provider
     public let health: ProviderHealthSummary
     public let capabilities: ProviderCapabilities
+    public let prelaunchPrimarySurface: SessionSurface
     public let defaultSession: Session?
     public let alternateSessions: [Session]
     public let failedSessions: [Session]
@@ -352,6 +356,7 @@ public struct ProviderDetail: Codable, Equatable, Sendable {
         provider: Provider,
         health: ProviderHealthSummary,
         capabilities: ProviderCapabilities = ProviderCapabilities(),
+        prelaunchPrimarySurface: SessionSurface = .terminal,
         defaultSession: Session?,
         alternateSessions: [Session],
         failedSessions: [Session]
@@ -360,6 +365,7 @@ public struct ProviderDetail: Codable, Equatable, Sendable {
         self.provider = provider
         self.health = health
         self.capabilities = capabilities
+        self.prelaunchPrimarySurface = prelaunchPrimarySurface
         self.defaultSession = defaultSession
         self.alternateSessions = alternateSessions
         self.failedSessions = failedSessions
