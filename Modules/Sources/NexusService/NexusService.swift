@@ -1999,7 +1999,10 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 transcript: resolvedSession.failureMessage ?? "Session exited"
             )
         case .ready:
-            return normalizedSessionScreen(try sessionRuntimeManager.sessionScreen(for: resolvedSession))
+            if sessionRuntimeManager.hasRuntime(for: resolvedSession) {
+                return normalizedSessionScreen(try sessionRuntimeManager.sessionScreen(for: resolvedSession))
+            }
+            return try staticSessionScreen(for: resolvedSession, transcript: "")
         }
     }
 
@@ -2033,7 +2036,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             throw NexusMetadataStoreError.sessionNotFound
         }
 
-        let resolvedSession = try reconcileSessionRuntimeState(session)
+        let resolvedSession = try interactiveReadySession(for: session)
         guard resolvedSession.state == .ready else {
             throw NexusMetadataStoreError.sessionNotReady
         }
@@ -2047,7 +2050,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             throw NexusMetadataStoreError.sessionNotFound
         }
 
-        let resolvedSession = try reconcileSessionRuntimeState(session)
+        let resolvedSession = try interactiveReadySession(for: session)
         guard resolvedSession.state == .ready else {
             throw NexusMetadataStoreError.sessionNotReady
         }
@@ -2066,7 +2069,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             throw NexusMetadataStoreError.sessionNotFound
         }
 
-        let resolvedSession = try reconcileSessionRuntimeState(session)
+        let resolvedSession = try interactiveReadySession(for: session)
         guard resolvedSession.state == .ready else {
             throw NexusMetadataStoreError.sessionNotReady
         }
@@ -2101,7 +2104,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             throw NexusMetadataStoreError.sessionNotFound
         }
 
-        let resolvedSession = try reconcileSessionRuntimeState(session)
+        let resolvedSession = try interactiveReadySession(for: session)
         guard resolvedSession.state == .ready else {
             throw NexusMetadataStoreError.sessionNotReady
         }
@@ -2121,7 +2124,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             throw NexusMetadataStoreError.sessionNotFound
         }
 
-        let resolvedSession = try reconcileSessionRuntimeState(session)
+        let resolvedSession = try interactiveReadySession(for: session)
         guard resolvedSession.state == .ready else {
             throw NexusMetadataStoreError.sessionNotReady
         }
@@ -2141,7 +2144,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             throw NexusMetadataStoreError.sessionNotFound
         }
 
-        let resolvedSession = try reconcileSessionRuntimeState(session)
+        let resolvedSession = try interactiveReadySession(for: session)
         guard resolvedSession.state == .ready else {
             throw NexusMetadataStoreError.sessionNotReady
         }
@@ -2302,13 +2305,32 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             throw NexusMetadataStoreError.sessionNotFound
         }
 
-        let resolvedSession = try reconcileSessionRuntimeState(session)
+        let resolvedSession = try interactiveReadySession(for: session)
         guard resolvedSession.state == .ready else {
             throw NexusMetadataStoreError.sessionNotReady
         }
         guard sessionControllerRegistry.isRemoteController(sessionID: resolvedSession.id, pairedDeviceID: pairedDeviceID) else {
             throw controllerError
         }
+        return resolvedSession
+    }
+
+    private func interactiveReadySession(for session: Session) throws -> Session {
+        let resolvedSession = try reconcileSessionRuntimeState(session)
+        guard resolvedSession.state == .ready else {
+            return resolvedSession
+        }
+
+        guard sessionRuntimeManager.hasRuntime(for: resolvedSession) == false else {
+            return resolvedSession
+        }
+
+        guard let workspace = try metadataStore.workspace(id: resolvedSession.workspaceID),
+              try sessionMayRemainReadyWithoutRuntime(resolvedSession, workspace: workspace) else {
+            return resolvedSession
+        }
+
+        _ = try launchOrResumeSession(resolvedSession, workspace: workspace)
         return resolvedSession
     }
 
@@ -2322,6 +2344,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         }
 
         let reconciledSession = try reconcileSessionRuntimeState(existingSession)
+        let sessionRecordAdapterMetadataSource = try relaunchSessionRecordAdapterMetadataSource(for: reconciledSession)
 
         if let launchSnapshot = try metadataStore.launchSnapshot(sessionID: reconciledSession.id) {
             if shouldAttemptRemoteRuntimeRecovery(for: reconciledSession, workspace: workspace) {
@@ -2339,7 +2362,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 session,
                 workspace: workspace,
                 launchSnapshot: launchSnapshot,
-                forceFreshRemoteRuntime: shouldCreateFreshRemoteRuntime(for: reconciledSession, workspace: workspace)
+                forceFreshRemoteRuntime: shouldCreateFreshRemoteRuntime(for: reconciledSession, workspace: workspace),
+                sessionRecordAdapterMetadataSource: sessionRecordAdapterMetadataSource
             )
         }
 
@@ -2380,8 +2404,19 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             session,
             workspace: workspace,
             launchSnapshot: launchSnapshot,
-            forceFreshRemoteRuntime: shouldCreateFreshRemoteRuntime(for: reconciledSession, workspace: workspace)
+            forceFreshRemoteRuntime: shouldCreateFreshRemoteRuntime(for: reconciledSession, workspace: workspace),
+            sessionRecordAdapterMetadataSource: sessionRecordAdapterMetadataSource
         )
+    }
+
+    private func relaunchSessionRecordAdapterMetadataSource(for session: Session) throws -> SessionRecordAdapterMetadataLaunchSource {
+        guard session.providerID == .ibmBob,
+              session.state != .ready else {
+            return .stored
+        }
+
+        let storedSessionID = try metadataStore.sessionRecordAdapterMetadata(sessionID: session.id)?.ibmBobSessionLinkage?.sessionID
+        return .explicit(SessionRecordAdapterMetadata.ibmBob(sessionID: storedSessionID))
     }
 
     private func shouldAttemptRemoteRuntimeRecovery(for session: Session, workspace: Workspace) -> Bool {
@@ -3814,11 +3849,25 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         }
 
         let workspace = try metadataStore.workspace(id: session.workspaceID)
+        if try sessionMayRemainReadyWithoutRuntime(session, workspace: workspace) {
+            return session
+        }
+
         return try metadataStore.updateSession(
             id: session.id,
             state: .interrupted,
             failureMessage: try interruptedSessionFailureMessage(for: session, workspace: workspace)
         )
+    }
+
+    private func sessionMayRemainReadyWithoutRuntime(_ session: Session, workspace: Workspace?) throws -> Bool {
+        guard session.providerID == .ibmBob,
+              workspace?.kind == .local,
+              try persistedPrimarySurface(for: session, workspace: workspace) == .structuredActivityFeed else {
+            return false
+        }
+
+        return try metadataStore.sessionRecordAdapterMetadata(sessionID: session.id)?.ibmBobTurnInProgress != true
     }
 
     private func interruptedSessionFailureMessage(for session: Session, workspace: Workspace?) throws -> String {

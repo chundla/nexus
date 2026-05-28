@@ -35,9 +35,7 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
     private var terminalRows = 24
     private var draft = ""
     private var transcriptEntries: [String] = []
-    private var activityItems: [SessionActivityItem] = [
-        SessionActivityItem(kind: .status, text: "IBM Bob Session ready. Send a prompt to start IBM Bob.")
-    ]
+    private var activityItems: [SessionActivityItem]
     private var changeHandler: (@Sendable () -> Void)?
     private var activeTransport: (any IBMBobTransporting)?
     private var activeTurn: ActiveTurn?
@@ -60,9 +58,12 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
     ) throws {
         self.executable = executable
         self.workingDirectory = workingDirectory
-        self.sessionLinkage = sessionLinkage
+        self.sessionLinkage = sessionLinkage.map { IBMBobSessionLinkage(sessionID: $0.sessionID) }
         self.terminationStatusMessageBuilder = terminationStatusMessageBuilder
         self.transportFactory = transportFactory
+        let restoredActivityItems = sessionLinkage?.persistedActivityItems ?? []
+        self.activityItems = restoredActivityItems.isEmpty ? Self.defaultActivityItems : restoredActivityItems
+        self.transcriptEntries = Self.transcriptEntries(from: self.activityItems)
     }
 
     var state: Session.State {
@@ -75,8 +76,13 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
         lock.lock()
         let sessionID = sessionLinkage?.sessionID
         let snapshotActivityItems = activityItems
+        let turnInProgress = isStreaming
         lock.unlock()
-        return SessionRecordAdapterMetadata.ibmBob(sessionID: sessionID, activityItems: snapshotActivityItems)
+        return SessionRecordAdapterMetadata.ibmBob(
+            sessionID: sessionID,
+            activityItems: snapshotActivityItems,
+            turnInProgress: turnInProgress
+        )
     }
 
     func sessionScreen(for session: Session) -> SessionScreen {
@@ -474,6 +480,22 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
             }
         }
         return nil
+    }
+
+    private static var defaultActivityItems: [SessionActivityItem] {
+        [SessionActivityItem(kind: .status, text: "IBM Bob Session ready. Send a prompt to start IBM Bob.")]
+    }
+
+    private static func transcriptEntries(from activityItems: [SessionActivityItem]) -> [String] {
+        activityItems.compactMap { item in
+            guard item.kind == .message else {
+                return nil
+            }
+            if item.text.hasPrefix("You: ") {
+                return "> \(item.text.dropFirst(5))"
+            }
+            return item.text
+        }
     }
 
     private static func launchArguments(prompt: String, sessionLinkage: IBMBobSessionLinkage?) -> [String] {

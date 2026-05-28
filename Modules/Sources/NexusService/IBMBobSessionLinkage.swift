@@ -5,31 +5,49 @@ import NexusDomain
 private enum IBMBobSessionRecordMetadataKey {
     static let sessionID = "bobSessionID"
     static let activityItemsJSON = "activityItemsJSON"
+    static let turnInProgress = "turnInProgress"
 }
 
 struct IBMBobSessionLinkage: Equatable, Sendable {
     let sessionID: String?
+    let persistedActivityItems: [SessionActivityItem]
+    let turnInProgress: Bool
+
+    init(sessionID: String?, persistedActivityItems: [SessionActivityItem] = [], turnInProgress: Bool = false) {
+        self.sessionID = sessionID
+        self.persistedActivityItems = persistedActivityItems
+        self.turnInProgress = turnInProgress
+    }
 
     var isEmpty: Bool {
-        guard let sessionID = sessionID?.trimmingCharacters(in: .whitespacesAndNewlines) else {
-            return true
-        }
-        return sessionID.isEmpty
+        let trimmedSessionID = sessionID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmedSessionID.isEmpty && persistedActivityItems.isEmpty && turnInProgress == false
     }
 
     var sessionRecordAdapterMetadata: SessionRecordAdapterMetadata? {
-        SessionRecordAdapterMetadata.ibmBob(sessionID: sessionID)
+        SessionRecordAdapterMetadata.ibmBob(
+            sessionID: sessionID,
+            activityItems: persistedActivityItems,
+            turnInProgress: turnInProgress
+        )
     }
 }
 
 extension SessionRecordAdapterMetadata {
-    static func ibmBob(sessionID: String?, activityItems: [SessionActivityItem] = []) -> SessionRecordAdapterMetadata? {
+    static func ibmBob(
+        sessionID: String?,
+        activityItems: [SessionActivityItem] = [],
+        turnInProgress: Bool = false
+    ) -> SessionRecordAdapterMetadata? {
         var values: [String: String] = [:]
         values[IBMBobSessionRecordMetadataKey.sessionID] = sessionID ?? ""
         if activityItems.isEmpty == false,
            let data = try? JSONEncoder().encode(activityItems),
            let json = String(data: data, encoding: .utf8) {
             values[IBMBobSessionRecordMetadataKey.activityItemsJSON] = json
+        }
+        if turnInProgress {
+            values[IBMBobSessionRecordMetadataKey.turnInProgress] = "true"
         }
 
         let metadata = SessionRecordAdapterMetadata(providerID: .ibmBob, values: values)
@@ -41,7 +59,11 @@ extension SessionRecordAdapterMetadata {
             return nil
         }
 
-        let linkage = IBMBobSessionLinkage(sessionID: values[IBMBobSessionRecordMetadataKey.sessionID])
+        let linkage = IBMBobSessionLinkage(
+            sessionID: values[IBMBobSessionRecordMetadataKey.sessionID],
+            persistedActivityItems: ibmBobPersistedActivityItems ?? [],
+            turnInProgress: ibmBobTurnInProgress
+        )
         return linkage.isEmpty ? nil : linkage
     }
 
@@ -55,6 +77,10 @@ extension SessionRecordAdapterMetadata {
         }
 
         return items
+    }
+
+    var ibmBobTurnInProgress: Bool {
+        providerID == .ibmBob && values[IBMBobSessionRecordMetadataKey.turnInProgress] == "true"
     }
 }
 #endif
