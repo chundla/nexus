@@ -158,9 +158,9 @@ private func structuredRemoteClientSessionSurfaceSupport(
     providerID: ProviderID
 ) -> SessionSurfaceSupport {
     switch providerID {
-    case .codex, .pi:
+    case .codex, .pi, .ibmBob:
         .supported
-    case .claude, .ibmBob:
+    case .claude:
         .unsupported
     }
 }

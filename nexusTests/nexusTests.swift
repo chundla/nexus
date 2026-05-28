@@ -429,6 +429,51 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func remoteSessionSurfacePresentationSupportsLocalIBMBobStructuredSessionsOnIPhone() {
+        let screen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .ibmBob,
+                isDefault: true,
+                state: .ready
+            ),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [SessionActivityItem(kind: .status, text: "IBM Bob Session ready. Send a prompt to start IBM Bob.")]
+        )
+
+        #expect(remoteSessionSurfacePresentation(for: screen, isReady: true) == RemoteSessionSurfacePresentation(
+            surfaceSupport: .supported,
+            showsTerminal: false,
+            showsStructuredActivity: true,
+            showsAttachment: true,
+            showsInput: false,
+            relaunchIsEnabled: true,
+            relaunchDisabledReason: nil,
+            unsupportedCopy: nil
+        ))
+    }
+
+    @MainActor
+    @Test func remoteProviderActionStateEnablesLocalIBMBobStructuredDefaultLaunchOnIPhone() {
+        let launchState = RemoteProviderActionState(
+            capability: ProviderCapability(
+                action: .launchDefaultSession,
+                isSupported: true,
+                isEnabled: true
+            ),
+            provider: Provider(id: .ibmBob),
+            prelaunchPrimarySurface: .structuredActivityFeed
+        )
+
+        #expect(launchState == RemoteProviderActionState(
+            isEnabled: true,
+            disabledReason: nil
+        ))
+    }
+
+    @MainActor
     @Test func remoteProviderActionStateUsesProviderHealthGuidanceWhenStructuredLaunchIsNotLaunchable() {
         let launchState = RemoteProviderActionState(
             capability: ProviderCapability(
@@ -8045,6 +8090,8 @@ private final class StubSessionRuntimeManager: SessionRuntimeManaging {
         self.launchTranscriptForExecutable = launchTranscriptForExecutable
         self.launchTranscriptForConfiguration = launchTranscriptForConfiguration
     }
+
+    func setRuntimeChangeHandler(_ handler: (@Sendable (UUID) -> Void)?) {}
 
     func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) throws {
         try launchBehavior?(launchConfiguration, session, workspace)

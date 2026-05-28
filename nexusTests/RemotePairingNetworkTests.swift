@@ -551,6 +551,119 @@ struct RemotePairingNetworkTests {
         #expect(sessionSurfaceSupport(for: screen, on: .remoteClient) == .supported)
     }
 
+    @Test func localIBMBobStructuredSessionIsInspectableAndStreamsSharedUpdatesOverDedicatedNetworkAPI() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let launcher = ProcessSessionRuntimeLauncher(
+            localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
+            ibmBobTransportFactory: { _, _, _ in
+                RemotePairingSynchronousIBMBobTransport(
+                    stdoutLines: [
+                        #"{"type":"status","text":"Bob turn started"}"#,
+                        #"{"type":"message","text":"Hello from Bob"}"#,
+                        #"{"type":"completion","text":"Bob turn complete"}"#
+                    ],
+                    terminationStatus: 0
+                )
+            }
+        )
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: RemotePairingTestExecutableResolver(executables: ["bob": "/tmp/fake-bob"]),
+                commandRunner: RemotePairingTestCommandRunner(results: [
+                    RemotePairingTestCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--version'"]): .success(stdout: "3.4.5\n"),
+                    RemotePairingTestCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--list-sessions'"]): .success(stdout: "[]\n")
+                ]),
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+            ),
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
+
+        _ = try await client.setRemoteAccessEnabled(true)
+        let pairing = try await client.startPairing()
+        let group = try await client.createWorkspaceGroup(name: "Client Work")
+        let workspace = try await client.createLocalWorkspace(
+            name: "Nexus",
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+
+        let remoteClient = RemotePairingHTTPClient()
+        let pairedMac = try await remoteClient.completePairing(
+            host: server.displayHost,
+            port: server.port,
+            pairingCode: pairing.code,
+            deviceName: "Chris’s iPhone"
+        )
+        let session = try await remoteClient.launchOrResumeDefaultSession(
+            for: pairedMac,
+            workspaceID: workspace.id,
+            providerID: .ibmBob
+        )
+        let idleScreen = try await remoteClient.fetchSessionScreen(for: pairedMac, sessionID: session.id)
+
+        #expect(idleScreen.session.id == session.id)
+        #expect(idleScreen.primarySurface == .structuredActivityFeed)
+        #expect(idleScreen.activityItems.map(\.text) == ["IBM Bob Session ready. Send a prompt to start IBM Bob."])
+        #expect(sessionSurfaceSupport(for: idleScreen, on: .remoteClient) == .supported)
+
+        var observedScreens: [SessionScreen] = []
+        let observation = try await remoteClient.observeSessionScreen(
+            for: pairedMac,
+            sessionID: session.id,
+            onUpdate: { screen in
+                Task { @MainActor in
+                    observedScreens.append(screen)
+                }
+            },
+            onDisconnect: { _ in }
+        )
+        defer {
+            Task {
+                await observation.cancel()
+            }
+        }
+
+        _ = try await waitForObservedScreen {
+            observedScreens.last
+        }
+
+        do {
+            _ = try await remoteClient.sendSessionInput(for: pairedMac, sessionID: session.id, text: "Ship it")
+            Issue.record("Expected IBM Bob structured prompt submission on iPhone to require Controller first")
+        } catch {
+            #expect(error.localizedDescription == "Take Controller on this iPhone before sending Session input.")
+        }
+
+        _ = try await remoteClient.takeSessionControl(for: pairedMac, sessionID: session.id, columns: 44, rows: 12)
+        let responseScreen = try await remoteClient.sendSessionInput(for: pairedMac, sessionID: session.id, text: "Ship it")
+        let observedScreen = try await waitForObservedScreen {
+            observedScreens.last { $0.activityItems.contains(where: { $0.text == "Bob turn complete" }) }
+        }
+        let fetchedScreen = try await remoteClient.fetchSessionScreen(for: pairedMac, sessionID: session.id)
+
+        #expect(responseScreen.session.id == session.id)
+        #expect(responseScreen.primarySurface == .structuredActivityFeed)
+        #expect(responseScreen.activityItems.map(\.text) == [
+            "IBM Bob Session ready. Send a prompt to start IBM Bob.",
+            "You: Ship it",
+            "Bob turn started",
+            "Hello from Bob",
+            "Bob turn complete"
+        ])
+        #expect(observedScreen.session.id == session.id)
+        #expect(observedScreen.activityItems.map(\.text) == responseScreen.activityItems.map(\.text))
+        #expect(fetchedScreen == responseScreen)
+    }
+
     @Test func failedStructuredCodexSessionScreenStaysInspectableOverDedicatedNetworkAPI() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)
@@ -1774,6 +1887,42 @@ private func waitForSessionScreen(
     }
 }
 
+private final class RemotePairingSynchronousIBMBobTransport: IBMBobTransporting, @unchecked Sendable {
+    private let stdoutLines: [String]
+    private let terminationStatus: Int32
+    private var stdoutLineHandler: (@Sendable (String) -> Void)?
+    private var stderrLineHandler: (@Sendable (String) -> Void)?
+    private var terminationHandler: (@Sendable (Int32) -> Void)?
+
+    init(stdoutLines: [String], terminationStatus: Int32) {
+        self.stdoutLines = stdoutLines
+        self.terminationStatus = terminationStatus
+    }
+
+    func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
+        stdoutLineHandler = handler
+    }
+
+    func setStderrLineHandler(_ handler: (@Sendable (String) -> Void)?) {
+        stderrLineHandler = handler
+    }
+
+    func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?) {
+        terminationHandler = handler
+    }
+
+    func start() throws {
+        for line in stdoutLines {
+            stdoutLineHandler?(line)
+        }
+        terminationHandler?(terminationStatus)
+    }
+
+    func terminate() throws {
+        terminationHandler?(terminationStatus)
+    }
+}
+
 private struct RemotePairingTestExecutableResolver: ProviderExecutableResolving {
     let executables: [String: String]
 
@@ -1828,6 +1977,8 @@ private final class DelayedEchoSessionRuntimeManager: SessionRuntimeManaging, @u
     init(initialTranscript: String) {
         self.initialTranscript = initialTranscript
     }
+
+    func setRuntimeChangeHandler(_ handler: (@Sendable (UUID) -> Void)?) {}
 
     func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) throws {
         lock.lock()
@@ -2002,6 +2153,8 @@ private final class StructuredPromptSessionRuntimeManager: SessionRuntimeManagin
         self.providerName = providerName
         self.initialApprovalRequests = approvalRequests
     }
+
+    func setRuntimeChangeHandler(_ handler: (@Sendable (UUID) -> Void)?) {}
 
     func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) throws {
         lock.lock()

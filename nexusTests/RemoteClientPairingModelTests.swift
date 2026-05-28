@@ -598,6 +598,59 @@ struct RemoteClientPairingModelTests {
         #expect(model.focusedSessionSurfaceSupport == .supported)
     }
 
+    @Test func focusedRemoteSessionSurfaceSupportAllowsExistingStructuredLocalIBMBobSessionsOnIPhone() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: UUID()
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .ibmBob,
+            isDefault: true,
+            state: .ready
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let screen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [SessionActivityItem(kind: .status, text: "IBM Bob Session ready. Send a prompt to start IBM Bob.")]
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let model = RemoteClientPairingModel(
+            client: StubRemotePairingClient(result: pairedMac, sessionScreen: screen),
+            store: store
+        )
+        model.catalog = RemoteWorkspaceCatalog(
+            workspaceGroups: [],
+            recentNavigation: [],
+            workspaceOverviews: [WorkspaceOverview(workspace: workspace, providerCards: [])]
+        )
+
+        await model.focusRemoteSession(sessionID: session.id)
+        await Task.yield()
+
+        #expect(model.focusedSessionScreen == screen)
+        #expect(model.focusedSessionSurfaceSupport == .supported)
+    }
+
     @Test func focusedRemoteSessionSurfaceSupportSupportsExistingStructuredRemotePiSessionsOnIPhone() async throws {
         let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
