@@ -158,6 +158,121 @@ struct CodexAppServerRuntimeTests {
         #expect(transport.sentMessages.last?["id"] as? String == "approval-2")
         #expect((transport.sentMessages.last?["result"] as? [String: String])?["decision"] == "decline")
     }
+
+    @Test func startupFailureSurfacesEarlyThreadStartTerminationInsteadOfTimingOut() {
+        #expect {
+            try CodexAppServerRuntime(
+                executable: "/tmp/fake-codex",
+                workingDirectory: "/tmp/workspace",
+                terminationStatusMessageBuilder: { _ in "" },
+                transportFactory: { _, _, _ in ExitDuringThreadStartCodexTransport() }
+            )
+        } throws: { error in
+            error.localizedDescription == "Codex app-server exited with status 127 before startup completed."
+        }
+    }
+
+    @Test func processCodexAppServerTransportLaunchesSiblingInterpreterForEnvShebangScripts() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let binURL = rootURL.appendingPathComponent("bin", isDirectory: true)
+        try FileManager.default.createDirectory(at: binURL, withIntermediateDirectories: true)
+
+        let interpreterURL = binURL.appendingPathComponent("fake-node-interpreter", isDirectory: false)
+        try "#!/bin/sh\nIFS= read -r _line\nprintf '%s\\n' '{\"id\":\"nexus-codex-readiness-initialize\",\"result\":{\"userAgent\":\"nexus-test\"}}'\nsleep 1\n".write(to: interpreterURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: interpreterURL.path)
+
+        let scriptURL = binURL.appendingPathComponent("fake-codex", isDirectory: false)
+        try "#!/usr/bin/env fake-node-interpreter\n".write(to: scriptURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+        let transport = try ProcessCodexAppServerTransport(
+            executable: scriptURL.path,
+            arguments: ["app-server"],
+            workingDirectory: rootURL.path(percentEncoded: false)
+        )
+        let startupSemaphore = DispatchSemaphore(value: 0)
+        let response = LockedValue<String?>(nil)
+        transport.setStdoutLineHandler { line in
+            response.set(line)
+            startupSemaphore.signal()
+        }
+
+        try transport.start()
+        defer { try? transport.terminate() }
+        try transport.sendLine("{\"jsonrpc\":\"2.0\",\"id\":\"nexus-codex-readiness-initialize\",\"method\":\"initialize\",\"params\":{\"clientInfo\":{\"name\":\"nexus\",\"version\":\"1\"}}}")
+
+        #expect(startupSemaphore.wait(timeout: .now() + 2) == .success)
+        #expect(response.get()?.contains("\"nexus-codex-readiness-initialize\"") == true)
+    }
+}
+
+private final class LockedValue<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Value
+
+    init(_ value: Value) {
+        self.value = value
+    }
+
+    func set(_ newValue: Value) {
+        lock.lock()
+        value = newValue
+        lock.unlock()
+    }
+
+    func get() -> Value {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+}
+
+private final class ExitDuringThreadStartCodexTransport: CodexAppServerTransporting, @unchecked Sendable {
+    private var stdoutLineHandler: (@Sendable (String) -> Void)?
+    private var terminationHandler: (@Sendable (Int32) -> Void)?
+
+    func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
+        stdoutLineHandler = handler
+    }
+
+    func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?) {
+        terminationHandler = handler
+    }
+
+    func start() throws {}
+
+    func sendLine(_ line: String) throws {
+        guard let data = line.data(using: .utf8),
+              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return
+        }
+
+        switch object["method"] as? String {
+        case "initialize":
+            stdoutLineHandler?(jsonLine([
+                "id": object["id"] ?? 0,
+                "result": [
+                    "userAgent": "nexus-test",
+                    "codexHome": "/tmp/codex-home",
+                    "platformFamily": "unix",
+                    "platformOs": "macos"
+                ]
+            ]))
+        case "thread/start":
+            terminationHandler?(127)
+        default:
+            break
+        }
+    }
+
+    func terminate() throws {}
+
+    private func jsonLine(_ object: [String: Any]) -> String {
+        let data = try! JSONSerialization.data(withJSONObject: object)
+        return String(decoding: data, as: UTF8.self)
+    }
 }
 
 private final class TestCodexAppServerTransport: CodexAppServerTransporting, @unchecked Sendable {

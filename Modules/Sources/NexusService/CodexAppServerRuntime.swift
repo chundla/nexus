@@ -113,7 +113,7 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
 
             let id = self.string(for: "id", in: object)
             if id == self.initializeRequestID {
-                startupState.didInitialize = true
+                startupState.markInitialized()
                 startupSemaphore.signal()
                 return
             }
@@ -123,13 +123,13 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
                 self.sessionLinkage = CodexSessionLinkage(threadID: self.threadID(from: object))
                 self.appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Codex shared Session stream connected"))
                 self.lock.unlock()
-                startupState.didResolveThread = true
+                startupState.markResolvedThread()
                 startupSemaphore.signal()
                 return
             }
 
             if let error = self.rpcErrorMessage(from: object), startupState.didResolveThread == false {
-                startupState.error = CodexAppServerRuntimeError.startupFailed(error)
+                startupState.record(error: CodexAppServerRuntimeError.startupFailed(error))
                 startupSemaphore.signal()
                 return
             }
@@ -139,6 +139,9 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
             }
         }
         transport.setTerminationHandler { [weak self] status in
+            if startupState.recordUnexpectedTerminationIfNeeded(status: status) {
+                startupSemaphore.signal()
+            }
             self?.handleTermination(status: status)
         }
 
@@ -431,12 +434,72 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
 }
 
 private final class CodexStartupState: @unchecked Sendable {
-    var error: Error?
-    var didInitialize = false
-    var didResolveThread = false
+    private let lock = NSLock()
+    private var resolvedError: Error?
+    private var initialized = false
+    private var resolvedThread = false
+
+    var error: Error? {
+        lock.lock()
+        defer { lock.unlock() }
+        return resolvedError
+    }
+
+    var didInitialize: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return initialized
+    }
+
+    var didResolveThread: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return resolvedThread
+    }
+
+    func markInitialized() {
+        lock.lock()
+        initialized = true
+        lock.unlock()
+    }
+
+    func markResolvedThread() {
+        lock.lock()
+        resolvedThread = true
+        lock.unlock()
+    }
+
+    func record(error: Error) {
+        lock.lock()
+        if resolvedError == nil {
+            resolvedError = error
+        }
+        lock.unlock()
+    }
+
+    func recordUnexpectedTerminationIfNeeded(status: Int32) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard resolvedThread == false else {
+            return false
+        }
+        if resolvedError == nil {
+            let message = status == 0
+                ? "Codex app-server exited before startup completed."
+                : "Codex app-server exited with status \(status) before startup completed."
+            resolvedError = CodexAppServerRuntimeError.startupFailed(message)
+        }
+        return true
+    }
 }
 
 final class ProcessCodexAppServerTransport: CodexAppServerTransporting, @unchecked Sendable {
+    private struct ProcessInvocation {
+        let executable: String
+        let arguments: [String]
+    }
+
     private let executable: String
     private let arguments: [String]
     private let workingDirectory: String?
@@ -468,9 +531,10 @@ final class ProcessCodexAppServerTransport: CodexAppServerTransporting, @uncheck
     }
 
     func start() throws {
+        let invocation = resolvedInvocation()
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = arguments
+        process.executableURL = URL(fileURLWithPath: invocation.executable)
+        process.arguments = invocation.arguments
         if let workingDirectory {
             process.currentDirectoryURL = URL(fileURLWithPath: workingDirectory, isDirectory: true)
         }
@@ -541,6 +605,68 @@ final class ProcessCodexAppServerTransport: CodexAppServerTransporting, @uncheck
         if process?.isRunning == true {
             process?.terminate()
         }
+    }
+
+    private func resolvedInvocation() -> ProcessInvocation {
+        guard let shebang = scriptShebang(),
+              let envInvocation = envInterpreterInvocation(for: shebang) else {
+            return ProcessInvocation(executable: executable, arguments: arguments)
+        }
+
+        return envInvocation
+    }
+
+    private func scriptShebang() -> String? {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: executable), options: .mappedIfSafe),
+              let newlineIndex = data.firstIndex(of: 0x0A) else {
+            return nil
+        }
+
+        let lineData = data.prefix(upTo: newlineIndex)
+        return String(data: lineData, encoding: .utf8)?.replacingOccurrences(of: "\r", with: "")
+    }
+
+    private func envInterpreterInvocation(for shebang: String) -> ProcessInvocation? {
+        guard shebang.hasPrefix("#!/usr/bin/env ") else {
+            return nil
+        }
+
+        var shebangArguments = shebang
+            .dropFirst("#!/usr/bin/env ".count)
+            .split(whereSeparator: \.isWhitespace)
+            .map(String.init)
+        guard shebangArguments.isEmpty == false else {
+            return nil
+        }
+
+        if shebangArguments.first == "-S" {
+            shebangArguments.removeFirst()
+        }
+
+        guard let interpreterName = shebangArguments.first,
+              let interpreterExecutable = resolvedInterpreter(named: interpreterName) else {
+            return nil
+        }
+
+        let interpreterArguments = Array(shebangArguments.dropFirst())
+        return ProcessInvocation(
+            executable: interpreterExecutable,
+            arguments: interpreterArguments + [executable] + arguments
+        )
+    }
+
+    private func resolvedInterpreter(named interpreterName: String) -> String? {
+        let siblingExecutable = URL(fileURLWithPath: executable)
+            .deletingLastPathComponent()
+            .appendingPathComponent(interpreterName, isDirectory: false)
+            .path
+        if FileManager.default.isExecutableFile(atPath: siblingExecutable) {
+            return siblingExecutable
+        }
+
+        return SystemProviderExecutableResolver()
+            .resolveExecutable(named: interpreterName)
+            .resolvedExecutable
     }
 
     private func consumeStdout(_ data: Data) {
