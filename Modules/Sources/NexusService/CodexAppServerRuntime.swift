@@ -85,6 +85,7 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
     private var pendingTurnRequestIDs: Set<String> = []
     private var nextTurnRequestSequence = 0
     private var completedAgentMessageItemIDs: Set<String> = []
+    private var didAnnounceConnectedStatus = false
     private var sessionLinkage: CodexSessionLinkage?
     private var changeHandler: (@Sendable () -> Void)?
     private var didRequestStop = false
@@ -122,18 +123,20 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
             }
 
             if id == self.startupThreadRequestID {
-                self.lock.lock()
-                self.sessionLinkage = CodexSessionLinkage(threadID: self.threadID(from: object))
-                self.appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Codex shared Session stream connected"))
-                self.lock.unlock()
-                startupState.markResolvedThread()
-                startupSemaphore.signal()
+                if self.captureThreadLinkage(from: object, appendConnectedStatus: true) {
+                    startupState.markResolvedThread()
+                    startupSemaphore.signal()
+                }
                 return
             }
 
             if let error = self.rpcErrorMessage(from: object), startupState.didResolveThread == false {
                 startupState.record(error: CodexAppServerRuntimeError.startupFailed(error))
                 startupSemaphore.signal()
+                return
+            }
+
+            if self.handleStartupThreadNotification(object, startupState: startupState, startupSemaphore: startupSemaphore) {
                 return
             }
 
@@ -228,7 +231,14 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
         }
 
         let requestID: String
+        let threadID: String
         lock.lock()
+        guard let resolvedThreadID = sessionLinkage?.threadID?.trimmingCharacters(in: .whitespacesAndNewlines),
+              resolvedThreadID.isEmpty == false else {
+            lock.unlock()
+            throw CodexAppServerRuntimeError.startupFailed("Codex Session thread ID is unavailable.")
+        }
+        threadID = resolvedThreadID
         nextTurnRequestSequence += 1
         requestID = "nexus-codex-turn-\(nextTurnRequestSequence)"
         pendingTurnRequestIDs.insert(requestID)
@@ -243,7 +253,7 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
                     "id": requestID,
                     "method": "turn/start",
                     "params": [
-                        "threadId": sessionLinkage?.threadID ?? "",
+                        "threadId": threadID,
                         "input": [[
                             "type": "text",
                             "text": trimmed
@@ -354,6 +364,10 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
                 lock.unlock()
                 notifyChange()
             }
+        case "thread/started", "thread/resumed":
+            if captureThreadLinkage(from: object, appendConnectedStatus: true) {
+                notifyChange()
+            }
         case "item/completed":
             handleCompletedItem(object["params"] as? [String: Any])
         case "item/commandExecution/requestApproval":
@@ -369,6 +383,46 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
         default:
             return
         }
+    }
+
+    private func handleStartupThreadNotification(
+        _ object: [String: Any],
+        startupState: CodexStartupState,
+        startupSemaphore: DispatchSemaphore
+    ) -> Bool {
+        guard startupState.didResolveThread == false,
+              let method = string(for: "method", in: object),
+              method == "thread/started" || method == "thread/resumed",
+              captureThreadLinkage(from: object, appendConnectedStatus: true) else {
+            return false
+        }
+
+        startupState.markResolvedThread()
+        startupSemaphore.signal()
+        return true
+    }
+
+    private func captureThreadLinkage(from object: [String: Any], appendConnectedStatus: Bool) -> Bool {
+        guard let threadID = resolvedThreadID(from: object) else {
+            return false
+        }
+
+        let didChange: Bool
+        lock.lock()
+        let existingThreadID = sessionLinkage?.threadID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let shouldUpdateThreadID = existingThreadID != threadID
+        if shouldUpdateThreadID {
+            sessionLinkage = CodexSessionLinkage(threadID: threadID)
+        }
+        let shouldAppendConnectedStatus = appendConnectedStatus && didAnnounceConnectedStatus == false
+        if shouldAppendConnectedStatus {
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Codex shared Session stream connected"))
+            didAnnounceConnectedStatus = true
+        }
+        didChange = shouldUpdateThreadID || shouldAppendConnectedStatus
+        lock.unlock()
+
+        return didChange
     }
 
     private func handleCompletedItem(_ params: [String: Any]?) {
@@ -461,12 +515,30 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
         return ["cwd": workingDirectory, "serviceName": "nexus"]
     }
 
-    private func threadID(from object: [String: Any]) -> String? {
-        guard let result = object["result"] as? [String: Any],
-              let thread = result["thread"] as? [String: Any] else {
-            return nil
+    private func resolvedThreadID(from object: [String: Any]) -> String? {
+        if let result = object["result"] as? [String: Any],
+           let thread = result["thread"] as? [String: Any],
+           let threadID = trimmedString(for: "id", in: thread) {
+            return threadID
         }
-        return string(for: "id", in: thread)
+
+        if let params = object["params"] as? [String: Any],
+           let thread = params["thread"] as? [String: Any],
+           let threadID = trimmedString(for: "id", in: thread) {
+            return threadID
+        }
+
+        if let result = object["result"] as? [String: Any],
+           let threadID = trimmedString(for: "threadId", in: result) {
+            return threadID
+        }
+
+        if let params = object["params"] as? [String: Any],
+           let threadID = trimmedString(for: "threadId", in: params) {
+            return threadID
+        }
+
+        return nil
     }
 
     private func rpcErrorMessage(from object: [String: Any]) -> String? {
@@ -486,6 +558,14 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
 
     private func string(for key: String, in object: [String: Any]) -> String? {
         object[key] as? String
+    }
+
+    private func trimmedString(for key: String, in object: [String: Any]) -> String? {
+        guard let value = string(for: key, in: object)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              value.isEmpty == false else {
+            return nil
+        }
+        return value
     }
 
     private func appendActivityItemLocked(_ item: SessionActivityItem) {

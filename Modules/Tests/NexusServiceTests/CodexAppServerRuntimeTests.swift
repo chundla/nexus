@@ -51,6 +51,46 @@ struct CodexAppServerRuntimeTests {
         #expect(resumeParameters["cwd"] as? String == "/tmp/workspace")
     }
 
+    @Test func startupCanResolveThreadLinkageFromThreadStartedNotification() throws {
+        let transport = TestCodexAppServerTransport(
+            threadID: "codex-thread-1",
+            omitThreadIDFromStartResponse: true,
+            completedAgentMessageText: "Hello. What would you like to work on in `nexus`?"
+        )
+        let runtime = try CodexAppServerRuntime(
+            executable: "/tmp/fake-codex",
+            workingDirectory: "/tmp/workspace",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .codex,
+            isDefault: true,
+            state: .ready
+        )
+
+        #expect(runtime.sessionRecordAdapterMetadata == SessionRecordAdapterMetadata(
+            providerID: .codex,
+            values: ["threadID": "codex-thread-1"]
+        ))
+
+        try runtime.sendInput("Hello")
+        let screen = runtime.sessionScreen(for: session)
+        let turnStart = try #require(transport.sentMessages.last)
+        let turnStartParameters = try #require(turnStart["params"] as? [String: Any])
+        let input = try #require(turnStartParameters["input"] as? [[String: String]])
+
+        #expect(turnStartParameters["threadId"] as? String == "codex-thread-1")
+        #expect(input == [["type": "text", "text": "Hello"]])
+        #expect(screen.activityItems.map(\.text) == [
+            "Codex shared Session stream connected",
+            "You: Hello",
+            "Codex: Hello. What would you like to work on in `nexus`?"
+        ])
+    }
+
     @Test func sendingPromptStartsCodexTurnAndSurfacesCompletedAgentMessage() throws {
         let transport = TestCodexAppServerTransport(
             threadID: "codex-thread-1",
@@ -313,13 +353,15 @@ private final class ExitDuringThreadStartCodexTransport: CodexAppServerTransport
 
 private final class TestCodexAppServerTransport: CodexAppServerTransporting, @unchecked Sendable {
     private let threadID: String
+    private let omitThreadIDFromStartResponse: Bool
     private let completedAgentMessageText: String?
     private var stdoutLineHandler: (@Sendable (String) -> Void)?
     private var terminationHandler: (@Sendable (Int32) -> Void)?
     private(set) var sentMessages: [[String: Any]] = []
 
-    init(threadID: String, completedAgentMessageText: String? = nil) {
+    init(threadID: String, omitThreadIDFromStartResponse: Bool = false, completedAgentMessageText: String? = nil) {
         self.threadID = threadID
+        self.omitThreadIDFromStartResponse = omitThreadIDFromStartResponse
         self.completedAgentMessageText = completedAgentMessageText
     }
 
@@ -353,24 +395,38 @@ private final class TestCodexAppServerTransport: CodexAppServerTransporting, @un
                 ]
             ]))
         case "thread/start", "thread/resume":
+            let thread: [String: Any] = omitThreadIDFromStartResponse ? [
+                "sessionId": threadID,
+                "preview": "",
+                "ephemeral": false,
+                "modelProvider": "openai",
+                "createdAt": 0,
+                "updatedAt": 0,
+                "status": ["type": "idle"],
+                "path": "/tmp/codex-thread.jsonl",
+                "cwd": "/tmp/workspace",
+                "cliVersion": "0.132.0",
+                "source": "appServer",
+                "turns": []
+            ] : [
+                "id": threadID,
+                "sessionId": threadID,
+                "preview": "",
+                "ephemeral": false,
+                "modelProvider": "openai",
+                "createdAt": 0,
+                "updatedAt": 0,
+                "status": ["type": "idle"],
+                "path": "/tmp/codex-thread.jsonl",
+                "cwd": "/tmp/workspace",
+                "cliVersion": "0.132.0",
+                "source": "appServer",
+                "turns": []
+            ]
             stdoutLineHandler?(jsonLine([
                 "id": object["id"] ?? 0,
                 "result": [
-                    "thread": [
-                        "id": threadID,
-                        "sessionId": threadID,
-                        "preview": "",
-                        "ephemeral": false,
-                        "modelProvider": "openai",
-                        "createdAt": 0,
-                        "updatedAt": 0,
-                        "status": ["type": "idle"],
-                        "path": "/tmp/codex-thread.jsonl",
-                        "cwd": "/tmp/workspace",
-                        "cliVersion": "0.132.0",
-                        "source": "appServer",
-                        "turns": []
-                    ],
+                    "thread": thread,
                     "model": "gpt-5.5",
                     "modelProvider": "openai",
                     "cwd": "/tmp/workspace",
@@ -379,6 +435,29 @@ private final class TestCodexAppServerTransport: CodexAppServerTransporting, @un
                     "sandbox": ["type": "readOnly", "networkAccess": false]
                 ]
             ]))
+            if omitThreadIDFromStartResponse {
+                stdoutLineHandler?(jsonLine([
+                    "jsonrpc": "2.0",
+                    "method": "thread/started",
+                    "params": [
+                        "thread": [
+                            "id": threadID,
+                            "sessionId": threadID,
+                            "preview": "",
+                            "ephemeral": false,
+                            "modelProvider": "openai",
+                            "createdAt": 0,
+                            "updatedAt": 0,
+                            "status": ["type": "idle"],
+                            "path": "/tmp/codex-thread.jsonl",
+                            "cwd": "/tmp/workspace",
+                            "cliVersion": "0.132.0",
+                            "source": "appServer",
+                            "turns": []
+                        ]
+                    ]
+                ]))
+            }
         case "turn/start":
             stdoutLineHandler?(jsonLine([
                 "id": object["id"] ?? 0,
