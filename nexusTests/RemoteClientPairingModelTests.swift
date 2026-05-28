@@ -2037,6 +2037,222 @@ struct RemoteClientPairingModelTests {
         #expect(model.providerDetail(for: workspace.id, providerID: .codex)?.defaultSession?.id == session.id)
     }
 
+    @Test func launchingRemotePiDefaultRemoteSessionRefreshesCatalogProviderDetailAndKeepsViewerByDefault() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let groupID = UUID()
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Remote Nexus",
+            kind: .remote,
+            folderPath: "/srv/nexus",
+            primaryGroupID: groupID,
+            remoteHostID: UUID()
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let refreshedCatalog = RemoteWorkspaceCatalog(
+            workspaceGroups: [WorkspaceGroup(id: groupID, name: "Remote Work")],
+            recentNavigation: [],
+            workspaceOverviews: [
+                WorkspaceOverview(
+                    workspace: workspace,
+                    providerCards: [
+                        WorkspaceProviderCard(
+                            provider: Provider(id: .pi),
+                            health: ProviderHealthSummary(state: .available, summary: "Pi 0.9.0 is available"),
+                            capabilities: ProviderCapabilities(
+                                launchDefaultSession: ProviderCapability(action: .launchDefaultSession, isSupported: true, isEnabled: true),
+                                createNamedSession: ProviderCapability(action: .createNamedSession, isSupported: true, isEnabled: true)
+                            ),
+                            prelaunchPrimarySurface: .structuredActivityFeed,
+                            defaultSession: ProviderDefaultSessionSummary(
+                                state: .ready,
+                                summary: "Default session ready",
+                                actionTitle: "Resume",
+                                sessionID: session.id
+                            )
+                        )
+                    ]
+                )
+            ]
+        )
+        let initialDetail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .pi),
+            health: ProviderHealthSummary(state: .available, summary: "Pi 0.9.0 is available"),
+            capabilities: ProviderCapabilities(
+                launchDefaultSession: ProviderCapability(action: .launchDefaultSession, isSupported: true, isEnabled: true),
+                createNamedSession: ProviderCapability(action: .createNamedSession, isSupported: true, isEnabled: true)
+            ),
+            prelaunchPrimarySurface: .structuredActivityFeed,
+            defaultSession: nil,
+            alternateSessions: [],
+            failedSessions: []
+        )
+        let refreshedDetail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .pi),
+            health: ProviderHealthSummary(state: .available, summary: "Pi 0.9.0 is available"),
+            capabilities: ProviderCapabilities(
+                launchDefaultSession: ProviderCapability(action: .launchDefaultSession, isSupported: true, isEnabled: true),
+                createNamedSession: ProviderCapability(action: .createNamedSession, isSupported: true, isEnabled: true)
+            ),
+            prelaunchPrimarySurface: .structuredActivityFeed,
+            defaultSession: session,
+            alternateSessions: [],
+            failedSessions: []
+        )
+        let launchedScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [SessionActivityItem(kind: .status, text: "Pi shared Session stream connected")]
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let model = RemoteClientPairingModel(
+            client: StubRemotePairingClient(
+                result: pairedMac,
+                catalog: refreshedCatalog,
+                providerDetail: refreshedDetail,
+                providerDetailResults: [initialDetail, refreshedDetail],
+                sessionScreen: launchedScreen,
+                launchedDefaultSession: session
+            ),
+            store: store
+        )
+
+        await model.loadProviderDetail(workspaceID: workspace.id, providerID: ProviderID.pi)
+        let launchedSession = try await model.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: ProviderID.pi)
+        await Task.yield()
+
+        #expect(launchedSession.id == session.id)
+        #expect(model.catalog == refreshedCatalog)
+        #expect(model.focusedSessionID == session.id)
+        #expect(model.focusedSessionScreen == launchedScreen)
+        #expect(model.focusedSessionSurfaceSupport == SessionSurfaceSupport.supported)
+        #expect(model.focusedSessionIsController == false)
+        #expect(model.providerDetail(for: workspace.id, providerID: ProviderID.pi)?.defaultSession?.id == session.id)
+    }
+
+    @Test func creatingRemotePiNamedSessionRefreshesCatalogProviderDetailAndKeepsViewerByDefault() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let groupID = UUID()
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Remote Nexus",
+            kind: .remote,
+            folderPath: "/srv/nexus",
+            primaryGroupID: groupID,
+            remoteHostID: UUID()
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .pi,
+            name: "Review",
+            isDefault: false,
+            state: .ready
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let refreshedCatalog = RemoteWorkspaceCatalog(
+            workspaceGroups: [WorkspaceGroup(id: groupID, name: "Remote Work")],
+            recentNavigation: [],
+            workspaceOverviews: [
+                WorkspaceOverview(
+                    workspace: workspace,
+                    providerCards: [
+                        WorkspaceProviderCard(
+                            provider: Provider(id: .pi),
+                            health: ProviderHealthSummary(state: .available, summary: "Pi 0.9.0 is available"),
+                            capabilities: ProviderCapabilities(
+                                launchDefaultSession: ProviderCapability(action: .launchDefaultSession, isSupported: true, isEnabled: true),
+                                createNamedSession: ProviderCapability(action: .createNamedSession, isSupported: true, isEnabled: true)
+                            ),
+                            prelaunchPrimarySurface: .structuredActivityFeed,
+                            defaultSession: ProviderDefaultSessionSummary(
+                                state: .notCreated,
+                                summary: "No default session yet",
+                                actionTitle: "Launch"
+                            ),
+                            alternateSessionCount: 1
+                        )
+                    ]
+                )
+            ]
+        )
+        let refreshedDetail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .pi),
+            health: ProviderHealthSummary(state: .available, summary: "Pi 0.9.0 is available"),
+            capabilities: ProviderCapabilities(
+                launchDefaultSession: ProviderCapability(action: .launchDefaultSession, isSupported: true, isEnabled: true),
+                createNamedSession: ProviderCapability(action: .createNamedSession, isSupported: true, isEnabled: true)
+            ),
+            prelaunchPrimarySurface: .structuredActivityFeed,
+            defaultSession: nil,
+            alternateSessions: [session],
+            failedSessions: []
+        )
+        let createdScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [SessionActivityItem(kind: .status, text: "Pi shared Session stream connected")]
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let model = RemoteClientPairingModel(
+            client: StubRemotePairingClient(
+                result: pairedMac,
+                catalog: refreshedCatalog,
+                providerDetail: refreshedDetail,
+                sessionScreen: createdScreen,
+                createdNamedSession: session
+            ),
+            store: store
+        )
+
+        let createdSession = try await model.createNamedSession(workspaceID: workspace.id, providerID: ProviderID.pi)
+        await Task.yield()
+
+        #expect(createdSession.id == session.id)
+        #expect(model.catalog == refreshedCatalog)
+        #expect(model.focusedSessionID == session.id)
+        #expect(model.focusedSessionScreen == createdScreen)
+        #expect(model.focusedSessionSurfaceSupport == SessionSurfaceSupport.supported)
+        #expect(model.focusedSessionIsController == false)
+        #expect(model.providerDetail(for: workspace.id, providerID: ProviderID.pi)?.alternateSessions.map { $0.id } == [session.id])
+    }
+
     @Test func creatingNamedRemoteSessionRefreshesCatalogProviderDetailAndFocusesSession() async throws {
         let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -3004,6 +3220,84 @@ struct RemoteClientPairingModelTests {
         #expect(model.focusedSessionID == failedSession.id)
         #expect(model.focusedSessionScreen?.session.state == .failed)
         #expect(model.providerDetail(for: workspace.id, providerID: .claude)?.failedSessions.map { $0.id } == [failedSession.id])
+    }
+
+    @Test func creatingFailedRemotePiNamedSessionStillFocusesInspectableStructuredViewer() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Remote Nexus",
+            kind: .remote,
+            folderPath: "/srv/nexus",
+            primaryGroupID: UUID(),
+            remoteHostID: UUID()
+        )
+        let failedSession = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .pi,
+            name: "Review",
+            isDefault: false,
+            state: .failed,
+            failureMessage: "Pi RPC startup failed"
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let refreshedDetail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .pi),
+            health: ProviderHealthSummary(
+                state: .available,
+                summary: "Pi 0.9.0 is available"
+            ),
+            capabilities: ProviderCapabilities(
+                launchDefaultSession: ProviderCapability(action: .launchDefaultSession, isSupported: true, isEnabled: true),
+                createNamedSession: ProviderCapability(action: .createNamedSession, isSupported: true, isEnabled: true)
+            ),
+            prelaunchPrimarySurface: .structuredActivityFeed,
+            defaultSession: nil,
+            alternateSessions: [],
+            failedSessions: [failedSession]
+        )
+        let failedScreen = SessionScreen(
+            session: failedSession,
+            primarySurface: .structuredActivityFeed,
+            transcript: failedSession.failureMessage ?? "",
+            activityItems: [SessionActivityItem(kind: .error, text: failedSession.failureMessage ?? "")]
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let model = RemoteClientPairingModel(
+            client: StubRemotePairingClient(
+                result: pairedMac,
+                providerDetail: refreshedDetail,
+                sessionScreen: failedScreen,
+                createdNamedSession: failedSession
+            ),
+            store: store
+        )
+
+        let createdSession = try await model.createNamedSession(workspaceID: workspace.id, providerID: ProviderID.pi)
+        await Task.yield()
+
+        #expect(createdSession.state == Session.State.failed)
+        #expect(model.focusedSessionID == failedSession.id)
+        #expect(model.focusedSessionScreen?.session.state == Session.State.failed)
+        #expect(model.focusedSessionScreen?.primarySurface == SessionSurface.structuredActivityFeed)
+        #expect(model.focusedSessionScreen?.activityItems.map(\.kind) == [SessionActivityItem.Kind.error])
+        #expect(model.focusedSessionSurfaceSupport == SessionSurfaceSupport.supported)
+        #expect(model.focusedSessionIsController == false)
+        #expect(model.providerDetail(for: workspace.id, providerID: ProviderID.pi)?.failedSessions.map { $0.id } == [failedSession.id])
     }
 
     @Test func creatingFailedStructuredNamedRemoteSessionStillFocusesInspectableSessionRecord() async throws {
