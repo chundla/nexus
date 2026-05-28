@@ -152,9 +152,11 @@ struct ProviderHealthEvaluatorLocalShellResolutionTests {
         let runner = RecordingRemoteCommandRunner(
             stdout: "/home/tester/.local/bin/codex\n1.2.3\n"
         )
+        let readinessProbe = RecordingRemoteCodexReadinessProbe()
         let evaluator = ProviderHealthEvaluator(
             executableResolver: TestExecutableResolver(executables: [:]),
-            commandRunner: runner
+            commandRunner: runner,
+            remoteCodexReadinessProbe: readinessProbe
         )
 
         let health = evaluator.healthSummary(
@@ -195,6 +197,194 @@ struct ProviderHealthEvaluatorLocalShellResolutionTests {
         #expect(runner.lastInvocation?.arguments.last?.contains("/bin/csh") == true)
         #expect(runner.lastInvocation?.arguments.last?.contains("source ~/.login") == true)
         #expect(runner.lastInvocation?.arguments.last?.contains("/opt/homebrew/bin/fish") == true)
+        #expect(runner.lastInvocation?.arguments.last?.contains("tmux") == false)
+        #expect(runner.lastInvocation?.arguments.last?.contains("--help") == false)
+        #expect(readinessProbe.invocations.count == 1)
+        #expect(readinessProbe.invocations.first?.hostID == hostID)
+        #expect(readinessProbe.invocations.first?.executable == "/home/tester/.local/bin/codex")
+        #expect(readinessProbe.invocations.first?.workingDirectory == "/srv/api")
+    }
+
+    @Test func remoteCodexReadinessProbeLaunchesDirectSSHAppServerWithoutPTY() throws {
+        let recorder = RecordingRemoteCodexTransportFactory()
+        let probe = SSHRemoteCodexAppServerReadinessProbe(transportFactory: recorder.makeTransport)
+        let host = NexusDomain.Host(id: UUID(), name: "Build Server", sshTarget: "build-box", port: 2222)
+
+        let outcome = try probe.probe(
+            host: host,
+            executable: "/home/tester/.local/bin/codex",
+            workingDirectory: "/srv/api"
+        )
+
+        #expect(outcome == .ready)
+        #expect(recorder.lastInvocation?.executable == "/usr/bin/ssh")
+        #expect(recorder.lastInvocation?.arguments.prefix(6) == ["-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-p"])
+        #expect(recorder.lastInvocation?.arguments.dropFirst(6).first == "2222")
+        #expect(recorder.lastInvocation?.arguments.last == "cd '/srv/api' || { echo 'NEXUS_REMOTE_WORKSPACE_UNAVAILABLE' >&2; exit 1; }; exec '/home/tester/.local/bin/codex' app-server")
+        #expect(recorder.lastInvocation?.arguments.last?.contains("tmux") == false)
+        #expect(recorder.transport.sentLines.count == 1)
+        #expect(recorder.transport.sentLines.first?.contains("\"method\":\"initialize\"") == true)
+    }
+
+    @Test func remoteCodexHealthMarksExplicitAuthFailureAsNotLaunchable() {
+        let workspaceID = UUID()
+        let hostID = UUID()
+        let host = NexusDomain.Host(id: hostID, name: "Build Server", sshTarget: "build-box")
+        let runner = RecordingRemoteCommandRunner(stdout: "/home/tester/.local/bin/codex\n1.2.3\n")
+        let evaluator = ProviderHealthEvaluator(
+            executableResolver: TestExecutableResolver(executables: [:]),
+            commandRunner: runner,
+            remoteCodexReadinessProbe: StubRemoteCodexReadinessProbe(outcome: .authenticationRequired("Run `codex login` on the Host."))
+        )
+
+        let health = evaluator.healthSummary(
+            for: .codex,
+            workspace: Workspace(
+                id: workspaceID,
+                name: "Remote",
+                kind: .remote,
+                folderPath: "/srv/api",
+                primaryGroupID: UUID(),
+                remoteHostID: hostID
+            ),
+            remoteContext: RemoteWorkspaceHealthContext(
+                host: host,
+                hostValidation: HostValidationSnapshot(
+                    hostID: hostID,
+                    state: .available,
+                    summary: "Host is available",
+                    checkedAt: Date()
+                ),
+                workspaceAvailability: WorkspaceAvailabilitySnapshot(
+                    workspaceID: workspaceID,
+                    state: .available,
+                    summary: "Workspace is available",
+                    checkedAt: Date()
+                )
+            )
+        )
+
+        #expect(health.state == .unavailable)
+        #expect(health.summary == "Codex requires authentication on the Remote Workspace")
+        #expect(health.resolvedExecutable == "/home/tester/.local/bin/codex")
+        #expect(health.version == "1.2.3")
+        #expect(health.launchability == .notLaunchable)
+        #expect(health.diagnostics == [
+            ProviderHealthDiagnostic(
+                severity: .error,
+                code: "remoteAuthRequired",
+                message: "Run `codex login` on the Host."
+            )
+        ])
+    }
+
+    @Test func remoteCodexHealthFailsLaunchabilityButKeepsResolvedExecutableWhenRemoteHandshakeErrors() {
+        let workspaceID = UUID()
+        let hostID = UUID()
+        let host = NexusDomain.Host(id: hostID, name: "Build Server", sshTarget: "build-box")
+        let runner = RecordingRemoteCommandRunner(stdout: "/home/tester/.local/bin/codex\n1.2.3\n")
+        let evaluator = ProviderHealthEvaluator(
+            executableResolver: TestExecutableResolver(executables: [:]),
+            commandRunner: runner,
+            remoteCodexReadinessProbe: ThrowingRemoteCodexReadinessProbe()
+        )
+
+        let health = evaluator.healthSummary(
+            for: .codex,
+            workspace: Workspace(
+                id: workspaceID,
+                name: "Remote",
+                kind: .remote,
+                folderPath: "/srv/api",
+                primaryGroupID: UUID(),
+                remoteHostID: hostID
+            ),
+            remoteContext: RemoteWorkspaceHealthContext(
+                host: host,
+                hostValidation: HostValidationSnapshot(
+                    hostID: hostID,
+                    state: .available,
+                    summary: "Host is available",
+                    checkedAt: Date()
+                ),
+                workspaceAvailability: WorkspaceAvailabilitySnapshot(
+                    workspaceID: workspaceID,
+                    state: .available,
+                    summary: "Workspace is available",
+                    checkedAt: Date()
+                )
+            )
+        )
+
+        #expect(health.state == .misconfigured)
+        #expect(health.summary == "Codex is installed but failed the remote protocol-native readiness probe")
+        #expect(health.resolvedExecutable == "/home/tester/.local/bin/codex")
+        #expect(health.version == "1.2.3")
+        #expect(health.launchability == .notLaunchable)
+        #expect(health.diagnostics == [
+            ProviderHealthDiagnostic(
+                severity: .error,
+                code: "remoteLaunchProbeFailed",
+                message: "Codex remote handshake failed."
+            )
+        ])
+    }
+
+    @Test func remoteCodexHealthKeepsCodexLaunchableWhenAuthReadinessIsUncertain() {
+        let workspaceID = UUID()
+        let hostID = UUID()
+        let host = NexusDomain.Host(id: hostID, name: "Build Server", sshTarget: "build-box")
+        let runner = RecordingRemoteCommandRunner(stdout: "/home/tester/.local/bin/codex\n1.2.3\n")
+        let evaluator = ProviderHealthEvaluator(
+            executableResolver: TestExecutableResolver(executables: [:]),
+            commandRunner: runner,
+            remoteCodexReadinessProbe: StubRemoteCodexReadinessProbe(outcome: .authenticationUncertain("Codex auth readiness could not be confirmed."))
+        )
+
+        let health = evaluator.healthSummary(
+            for: .codex,
+            workspace: Workspace(
+                id: workspaceID,
+                name: "Remote",
+                kind: .remote,
+                folderPath: "/srv/api",
+                primaryGroupID: UUID(),
+                remoteHostID: hostID
+            ),
+            remoteContext: RemoteWorkspaceHealthContext(
+                host: host,
+                hostValidation: HostValidationSnapshot(
+                    hostID: hostID,
+                    state: .available,
+                    summary: "Host is available",
+                    checkedAt: Date()
+                ),
+                workspaceAvailability: WorkspaceAvailabilitySnapshot(
+                    workspaceID: workspaceID,
+                    state: .available,
+                    summary: "Workspace is available",
+                    checkedAt: Date()
+                )
+            )
+        )
+
+        #expect(health.state == .available)
+        #expect(health.summary == "Codex 1.2.3 is available")
+        #expect(health.resolvedExecutable == "/home/tester/.local/bin/codex")
+        #expect(health.version == "1.2.3")
+        #expect(health.launchability == .launchable)
+        #expect(health.diagnostics == [
+            ProviderHealthDiagnostic(
+                severity: .info,
+                code: "remoteProbe",
+                message: "Validated remote Codex launch prerequisites on Build Server for /srv/api."
+            ),
+            ProviderHealthDiagnostic(
+                severity: .warning,
+                code: "remoteAuthUncertain",
+                message: "Codex auth readiness could not be confirmed."
+            )
+        ])
     }
 }
 
@@ -254,6 +444,64 @@ private final class RecordingCodexReadinessProbe: CodexReadinessProbing, @unchec
 
     func probe(executable: String, workingDirectory: String) throws {
         invocations.append((executable, workingDirectory))
+    }
+}
+
+private final class RecordingRemoteCodexReadinessProbe: RemoteCodexReadinessProbing, @unchecked Sendable {
+    private(set) var invocations: [(hostID: UUID, executable: String, workingDirectory: String)] = []
+
+    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) throws -> RemoteCodexReadinessOutcome {
+        invocations.append((host.id, executable, workingDirectory))
+        return .ready
+    }
+}
+
+private struct StubRemoteCodexReadinessProbe: RemoteCodexReadinessProbing {
+    let outcome: RemoteCodexReadinessOutcome
+
+    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) throws -> RemoteCodexReadinessOutcome {
+        outcome
+    }
+}
+
+private struct ThrowingRemoteCodexReadinessProbe: RemoteCodexReadinessProbing {
+    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) throws -> RemoteCodexReadinessOutcome {
+        throw NSError(domain: "ThrowingRemoteCodexReadinessProbe", code: 1, userInfo: [NSLocalizedDescriptionKey: "Codex remote handshake failed."])
+    }
+}
+
+private final class RecordingRemoteCodexTransportFactory: @unchecked Sendable {
+    let transport = ImmediateReadyRemoteCodexTransport()
+    private(set) var lastInvocation: (executable: String, arguments: [String])?
+
+    func makeTransport(executable: String, arguments: [String], workingDirectory: String?) throws -> any CodexAppServerTransporting {
+        lastInvocation = (executable, arguments)
+        return transport
+    }
+}
+
+private final class ImmediateReadyRemoteCodexTransport: CodexAppServerTransporting, @unchecked Sendable {
+    private var stdoutLineHandler: (@Sendable (String) -> Void)?
+    private var terminationHandler: (@Sendable (Int32) -> Void)?
+    private(set) var sentLines: [String] = []
+
+    func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
+        stdoutLineHandler = handler
+    }
+
+    func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?) {
+        terminationHandler = handler
+    }
+
+    func start() throws {}
+
+    func sendLine(_ line: String) throws {
+        sentLines.append(line)
+        stdoutLineHandler?("{\"id\":\"nexus-codex-readiness-initialize\",\"result\":{\"userAgent\":\"nexus-test\"}}")
+    }
+
+    func terminate() throws {
+        terminationHandler?(0)
     }
 }
 #endif

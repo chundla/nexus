@@ -28,6 +28,16 @@ protocol CodexReadinessProbing {
     func probe(executable: String, workingDirectory: String) throws
 }
 
+protocol RemoteCodexReadinessProbing {
+    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) throws -> RemoteCodexReadinessOutcome
+}
+
+enum RemoteCodexReadinessOutcome: Sendable, Equatable {
+    case ready
+    case authenticationRequired(String)
+    case authenticationUncertain(String?)
+}
+
 struct RemoteWorkspaceHealthContext {
     let host: NexusDomain.Host
     let hostValidation: HostValidationSnapshot?
@@ -44,17 +54,20 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
     let commandRunner: any ProviderCommandRunning
     let localShellCommandBuilder: LocalShellCommandBuilder
     let codexReadinessProbe: any CodexReadinessProbing
+    let remoteCodexReadinessProbe: any RemoteCodexReadinessProbing
 
     init(
         executableResolver: any ProviderExecutableResolving = SystemProviderExecutableResolver(),
         commandRunner: any ProviderCommandRunning = SystemProviderCommandRunner(),
         localShellCommandBuilder: LocalShellCommandBuilder = LocalShellCommandBuilder(),
-        codexReadinessProbe: any CodexReadinessProbing = CodexAppServerReadinessProbe()
+        codexReadinessProbe: any CodexReadinessProbing = CodexAppServerReadinessProbe(),
+        remoteCodexReadinessProbe: any RemoteCodexReadinessProbing = SSHRemoteCodexAppServerReadinessProbe()
     ) {
         self.executableResolver = executableResolver
         self.commandRunner = commandRunner
         self.localShellCommandBuilder = localShellCommandBuilder
         self.codexReadinessProbe = codexReadinessProbe
+        self.remoteCodexReadinessProbe = remoteCodexReadinessProbe
     }
 
     func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext? = nil) -> [WorkspaceProviderCard] {
@@ -120,7 +133,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
         case .claude:
             return remoteCLIHealthSummary(commandName: "claude", providerName: "Claude", workspace: workspace, host: remoteContext.host)
         case .codex:
-            return remoteCLIHealthSummary(commandName: "codex", providerName: "Codex", workspace: workspace, host: remoteContext.host)
+            return remoteCodexHealthSummary(workspace: workspace, host: remoteContext.host)
         case .ibmBob, .pi:
             return ProviderHealthSummary(
                 state: .notChecked,
@@ -265,6 +278,147 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
                     ProviderHealthDiagnostic(
                         severity: .error,
                         code: "sshLaunchFailed",
+                        message: error.localizedDescription
+                    )
+                ]
+            )
+        }
+    }
+
+    private func remoteCodexHealthSummary(workspace: Workspace, host: NexusDomain.Host) -> ProviderHealthSummary {
+        let result: ProviderCommandResult
+        do {
+            result = try commandRunner.run(
+                executable: "/usr/bin/ssh",
+                arguments: remoteCodexExecutableResolutionArguments(workspace: workspace, host: host),
+                currentDirectoryURL: nil
+            )
+        } catch {
+            return ProviderHealthSummary(
+                state: .unavailable,
+                summary: "Remote Codex health check failed before the SSH probe completed",
+                launchability: .notLaunchable,
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .error,
+                        code: "sshLaunchFailed",
+                        message: error.localizedDescription
+                    )
+                ]
+            )
+        }
+
+        guard result.exitStatus == 0 else {
+            let detail = firstDiagnosticLine(stdout: result.stdout, stderr: result.stderr)
+            let classification = classifyRemoteCLIProbeFailure(
+                detail: detail,
+                providerName: "Codex",
+                notFoundMarker: remoteExecutableNotFoundMarker(commandName: "codex")
+            )
+            return ProviderHealthSummary(
+                state: classification.state,
+                summary: classification.summary,
+                launchability: .notLaunchable,
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .error,
+                        code: classification.code,
+                        message: classification.message ?? (detail.isEmpty ? classification.summary : detail)
+                    )
+                ]
+            )
+        }
+
+        let outputLines = result.stdout
+            .split(whereSeparator: \.isNewline)
+            .map(String.init)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.isEmpty == false }
+        guard let executable = outputLines.first else {
+            return ProviderHealthSummary(
+                state: .misconfigured,
+                summary: "Codex executable resolution returned no executable path",
+                launchability: .notLaunchable,
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .error,
+                        code: "remoteExecutableResolutionFailed",
+                        message: "The remote Codex executable resolution probe did not return an executable path."
+                    )
+                ]
+            )
+        }
+        let version = outputLines.dropFirst().first
+
+        do {
+            switch try remoteCodexReadinessProbe.probe(host: host, executable: executable, workingDirectory: workspace.folderPath) {
+            case .ready:
+                return ProviderHealthSummary(
+                    state: .available,
+                    summary: version.map { "Codex \($0) is available" } ?? "Codex is available",
+                    resolvedExecutable: executable,
+                    version: version,
+                    launchability: .launchable,
+                    diagnostics: [
+                        ProviderHealthDiagnostic(
+                            severity: .info,
+                            code: "remoteProbe",
+                            message: "Validated remote Codex launch prerequisites on \(host.name) for \(workspace.folderPath)."
+                        )
+                    ]
+                )
+            case let .authenticationRequired(message):
+                return ProviderHealthSummary(
+                    state: .unavailable,
+                    summary: "Codex requires authentication on the Remote Workspace",
+                    resolvedExecutable: executable,
+                    version: version,
+                    launchability: .notLaunchable,
+                    diagnostics: [
+                        ProviderHealthDiagnostic(
+                            severity: .error,
+                            code: "remoteAuthRequired",
+                            message: message
+                        )
+                    ]
+                )
+            case let .authenticationUncertain(message):
+                var diagnostics = [
+                    ProviderHealthDiagnostic(
+                        severity: .info,
+                        code: "remoteProbe",
+                        message: "Validated remote Codex launch prerequisites on \(host.name) for \(workspace.folderPath)."
+                    )
+                ]
+                if let message, message.isEmpty == false {
+                    diagnostics.append(
+                        ProviderHealthDiagnostic(
+                            severity: .warning,
+                            code: "remoteAuthUncertain",
+                            message: message
+                        )
+                    )
+                }
+                return ProviderHealthSummary(
+                    state: .available,
+                    summary: version.map { "Codex \($0) is available" } ?? "Codex is available",
+                    resolvedExecutable: executable,
+                    version: version,
+                    launchability: .launchable,
+                    diagnostics: diagnostics
+                )
+            }
+        } catch {
+            return ProviderHealthSummary(
+                state: .misconfigured,
+                summary: "Codex is installed but failed the remote protocol-native readiness probe",
+                resolvedExecutable: executable,
+                version: version,
+                launchability: .notLaunchable,
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .error,
+                        code: "remoteLaunchProbeFailed",
                         message: error.localizedDescription
                     )
                 ]
@@ -551,6 +705,42 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
         }
     }
 
+    private func remoteCodexExecutableResolutionArguments(workspace: Workspace, host: NexusDomain.Host) -> [String] {
+        var arguments = [
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=5"
+        ]
+        if let port = host.port {
+            arguments += ["-p", String(port)]
+        }
+        arguments += [host.sshTarget, remoteCodexExecutableResolutionScript(workspace: workspace)]
+        return arguments
+    }
+
+    private func remoteCodexExecutableResolutionScript(workspace: Workspace) -> String {
+        let commandPathVariable = "CODEX_PATH"
+        let resolveFunctionName = "resolve_codex_path"
+        let notFoundMarker = remoteExecutableNotFoundMarker(commandName: "codex")
+        let shellCommand = shellQuoted("command -v codex")
+        let fallbackCandidates = [
+            "$HOME/.local/bin/codex",
+            "$HOME/bin/codex",
+            "$HOME/.volta/bin/codex",
+            "$HOME/.asdf/shims/codex",
+            "$HOME/.local/share/mise/shims/codex",
+            "$HOME/.nix-profile/bin/codex",
+            "$HOME/.bun/bin/codex",
+            "$HOME/.nvm/current/bin/codex",
+            "/opt/homebrew/bin/codex",
+            "/usr/local/bin/codex",
+            "/usr/bin/codex",
+            "/bin/codex"
+        ].map { "\"\($0)\"" }.joined(separator: " ")
+        let shellCandidates = ShellSupport.remoteShellCandidateListScript()
+
+        return "cd \(shellQuoted(workspace.folderPath)) || { echo 'NEXUS_REMOTE_WORKSPACE_UNAVAILABLE' >&2; exit 1; }; \(resolveFunctionName)() { for shell in \(shellCandidates); do [ -n \"$shell\" ] || continue; [ -x \"$shell\" ] || continue; case \"${shell##*/}\" in csh|tcsh) CANDIDATE=\"$(\"$shell\" -i -c \"if ( -f ~/.login ) source ~/.login; command -v codex\" 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -c \"if ( -f ~/.login ) source ~/.login; command -v codex\" 2>/dev/null)\" || continue ;; fish) CANDIDATE=\"$(\"$shell\" -i -c \"command -v codex\" 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -l -c \"command -v codex\" 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -c \"command -v codex\" 2>/dev/null)\" || continue ;; *) CANDIDATE=\"$(\"$shell\" -lic \(shellCommand) 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -lc \(shellCommand) 2>/dev/null)\" || continue ;; esac; [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; for CANDIDATE in \(fallbackCandidates); do [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; return 1; }; \(commandPathVariable)=\"$(\(resolveFunctionName))\" || { echo '\(notFoundMarker)' >&2; exit 1; }; [ -n \"$\(commandPathVariable)\" ] || { echo '\(notFoundMarker)' >&2; exit 1; }; printf '%s\\n' \"$\(commandPathVariable)\"; \"$\(commandPathVariable)\" --version"
+    }
+
     private func remoteCLIHealthProbeArguments(commandName: String, workspace: Workspace, host: NexusDomain.Host) -> [String] {
         var arguments = [
             "-o", "BatchMode=yes",
@@ -738,6 +928,130 @@ struct CodexAppServerReadinessProbe: CodexReadinessProbing {
         let data = try JSONSerialization.data(withJSONObject: object)
         guard let line = String(data: data, encoding: .utf8) else {
             throw NSError(domain: "CodexAppServerReadinessProbe", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to encode Codex readiness probe request."])
+        }
+        return line
+    }
+}
+
+struct SSHRemoteCodexAppServerReadinessProbe: RemoteCodexReadinessProbing {
+    typealias TransportFactory = (_ executable: String, _ arguments: [String], _ workingDirectory: String?) throws -> any CodexAppServerTransporting
+
+    private let transportFactory: TransportFactory
+
+    init(transportFactory: @escaping TransportFactory = { executable, arguments, workingDirectory in
+        try ProcessCodexAppServerTransport(
+            executable: executable,
+            arguments: arguments,
+            workingDirectory: workingDirectory
+        )
+    }) {
+        self.transportFactory = transportFactory
+    }
+
+    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) throws -> RemoteCodexReadinessOutcome {
+        let transport = try transportFactory(
+            "/usr/bin/ssh",
+            sshArguments(host: host, executable: executable, workingDirectory: workingDirectory),
+            nil
+        )
+
+        let semaphore = DispatchSemaphore(value: 0)
+        let state = CodexReadinessProbeState()
+
+        transport.setStdoutLineHandler { line in
+            guard let data = line.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return
+            }
+
+            if let error = object["error"] as? [String: Any],
+               let message = error["message"] as? String {
+                state.error = NSError(domain: "SSHRemoteCodexAppServerReadinessProbe", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+                semaphore.signal()
+                return
+            }
+
+            if let id = object["id"] as? String, id == "nexus-codex-readiness-initialize" {
+                semaphore.signal()
+            }
+        }
+        transport.setTerminationHandler { status in
+            if status != 0, state.error == nil {
+                state.error = NSError(
+                    domain: "SSHRemoteCodexAppServerReadinessProbe",
+                    code: Int(status),
+                    userInfo: [NSLocalizedDescriptionKey: "Codex app-server exited before remote readiness completed."]
+                )
+                semaphore.signal()
+            }
+        }
+
+        try transport.start()
+        try transport.sendLine(Self.jsonLine([
+            "jsonrpc": "2.0",
+            "id": "nexus-codex-readiness-initialize",
+            "method": "initialize",
+            "params": [
+                "clientInfo": [
+                    "name": "nexus",
+                    "version": "1"
+                ]
+            ]
+        ]))
+
+        defer {
+            try? transport.terminate()
+        }
+
+        guard semaphore.wait(timeout: .now() + 5) == .success else {
+            return .authenticationUncertain("Codex app-server did not answer the remote readiness probe in time.")
+        }
+
+        if let error = state.error {
+            let message = error.localizedDescription
+            if isExplicitAuthenticationFailure(message) {
+                return .authenticationRequired(message)
+            }
+            throw error
+        }
+
+        return .ready
+    }
+
+    private func sshArguments(host: NexusDomain.Host, executable: String, workingDirectory: String) -> [String] {
+        var arguments = [
+            "-T",
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=5"
+        ]
+        if let port = host.port {
+            arguments += ["-p", String(port)]
+        }
+        arguments += [host.sshTarget, remoteCommand(executable: executable, workingDirectory: workingDirectory)]
+        return arguments
+    }
+
+    private func remoteCommand(executable: String, workingDirectory: String) -> String {
+        "cd \(shellQuoted(workingDirectory)) || { echo 'NEXUS_REMOTE_WORKSPACE_UNAVAILABLE' >&2; exit 1; }; exec \(shellQuoted(executable)) app-server"
+    }
+
+    private func shellQuoted(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+
+    private func isExplicitAuthenticationFailure(_ message: String) -> Bool {
+        let normalized = message.lowercased()
+        return normalized.contains("auth")
+            || normalized.contains("login")
+            || normalized.contains("not logged in")
+            || normalized.contains("not authenticated")
+            || normalized.contains("unauthorized")
+    }
+
+    private static func jsonLine(_ object: [String: Any]) throws -> String {
+        let data = try JSONSerialization.data(withJSONObject: object)
+        guard let line = String(data: data, encoding: .utf8) else {
+            throw NSError(domain: "SSHRemoteCodexAppServerReadinessProbe", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to encode remote Codex readiness probe request."])
         }
         return line
     }
