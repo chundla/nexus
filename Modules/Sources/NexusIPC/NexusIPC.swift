@@ -67,7 +67,7 @@ public protocol SessionScreenObservation: Sendable {
     func sendRemoteSessionInputKey(sessionID: String, pairedDeviceID: String, key: String, reply: @escaping (Data?, NSString?) -> Void)
 }
 
-public protocol NexusServiceClient {
+public protocol NexusServiceClient: Sendable {
     func getServiceStatus() async throws -> NexusServiceStatus
     func listWorkspaceGroups() async throws -> [WorkspaceGroup]
     func createWorkspaceGroup(name: String) async throws -> WorkspaceGroup
@@ -619,7 +619,7 @@ public protocol SessionScreenObservation: Sendable {
     func cancel() async
 }
 
-public protocol NexusServiceClient {}
+public protocol NexusServiceClient: Sendable {}
 
 public typealias NexusServiceStatusClient = NexusServiceClient
 

@@ -7,7 +7,7 @@ struct RemoteDefaultSessionSectionState: Equatable {
 
     init(detail: ProviderDetail?) {
         session = detail?.defaultSession
-        canDeleteSessionRecord = detail?.defaultSession.map { $0.isDefault && remoteSessionRecordCanBeDeleted($0, workspace: detail?.workspace) } ?? false
+        canDeleteSessionRecord = detail?.defaultSession.map { $0.isDefault && RemoteSessionDeletionRules.canDeleteSessionRecord($0, workspace: detail?.workspace) } ?? false
     }
 }
 
@@ -36,7 +36,7 @@ struct RemoteNamedSessionsSectionState: Equatable {
             content = detail.alternateSessions.isEmpty ? .empty : .sessions(detail.alternateSessions)
             deletableSessionIDs = Set(
                 detail.alternateSessions
-                    .filter { $0.isDefault == false && remoteSessionRecordCanBeDeleted($0, workspace: detail.workspace) }
+                    .filter { $0.isDefault == false && RemoteSessionDeletionRules.canDeleteSessionRecord($0, workspace: detail.workspace) }
                     .map(\.id)
             )
         } else if errorMessage == nil {
@@ -59,10 +59,12 @@ struct RemoteNamedSessionsSectionState: Equatable {
     }
 }
 
-private func remoteSessionRecordCanBeDeleted(_ session: Session, workspace: Workspace?) -> Bool {
-    if session.state != .ready {
-        return true
-    }
+private enum RemoteSessionDeletionRules {
+    nonisolated static func canDeleteSessionRecord(_ session: Session, workspace: Workspace?) -> Bool {
+        if session.state != .ready {
+            return true
+        }
 
-    return session.providerID == .ibmBob && workspace?.kind == .local
+        return session.providerID == .ibmBob && workspace?.kind == .local
+    }
 }

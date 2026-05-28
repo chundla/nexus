@@ -8224,7 +8224,7 @@ private final class StubSessionRuntimeManager: SessionRuntimeManaging {
     }
 }
 
-private final class TrackingServiceClient: NexusServiceClient {
+private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendable {
     private var workspaceOverviewValue: WorkspaceOverview
     private var providerDetailValue: ProviderDetail
     private var sessionValue: Session

@@ -48,13 +48,13 @@ final class NexusAppModel {
     var focusedSessionScreen: SessionScreen?
     let remotePairingEndpoint: RemotePairingEndpoint?
 
-    private let client: NexusServiceClient
+    private let client: any NexusServiceClient
     private let embeddedService: (any NexusEmbeddedServiceSession)?
     private let remotePairingServer: RemotePairingServer?
     private var focusedSessionObservation: (any SessionScreenObservation)?
 
     init(
-        client: NexusServiceClient,
+        client: any NexusServiceClient,
         embeddedService: (any NexusEmbeddedServiceSession)? = nil,
         remotePairingServer: RemotePairingServer? = nil
     ) {

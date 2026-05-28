@@ -2,7 +2,7 @@ import Foundation
 import NexusDomain
 import NexusIPC
 
-struct RemotePairingEndpoint: Equatable, Sendable {
+nonisolated struct RemotePairingEndpoint: Equatable, Sendable {
     let host: String
     let port: Int
 
@@ -11,12 +11,12 @@ struct RemotePairingEndpoint: Equatable, Sendable {
     }
 }
 
-struct RemotePairedMacStatus: Codable, Equatable, Sendable {
+nonisolated struct RemotePairedMacStatus: Codable, Equatable, Sendable {
     let macName: String
     let isRemoteAccessEnabled: Bool
 }
 
-struct PairedMac: Codable, Equatable, Identifiable, Sendable {
+nonisolated struct PairedMac: Codable, Equatable, Identifiable, Sendable {
     let name: String
     let host: String
     let port: Int
@@ -36,13 +36,13 @@ struct PairedMac: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
-struct RemoteWorkspaceCatalog: Codable, Equatable, Sendable {
+nonisolated struct RemoteWorkspaceCatalog: Codable, Equatable, Sendable {
     let workspaceGroups: [WorkspaceGroup]
     let recentNavigation: [NavigationItem]
     let workspaceOverviews: [WorkspaceOverview]
 }
 
-struct RemotePairingHTTPClient {
+nonisolated struct RemotePairingHTTPClient {
     private final class SessionBox: @unchecked Sendable {
         let session: URLSession
 
@@ -468,7 +468,7 @@ private actor ObservationStartupSignal {
     }
 }
 
-enum RemotePairingHTTPError: LocalizedError, Equatable {
+nonisolated enum RemotePairingHTTPError: LocalizedError, Equatable {
     case requestFailed(String)
     case pairingRevoked(String)
     case missingPairedDeviceIdentity
@@ -497,38 +497,38 @@ private enum RemotePairingHTTPObservationError: LocalizedError {
     }
 }
 
-struct RemotePairingCompletionRequest: Codable, Sendable {
+nonisolated struct RemotePairingCompletionRequest: Codable, Sendable {
     let pairingCode: String
     let deviceName: String
 }
 
-struct RemotePairingCompletionResponse: Codable, Sendable {
+nonisolated struct RemotePairingCompletionResponse: Codable, Sendable {
     let macName: String
     let pairedAt: Date
     let pairedDeviceID: UUID
 }
 
-struct RemoteSessionControlRequest: Codable, Sendable {
+nonisolated struct RemoteSessionControlRequest: Codable, Sendable {
     let columns: Int
     let rows: Int
 }
 
-struct RemoteSessionInputRequest: Codable, Sendable {
+nonisolated struct RemoteSessionInputRequest: Codable, Sendable {
     let text: String
 }
 
-struct RemoteSessionTextRequest: Codable, Sendable {
+nonisolated struct RemoteSessionTextRequest: Codable, Sendable {
     let text: String
 }
 
-struct RemoteApprovalRequestDecisionRequest: Codable, Sendable {
+nonisolated struct RemoteApprovalRequestDecisionRequest: Codable, Sendable {
     let decision: ApprovalRequestDecision
 }
 
-struct RemoteSessionKeyRequest: Codable, Sendable {
+nonisolated struct RemoteSessionKeyRequest: Codable, Sendable {
     let key: SessionInputKey
 }
 
-struct RemotePairingErrorResponse: Codable, Sendable {
+nonisolated struct RemotePairingErrorResponse: Codable, Sendable {
     let message: String
 }

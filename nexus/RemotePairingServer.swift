@@ -4,7 +4,7 @@ import Network
 import NexusDomain
 import NexusIPC
 
-final class RemotePairingServer {
+nonisolated final class RemotePairingServer: @unchecked Sendable {
     private static let revokedPairingMessage = "Pair this iPhone again to browse this Paired Mac"
 
     let displayHost: String
@@ -40,7 +40,7 @@ final class RemotePairingServer {
         }
 
         let startup = DispatchSemaphore(value: 0)
-        var startupError: Error?
+        let startupState = RemotePairingServerStartupState()
 
         listener.stateUpdateHandler = { [weak self] state in
             switch state {
@@ -48,7 +48,7 @@ final class RemotePairingServer {
                 self?.port = Int(self?.listener.port?.rawValue ?? 0)
                 startup.signal()
             case .failed(let error):
-                startupError = error
+                startupState.store(error)
                 startup.signal()
             default:
                 break
@@ -60,7 +60,7 @@ final class RemotePairingServer {
         listener.start(queue: queue)
         startup.wait()
 
-        if let startupError {
+        if let startupError = startupState.error {
             throw startupError
         }
     }
@@ -810,7 +810,24 @@ final class RemotePairingServer {
     }
 }
 
-private final class RemoteSessionScreenStream: @unchecked Sendable {
+nonisolated private final class RemotePairingServerStartupState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedError: Error?
+
+    func store(_ error: Error) {
+        lock.lock()
+        storedError = error
+        lock.unlock()
+    }
+
+    var error: Error? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedError
+    }
+}
+
+nonisolated private final class RemoteSessionScreenStream: @unchecked Sendable {
     private let connection: NWConnection
     private let queue: DispatchQueue
     private var didStart = false
