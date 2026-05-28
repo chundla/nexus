@@ -80,6 +80,58 @@ struct NexusServiceRemoteCodexStructuredSessionTests {
         #expect(resumedLaunch.arguments.last?.contains("tmux has-session") == true)
         #expect(resumedLaunch.arguments.last?.contains("attach-session") == false)
     }
+
+    @Test func remoteCodexNamedSessionUsesStructuredSurfaceAndOwnThreadLinkageAlongsideDefaultSession() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let transportHarness = RemoteCodexTransportHarness()
+        func makeService() throws -> NexusService {
+            try makeRemoteCodexService(rootURL: rootURL, transportHarness: transportHarness)
+        }
+
+        let service = try makeService()
+        let group = try service.createWorkspaceGroup(name: "Remote")
+        let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: nil)
+        _ = try service.validateHost(hostID: host.id)
+        let workspace = try service.createRemoteWorkspace(
+            name: "Remote Codex",
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+
+        let defaultSession = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .codex)
+        let namedSession = try service.createNamedSession(workspaceID: workspace.id, providerID: .codex, name: "Review")
+        let detail = try service.getProviderDetail(workspaceID: workspace.id, providerID: .codex)
+        let namedScreen = try service.getSessionScreen(sessionID: namedSession.id)
+
+        let restartedService = try makeService()
+        let resumedNamedSession = try restartedService.launchOrResumeSession(sessionID: namedSession.id)
+        let resumedNamedScreen = try restartedService.getSessionScreen(sessionID: namedSession.id)
+        let launches = transportHarness.launches()
+        let defaultLaunch = try #require(launches.first)
+        let namedLaunch = try #require(launches.dropFirst().first)
+        let resumedNamedLaunch = try #require(launches.last)
+
+        #expect(detail.defaultSession?.id == defaultSession.id)
+        #expect(detail.alternateSessions.map(\.id) == [namedSession.id])
+        #expect(detail.failedSessions.isEmpty)
+        #expect(namedScreen.primarySurface == .structuredActivityFeed)
+        #expect(namedScreen.activityItems.map(\.text) == ["Codex shared Session stream connected"])
+        #expect(resumedNamedSession.id == namedSession.id)
+        #expect(resumedNamedScreen.primarySurface == .structuredActivityFeed)
+        #expect(resumedNamedScreen.activityItems.map(\.text) == ["Codex shared Session stream connected"])
+        #expect(launches.count == 3)
+        #expect(defaultLaunch.method == "thread/start")
+        #expect(namedLaunch.method == "thread/start")
+        #expect(namedLaunch.resolvedThreadID != defaultLaunch.resolvedThreadID)
+        #expect(resumedNamedLaunch.method == "thread/resume")
+        #expect(resumedNamedLaunch.requestedThreadID == namedLaunch.resolvedThreadID)
+        #expect(resumedNamedLaunch.resolvedThreadID == namedLaunch.resolvedThreadID)
+        #expect(resumedNamedLaunch.resolvedThreadID != defaultLaunch.resolvedThreadID)
+    }
 }
 
 private func makeRemoteCodexService(rootURL: URL, transportHarness: RemoteCodexTransportHarness) throws -> NexusService {
