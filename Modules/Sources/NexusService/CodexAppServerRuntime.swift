@@ -72,6 +72,7 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
 
     private let lock = NSLock()
     private let transport: any CodexAppServerTransporting
+    private let stopHandler: (() throws -> Void)?
     private let terminationStatusMessageBuilder: (Int32) -> String
     private let initializeRequestID = "nexus-codex-initialize"
     private let startupThreadRequestID = "nexus-codex-thread-start"
@@ -95,6 +96,7 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
         workingDirectory: String,
         sessionLinkage: CodexSessionLinkage? = nil,
         terminationStatusMessageBuilder: @escaping (Int32) -> String,
+        stopHandler: (() throws -> Void)? = nil,
         transportFactory: TransportFactory = { executable, arguments, workingDirectory in
             try ProcessCodexAppServerTransport(
                 executable: executable,
@@ -105,6 +107,7 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
     ) throws {
         self.terminationStatusMessageBuilder = terminationStatusMessageBuilder
         self.sessionLinkage = sessionLinkage
+        self.stopHandler = stopHandler
         self.transport = try transportFactory(executable, ["app-server"], workingDirectory)
 
         let startupSemaphore = DispatchSemaphore(value: 0)
@@ -245,6 +248,7 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
         didRequestStop = true
         runtimeState = .exited
         lock.unlock()
+        try stopHandler?()
         try transport.terminate()
         notifyChange()
     }

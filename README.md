@@ -7,14 +7,14 @@ Nexus is a workspace-first control center for coding agent CLIs across local and
 - This checkout builds the macOS app target and shared service/domain modules.
 - Nexus supports both terminal-backed and protocol-native **Sessions** behind one shared **Session** model.
 - Local Pi is the first documented protocol-native **Provider** path.
-- `docs/architecture/milestone-9.md` is the latest rollout-planning document and describes the next generalization step for local Codex.
+- `docs/architecture/milestone-10.md` is the latest rollout-planning document and describes the next remote protocol-native Codex rollout step.
 - Older milestone docs and the PRD are historical snapshots; use them for rollout history, not as the sole source of current truth.
 
 ## Start here
 
 1. `CONTEXT.md` — canonical product language
 2. `ARCHITECTURE.md` — stable high-level architecture and doc map
-3. `docs/architecture/milestone-9.md` — latest planned rollout direction
+3. `docs/architecture/milestone-10.md` — latest planned rollout direction
 4. `docs/adr/README.md` — index of durable architecture decisions
 5. `docs/prd/nexus-workspace-first-control-center.md` — historical milestone-one product framing
 

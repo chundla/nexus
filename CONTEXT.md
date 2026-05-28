@@ -178,6 +178,7 @@ _Avoid_: stop, close
 - "remote access" could sound always-on — resolved: **Remote Access** is an explicit opt-in capability on a Mac and only works while Nexus is running.
 - **Pairing** scope could be read as per-Workspace or per-Provider approval — resolved: a trusted **Paired Device** is authorized against the **Paired Mac** as a whole in V1.
 - "tmux" could sound like a workspace type — resolved: it is a **Remote Session Strategy**.
+- "tmux" could also be mistaken for the protocol transport or the visible **Session Surface** for remote protocol-native work — resolved: it is only the durability mechanism behind a remote **Session**, while the protocol transport and primary **Session Surface** are separate concerns.
 - "remote health" was too vague — resolved: split into **Host Validation** and **Provider Health**.
 - User-installed provider CLIs may appear in one Host shell environment but not another, and may not appear in the raw SSH command PATH at all — resolved: terminal-backed remote **Provider Health** resolves executables across the Host user's shell environments and standard per-user install locations, then remote launch uses that absolute path.
 - Remote path accessibility is not **Host Validation** — resolved: it belongs under **Workspace Availability**.

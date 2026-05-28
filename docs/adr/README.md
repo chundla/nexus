@@ -36,3 +36,4 @@ Initial set:
 28. Shared Session stream is canonical; terminal is an optional Session surface
 29. Session surface is explicit, and client support is separate from Provider Capability
 30. Provider-native continuation linkage lives on the Session Record, not the Launch Snapshot
+31. Remote protocol-native Sessions use a service-owned SSH stdio bridge with tmux durability

@@ -69,6 +69,53 @@ struct ProcessSessionRuntimeLauncherTests {
         #expect(codexScreen.transcript == "Codex ready")
     }
 
+    @Test func remoteProtocolNativeProvidersUseSharedFactoryRegistry() throws {
+        let launchRecorder = ProtocolNativeLaunchRecorder()
+        let launcher = ProcessSessionRuntimeLauncher(
+            remoteProtocolNativeRuntimeFactories: [
+                .codex: { launchConfiguration, session, workspace in
+                    launchRecorder.record(session: session, workspace: workspace, launchConfiguration: launchConfiguration)
+                    return StubProtocolNativeRuntime(
+                        primarySurface: .structuredActivityFeed,
+                        activityItems: [SessionActivityItem(kind: .status, text: "Remote Codex ready")]
+                    )
+                }
+            ]
+        )
+
+        let host = NexusDomain.Host(id: UUID(), name: "Build Server", sshTarget: "build-box", port: 2222)
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Remote Workspace",
+            kind: .remote,
+            folderPath: "/srv/api",
+            primaryGroupID: UUID(),
+            remoteHostID: host.id
+        )
+        let session = Session(id: UUID(), workspaceID: workspace.id, providerID: .codex, isDefault: true, state: .ready)
+
+        let runtime = try launcher.makeRuntime(
+            session: session,
+            workspace: workspace,
+            launchConfiguration: SessionRuntimeLaunchConfiguration(
+                executable: "/home/tester/.local/bin/codex",
+                workingDirectory: workspace.folderPath,
+                remoteHost: host,
+                remoteRuntimeIdentifier: "nexus-runtime-1",
+                sessionRecordAdapterMetadata: SessionRecordAdapterMetadata(providerID: .codex, values: ["threadID": "codex-thread-1"])
+            )
+        )
+
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(launchRecorder.records.count == 1)
+        #expect(launchRecorder.records.first?.session.providerID == .codex)
+        #expect(launchRecorder.records.first?.workspace.kind == .remote)
+        #expect(launchRecorder.records.first?.launchConfiguration.remoteHost?.id == host.id)
+        #expect(screen.primarySurface == SessionSurface.structuredActivityFeed)
+        #expect(screen.activityItems.map { $0.text } == ["Remote Codex ready"])
+    }
+
     @Test func terminalBackedProvidersStillUseProcessRuntimePath() throws {
         let launcher = ProcessSessionRuntimeLauncher(
             localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/sh"])

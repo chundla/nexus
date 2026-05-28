@@ -8,7 +8,7 @@ Nexus is the workspace-first control center for coding agent CLIs across local a
 - Read `CONTEXT.md` for canonical product language.
 - Use this document for the stable high-level architecture.
 - Use `docs/architecture/milestone-*.md` for rollout slices; older milestone docs are historical snapshots.
-- `docs/architecture/milestone-9.md` is the latest rollout-planning document.
+- `docs/architecture/milestone-10.md` is the latest rollout-planning document.
 - `docs/prd/nexus-workspace-first-control-center.md` is historical milestone-one product framing, not the source of truth for current rollout details.
 
 ## Current documented rollout snapshot
@@ -16,7 +16,8 @@ Nexus is the workspace-first control center for coding agent CLIs across local a
 - The macOS app and **Background Service** are the primary build targets in this repo.
 - Nexus supports both terminal-backed and protocol-native **Sessions** behind one shared **Session** model.
 - Milestone Eight established local Pi as the first documented protocol-native **Provider** path.
-- Milestone Nine is the latest documented next-step plan and generalizes the protocol-native structured **Session** path to local Codex.
+- Milestone Nine generalized the protocol-native structured **Session** path to local Codex.
+- Milestone Ten is the latest documented next-step plan and expands the protocol-native structured **Session** path to remote Codex.
 - iPhone **Remote Client** behavior is documented in architecture and tested at shared-model/API boundaries, but this checkout does not contain a top-level iOS app target.
 
 ## Product shape
@@ -215,4 +216,5 @@ Milestone one proves the service-centered architecture with local-only execution
 - `docs/architecture/milestone-7.md`
 - `docs/architecture/milestone-8.md`
 - `docs/architecture/milestone-9.md`
+- `docs/architecture/milestone-10.md`
 - `docs/adr/`

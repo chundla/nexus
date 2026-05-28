@@ -439,11 +439,23 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
     private let remoteSessionCommandBuilder = RemoteSessionCommandBuilder()
     private let localShellCommandBuilder: LocalShellCommandBuilder
     private let localProtocolNativeRuntimeFactories: [ProviderID: ProtocolNativeRuntimeFactory]
+    private let remoteProtocolNativeRuntimeFactories: [ProviderID: ProtocolNativeRuntimeFactory]
 
     init(
         localShellCommandBuilder: LocalShellCommandBuilder = LocalShellCommandBuilder(),
-        localProtocolNativeRuntimeFactories: [ProviderID: ProtocolNativeRuntimeFactory]? = nil
+        codexTransportFactory: CodexAppServerRuntime.TransportFactory? = nil,
+        localProtocolNativeRuntimeFactories: [ProviderID: ProtocolNativeRuntimeFactory]? = nil,
+        remoteProtocolNativeRuntimeFactories: [ProviderID: ProtocolNativeRuntimeFactory] = [:],
+        remoteProtocolSessionCommandBuilder: RemoteProtocolSessionCommandBuilder = RemoteProtocolSessionCommandBuilder()
     ) {
+        let resolvedCodexTransportFactory: CodexAppServerRuntime.TransportFactory = codexTransportFactory ?? { executable, arguments, workingDirectory in
+            try ProcessCodexAppServerTransport(
+                executable: executable,
+                arguments: arguments,
+                workingDirectory: workingDirectory
+            )
+        }
+
         self.localShellCommandBuilder = localShellCommandBuilder
         self.localProtocolNativeRuntimeFactories = localProtocolNativeRuntimeFactories ?? [
             .pi: { launchConfiguration, _, _ in
@@ -459,15 +471,66 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
                     executable: launchConfiguration.executable,
                     workingDirectory: launchConfiguration.workingDirectory,
                     sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.codexSessionLinkage,
-                    terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder
+                    terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
+                    transportFactory: resolvedCodexTransportFactory
                 )
             }
         ]
+
+        if remoteProtocolNativeRuntimeFactories.isEmpty {
+            self.remoteProtocolNativeRuntimeFactories = [
+                .codex: { launchConfiguration, _, _ in
+                    guard let remoteHost = launchConfiguration.remoteHost,
+                          let runtimeIdentifier = launchConfiguration.remoteRuntimeIdentifier else {
+                        throw NSError(
+                            domain: "ProcessSessionRuntimeLauncher",
+                            code: 1,
+                            userInfo: [NSLocalizedDescriptionKey: "Remote Codex launch requires a Host and runtime identifier."]
+                        )
+                    }
+
+                    let bridgeArguments = remoteProtocolSessionCommandBuilder.bridgeArguments(
+                        host: remoteHost,
+                        runtimeIdentifier: runtimeIdentifier,
+                        workingDirectory: launchConfiguration.workingDirectory,
+                        executable: launchConfiguration.executable,
+                        providerArguments: ["app-server"],
+                        launchMode: launchConfiguration.remoteRuntimeLaunchMode
+                    )
+
+                    return try CodexAppServerRuntime(
+                        executable: "/usr/bin/ssh",
+                        workingDirectory: launchConfiguration.workingDirectory,
+                        sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.codexSessionLinkage,
+                        terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
+                        stopHandler: {
+                            try Self.runCommand(
+                                executable: "/usr/bin/ssh",
+                                arguments: remoteProtocolSessionCommandBuilder.stopArguments(
+                                    runtimeIdentifier: runtimeIdentifier,
+                                    host: remoteHost
+                                )
+                            )
+                        },
+                        transportFactory: { _, _, _ in
+                            try resolvedCodexTransportFactory("/usr/bin/ssh", bridgeArguments, nil)
+                        }
+                    )
+                }
+            ]
+        } else {
+            self.remoteProtocolNativeRuntimeFactories = remoteProtocolNativeRuntimeFactories
+        }
     }
 
     func makeRuntime(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) throws -> any SessionRuntime {
         if launchConfiguration.remoteHost == nil,
            let protocolNativeRuntimeFactory = localProtocolNativeRuntimeFactories[session.providerID] {
+            return try protocolNativeRuntimeFactory(launchConfiguration, session, workspace)
+        }
+
+        if launchConfiguration.remoteHost != nil,
+           let protocolNativeRuntimeFactory = remoteProtocolNativeRuntimeFactories[session.providerID] {
             return try protocolNativeRuntimeFactory(launchConfiguration, session, workspace)
         }
 
