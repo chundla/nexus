@@ -67,7 +67,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     private var currentAssistantText = ""
     private var didRequestStop = false
 
-    init(
+    convenience init(
         executable: String,
         workingDirectory: String,
         sessionLinkage: PiSessionLinkage? = nil,
@@ -83,15 +83,72 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             )
         }
     ) throws {
+        try self.init(
+            executable: executable,
+            workingDirectory: workingDirectory,
+            sessionLinkage: sessionLinkage,
+            terminationStatusMessageBuilder: terminationStatusMessageBuilder,
+            unexpectedTerminationState: unexpectedTerminationState,
+            unexpectedTerminationMessageBuilder: unexpectedTerminationMessageBuilder,
+            stopHandler: stopHandler,
+            transportFactory: transportFactory,
+            performStartup: false
+        )
+        try AsyncOperationSupport.blocking { try await self.completeStartup() }
+    }
+
+    convenience init(
+        executable: String,
+        workingDirectory: String,
+        sessionLinkage: PiSessionLinkage? = nil,
+        terminationStatusMessageBuilder: @escaping (Int32) -> String,
+        unexpectedTerminationState: Session.State = .exited,
+        unexpectedTerminationMessageBuilder: ((Int32) -> String)? = nil,
+        stopHandler: (() throws -> Void)? = nil,
+        transportFactory: TransportFactory = { executable, arguments, workingDirectory in
+            try ProcessPiRPCTransport(
+                executable: executable,
+                arguments: arguments,
+                workingDirectory: workingDirectory
+            )
+        }
+    ) async throws {
+        try self.init(
+            executable: executable,
+            workingDirectory: workingDirectory,
+            sessionLinkage: sessionLinkage,
+            terminationStatusMessageBuilder: terminationStatusMessageBuilder,
+            unexpectedTerminationState: unexpectedTerminationState,
+            unexpectedTerminationMessageBuilder: unexpectedTerminationMessageBuilder,
+            stopHandler: stopHandler,
+            transportFactory: transportFactory,
+            performStartup: false
+        )
+        try await self.completeStartup()
+    }
+
+    private init(
+        executable: String,
+        workingDirectory: String,
+        sessionLinkage: PiSessionLinkage?,
+        terminationStatusMessageBuilder: @escaping (Int32) -> String,
+        unexpectedTerminationState: Session.State,
+        unexpectedTerminationMessageBuilder: ((Int32) -> String)?,
+        stopHandler: (() throws -> Void)?,
+        transportFactory: TransportFactory,
+        performStartup: Bool
+    ) throws {
         self.stopHandler = stopHandler
         self.terminationStatusMessageBuilder = terminationStatusMessageBuilder
         self.unexpectedTerminationState = unexpectedTerminationState
         self.unexpectedTerminationMessageBuilder = unexpectedTerminationMessageBuilder ?? terminationStatusMessageBuilder
         self.sessionLinkage = sessionLinkage
         self.transport = try transportFactory(executable, Self.transportArguments(sessionLinkage: sessionLinkage), workingDirectory)
+    }
 
-        let startupSemaphore = DispatchSemaphore(value: 0)
+    private func completeStartup() async throws {
         let startupState = StartupState()
+        let startupWaiter = AsyncResultWaiter<Void>()
 
         transport.setStdoutLineHandler { [weak self] line in
             guard let self else { return }
@@ -104,26 +161,38 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
                     self.updateSessionLinkageLocked(from: response)
                     self.appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"))
                     self.lock.unlock()
+                    startupWaiter.succeed()
                 } else {
                     let errorMessage = self.string(for: "error", in: response) ?? "Pi RPC startup failed."
-                    startupState.error = PiRPCSessionRuntimeError.startupFailed(errorMessage)
+                    let startupError = PiRPCSessionRuntimeError.startupFailed(errorMessage)
+                    startupState.record(error: startupError)
+                    startupWaiter.fail(startupError)
                 }
-                startupSemaphore.signal()
                 return
             }
 
             self.handleOutputLine(line)
         }
         transport.setTerminationHandler { [weak self] status in
+            if status != 0, startupState.error == nil {
+                let startupError = PiRPCSessionRuntimeError.startupFailed("Pi RPC mode exited before startup completed.")
+                startupState.record(error: startupError)
+                startupWaiter.fail(startupError)
+            }
             self?.handleTermination(status: status)
         }
 
         try transport.start()
         try transport.sendLine(Self.jsonLine(["id": startupResponseID, "type": "get_state"]))
 
-        guard startupSemaphore.wait(timeout: .now() + 5) == .success else {
+        do {
+            try await startupWaiter.wait(
+                timeoutNanoseconds: 5_000_000_000,
+                timeoutError: { PiRPCSessionRuntimeError.startupTimedOut }
+            )
+        } catch {
             try? transport.terminate()
-            throw PiRPCSessionRuntimeError.startupTimedOut
+            throw startupState.error ?? error
         }
 
         if let startupError = startupState.error {
@@ -488,7 +557,22 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
 }
 
 private final class StartupState: @unchecked Sendable {
-    var error: Error?
+    private let lock = NSLock()
+    private var resolvedError: Error?
+
+    var error: Error? {
+        lock.lock()
+        defer { lock.unlock() }
+        return resolvedError
+    }
+
+    func record(error: Error) {
+        lock.lock()
+        if resolvedError == nil {
+            resolvedError = error
+        }
+        lock.unlock()
+    }
 }
 
 final class ProcessPiRPCTransport: PiRPCTransporting, @unchecked Sendable {

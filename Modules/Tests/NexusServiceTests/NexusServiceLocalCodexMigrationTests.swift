@@ -98,11 +98,11 @@ private struct MigrationStubCommandRunner: ProviderCommandRunning {
 }
 
 private struct MigrationCodexReadinessProbe: CodexReadinessProbing {
-    func probe(executable: String, workingDirectory: String) throws {}
+    func probe(executable: String, workingDirectory: String) async throws {}
 }
 
 private struct MigrationTerminalCodexRuntimeLauncher: SessionRuntimeLaunching {
-    func makeRuntime(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) throws -> any SessionRuntime {
+    func makeRuntime(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) async throws -> any SessionRuntime {
         MigrationTerminalCodexRuntime()
     }
 }

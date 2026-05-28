@@ -155,7 +155,7 @@ private struct IBMBobDeletionStubExecutableResolver: ProviderExecutableResolving
     }
 }
 
-private final class RecordingIBMBobDeletionCommandRunner: ProviderCommandRunning {
+private final class RecordingIBMBobDeletionCommandRunner: ProviderCommandRunning, @unchecked Sendable {
     struct Invocation: Equatable {
         let executable: String
         let arguments: [String]

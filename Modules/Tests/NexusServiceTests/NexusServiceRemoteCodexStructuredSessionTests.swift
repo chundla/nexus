@@ -494,7 +494,7 @@ private struct RemoteCodexStubCommandRunner: ProviderCommandRunning {
 }
 
 private struct RemoteCodexReadyReadinessProbe: RemoteCodexReadinessProbing {
-    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) throws -> RemoteCodexReadinessOutcome {
+    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) async throws -> RemoteCodexReadinessOutcome {
         .ready
     }
 }
@@ -512,7 +512,7 @@ private struct RemoteCodexAvailableHostValidationEvaluator: HostValidationEvalua
 }
 
 private struct LegacyRemoteTerminalCodexRuntimeLauncher: SessionRuntimeLaunching {
-    func makeRuntime(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) throws -> any SessionRuntime {
+    func makeRuntime(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) async throws -> any SessionRuntime {
         LegacyRemoteTerminalCodexRuntime()
     }
 }

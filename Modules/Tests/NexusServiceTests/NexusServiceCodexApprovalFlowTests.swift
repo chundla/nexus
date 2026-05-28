@@ -108,7 +108,7 @@ private struct CodexApprovalStubCommandRunner: ProviderCommandRunning {
 }
 
 private struct CodexApprovalReadinessProbe: CodexReadinessProbing {
-    func probe(executable: String, workingDirectory: String) throws {}
+    func probe(executable: String, workingDirectory: String) async throws {}
 }
 
 private final class CodexApprovalTransportHarness: @unchecked Sendable {

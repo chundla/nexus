@@ -25,7 +25,7 @@ public enum NexusEmbeddedServiceBootstrap {
 
 protocol SessionRuntimeManaging: AnyObject {
     func setRuntimeChangeHandler(_ handler: (@Sendable (UUID) -> Void)?)
-    func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) throws
+    func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) async throws
     func stop(session: Session) throws
     func remove(session: Session)
     func hasRuntime(for session: Session) -> Bool
@@ -86,7 +86,7 @@ struct SessionRuntimeLaunchConfiguration {
 }
 
 protocol SessionRuntimeLaunching {
-    func makeRuntime(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) throws -> any SessionRuntime
+    func makeRuntime(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) async throws -> any SessionRuntime
 }
 
 protocol SessionRuntime: AnyObject {
@@ -206,7 +206,7 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Se
         lock.unlock()
     }
 
-    func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) throws {
+    func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) async throws {
         let shouldCreateRuntime = try withLock {
             if let runtime = runtimes[session.id], runtime.state == .ready {
                 return false
@@ -218,7 +218,7 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Se
             return
         }
 
-        let runtime = try launcher.makeRuntime(session: session, workspace: workspace, launchConfiguration: launchConfiguration)
+        let runtime = try await launcher.makeRuntime(session: session, workspace: workspace, launchConfiguration: launchConfiguration)
         runtime.setChangeHandler { [weak self] in
             self?.notifyRuntimeChange(for: session.id)
         }
@@ -456,7 +456,7 @@ struct RemoteSessionCommandBuilder {
 }
 
 final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
-    typealias ProtocolNativeRuntimeFactory = (_ launchConfiguration: SessionRuntimeLaunchConfiguration, _ session: Session, _ workspace: Workspace) throws -> any SessionRuntime
+    typealias ProtocolNativeRuntimeFactory = (_ launchConfiguration: SessionRuntimeLaunchConfiguration, _ session: Session, _ workspace: Workspace) async throws -> any SessionRuntime
 
     private let remoteSessionCommandBuilder = RemoteSessionCommandBuilder()
     private let localShellCommandBuilder: LocalShellCommandBuilder
@@ -498,7 +498,7 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
 
         self.localProtocolNativeRuntimeFactories = localProtocolNativeRuntimeFactories ?? [
             .pi: { launchConfiguration, _, _ in
-                try PiRPCSessionRuntime(
+                try await PiRPCSessionRuntime(
                     executable: launchConfiguration.executable,
                     workingDirectory: launchConfiguration.workingDirectory,
                     sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.piSessionLinkage,
@@ -506,7 +506,7 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
                 )
             },
             .codex: { launchConfiguration, _, _ in
-                try CodexAppServerRuntime(
+                try await CodexAppServerRuntime(
                     executable: launchConfiguration.executable,
                     workingDirectory: launchConfiguration.workingDirectory,
                     sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.codexSessionLinkage,
@@ -548,7 +548,7 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
                         launchMode: launchConfiguration.remoteRuntimeLaunchMode
                     )
 
-                    return try PiRPCSessionRuntime(
+                    return try await PiRPCSessionRuntime(
                         executable: "/usr/bin/ssh",
                         workingDirectory: launchConfiguration.workingDirectory,
                         sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.piSessionLinkage,
@@ -590,7 +590,7 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
                         launchMode: launchConfiguration.remoteRuntimeLaunchMode
                     )
 
-                    return try CodexAppServerRuntime(
+                    return try await CodexAppServerRuntime(
                         executable: "/usr/bin/ssh",
                         workingDirectory: launchConfiguration.workingDirectory,
                         sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.codexSessionLinkage,
@@ -619,15 +619,15 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
         }
     }
 
-    func makeRuntime(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) throws -> any SessionRuntime {
+    func makeRuntime(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) async throws -> any SessionRuntime {
         if launchConfiguration.remoteHost == nil,
            let protocolNativeRuntimeFactory = localProtocolNativeRuntimeFactories[session.providerID] {
-            return try protocolNativeRuntimeFactory(launchConfiguration, session, workspace)
+            return try await protocolNativeRuntimeFactory(launchConfiguration, session, workspace)
         }
 
         if launchConfiguration.remoteHost != nil,
            let protocolNativeRuntimeFactory = remoteProtocolNativeRuntimeFactories[session.providerID] {
-            return try protocolNativeRuntimeFactory(launchConfiguration, session, workspace)
+            return try await protocolNativeRuntimeFactory(launchConfiguration, session, workspace)
         }
 
         if let remoteHost = launchConfiguration.remoteHost,
@@ -747,7 +747,7 @@ final class ProcessSessionRuntime: SessionRuntime, @unchecked Sendable {
             setenv("TERM", "xterm-256color", 1)
             var processArguments: [UnsafeMutablePointer<CChar>?] = ([executable] + arguments).map { strdup($0) }
             processArguments.append(nil)
-            executable.withCString { executablePath in
+            _ = executable.withCString { executablePath in
                 execv(executablePath, &processArguments)
             }
             _exit(127)
@@ -1120,7 +1120,7 @@ struct ServiceProviderAdapter {
     private let defaultSessionLaunchSupportEvaluator: (Workspace) -> Bool
     private let namedSessionSupportEvaluator: (Workspace) -> Bool
     private let primarySurfaceEvaluator: (Workspace) -> SessionSurface
-    let healthSummaryEvaluator: (Workspace, RemoteWorkspaceHealthContext?, any ProviderHealthEvaluating) -> ProviderHealthSummary
+    let healthSummaryEvaluator: (Workspace, RemoteWorkspaceHealthContext?, any ProviderHealthEvaluating) async -> ProviderHealthSummary
     let initialTranscriptBuilder: (Workspace, NexusDomain.Host?, RemoteRuntimeLaunchMode) -> String
     let terminationStatusMessageBuilder: (Int32) -> String
     let remoteRuntimeRecoveryFailureEvaluator: (RemoteRuntimeRecoveryFailureContext) -> (state: Session.State, message: String)
@@ -1130,7 +1130,7 @@ struct ServiceProviderAdapter {
         providerID: ProviderID,
         supportsDefaultSessionLaunch: Bool,
         supportsNamedSessions: Bool,
-        healthSummaryEvaluator: @escaping (Workspace, RemoteWorkspaceHealthContext?, any ProviderHealthEvaluating) -> ProviderHealthSummary,
+        healthSummaryEvaluator: @escaping (Workspace, RemoteWorkspaceHealthContext?, any ProviderHealthEvaluating) async -> ProviderHealthSummary,
         defaultSessionLaunchSupportEvaluator: ((Workspace) -> Bool)? = nil,
         namedSessionSupportEvaluator: ((Workspace) -> Bool)? = nil,
         primarySurfaceEvaluator: ((Workspace) -> SessionSurface)? = nil,
@@ -1206,8 +1206,8 @@ struct ServiceProviderAdapter {
         for workspace: Workspace,
         remoteContext: RemoteWorkspaceHealthContext?,
         providerHealthEvaluator: any ProviderHealthEvaluating
-    ) -> ProviderHealthSummary {
-        healthSummaryEvaluator(workspace, remoteContext, providerHealthEvaluator)
+    ) async -> ProviderHealthSummary {
+        await healthSummaryEvaluator(workspace, remoteContext, providerHealthEvaluator)
     }
 
     func initialTranscript(
@@ -1409,7 +1409,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 supportsDefaultSessionLaunch: true,
                 supportsNamedSessions: true,
                 healthSummaryEvaluator: { workspace, remoteContext, providerHealthEvaluator in
-                    providerHealthEvaluator.healthSummary(for: .claude, workspace: workspace, remoteContext: remoteContext)
+                    await providerHealthEvaluator.healthSummary(for: .claude, workspace: workspace, remoteContext: remoteContext)
                 },
                 shouldReuseRemoteHealthSnapshot: { snapshot, remoteContext in
                     shouldReuseRemoteCLIHealthSnapshot(snapshot, remoteContext: remoteContext)
@@ -1420,7 +1420,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 supportsDefaultSessionLaunch: true,
                 supportsNamedSessions: true,
                 healthSummaryEvaluator: { workspace, remoteContext, providerHealthEvaluator in
-                    providerHealthEvaluator.healthSummary(for: .codex, workspace: workspace, remoteContext: remoteContext)
+                    await providerHealthEvaluator.healthSummary(for: .codex, workspace: workspace, remoteContext: remoteContext)
                 },
                 primarySurfaceEvaluator: { _ in .structuredActivityFeed },
                 shouldReuseRemoteHealthSnapshot: { snapshot, remoteContext in
@@ -1432,7 +1432,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 supportsDefaultSessionLaunch: false,
                 supportsNamedSessions: false,
                 healthSummaryEvaluator: { workspace, remoteContext, providerHealthEvaluator in
-                    providerHealthEvaluator.healthSummary(for: .ibmBob, workspace: workspace, remoteContext: remoteContext)
+                    await providerHealthEvaluator.healthSummary(for: .ibmBob, workspace: workspace, remoteContext: remoteContext)
                 },
                 defaultSessionLaunchSupportEvaluator: { $0.kind == .local },
                 namedSessionSupportEvaluator: { $0.kind == .local },
@@ -1443,7 +1443,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 supportsDefaultSessionLaunch: true,
                 supportsNamedSessions: true,
                 healthSummaryEvaluator: { workspace, remoteContext, providerHealthEvaluator in
-                    providerHealthEvaluator.healthSummary(for: .pi, workspace: workspace, remoteContext: remoteContext)
+                    await providerHealthEvaluator.healthSummary(for: .pi, workspace: workspace, remoteContext: remoteContext)
                 },
                 primarySurfaceEvaluator: { _ in .structuredActivityFeed },
                 shouldReuseRemoteHealthSnapshot: { snapshot, remoteContext in
@@ -1607,6 +1607,10 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     func getWorkspaceOverview(workspaceID: UUID) throws -> WorkspaceOverview {
+        try AsyncOperationSupport.blocking { try await self.getWorkspaceOverview(workspaceID: workspaceID) }
+    }
+
+    func getWorkspaceOverview(workspaceID: UUID) async throws -> WorkspaceOverview {
         guard let workspace = try metadataStore.workspace(id: workspaceID) else {
             throw NexusMetadataStoreError.workspaceNotFound
         }
@@ -1620,18 +1624,21 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             )
         }
 
-        let providerCards = try ProviderID.allCases.map { providerID in
-            let health = try providerHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
+        var providerCards: [WorkspaceProviderCard] = []
+        for providerID in ProviderID.allCases {
+            let health = try await providerHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
             let defaultSession = try metadataStore.defaultSession(workspaceID: workspaceID, providerID: providerID)
-            return WorkspaceProviderCard(
-                provider: Provider(id: providerID),
-                health: health,
-                capabilities: providerCapabilities(for: providerID, workspace: workspace, health: health, defaultSession: defaultSession),
-                prelaunchPrimarySurface: providerAdapter(for: providerID).primarySurface(in: workspace),
-                defaultSession: try defaultSessionSummary(for: workspace, providerID: providerID),
-                alternateSessionCount: try metadataStore.listSessions(workspaceID: workspaceID, providerID: providerID)
-                    .filter { $0.isDefault == false }
-                    .count
+            providerCards.append(
+                WorkspaceProviderCard(
+                    provider: Provider(id: providerID),
+                    health: health,
+                    capabilities: providerCapabilities(for: providerID, workspace: workspace, health: health, defaultSession: defaultSession),
+                    prelaunchPrimarySurface: providerAdapter(for: providerID).primarySurface(in: workspace),
+                    defaultSession: try defaultSessionSummary(for: workspace, providerID: providerID),
+                    alternateSessionCount: try metadataStore.listSessions(workspaceID: workspaceID, providerID: providerID)
+                        .filter { $0.isDefault == false }
+                        .count
+                )
             )
         }
 
@@ -1639,6 +1646,10 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     func getProviderDetail(workspaceID: UUID, providerID: ProviderID) throws -> ProviderDetail {
+        try AsyncOperationSupport.blocking { try await self.getProviderDetail(workspaceID: workspaceID, providerID: providerID) }
+    }
+
+    func getProviderDetail(workspaceID: UUID, providerID: ProviderID) async throws -> ProviderDetail {
         guard let workspace = try metadataStore.workspace(id: workspaceID) else {
             throw NexusMetadataStoreError.workspaceNotFound
         }
@@ -1653,7 +1664,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         }
         let sessions = try metadataStore.listSessions(workspaceID: workspaceID, providerID: providerID)
             .map(reconcileSessionRuntimeState)
-        let health = try providerHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
+        let health = try await providerHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
         let defaultSession = sessions.first(where: \.isDefault)
 
         return ProviderDetail(
@@ -1712,11 +1723,11 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         workspace: Workspace,
         remoteContext: RemoteWorkspaceHealthContext?,
         preferFreshRemoteCheck: Bool = false
-    ) throws -> ProviderHealthSummary {
+    ) async throws -> ProviderHealthSummary {
         let adapter = providerAdapter(for: providerID)
 
         guard workspace.kind == .remote else {
-            return adapter.healthSummary(
+            return await adapter.healthSummary(
                 for: workspace,
                 remoteContext: remoteContext,
                 providerHealthEvaluator: providerHealthEvaluator
@@ -1729,7 +1740,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             return snapshot
         }
 
-        let evaluated = adapter.healthSummary(
+        let evaluated = await adapter.healthSummary(
             for: workspace,
             remoteContext: remoteContext,
             providerHealthEvaluator: providerHealthEvaluator
@@ -1748,7 +1759,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             supportsDefaultSessionLaunch: false,
             supportsNamedSessions: false,
             healthSummaryEvaluator: { workspace, remoteContext, providerHealthEvaluator in
-                providerHealthEvaluator.healthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
+                await providerHealthEvaluator.healthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
             }
         )
     }
@@ -1825,6 +1836,10 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) throws -> Session {
+        try AsyncOperationSupport.blocking { try await self.launchOrResumeDefaultSession(workspaceID: workspaceID, providerID: providerID) }
+    }
+
+    func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) async throws -> Session {
         guard let workspace = try metadataStore.workspace(id: workspaceID) else {
             throw NexusMetadataStoreError.workspaceNotFound
         }
@@ -1834,7 +1849,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         }
 
         if let existingSession = try metadataStore.defaultSession(workspaceID: workspaceID, providerID: providerID) {
-            return try launchOrResumeSession(existingSession, workspace: workspace)
+            return try await launchOrResumeSession(existingSession, workspace: workspace)
         }
 
         let remoteContext = try remoteWorkspaceTargetOverview(for: workspace, refreshHostValidation: true).map {
@@ -1844,7 +1859,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 workspaceAvailability: $0.workspaceAvailability
             )
         }
-        let health = try providerHealthSummary(
+        let health = try await providerHealthSummary(
             for: providerID,
             workspace: workspace,
             remoteContext: remoteContext,
@@ -1874,10 +1889,14 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             resolvedExecutable: executable,
             resolvedWorkingDirectory: workspace.folderPath
         )
-        return try launchSession(session, workspace: workspace, launchSnapshot: launchSnapshot, forceFreshRemoteRuntime: true)
+        return try await launchSession(session, workspace: workspace, launchSnapshot: launchSnapshot, forceFreshRemoteRuntime: true)
     }
 
     func launchOrResumeSession(sessionID: UUID) throws -> Session {
+        try AsyncOperationSupport.blocking { try await self.launchOrResumeSession(sessionID: sessionID) }
+    }
+
+    func launchOrResumeSession(sessionID: UUID) async throws -> Session {
         guard let session = try metadataStore.session(id: sessionID) else {
             throw NexusMetadataStoreError.sessionNotFound
         }
@@ -1885,10 +1904,14 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             throw NexusMetadataStoreError.workspaceNotFound
         }
 
-        return try launchOrResumeSession(session, workspace: workspace)
+        return try await launchOrResumeSession(session, workspace: workspace)
     }
 
     func createNamedSession(workspaceID: UUID, providerID: ProviderID, name: String?) throws -> Session {
+        try AsyncOperationSupport.blocking { try await self.createNamedSession(workspaceID: workspaceID, providerID: providerID, name: name) }
+    }
+
+    func createNamedSession(workspaceID: UUID, providerID: ProviderID, name: String?) async throws -> Session {
         guard let workspace = try metadataStore.workspace(id: workspaceID) else {
             throw NexusMetadataStoreError.workspaceNotFound
         }
@@ -1906,7 +1929,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 workspaceAvailability: $0.workspaceAvailability
             )
         }
-        let health = try providerHealthSummary(
+        let health = try await providerHealthSummary(
             for: providerID,
             workspace: workspace,
             remoteContext: remoteContext,
@@ -1939,7 +1962,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             resolvedExecutable: executable,
             resolvedWorkingDirectory: workspace.folderPath
         )
-        return try launchSession(session, workspace: workspace, launchSnapshot: launchSnapshot, forceFreshRemoteRuntime: true)
+        return try await launchSession(session, workspace: workspace, launchSnapshot: launchSnapshot, forceFreshRemoteRuntime: true)
     }
 
     func stopSession(sessionID: UUID) throws -> Session {
@@ -2056,11 +2079,15 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     func sendSessionInput(sessionID: UUID, text: String) throws -> SessionScreen {
+        try AsyncOperationSupport.blocking { try await self.sendSessionInput(sessionID: sessionID, text: text) }
+    }
+
+    func sendSessionInput(sessionID: UUID, text: String) async throws -> SessionScreen {
         guard let session = try metadataStore.session(id: sessionID) else {
             throw NexusMetadataStoreError.sessionNotFound
         }
 
-        let resolvedSession = try interactiveReadySession(for: session)
+        let resolvedSession = try await interactiveReadySession(for: session)
         guard resolvedSession.state == .ready else {
             throw NexusMetadataStoreError.sessionNotReady
         }
@@ -2070,11 +2097,15 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     func sendSessionText(sessionID: UUID, text: String) throws -> SessionScreen {
+        try AsyncOperationSupport.blocking { try await self.sendSessionText(sessionID: sessionID, text: text) }
+    }
+
+    func sendSessionText(sessionID: UUID, text: String) async throws -> SessionScreen {
         guard let session = try metadataStore.session(id: sessionID) else {
             throw NexusMetadataStoreError.sessionNotFound
         }
 
-        let resolvedSession = try interactiveReadySession(for: session)
+        let resolvedSession = try await interactiveReadySession(for: session)
         guard resolvedSession.state == .ready else {
             throw NexusMetadataStoreError.sessionNotReady
         }
@@ -2089,11 +2120,15 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     func sendSessionInputKey(sessionID: UUID, key: SessionInputKey) throws -> SessionScreen {
+        try AsyncOperationSupport.blocking { try await self.sendSessionInputKey(sessionID: sessionID, key: key) }
+    }
+
+    func sendSessionInputKey(sessionID: UUID, key: SessionInputKey) async throws -> SessionScreen {
         guard let session = try metadataStore.session(id: sessionID) else {
             throw NexusMetadataStoreError.sessionNotFound
         }
 
-        let resolvedSession = try interactiveReadySession(for: session)
+        let resolvedSession = try await interactiveReadySession(for: session)
         guard resolvedSession.state == .ready else {
             throw NexusMetadataStoreError.sessionNotReady
         }
@@ -2124,11 +2159,25 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         approvalRequestID: UUID,
         decision: ApprovalRequestDecision
     ) throws -> SessionScreen {
+        try AsyncOperationSupport.blocking {
+            try await self.respondToApprovalRequest(
+                sessionID: sessionID,
+                approvalRequestID: approvalRequestID,
+                decision: decision
+            )
+        }
+    }
+
+    func respondToApprovalRequest(
+        sessionID: UUID,
+        approvalRequestID: UUID,
+        decision: ApprovalRequestDecision
+    ) async throws -> SessionScreen {
         guard let session = try metadataStore.session(id: sessionID) else {
             throw NexusMetadataStoreError.sessionNotFound
         }
 
-        let resolvedSession = try interactiveReadySession(for: session)
+        let resolvedSession = try await interactiveReadySession(for: session)
         guard resolvedSession.state == .ready else {
             throw NexusMetadataStoreError.sessionNotReady
         }
@@ -2144,11 +2193,15 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     func resizeSession(sessionID: UUID, columns: Int, rows: Int) throws -> SessionScreen {
+        try AsyncOperationSupport.blocking { try await self.resizeSession(sessionID: sessionID, columns: columns, rows: rows) }
+    }
+
+    func resizeSession(sessionID: UUID, columns: Int, rows: Int) async throws -> SessionScreen {
         guard let session = try metadataStore.session(id: sessionID) else {
             throw NexusMetadataStoreError.sessionNotFound
         }
 
-        let resolvedSession = try interactiveReadySession(for: session)
+        let resolvedSession = try await interactiveReadySession(for: session)
         guard resolvedSession.state == .ready else {
             throw NexusMetadataStoreError.sessionNotReady
         }
@@ -2164,11 +2217,22 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     func takeRemoteSessionControl(sessionID: UUID, pairedDeviceID: UUID, columns: Int, rows: Int) throws -> SessionScreen {
+        try AsyncOperationSupport.blocking {
+            try await self.takeRemoteSessionControl(
+                sessionID: sessionID,
+                pairedDeviceID: pairedDeviceID,
+                columns: columns,
+                rows: rows
+            )
+        }
+    }
+
+    func takeRemoteSessionControl(sessionID: UUID, pairedDeviceID: UUID, columns: Int, rows: Int) async throws -> SessionScreen {
         guard let session = try metadataStore.session(id: sessionID) else {
             throw NexusMetadataStoreError.sessionNotFound
         }
 
-        let resolvedSession = try interactiveReadySession(for: session)
+        let resolvedSession = try await interactiveReadySession(for: session)
         guard resolvedSession.state == .ready else {
             throw NexusMetadataStoreError.sessionNotReady
         }
@@ -2190,7 +2254,13 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     func sendRemoteSessionInput(sessionID: UUID, pairedDeviceID: UUID, text: String) throws -> SessionScreen {
-        let resolvedSession = try readyRemoteControlledSession(
+        try AsyncOperationSupport.blocking {
+            try await self.sendRemoteSessionInput(sessionID: sessionID, pairedDeviceID: pairedDeviceID, text: text)
+        }
+    }
+
+    func sendRemoteSessionInput(sessionID: UUID, pairedDeviceID: UUID, text: String) async throws -> SessionScreen {
+        let resolvedSession = try await readyRemoteControlledSession(
             sessionID: sessionID,
             pairedDeviceID: pairedDeviceID,
             controllerError: .remoteSessionInputControllerRequired
@@ -2204,7 +2274,23 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         approvalRequestID: UUID,
         decision: ApprovalRequestDecision
     ) throws -> SessionScreen {
-        let resolvedSession = try readyRemoteControlledSession(
+        try AsyncOperationSupport.blocking {
+            try await self.respondToRemoteApprovalRequest(
+                sessionID: sessionID,
+                pairedDeviceID: pairedDeviceID,
+                approvalRequestID: approvalRequestID,
+                decision: decision
+            )
+        }
+    }
+
+    func respondToRemoteApprovalRequest(
+        sessionID: UUID,
+        pairedDeviceID: UUID,
+        approvalRequestID: UUID,
+        decision: ApprovalRequestDecision
+    ) async throws -> SessionScreen {
+        let resolvedSession = try await readyRemoteControlledSession(
             sessionID: sessionID,
             pairedDeviceID: pairedDeviceID,
             controllerError: .remoteApprovalRequestControllerRequired
@@ -2219,7 +2305,13 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     func sendRemoteSessionText(sessionID: UUID, pairedDeviceID: UUID, text: String) throws -> SessionScreen {
-        let resolvedSession = try readyRemoteControlledSession(sessionID: sessionID, pairedDeviceID: pairedDeviceID)
+        try AsyncOperationSupport.blocking {
+            try await self.sendRemoteSessionText(sessionID: sessionID, pairedDeviceID: pairedDeviceID, text: text)
+        }
+    }
+
+    func sendRemoteSessionText(sessionID: UUID, pairedDeviceID: UUID, text: String) async throws -> SessionScreen {
+        let resolvedSession = try await readyRemoteControlledSession(sessionID: sessionID, pairedDeviceID: pairedDeviceID)
         let screenBeforeInput = normalizedSessionScreen(try sessionRuntimeManager.sessionScreen(for: resolvedSession))
         let responseScreen = normalizedSessionScreen(try sessionRuntimeManager.sendText(text, to: resolvedSession))
         return stabilizedScreenAfterTerminalInput(
@@ -2230,7 +2322,13 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     func sendRemoteSessionInputKey(sessionID: UUID, pairedDeviceID: UUID, key: SessionInputKey) throws -> SessionScreen {
-        let resolvedSession = try readyRemoteControlledSession(sessionID: sessionID, pairedDeviceID: pairedDeviceID)
+        try AsyncOperationSupport.blocking {
+            try await self.sendRemoteSessionInputKey(sessionID: sessionID, pairedDeviceID: pairedDeviceID, key: key)
+        }
+    }
+
+    func sendRemoteSessionInputKey(sessionID: UUID, pairedDeviceID: UUID, key: SessionInputKey) async throws -> SessionScreen {
+        let resolvedSession = try await readyRemoteControlledSession(sessionID: sessionID, pairedDeviceID: pairedDeviceID)
         let currentScreen = normalizedSessionScreen(try sessionRuntimeManager.sessionScreen(for: resolvedSession))
         let renderState = TerminalRenderer.renderState(
             from: currentScreen.transcript,
@@ -2324,12 +2422,12 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         sessionID: UUID,
         pairedDeviceID: UUID,
         controllerError: NexusSessionControlError = .remoteControllerRequired
-    ) throws -> Session {
+    ) async throws -> Session {
         guard let session = try metadataStore.session(id: sessionID) else {
             throw NexusMetadataStoreError.sessionNotFound
         }
 
-        let resolvedSession = try interactiveReadySession(for: session)
+        let resolvedSession = try await interactiveReadySession(for: session)
         guard resolvedSession.state == .ready else {
             throw NexusMetadataStoreError.sessionNotReady
         }
@@ -2339,7 +2437,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         return resolvedSession
     }
 
-    private func interactiveReadySession(for session: Session) throws -> Session {
+    private func interactiveReadySession(for session: Session) async throws -> Session {
         let resolvedSession = try reconcileSessionRuntimeState(session)
         guard resolvedSession.state == .ready else {
             return resolvedSession
@@ -2354,11 +2452,11 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             return resolvedSession
         }
 
-        _ = try launchOrResumeSession(resolvedSession, workspace: workspace)
+        _ = try await launchOrResumeSession(resolvedSession, workspace: workspace)
         return resolvedSession
     }
 
-    private func launchOrResumeSession(_ existingSession: Session, workspace: Workspace) throws -> Session {
+    private func launchOrResumeSession(_ existingSession: Session, workspace: Workspace) async throws -> Session {
         let adapter = providerAdapter(for: existingSession.providerID)
         let isSupported = existingSession.isDefault
             ? adapter.supportsDefaultSessionLaunch(in: workspace)
@@ -2372,7 +2470,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
 
         if let launchSnapshot = try metadataStore.launchSnapshot(sessionID: reconciledSession.id) {
             if shouldAttemptRemoteRuntimeRecovery(for: reconciledSession, workspace: workspace) {
-                return try recoverRemoteSession(
+                return try await recoverRemoteSession(
                     reconciledSession,
                     workspace: workspace,
                     launchSnapshot: launchSnapshot
@@ -2382,7 +2480,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             let session = reconciledSession.state == .ready && reconciledSession.failureMessage == nil
                 ? reconciledSession
                 : try metadataStore.updateSession(id: reconciledSession.id, state: .ready, failureMessage: nil)
-            return try launchSession(
+            return try await launchSession(
                 session,
                 workspace: workspace,
                 launchSnapshot: launchSnapshot,
@@ -2398,7 +2496,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 workspaceAvailability: $0.workspaceAvailability
             )
         }
-        let health = try providerHealthSummary(
+        let health = try await providerHealthSummary(
             for: reconciledSession.providerID,
             workspace: workspace,
             remoteContext: remoteContext,
@@ -2424,7 +2522,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             resolvedExecutable: executable,
             resolvedWorkingDirectory: workspace.folderPath
         )
-        return try launchSession(
+        return try await launchSession(
             session,
             workspace: workspace,
             launchSnapshot: launchSnapshot,
@@ -2499,13 +2597,13 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         _ session: Session,
         workspace: Workspace,
         launchSnapshot: LaunchSnapshot
-    ) throws -> Session {
+    ) async throws -> Session {
         let readySession = session.state == .ready && session.failureMessage == nil
             ? session
             : try metadataStore.updateSession(id: session.id, state: .ready, failureMessage: nil)
 
         do {
-            try sessionRuntimeManager.launchOrResume(
+            try await sessionRuntimeManager.launchOrResume(
                 session: readySession,
                 workspace: workspace,
                 launchConfiguration: try runtimeLaunchConfiguration(
@@ -2528,7 +2626,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         } catch {
             let failureContext = try remoteRuntimeRecoveryFailureContext(for: error, session: readySession, workspace: workspace)
             if failureContext.isMissingRemoteRuntime {
-                return try launchSession(
+                return try await launchSession(
                     readySession,
                     workspace: workspace,
                     launchSnapshot: launchSnapshot,
@@ -2551,9 +2649,9 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         launchSnapshot: LaunchSnapshot,
         forceFreshRemoteRuntime: Bool = false,
         sessionRecordAdapterMetadataSource: SessionRecordAdapterMetadataLaunchSource = .stored
-    ) throws -> Session {
+    ) async throws -> Session {
         do {
-            try sessionRuntimeManager.launchOrResume(
+            try await sessionRuntimeManager.launchOrResume(
                 session: session,
                 workspace: workspace,
                 launchConfiguration: try runtimeLaunchConfiguration(
@@ -2582,7 +2680,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 sessionRecordAdapterMetadataSource: sessionRecordAdapterMetadataSource,
                 error: error
             ) {
-                return try launchSession(
+                return try await launchSession(
                     session,
                     workspace: workspace,
                     launchSnapshot: launchSnapshot,
@@ -3948,7 +4046,7 @@ extension NexusService: NSXPCListenerDelegate {
     }
 }
 
-private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
+private final class NexusXPCBridge: NSObject, NexusXPCProtocol, @unchecked Sendable {
     let service: NexusService
     private let connection: NSXPCConnection
     private let lock = NSLock()
@@ -4066,18 +4164,18 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
     }
 
     func getWorkspaceOverview(workspaceID: String, reply: @escaping (Data?, NSString?) -> Void) {
-        sendReply(with: { try service.getWorkspaceOverview(workspaceID: resolveUUID(workspaceID)) }, reply: reply)
+        sendReply(with: { [self] in try await self.service.getWorkspaceOverview(workspaceID: self.resolveUUID(workspaceID)) }, reply: reply)
     }
 
     func getProviderDetail(workspaceID: String, providerID: String, reply: @escaping (Data?, NSString?) -> Void) {
         sendReply(
-            with: {
+            with: { [self] in
                 guard let resolvedProviderID = ProviderID(rawValue: providerID) else {
                     throw CocoaError(.coderInvalidValue)
                 }
 
-                return try service.getProviderDetail(
-                    workspaceID: resolveUUID(workspaceID),
+                return try await self.service.getProviderDetail(
+                    workspaceID: self.resolveUUID(workspaceID),
                     providerID: resolvedProviderID
                 )
             },
@@ -4114,13 +4212,13 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
 
     func launchOrResumeDefaultSession(workspaceID: String, providerID: String, reply: @escaping (Data?, NSString?) -> Void) {
         sendReply(
-            with: {
+            with: { [self] in
                 guard let resolvedProviderID = ProviderID(rawValue: providerID) else {
                     throw CocoaError(.coderInvalidValue)
                 }
 
-                return try service.launchOrResumeDefaultSession(
-                    workspaceID: resolveUUID(workspaceID),
+                return try await self.service.launchOrResumeDefaultSession(
+                    workspaceID: self.resolveUUID(workspaceID),
                     providerID: resolvedProviderID
                 )
             },
@@ -4129,18 +4227,18 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
     }
 
     func launchOrResumeSession(sessionID: String, reply: @escaping (Data?, NSString?) -> Void) {
-        sendReply(with: { try service.launchOrResumeSession(sessionID: resolveUUID(sessionID)) }, reply: reply)
+        sendReply(with: { [self] in try await self.service.launchOrResumeSession(sessionID: self.resolveUUID(sessionID)) }, reply: reply)
     }
 
     func createNamedSession(workspaceID: String, providerID: String, name: String?, reply: @escaping (Data?, NSString?) -> Void) {
         sendReply(
-            with: {
+            with: { [self] in
                 guard let resolvedProviderID = ProviderID(rawValue: providerID) else {
                     throw CocoaError(.coderInvalidValue)
                 }
 
-                return try service.createNamedSession(
-                    workspaceID: resolveUUID(workspaceID),
+                return try await self.service.createNamedSession(
+                    workspaceID: self.resolveUUID(workspaceID),
                     providerID: resolvedProviderID,
                     name: name
                 )
@@ -4203,26 +4301,26 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
 
     func sendSessionInput(sessionID: String, text: String, reply: @escaping (Data?, NSString?) -> Void) {
         sendReply(
-            with: { try service.sendSessionInput(sessionID: resolveUUID(sessionID), text: text) },
+            with: { [self] in try await self.service.sendSessionInput(sessionID: self.resolveUUID(sessionID), text: text) },
             reply: reply
         )
     }
 
     func sendSessionText(sessionID: String, text: String, reply: @escaping (Data?, NSString?) -> Void) {
         sendReply(
-            with: { try service.sendSessionText(sessionID: resolveUUID(sessionID), text: text) },
+            with: { [self] in try await self.service.sendSessionText(sessionID: self.resolveUUID(sessionID), text: text) },
             reply: reply
         )
     }
 
     func sendSessionInputKey(sessionID: String, key: String, reply: @escaping (Data?, NSString?) -> Void) {
         sendReply(
-            with: {
+            with: { [self] in
                 guard let resolvedKey = SessionInputKey(rawValue: key) else {
                     throw CocoaError(.coderInvalidValue)
                 }
 
-                return try service.sendSessionInputKey(sessionID: resolveUUID(sessionID), key: resolvedKey)
+                return try await self.service.sendSessionInputKey(sessionID: self.resolveUUID(sessionID), key: resolvedKey)
             },
             reply: reply
         )
@@ -4230,14 +4328,14 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
 
     func respondToApprovalRequest(sessionID: String, approvalRequestID: String, decision: String, reply: @escaping (Data?, NSString?) -> Void) {
         sendReply(
-            with: {
+            with: { [self] in
                 guard let resolvedDecision = ApprovalRequestDecision(rawValue: decision) else {
                     throw CocoaError(.coderInvalidValue)
                 }
 
-                return try service.respondToApprovalRequest(
-                    sessionID: resolveUUID(sessionID),
-                    approvalRequestID: resolveUUID(approvalRequestID),
+                return try await self.service.respondToApprovalRequest(
+                    sessionID: self.resolveUUID(sessionID),
+                    approvalRequestID: self.resolveUUID(approvalRequestID),
                     decision: resolvedDecision
                 )
             },
@@ -4247,17 +4345,17 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
 
     func resizeSession(sessionID: String, columns: Int, rows: Int, reply: @escaping (Data?, NSString?) -> Void) {
         sendReply(
-            with: { try service.resizeSession(sessionID: resolveUUID(sessionID), columns: columns, rows: rows) },
+            with: { [self] in try await self.service.resizeSession(sessionID: self.resolveUUID(sessionID), columns: columns, rows: rows) },
             reply: reply
         )
     }
 
     func takeRemoteSessionControl(sessionID: String, pairedDeviceID: String, columns: Int, rows: Int, reply: @escaping (Data?, NSString?) -> Void) {
         sendReply(
-            with: {
-                try service.takeRemoteSessionControl(
-                    sessionID: resolveUUID(sessionID),
-                    pairedDeviceID: resolveUUID(pairedDeviceID),
+            with: { [self] in
+                try await self.service.takeRemoteSessionControl(
+                    sessionID: self.resolveUUID(sessionID),
+                    pairedDeviceID: self.resolveUUID(pairedDeviceID),
                     columns: columns,
                     rows: rows
                 )
@@ -4280,10 +4378,10 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
 
     func sendRemoteSessionInput(sessionID: String, pairedDeviceID: String, text: String, reply: @escaping (Data?, NSString?) -> Void) {
         sendReply(
-            with: {
-                try service.sendRemoteSessionInput(
-                    sessionID: resolveUUID(sessionID),
-                    pairedDeviceID: resolveUUID(pairedDeviceID),
+            with: { [self] in
+                try await self.service.sendRemoteSessionInput(
+                    sessionID: self.resolveUUID(sessionID),
+                    pairedDeviceID: self.resolveUUID(pairedDeviceID),
                     text: text
                 )
             },
@@ -4293,15 +4391,15 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
 
     func respondToRemoteApprovalRequest(sessionID: String, pairedDeviceID: String, approvalRequestID: String, decision: String, reply: @escaping (Data?, NSString?) -> Void) {
         sendReply(
-            with: {
+            with: { [self] in
                 guard let resolvedDecision = ApprovalRequestDecision(rawValue: decision) else {
                     throw CocoaError(.coderInvalidValue)
                 }
 
-                return try service.respondToRemoteApprovalRequest(
-                    sessionID: resolveUUID(sessionID),
-                    pairedDeviceID: resolveUUID(pairedDeviceID),
-                    approvalRequestID: resolveUUID(approvalRequestID),
+                return try await self.service.respondToRemoteApprovalRequest(
+                    sessionID: self.resolveUUID(sessionID),
+                    pairedDeviceID: self.resolveUUID(pairedDeviceID),
+                    approvalRequestID: self.resolveUUID(approvalRequestID),
                     decision: resolvedDecision
                 )
             },
@@ -4311,10 +4409,10 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
 
     func sendRemoteSessionText(sessionID: String, pairedDeviceID: String, text: String, reply: @escaping (Data?, NSString?) -> Void) {
         sendReply(
-            with: {
-                try service.sendRemoteSessionText(
-                    sessionID: resolveUUID(sessionID),
-                    pairedDeviceID: resolveUUID(pairedDeviceID),
+            with: { [self] in
+                try await self.service.sendRemoteSessionText(
+                    sessionID: self.resolveUUID(sessionID),
+                    pairedDeviceID: self.resolveUUID(pairedDeviceID),
                     text: text
                 )
             },
@@ -4324,14 +4422,14 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
 
     func sendRemoteSessionInputKey(sessionID: String, pairedDeviceID: String, key: String, reply: @escaping (Data?, NSString?) -> Void) {
         sendReply(
-            with: {
+            with: { [self] in
                 guard let resolvedKey = SessionInputKey(rawValue: key) else {
                     throw CocoaError(.coderInvalidValue)
                 }
 
-                return try service.sendRemoteSessionInputKey(
-                    sessionID: resolveUUID(sessionID),
-                    pairedDeviceID: resolveUUID(pairedDeviceID),
+                return try await self.service.sendRemoteSessionInputKey(
+                    sessionID: self.resolveUUID(sessionID),
+                    pairedDeviceID: self.resolveUUID(pairedDeviceID),
                     key: resolvedKey
                 )
             },
@@ -4348,11 +4446,48 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
         }
     }
 
+    private func sendReply<T: Encodable>(with operation: @escaping @Sendable () async throws -> T, reply: @escaping (Data?, NSString?) -> Void) {
+        let relay = XPCReplyRelay(reply)
+        let replyOperation = AsyncEncodedReplyOperation(operation: operation, replyRelay: relay)
+        Task(priority: .userInitiated, operation: replyOperation.run)
+    }
+
     private func resolveUUID(_ rawValue: String) throws -> UUID {
         guard let uuid = UUID(uuidString: rawValue) else {
             throw CocoaError(.coderInvalidValue)
         }
         return uuid
+    }
+}
+
+private final class XPCReplyRelay: @unchecked Sendable {
+    private let reply: (Data?, NSString?) -> Void
+
+    init(_ reply: @escaping (Data?, NSString?) -> Void) {
+        self.reply = reply
+    }
+
+    func succeed(_ payload: Data) {
+        reply(payload, nil)
+    }
+
+    func fail(_ error: Error) {
+        reply(nil, error.localizedDescription as NSString)
+    }
+}
+
+private struct AsyncEncodedReplyOperation<T: Encodable>: @unchecked Sendable {
+    let operation: @Sendable () async throws -> T
+    let replyRelay: XPCReplyRelay
+
+    func run() async {
+        do {
+            let value = try await operation()
+            let payload = try JSONEncoder().encode(value)
+            replyRelay.succeed(payload)
+        } catch {
+            replyRelay.fail(error)
+        }
     }
 }
 

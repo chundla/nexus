@@ -5,7 +5,7 @@ import NexusDomain
 import Testing
 
 struct ProcessSessionRuntimeLauncherTests {
-    @Test func localProtocolNativeProvidersUseSharedFactoryRegistry() throws {
+    @Test func localProtocolNativeProvidersUseSharedFactoryRegistry() async throws {
         let launchRecorder = ProtocolNativeLaunchRecorder()
         let launcher = ProcessSessionRuntimeLauncher(
             localProtocolNativeRuntimeFactories: [
@@ -36,7 +36,7 @@ struct ProcessSessionRuntimeLauncherTests {
         let piSession = Session(id: UUID(), workspaceID: workspace.id, providerID: .pi, isDefault: true, state: .ready)
         let codexSession = Session(id: UUID(), workspaceID: workspace.id, providerID: .codex, isDefault: false, state: .ready)
 
-        let piRuntime = try launcher.makeRuntime(
+        let piRuntime = try await launcher.makeRuntime(
             session: piSession,
             workspace: workspace,
             launchConfiguration: SessionRuntimeLaunchConfiguration(
@@ -46,7 +46,7 @@ struct ProcessSessionRuntimeLauncherTests {
                 sessionRecordAdapterMetadata: SessionRecordAdapterMetadata(providerID: .pi, values: ["piSessionID": "pi-session-1"])
             )
         )
-        let codexRuntime = try launcher.makeRuntime(
+        let codexRuntime = try await launcher.makeRuntime(
             session: codexSession,
             workspace: workspace,
             launchConfiguration: SessionRuntimeLaunchConfiguration(
@@ -69,7 +69,7 @@ struct ProcessSessionRuntimeLauncherTests {
         #expect(codexScreen.transcript == "Codex ready")
     }
 
-    @Test func remoteProtocolNativeProvidersUseSharedFactoryRegistry() throws {
+    @Test func remoteProtocolNativeProvidersUseSharedFactoryRegistry() async throws {
         let launchRecorder = ProtocolNativeLaunchRecorder()
         let launcher = ProcessSessionRuntimeLauncher(
             remoteProtocolNativeRuntimeFactories: [
@@ -94,7 +94,7 @@ struct ProcessSessionRuntimeLauncherTests {
         )
         let session = Session(id: UUID(), workspaceID: workspace.id, providerID: .codex, isDefault: true, state: .ready)
 
-        let runtime = try launcher.makeRuntime(
+        let runtime = try await launcher.makeRuntime(
             session: session,
             workspace: workspace,
             launchConfiguration: SessionRuntimeLaunchConfiguration(
@@ -116,7 +116,7 @@ struct ProcessSessionRuntimeLauncherTests {
         #expect(screen.activityItems.map { $0.text } == ["Remote Codex ready"])
     }
 
-    @Test func terminalBackedProvidersStillUseProcessRuntimePath() throws {
+    @Test func terminalBackedProvidersStillUseProcessRuntimePath() async throws {
         let launcher = ProcessSessionRuntimeLauncher(
             localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/sh"])
         )
@@ -129,7 +129,7 @@ struct ProcessSessionRuntimeLauncherTests {
         )
         let session = Session(id: UUID(), workspaceID: workspace.id, providerID: .claude, isDefault: true, state: .ready)
 
-        let runtime = try launcher.makeRuntime(
+        let runtime = try await launcher.makeRuntime(
             session: session,
             workspace: workspace,
             launchConfiguration: SessionRuntimeLaunchConfiguration(

@@ -200,7 +200,7 @@ private struct CodexLifecycleStubCommandRunner: ProviderCommandRunning {
 }
 
 private struct NoOpCodexLifecycleReadinessProbe: CodexReadinessProbing {
-    func probe(executable: String, workingDirectory: String) throws {}
+    func probe(executable: String, workingDirectory: String) async throws {}
 }
 
 private final class PersistentCodexTransportHarness: @unchecked Sendable {

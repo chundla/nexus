@@ -3,7 +3,7 @@ import Darwin
 import Foundation
 import NexusDomain
 
-protocol ProviderExecutableResolving {
+protocol ProviderExecutableResolving: Sendable {
     func resolveExecutable(named command: String) -> ProviderExecutableResolution
 }
 
@@ -14,7 +14,7 @@ struct ProviderExecutableResolution: Equatable {
     let pathEnvironment: String?
 }
 
-protocol ProviderCommandRunning {
+protocol ProviderCommandRunning: Sendable {
     func run(executable: String, arguments: [String], currentDirectoryURL: URL?) throws -> ProviderCommandResult
 }
 
@@ -24,16 +24,16 @@ struct ProviderCommandResult: Equatable {
     let stderr: String
 }
 
-protocol CodexReadinessProbing {
-    func probe(executable: String, workingDirectory: String) throws
+protocol CodexReadinessProbing: Sendable {
+    func probe(executable: String, workingDirectory: String) async throws
 }
 
-protocol RemoteCodexReadinessProbing {
-    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) throws -> RemoteCodexReadinessOutcome
+protocol RemoteCodexReadinessProbing: Sendable {
+    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) async throws -> RemoteCodexReadinessOutcome
 }
 
-protocol RemotePiReadinessProbing {
-    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) throws -> RemotePiReadinessOutcome
+protocol RemotePiReadinessProbing: Sendable {
+    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) async throws -> RemotePiReadinessOutcome
 }
 
 enum RemoteCodexReadinessOutcome: Sendable, Equatable {
@@ -54,12 +54,33 @@ struct RemoteWorkspaceHealthContext {
     let workspaceAvailability: WorkspaceAvailabilitySnapshot?
 }
 
-protocol ProviderHealthEvaluating {
-    func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) -> [WorkspaceProviderCard]
-    func healthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) -> ProviderHealthSummary
+protocol ProviderHealthEvaluating: Sendable {
+    func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> [WorkspaceProviderCard]
+    func healthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> ProviderHealthSummary
 }
 
-struct ProviderHealthEvaluator: ProviderHealthEvaluating {
+extension ProviderHealthEvaluating {
+    func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) -> [WorkspaceProviderCard] {
+        (try? AsyncOperationSupport.blocking { await providerCards(for: workspace, remoteContext: remoteContext) }) ?? []
+    }
+
+    func healthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) -> ProviderHealthSummary {
+        (try? AsyncOperationSupport.blocking { await healthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext) })
+            ?? ProviderHealthSummary(
+                state: .notChecked,
+                summary: "Provider Health could not be evaluated",
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .error,
+                        code: "providerHealthEvaluationFailed",
+                        message: "Provider Health could not be evaluated."
+                    )
+                ]
+            )
+    }
+}
+
+struct ProviderHealthEvaluator: ProviderHealthEvaluating, @unchecked Sendable {
     let executableResolver: any ProviderExecutableResolving
     let commandRunner: any ProviderCommandRunning
     let localShellCommandBuilder: LocalShellCommandBuilder
@@ -83,30 +104,34 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
         self.remotePiReadinessProbe = remotePiReadinessProbe
     }
 
-    func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext? = nil) -> [WorkspaceProviderCard] {
-        ProviderID.allCases.map { providerID in
-            WorkspaceProviderCard(
-                provider: Provider(id: providerID),
-                health: healthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext),
-                defaultSession: ProviderDefaultSessionSummary(
-                    state: .notCreated,
-                    summary: "No default session yet",
-                    actionTitle: "Launch"
+    func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext? = nil) async -> [WorkspaceProviderCard] {
+        var cards: [WorkspaceProviderCard] = []
+        for providerID in ProviderID.allCases {
+            cards.append(
+                WorkspaceProviderCard(
+                    provider: Provider(id: providerID),
+                    health: await healthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext),
+                    defaultSession: ProviderDefaultSessionSummary(
+                        state: .notCreated,
+                        summary: "No default session yet",
+                        actionTitle: "Launch"
+                    )
                 )
             )
         }
+        return cards
     }
 
-    func healthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext? = nil) -> ProviderHealthSummary {
+    func healthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext? = nil) async -> ProviderHealthSummary {
         if workspace.kind == .remote {
-            return remoteHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
+            return await remoteHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
         }
 
         switch providerID {
         case .claude:
             return localCLIHealthSummary(commandName: "claude", providerName: "Claude", workspace: workspace)
         case .codex:
-            return localCodexHealthSummary(workspace: workspace)
+            return await localCodexHealthSummary(workspace: workspace)
         case .pi:
             return localCLIHealthSummary(commandName: "pi", providerName: "Pi", workspace: workspace)
         case .ibmBob:
@@ -114,7 +139,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
         }
     }
 
-    private func remoteHealthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) -> ProviderHealthSummary {
+    private func remoteHealthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> ProviderHealthSummary {
         let providerName = Provider(id: providerID).displayName
 
         if let blockedByHostValidation = blockedByHostValidation(providerName: providerName, remoteContext: remoteContext) {
@@ -143,9 +168,9 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
         case .claude:
             return remoteCLIHealthSummary(commandName: "claude", providerName: "Claude", workspace: workspace, host: remoteContext.host)
         case .codex:
-            return remoteCodexHealthSummary(workspace: workspace, host: remoteContext.host)
+            return await remoteCodexHealthSummary(workspace: workspace, host: remoteContext.host)
         case .pi:
-            return remotePiHealthSummary(workspace: workspace, host: remoteContext.host)
+            return await remotePiHealthSummary(workspace: workspace, host: remoteContext.host)
         case .ibmBob:
             return ProviderHealthSummary(
                 state: .notChecked,
@@ -297,7 +322,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
         }
     }
 
-    private func remoteCodexHealthSummary(workspace: Workspace, host: NexusDomain.Host) -> ProviderHealthSummary {
+    private func remoteCodexHealthSummary(workspace: Workspace, host: NexusDomain.Host) async -> ProviderHealthSummary {
         let result: ProviderCommandResult
         do {
             result = try commandRunner.run(
@@ -363,7 +388,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
         let version = outputLines.dropFirst().first
 
         do {
-            switch try remoteCodexReadinessProbe.probe(host: host, executable: executable, workingDirectory: workspace.folderPath) {
+            switch try await remoteCodexReadinessProbe.probe(host: host, executable: executable, workingDirectory: workspace.folderPath) {
             case .ready:
                 return ProviderHealthSummary(
                     state: .available,
@@ -438,7 +463,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
         }
     }
 
-    private func remotePiHealthSummary(workspace: Workspace, host: NexusDomain.Host) -> ProviderHealthSummary {
+    private func remotePiHealthSummary(workspace: Workspace, host: NexusDomain.Host) async -> ProviderHealthSummary {
         let result: ProviderCommandResult
         do {
             result = try commandRunner.run(
@@ -504,7 +529,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
         let version = outputLines.dropFirst().first
 
         do {
-            switch try remotePiReadinessProbe.probe(host: host, executable: executable, workingDirectory: workspace.folderPath) {
+            switch try await remotePiReadinessProbe.probe(host: host, executable: executable, workingDirectory: workspace.folderPath) {
             case .ready:
                 return ProviderHealthSummary(
                     state: .available,
@@ -579,7 +604,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
         }
     }
 
-    private func localCodexHealthSummary(workspace: Workspace) -> ProviderHealthSummary {
+    private func localCodexHealthSummary(workspace: Workspace) async -> ProviderHealthSummary {
         let resolution = resolvedLocalExecutable(named: "codex")
         guard let executable = resolution.resolvedExecutable else {
             return ProviderHealthSummary(
@@ -615,7 +640,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
         let version = detectLocalVersion(executable: executable, providerName: "Codex", diagnostics: &diagnostics)
 
         do {
-            try codexReadinessProbe.probe(executable: executable, workingDirectory: workspace.folderPath)
+            try await codexReadinessProbe.probe(executable: executable, workingDirectory: workspace.folderPath)
         } catch {
             return ProviderHealthSummary(
                 state: .misconfigured,
@@ -1197,14 +1222,14 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
 }
 
 struct CodexAppServerReadinessProbe: CodexReadinessProbing {
-    func probe(executable: String, workingDirectory: String) throws {
+    func probe(executable: String, workingDirectory: String) async throws {
         let transport = try ProcessCodexAppServerTransport(
             executable: executable,
             arguments: ["app-server"],
             workingDirectory: workingDirectory
         )
 
-        let semaphore = DispatchSemaphore(value: 0)
+        let waiter = AsyncResultWaiter<Void>()
         let state = CodexReadinessProbeState()
 
         transport.setStdoutLineHandler { line in
@@ -1215,25 +1240,29 @@ struct CodexAppServerReadinessProbe: CodexReadinessProbing {
 
             if let error = object["error"] as? [String: Any],
                let message = error["message"] as? String {
-                state.error = NSError(domain: "CodexAppServerReadinessProbe", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
-                semaphore.signal()
+                let resolvedError = NSError(domain: "CodexAppServerReadinessProbe", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+                state.record(error: resolvedError)
+                waiter.fail(resolvedError)
                 return
             }
 
             if let id = object["id"] as? String, id == "nexus-codex-readiness-initialize" {
-                semaphore.signal()
+                waiter.succeed()
             }
         }
         transport.setTerminationHandler { termination in
-            if termination.status != 0, state.error == nil {
-                let detail = termination.stderr?.trimmingCharacters(in: .whitespacesAndNewlines)
-                state.error = NSError(
-                    domain: "CodexAppServerReadinessProbe",
-                    code: Int(termination.status),
-                    userInfo: [NSLocalizedDescriptionKey: detail?.isEmpty == false ? detail! : "Codex app-server exited before readiness completed."]
-                )
-                semaphore.signal()
+            guard termination.status != 0, state.error == nil else {
+                return
             }
+
+            let detail = termination.stderr?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let resolvedError = NSError(
+                domain: "CodexAppServerReadinessProbe",
+                code: Int(termination.status),
+                userInfo: [NSLocalizedDescriptionKey: detail?.isEmpty == false ? detail! : "Codex app-server exited before readiness completed."]
+            )
+            state.record(error: resolvedError)
+            waiter.fail(resolvedError)
         }
 
         try transport.start()
@@ -1253,12 +1282,19 @@ struct CodexAppServerReadinessProbe: CodexReadinessProbing {
             try? transport.terminate()
         }
 
-        guard semaphore.wait(timeout: .now() + 5) == .success else {
-            throw NSError(
-                domain: "CodexAppServerReadinessProbe",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "Codex app-server did not answer the readiness probe in time."]
+        do {
+            try await waiter.wait(
+                timeoutNanoseconds: 5_000_000_000,
+                timeoutError: {
+                    NSError(
+                        domain: "CodexAppServerReadinessProbe",
+                        code: 1,
+                        userInfo: [NSLocalizedDescriptionKey: "Codex app-server did not answer the readiness probe in time."]
+                    )
+                }
             )
+        } catch {
+            throw state.error ?? error
         }
 
         if let error = state.error {
@@ -1275,8 +1311,8 @@ struct CodexAppServerReadinessProbe: CodexReadinessProbing {
     }
 }
 
-struct SSHRemoteCodexAppServerReadinessProbe: RemoteCodexReadinessProbing {
-    typealias TransportFactory = (_ executable: String, _ arguments: [String], _ workingDirectory: String?) throws -> any CodexAppServerTransporting
+struct SSHRemoteCodexAppServerReadinessProbe: RemoteCodexReadinessProbing, @unchecked Sendable {
+    typealias TransportFactory = @Sendable (_ executable: String, _ arguments: [String], _ workingDirectory: String?) throws -> any CodexAppServerTransporting
 
     private let transportFactory: TransportFactory
 
@@ -1290,14 +1326,14 @@ struct SSHRemoteCodexAppServerReadinessProbe: RemoteCodexReadinessProbing {
         self.transportFactory = transportFactory
     }
 
-    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) throws -> RemoteCodexReadinessOutcome {
+    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) async throws -> RemoteCodexReadinessOutcome {
         let transport = try transportFactory(
             "/usr/bin/ssh",
             sshArguments(host: host, executable: executable, workingDirectory: workingDirectory),
             nil
         )
 
-        let semaphore = DispatchSemaphore(value: 0)
+        let waiter = AsyncResultWaiter<Void>()
         let state = CodexReadinessProbeState()
 
         transport.setStdoutLineHandler { line in
@@ -1308,25 +1344,29 @@ struct SSHRemoteCodexAppServerReadinessProbe: RemoteCodexReadinessProbing {
 
             if let error = object["error"] as? [String: Any],
                let message = error["message"] as? String {
-                state.error = NSError(domain: "SSHRemoteCodexAppServerReadinessProbe", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
-                semaphore.signal()
+                let resolvedError = NSError(domain: "SSHRemoteCodexAppServerReadinessProbe", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+                state.record(error: resolvedError)
+                waiter.fail(resolvedError)
                 return
             }
 
             if let id = object["id"] as? String, id == "nexus-codex-readiness-initialize" {
-                semaphore.signal()
+                waiter.succeed()
             }
         }
         transport.setTerminationHandler { termination in
-            if termination.status != 0, state.error == nil {
-                let detail = termination.stderr?.trimmingCharacters(in: .whitespacesAndNewlines)
-                state.error = NSError(
-                    domain: "SSHRemoteCodexAppServerReadinessProbe",
-                    code: Int(termination.status),
-                    userInfo: [NSLocalizedDescriptionKey: detail?.isEmpty == false ? detail! : "Codex app-server exited before remote readiness completed."]
-                )
-                semaphore.signal()
+            guard termination.status != 0, state.error == nil else {
+                return
             }
+
+            let detail = termination.stderr?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let resolvedError = NSError(
+                domain: "SSHRemoteCodexAppServerReadinessProbe",
+                code: Int(termination.status),
+                userInfo: [NSLocalizedDescriptionKey: detail?.isEmpty == false ? detail! : "Codex app-server exited before remote readiness completed."]
+            )
+            state.record(error: resolvedError)
+            waiter.fail(resolvedError)
         }
 
         try transport.start()
@@ -1346,8 +1386,32 @@ struct SSHRemoteCodexAppServerReadinessProbe: RemoteCodexReadinessProbing {
             try? transport.terminate()
         }
 
-        guard semaphore.wait(timeout: .now() + 5) == .success else {
-            return .authenticationUncertain("Codex app-server did not answer the remote readiness probe in time.")
+        do {
+            try await waiter.wait(
+                timeoutNanoseconds: 5_000_000_000,
+                timeoutError: {
+                    NSError(
+                        domain: "SSHRemoteCodexAppServerReadinessProbe",
+                        code: 1,
+                        userInfo: [NSLocalizedDescriptionKey: "Codex app-server did not answer the remote readiness probe in time."]
+                    )
+                }
+            )
+        } catch {
+            let message = (state.error ?? error).localizedDescription
+            if message == "Codex app-server did not answer the remote readiness probe in time." {
+                return .authenticationUncertain(message)
+            }
+
+            if let resolvedError = state.error {
+                let resolvedMessage = resolvedError.localizedDescription
+                if isExplicitAuthenticationFailure(resolvedMessage) {
+                    return .authenticationRequired(resolvedMessage)
+                }
+                throw resolvedError
+            }
+
+            throw error
         }
 
         if let error = state.error {
@@ -1400,8 +1464,8 @@ struct SSHRemoteCodexAppServerReadinessProbe: RemoteCodexReadinessProbing {
     }
 }
 
-struct SSHRemotePiRPCReadinessProbe: RemotePiReadinessProbing {
-    typealias TransportFactory = (_ executable: String, _ arguments: [String], _ workingDirectory: String?) throws -> any PiRPCTransporting
+struct SSHRemotePiRPCReadinessProbe: RemotePiReadinessProbing, @unchecked Sendable {
+    typealias TransportFactory = @Sendable (_ executable: String, _ arguments: [String], _ workingDirectory: String?) throws -> any PiRPCTransporting
 
     private let transportFactory: TransportFactory
 
@@ -1415,14 +1479,14 @@ struct SSHRemotePiRPCReadinessProbe: RemotePiReadinessProbing {
         self.transportFactory = transportFactory
     }
 
-    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) throws -> RemotePiReadinessOutcome {
+    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) async throws -> RemotePiReadinessOutcome {
         let transport = try transportFactory(
             "/usr/bin/ssh",
             sshArguments(host: host, executable: executable, workingDirectory: workingDirectory),
             nil
         )
 
-        let semaphore = DispatchSemaphore(value: 0)
+        let waiter = AsyncResultWaiter<Void>()
         let state = CodexReadinessProbeState()
         let responseID = "nexus-pi-readiness-get-state"
 
@@ -1435,23 +1499,27 @@ struct SSHRemotePiRPCReadinessProbe: RemotePiReadinessProbing {
             }
 
             if object["success"] as? Bool == true {
-                semaphore.signal()
+                waiter.succeed()
                 return
             }
 
             let message = object["error"] as? String ?? "Pi RPC readiness probe failed."
-            state.error = NSError(domain: "SSHRemotePiRPCReadinessProbe", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
-            semaphore.signal()
+            let resolvedError = NSError(domain: "SSHRemotePiRPCReadinessProbe", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+            state.record(error: resolvedError)
+            waiter.fail(resolvedError)
         }
         transport.setTerminationHandler { status in
-            if status != 0, state.error == nil {
-                state.error = NSError(
-                    domain: "SSHRemotePiRPCReadinessProbe",
-                    code: Int(status),
-                    userInfo: [NSLocalizedDescriptionKey: "Pi RPC mode exited before remote readiness completed."]
-                )
-                semaphore.signal()
+            guard status != 0, state.error == nil else {
+                return
             }
+
+            let resolvedError = NSError(
+                domain: "SSHRemotePiRPCReadinessProbe",
+                code: Int(status),
+                userInfo: [NSLocalizedDescriptionKey: "Pi RPC mode exited before remote readiness completed."]
+            )
+            state.record(error: resolvedError)
+            waiter.fail(resolvedError)
         }
 
         try transport.start()
@@ -1461,8 +1529,32 @@ struct SSHRemotePiRPCReadinessProbe: RemotePiReadinessProbing {
             try? transport.terminate()
         }
 
-        guard semaphore.wait(timeout: .now() + 5) == .success else {
-            return .authenticationUncertain("Pi RPC mode did not answer the remote readiness probe in time.")
+        do {
+            try await waiter.wait(
+                timeoutNanoseconds: 5_000_000_000,
+                timeoutError: {
+                    NSError(
+                        domain: "SSHRemotePiRPCReadinessProbe",
+                        code: 1,
+                        userInfo: [NSLocalizedDescriptionKey: "Pi RPC mode did not answer the remote readiness probe in time."]
+                    )
+                }
+            )
+        } catch {
+            let message = (state.error ?? error).localizedDescription
+            if message == "Pi RPC mode did not answer the remote readiness probe in time." {
+                return .authenticationUncertain(message)
+            }
+
+            if let resolvedError = state.error {
+                let resolvedMessage = resolvedError.localizedDescription
+                if isExplicitAuthenticationFailure(resolvedMessage) {
+                    return .authenticationRequired(resolvedMessage)
+                }
+                throw resolvedError
+            }
+
+            throw error
         }
 
         if let error = state.error {
@@ -1516,10 +1608,25 @@ struct SSHRemotePiRPCReadinessProbe: RemotePiReadinessProbing {
 }
 
 private final class CodexReadinessProbeState: @unchecked Sendable {
-    var error: Error?
+    private let lock = NSLock()
+    private var resolvedError: Error?
+
+    var error: Error? {
+        lock.lock()
+        defer { lock.unlock() }
+        return resolvedError
+    }
+
+    func record(error: Error) {
+        lock.lock()
+        if resolvedError == nil {
+            resolvedError = error
+        }
+        lock.unlock()
+    }
 }
 
-struct SystemProviderExecutableResolver: ProviderExecutableResolving {
+struct SystemProviderExecutableResolver: ProviderExecutableResolving, @unchecked Sendable {
     private let fileManager: FileManager
     private let environment: [String: String]
 

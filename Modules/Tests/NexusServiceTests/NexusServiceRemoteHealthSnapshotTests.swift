@@ -132,7 +132,7 @@ struct NexusServiceRemoteHealthSnapshotTests {
 private struct StubProviderHealthEvaluator: ProviderHealthEvaluating {
     let summariesByProvider: [ProviderID: ProviderHealthSummary]
 
-    func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) -> [WorkspaceProviderCard] {
+    func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> [WorkspaceProviderCard] {
         ProviderID.allCases.map { providerID in
             WorkspaceProviderCard(
                 provider: Provider(id: providerID),
@@ -146,7 +146,7 @@ private struct StubProviderHealthEvaluator: ProviderHealthEvaluating {
         }
     }
 
-    func healthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) -> ProviderHealthSummary {
+    func healthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> ProviderHealthSummary {
         summariesByProvider[providerID] ?? ProviderHealthSummary(state: .notChecked, summary: "Health checks coming soon")
     }
 }

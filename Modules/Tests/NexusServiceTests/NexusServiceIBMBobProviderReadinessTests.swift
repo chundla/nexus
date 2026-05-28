@@ -211,7 +211,7 @@ private struct BobStubExecutableResolver: ProviderExecutableResolving {
     }
 }
 
-private final class RecordingBobCommandRunner: ProviderCommandRunning {
+private final class RecordingBobCommandRunner: ProviderCommandRunning, @unchecked Sendable {
     struct Invocation: Hashable {
         let executable: String
         let arguments: [String]

@@ -60,7 +60,7 @@ struct NexusServiceStructuredSessionCopyTests {
 }
 
 private struct StructuredCodexProviderHealthEvaluator: ProviderHealthEvaluating {
-    func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) -> [WorkspaceProviderCard] {
+    func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> [WorkspaceProviderCard] {
         ProviderID.allCases.map { providerID in
             WorkspaceProviderCard(
                 provider: Provider(id: providerID),
@@ -74,7 +74,7 @@ private struct StructuredCodexProviderHealthEvaluator: ProviderHealthEvaluating 
         }
     }
 
-    func healthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) -> ProviderHealthSummary {
+    func healthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> ProviderHealthSummary {
         switch providerID {
         case .codex:
             ProviderHealthSummary(
@@ -97,7 +97,7 @@ private struct StructuredCodexRuntimeLauncher: SessionRuntimeLaunching {
         session: Session,
         workspace: Workspace,
         launchConfiguration: SessionRuntimeLaunchConfiguration
-    ) throws -> any SessionRuntime {
+    ) async throws -> any SessionRuntime {
         StructuredCodexRuntime()
     }
 }

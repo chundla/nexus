@@ -595,7 +595,7 @@ private struct RemotePiStructuredStubCommandRunner: ProviderCommandRunning {
 }
 
 private struct RemotePiStructuredReadyReadinessProbe: RemotePiReadinessProbing {
-    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) throws -> RemotePiReadinessOutcome {
+    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) async throws -> RemotePiReadinessOutcome {
         .ready
     }
 }

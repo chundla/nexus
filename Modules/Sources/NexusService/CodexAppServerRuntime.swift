@@ -98,7 +98,7 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
     private var changeHandler: (@Sendable () -> Void)?
     private var didRequestStop = false
 
-    init(
+    convenience init(
         executable: String,
         workingDirectory: String,
         sessionLinkage: CodexSessionLinkage? = nil,
@@ -114,15 +114,73 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
             )
         }
     ) throws {
+        try self.init(
+            executable: executable,
+            workingDirectory: workingDirectory,
+            sessionLinkage: sessionLinkage,
+            terminationStatusMessageBuilder: terminationStatusMessageBuilder,
+            unexpectedTerminationState: unexpectedTerminationState,
+            unexpectedTerminationMessageBuilder: unexpectedTerminationMessageBuilder,
+            stopHandler: stopHandler,
+            transportFactory: transportFactory,
+            performStartup: false
+        )
+        try AsyncOperationSupport.blocking { try await self.completeStartup(workingDirectory: workingDirectory) }
+    }
+
+    convenience init(
+        executable: String,
+        workingDirectory: String,
+        sessionLinkage: CodexSessionLinkage? = nil,
+        terminationStatusMessageBuilder: @escaping (Int32) -> String,
+        unexpectedTerminationState: Session.State = .exited,
+        unexpectedTerminationMessageBuilder: ((Int32) -> String)? = nil,
+        stopHandler: (() throws -> Void)? = nil,
+        transportFactory: TransportFactory = { executable, arguments, workingDirectory in
+            try ProcessCodexAppServerTransport(
+                executable: executable,
+                arguments: arguments,
+                workingDirectory: workingDirectory
+            )
+        }
+    ) async throws {
+        try self.init(
+            executable: executable,
+            workingDirectory: workingDirectory,
+            sessionLinkage: sessionLinkage,
+            terminationStatusMessageBuilder: terminationStatusMessageBuilder,
+            unexpectedTerminationState: unexpectedTerminationState,
+            unexpectedTerminationMessageBuilder: unexpectedTerminationMessageBuilder,
+            stopHandler: stopHandler,
+            transportFactory: transportFactory,
+            performStartup: false
+        )
+        try await self.completeStartup(workingDirectory: workingDirectory)
+    }
+
+    private init(
+        executable: String,
+        workingDirectory: String,
+        sessionLinkage: CodexSessionLinkage?,
+        terminationStatusMessageBuilder: @escaping (Int32) -> String,
+        unexpectedTerminationState: Session.State,
+        unexpectedTerminationMessageBuilder: ((Int32) -> String)?,
+        stopHandler: (() throws -> Void)?,
+        transportFactory: TransportFactory,
+        performStartup: Bool
+    ) throws {
         self.terminationStatusMessageBuilder = terminationStatusMessageBuilder
         self.unexpectedTerminationState = unexpectedTerminationState
         self.unexpectedTerminationMessageBuilder = unexpectedTerminationMessageBuilder ?? terminationStatusMessageBuilder
         self.sessionLinkage = sessionLinkage
         self.stopHandler = stopHandler
         self.transport = try transportFactory(executable, ["app-server"], workingDirectory)
+    }
 
-        let startupSemaphore = DispatchSemaphore(value: 0)
+    private func completeStartup(workingDirectory: String) async throws {
         let startupState = CodexStartupState()
+        let initializeWaiter = AsyncResultWaiter<Void>()
+        let resolveThreadWaiter = AsyncResultWaiter<Void>()
         let shouldAttemptStartupResume = sessionLinkage?.isEmpty == false
         let startupFreshThreadFallbackRequestID = "nexus-codex-thread-start-fallback"
 
@@ -134,14 +192,14 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
             let id = self.string(for: "id", in: object)
             if id == self.initializeRequestID {
                 startupState.markInitialized()
-                startupSemaphore.signal()
+                initializeWaiter.succeed()
                 return
             }
 
             if id == self.startupThreadRequestID || id == startupFreshThreadFallbackRequestID {
                 if self.captureThreadLinkage(from: object, appendConnectedStatus: true) {
                     startupState.markResolvedThread()
-                    startupSemaphore.signal()
+                    resolveThreadWaiter.succeed()
                     return
                 }
 
@@ -158,24 +216,26 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
                             ]))
                         } catch {
                             startupState.record(error: error)
-                            startupSemaphore.signal()
+                            resolveThreadWaiter.fail(error)
                         }
                         return
                     }
 
-                    startupState.record(error: CodexAppServerRuntimeError.startupFailed(error))
-                    startupSemaphore.signal()
+                    let startupError = CodexAppServerRuntimeError.startupFailed(error)
+                    startupState.record(error: startupError)
+                    (startupState.didInitialize ? resolveThreadWaiter : initializeWaiter).fail(startupError)
                 }
                 return
             }
 
             if let error = self.rpcErrorMessage(from: object), startupState.didResolveThread == false {
-                startupState.record(error: CodexAppServerRuntimeError.startupFailed(error))
-                startupSemaphore.signal()
+                let startupError = CodexAppServerRuntimeError.startupFailed(error)
+                startupState.record(error: startupError)
+                (startupState.didInitialize ? resolveThreadWaiter : initializeWaiter).fail(startupError)
                 return
             }
 
-            if self.handleStartupThreadNotification(object, startupState: startupState, startupSemaphore: startupSemaphore) {
+            if self.handleStartupThreadNotification(object, startupState: startupState, resolveThreadWaiter: resolveThreadWaiter) {
                 return
             }
 
@@ -188,7 +248,8 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
         }
         transport.setTerminationHandler { [weak self] termination in
             if startupState.recordUnexpectedTerminationIfNeeded(termination: termination) {
-                startupSemaphore.signal()
+                let startupError = startupState.error ?? CodexAppServerRuntimeError.startupTimedOut
+                (startupState.didInitialize ? resolveThreadWaiter : initializeWaiter).fail(startupError)
             }
             self?.handleTermination(status: termination.status)
         }
@@ -206,9 +267,14 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
             ]
         ]))
 
-        guard startupSemaphore.wait(timeout: .now() + 5) == .success, startupState.didInitialize else {
+        do {
+            try await initializeWaiter.wait(
+                timeoutNanoseconds: 5_000_000_000,
+                timeoutError: { startupState.error ?? CodexAppServerRuntimeError.startupTimedOut }
+            )
+        } catch {
             try? transport.terminate()
-            throw startupState.error ?? CodexAppServerRuntimeError.startupTimedOut
+            throw startupState.error ?? error
         }
 
         try transport.sendLine(Self.jsonLine([
@@ -223,9 +289,14 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
             "params": startupThreadParameters(workingDirectory: workingDirectory, sessionLinkage: sessionLinkage)
         ]))
 
-        guard startupSemaphore.wait(timeout: .now() + 5) == .success, startupState.didResolveThread else {
+        do {
+            try await resolveThreadWaiter.wait(
+                timeoutNanoseconds: 5_000_000_000,
+                timeoutError: { startupState.error ?? CodexAppServerRuntimeError.startupTimedOut }
+            )
+        } catch {
             try? transport.terminate()
-            throw startupState.error ?? CodexAppServerRuntimeError.startupTimedOut
+            throw startupState.error ?? error
         }
 
         if let startupError = startupState.error {
@@ -428,7 +499,7 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
     private func handleStartupThreadNotification(
         _ object: [String: Any],
         startupState: CodexStartupState,
-        startupSemaphore: DispatchSemaphore
+        resolveThreadWaiter: AsyncResultWaiter<Void>
     ) -> Bool {
         guard startupState.didResolveThread == false,
               let method = string(for: "method", in: object),
@@ -438,7 +509,7 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
         }
 
         startupState.markResolvedThread()
-        startupSemaphore.signal()
+        resolveThreadWaiter.succeed()
         return true
     }
 

@@ -6,7 +6,7 @@ struct LocalShellCommand: Equatable {
     let arguments: [String]
 }
 
-struct LocalShellCommandBuilder {
+struct LocalShellCommandBuilder: @unchecked Sendable {
     private let fileManager: FileManager
     private let environment: [String: String]
 

@@ -124,7 +124,7 @@ private struct CompatibilityStubCommandRunner: ProviderCommandRunning {
 }
 
 private struct CompatibilityCodexReadinessProbe: CodexReadinessProbing {
-    func probe(executable: String, workingDirectory: String) throws {}
+    func probe(executable: String, workingDirectory: String) async throws {}
 }
 
 private struct CompatibilitySessionRuntimeLauncher: SessionRuntimeLaunching {
@@ -132,7 +132,7 @@ private struct CompatibilitySessionRuntimeLauncher: SessionRuntimeLaunching {
         session: Session,
         workspace: Workspace,
         launchConfiguration: SessionRuntimeLaunchConfiguration
-    ) throws -> any SessionRuntime {
+    ) async throws -> any SessionRuntime {
         switch session.providerID {
         case .claude:
             CompatibilityStaticSessionRuntime(transcript: "Claude ready")

@@ -205,12 +205,12 @@ struct ProviderHealthEvaluatorLocalShellResolutionTests {
         #expect(readinessProbe.invocations.first?.workingDirectory == "/srv/api")
     }
 
-    @Test func remoteCodexReadinessProbeLaunchesDirectSSHAppServerWithoutPTY() throws {
+    @Test func remoteCodexReadinessProbeLaunchesDirectSSHAppServerWithoutPTY() async throws {
         let recorder = RecordingRemoteCodexTransportFactory()
         let probe = SSHRemoteCodexAppServerReadinessProbe(transportFactory: recorder.makeTransport)
         let host = NexusDomain.Host(id: UUID(), name: "Build Server", sshTarget: "build-box", port: 2222)
 
-        let outcome = try probe.probe(
+        let outcome = try await probe.probe(
             host: host,
             executable: "/home/tester/.local/bin/codex",
             workingDirectory: "/srv/api"
@@ -283,12 +283,12 @@ struct ProviderHealthEvaluatorLocalShellResolutionTests {
         #expect(readinessProbe.invocations.first?.workingDirectory == "/srv/api")
     }
 
-    @Test func remotePiReadinessProbeLaunchesDirectSSHRPCWithoutPTY() throws {
+    @Test func remotePiReadinessProbeLaunchesDirectSSHRPCWithoutPTY() async throws {
         let recorder = RecordingRemotePiTransportFactory()
         let probe = SSHRemotePiRPCReadinessProbe(transportFactory: recorder.makeTransport)
         let host = NexusDomain.Host(id: UUID(), name: "Build Server", sshTarget: "build-box", port: 2222)
 
-        let outcome = try probe.probe(
+        let outcome = try await probe.probe(
             host: host,
             executable: "/home/tester/.local/bin/pi",
             workingDirectory: "/srv/api"
@@ -589,7 +589,7 @@ private struct TestExecutableResolver: ProviderExecutableResolving {
     }
 }
 
-private final class RecordingRemoteCommandRunner: ProviderCommandRunning {
+private final class RecordingRemoteCommandRunner: ProviderCommandRunning, @unchecked Sendable {
     private(set) var lastInvocation: (executable: String, arguments: [String])?
     let stdout: String
 
@@ -630,7 +630,7 @@ private struct TestCommandRunner: ProviderCommandRunning {
 private final class RecordingCodexReadinessProbe: CodexReadinessProbing, @unchecked Sendable {
     private(set) var invocations: [(executable: String, workingDirectory: String)] = []
 
-    func probe(executable: String, workingDirectory: String) throws {
+    func probe(executable: String, workingDirectory: String) async throws {
         invocations.append((executable, workingDirectory))
     }
 }
@@ -638,7 +638,7 @@ private final class RecordingCodexReadinessProbe: CodexReadinessProbing, @unchec
 private final class RecordingRemoteCodexReadinessProbe: RemoteCodexReadinessProbing, @unchecked Sendable {
     private(set) var invocations: [(hostID: UUID, executable: String, workingDirectory: String)] = []
 
-    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) throws -> RemoteCodexReadinessOutcome {
+    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) async throws -> RemoteCodexReadinessOutcome {
         invocations.append((host.id, executable, workingDirectory))
         return .ready
     }
@@ -647,7 +647,7 @@ private final class RecordingRemoteCodexReadinessProbe: RemoteCodexReadinessProb
 private final class RecordingRemotePiReadinessProbe: RemotePiReadinessProbing, @unchecked Sendable {
     private(set) var invocations: [(hostID: UUID, executable: String, workingDirectory: String)] = []
 
-    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) throws -> RemotePiReadinessOutcome {
+    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) async throws -> RemotePiReadinessOutcome {
         invocations.append((host.id, executable, workingDirectory))
         return .ready
     }
@@ -656,7 +656,7 @@ private final class RecordingRemotePiReadinessProbe: RemotePiReadinessProbing, @
 private struct StubRemoteCodexReadinessProbe: RemoteCodexReadinessProbing {
     let outcome: RemoteCodexReadinessOutcome
 
-    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) throws -> RemoteCodexReadinessOutcome {
+    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) async throws -> RemoteCodexReadinessOutcome {
         outcome
     }
 }
@@ -664,13 +664,13 @@ private struct StubRemoteCodexReadinessProbe: RemoteCodexReadinessProbing {
 private struct StubRemotePiReadinessProbe: RemotePiReadinessProbing {
     let outcome: RemotePiReadinessOutcome
 
-    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) throws -> RemotePiReadinessOutcome {
+    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) async throws -> RemotePiReadinessOutcome {
         outcome
     }
 }
 
 private struct ThrowingRemoteCodexReadinessProbe: RemoteCodexReadinessProbing {
-    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) throws -> RemoteCodexReadinessOutcome {
+    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) async throws -> RemoteCodexReadinessOutcome {
         throw NSError(domain: "ThrowingRemoteCodexReadinessProbe", code: 1, userInfo: [NSLocalizedDescriptionKey: "Codex remote handshake failed."])
     }
 }
