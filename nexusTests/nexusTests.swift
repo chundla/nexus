@@ -474,6 +474,24 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func remoteProviderActionStateEnablesRemoteIBMBobStructuredNamedSessionCreationOnIPhone() {
+        let createState = RemoteProviderActionState(
+            capability: ProviderCapability(
+                action: .createNamedSession,
+                isSupported: true,
+                isEnabled: true
+            ),
+            provider: Provider(id: .ibmBob),
+            prelaunchPrimarySurface: .structuredActivityFeed
+        )
+
+        #expect(createState == RemoteProviderActionState(
+            isEnabled: true,
+            disabledReason: nil
+        ))
+    }
+
+    @MainActor
     @Test func remoteProviderActionStateUsesProviderHealthGuidanceWhenStructuredLaunchIsNotLaunchable() {
         let launchState = RemoteProviderActionState(
             capability: ProviderCapability(

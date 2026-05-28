@@ -612,6 +612,34 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
                             try resolvedCodexTransportFactory("/usr/bin/ssh", bridgeArguments, nil)
                         }
                     )
+                },
+                .ibmBob: { launchConfiguration, _, _ in
+                    guard let remoteHost = launchConfiguration.remoteHost else {
+                        throw NSError(
+                            domain: "ProcessSessionRuntimeLauncher",
+                            code: 1,
+                            userInfo: [NSLocalizedDescriptionKey: "Remote IBM Bob launch requires a Host."]
+                        )
+                    }
+
+                    return try IBMBobSessionRuntime(
+                        executable: launchConfiguration.executable,
+                        workingDirectory: launchConfiguration.workingDirectory,
+                        sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.ibmBobSessionLinkage,
+                        terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
+                        transportFactory: { executable, arguments, workingDirectory in
+                            try resolvedIBMBobTransportFactory(
+                                "/usr/bin/ssh",
+                                Self.remoteIBMBobArguments(
+                                    host: remoteHost,
+                                    workingDirectory: workingDirectory ?? launchConfiguration.workingDirectory,
+                                    executable: executable,
+                                    providerArguments: arguments
+                                ),
+                                nil
+                            )
+                        }
+                    )
                 }
             ]
         } else {
@@ -666,6 +694,40 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
             initialTranscript: launchConfiguration.initialTranscript,
             terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder
         )
+    }
+
+    private static func remoteIBMBobArguments(
+        host: NexusDomain.Host,
+        workingDirectory: String,
+        executable: String,
+        providerArguments: [String]
+    ) -> [String] {
+        var arguments = ["-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5"]
+        if let port = host.port {
+            arguments += ["-p", String(port)]
+        }
+        arguments += [
+            host.sshTarget,
+            remoteIBMBobCommand(
+                workingDirectory: workingDirectory,
+                executable: executable,
+                providerArguments: providerArguments
+            )
+        ]
+        return arguments
+    }
+
+    private static func remoteIBMBobCommand(
+        workingDirectory: String,
+        executable: String,
+        providerArguments: [String]
+    ) -> String {
+        let command = ([shellQuoted(executable)] + providerArguments.map(shellQuoted)).joined(separator: " ")
+        return "cd \(shellQuoted(workingDirectory)) && exec \(command)"
+    }
+
+    private static func shellQuoted(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
 
     private static func runCommand(executable: String, arguments: [String]) throws {
@@ -1429,13 +1491,11 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             ),
             .ibmBob: ServiceProviderAdapter(
                 providerID: .ibmBob,
-                supportsDefaultSessionLaunch: false,
-                supportsNamedSessions: false,
+                supportsDefaultSessionLaunch: true,
+                supportsNamedSessions: true,
                 healthSummaryEvaluator: { workspace, remoteContext, providerHealthEvaluator in
                     await providerHealthEvaluator.healthSummary(for: .ibmBob, workspace: workspace, remoteContext: remoteContext)
                 },
-                defaultSessionLaunchSupportEvaluator: { $0.kind == .local },
-                namedSessionSupportEvaluator: { $0.kind == .local },
                 primarySurfaceEvaluator: { _ in .structuredActivityFeed }
             ),
             .pi: ServiceProviderAdapter(
@@ -2543,6 +2603,10 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
 
     private func shouldAttemptRemoteRuntimeRecovery(for session: Session, workspace: Workspace) -> Bool {
         guard workspace.kind == .remote else {
+            return false
+        }
+
+        if (try? sessionMayRemainReadyWithoutRuntime(session, workspace: workspace)) == true {
             return false
         }
 
@@ -4011,8 +4075,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             try metadataStore.workspace(id: session.workspaceID)
         }
 
-        guard session.providerID == .ibmBob,
-              resolvedWorkspace?.kind == .local else {
+        guard session.providerID == .ibmBob else {
             return false
         }
 
@@ -4020,12 +4083,12 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     private func interruptedSessionFailureMessage(for session: Session, workspace: Workspace?) throws -> String {
-        guard workspace?.kind == .local,
-              try persistedPrimarySurface(for: session, workspace: workspace) == .structuredActivityFeed else {
-            return "Session interrupted because the background service restarted. Relaunch to create a new live runtime."
+        if try persistedPrimarySurface(for: session, workspace: workspace) == .structuredActivityFeed,
+           session.providerID == .ibmBob || workspace?.kind == .local {
+            return structuredInterruptedSessionFailureMessage(for: session.providerID)
         }
 
-        return structuredInterruptedSessionFailureMessage(for: session.providerID)
+        return "Session interrupted because the background service restarted. Relaunch to create a new live runtime."
     }
 }
 
