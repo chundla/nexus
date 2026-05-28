@@ -392,7 +392,7 @@ struct nexusTests {
     }
 
     @MainActor
-    @Test func remoteProviderActionStateKeepsUnsupportedStructuredDefaultLaunchBlockedOnIPhone() {
+    @Test func remoteProviderActionStateEnablesRemotePiStructuredDefaultLaunchOnIPhone() {
         let launchState = RemoteProviderActionState(
             capability: ProviderCapability(
                 action: .launchDefaultSession,
@@ -405,8 +405,8 @@ struct nexusTests {
         )
 
         #expect(launchState == RemoteProviderActionState(
-            isEnabled: false,
-            disabledReason: "Open this Workspace on the paired Mac to launch Pi because this iPhone cannot operate its primary Session surface yet."
+            isEnabled: true,
+            disabledReason: nil
         ))
     }
 
@@ -431,7 +431,7 @@ struct nexusTests {
     }
 
     @MainActor
-    @Test func remoteSessionSurfacePresentationKeepsRemotePiStructuredSessionsUnsupportedOnIPhone() {
+    @Test func remoteSessionSurfacePresentationSupportsRemotePiStructuredSessionsOnIPhone() {
         let screen = SessionScreen(
             session: Session(
                 id: UUID(),
@@ -439,25 +439,21 @@ struct nexusTests {
                 providerID: .pi,
                 isDefault: true,
                 state: .interrupted,
-                failureMessage: "Remote Pi remains unsupported"
+                failureMessage: "Remote Pi ready"
             ),
             primarySurface: .structuredActivityFeed,
             transcript: ""
         )
 
         #expect(remoteSessionSurfacePresentation(for: screen, isReady: false, workspaceKind: .remote) == RemoteSessionSurfacePresentation(
-            surfaceSupport: .unsupported,
+            surfaceSupport: .supported,
             showsTerminal: false,
-            showsStructuredActivity: false,
+            showsStructuredActivity: true,
             showsAttachment: false,
             showsInput: false,
-            relaunchIsEnabled: false,
-            relaunchDisabledReason: "Open this Session on the paired Mac to relaunch it because this iPhone cannot operate its primary Session surface yet.",
-            unsupportedCopy: UnsupportedRemoteSessionSurfaceCopy(
-                title: "Unsupported Session Surface",
-                summary: "This iPhone can inspect this Pi Session, but it cannot present or operate its primary Session surface yet.",
-                recovery: "Open this Session on the paired Mac to use its primary Session surface."
-            )
+            relaunchIsEnabled: true,
+            relaunchDisabledReason: nil,
+            unsupportedCopy: nil
         ))
     }
 

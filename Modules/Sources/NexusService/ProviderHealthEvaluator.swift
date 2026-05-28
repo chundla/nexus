@@ -32,7 +32,17 @@ protocol RemoteCodexReadinessProbing {
     func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) throws -> RemoteCodexReadinessOutcome
 }
 
+protocol RemotePiReadinessProbing {
+    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) throws -> RemotePiReadinessOutcome
+}
+
 enum RemoteCodexReadinessOutcome: Sendable, Equatable {
+    case ready
+    case authenticationRequired(String)
+    case authenticationUncertain(String?)
+}
+
+enum RemotePiReadinessOutcome: Sendable, Equatable {
     case ready
     case authenticationRequired(String)
     case authenticationUncertain(String?)
@@ -55,19 +65,22 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
     let localShellCommandBuilder: LocalShellCommandBuilder
     let codexReadinessProbe: any CodexReadinessProbing
     let remoteCodexReadinessProbe: any RemoteCodexReadinessProbing
+    let remotePiReadinessProbe: any RemotePiReadinessProbing
 
     init(
         executableResolver: any ProviderExecutableResolving = SystemProviderExecutableResolver(),
         commandRunner: any ProviderCommandRunning = SystemProviderCommandRunner(),
         localShellCommandBuilder: LocalShellCommandBuilder = LocalShellCommandBuilder(),
         codexReadinessProbe: any CodexReadinessProbing = CodexAppServerReadinessProbe(),
-        remoteCodexReadinessProbe: any RemoteCodexReadinessProbing = SSHRemoteCodexAppServerReadinessProbe()
+        remoteCodexReadinessProbe: any RemoteCodexReadinessProbing = SSHRemoteCodexAppServerReadinessProbe(),
+        remotePiReadinessProbe: any RemotePiReadinessProbing = SSHRemotePiRPCReadinessProbe()
     ) {
         self.executableResolver = executableResolver
         self.commandRunner = commandRunner
         self.localShellCommandBuilder = localShellCommandBuilder
         self.codexReadinessProbe = codexReadinessProbe
         self.remoteCodexReadinessProbe = remoteCodexReadinessProbe
+        self.remotePiReadinessProbe = remotePiReadinessProbe
     }
 
     func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext? = nil) -> [WorkspaceProviderCard] {
@@ -134,7 +147,9 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
             return remoteCLIHealthSummary(commandName: "claude", providerName: "Claude", workspace: workspace, host: remoteContext.host)
         case .codex:
             return remoteCodexHealthSummary(workspace: workspace, host: remoteContext.host)
-        case .ibmBob, .pi:
+        case .pi:
+            return remotePiHealthSummary(workspace: workspace, host: remoteContext.host)
+        case .ibmBob:
             return ProviderHealthSummary(
                 state: .notChecked,
                 summary: "Remote \(providerName) execution is not implemented yet",
@@ -412,6 +427,147 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
             return ProviderHealthSummary(
                 state: .misconfigured,
                 summary: "Codex is installed but failed the remote protocol-native readiness probe",
+                resolvedExecutable: executable,
+                version: version,
+                launchability: .notLaunchable,
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .error,
+                        code: "remoteLaunchProbeFailed",
+                        message: error.localizedDescription
+                    )
+                ]
+            )
+        }
+    }
+
+    private func remotePiHealthSummary(workspace: Workspace, host: NexusDomain.Host) -> ProviderHealthSummary {
+        let result: ProviderCommandResult
+        do {
+            result = try commandRunner.run(
+                executable: "/usr/bin/ssh",
+                arguments: remotePiExecutableResolutionArguments(workspace: workspace, host: host),
+                currentDirectoryURL: nil
+            )
+        } catch {
+            return ProviderHealthSummary(
+                state: .unavailable,
+                summary: "Remote Pi health check failed before the SSH probe completed",
+                launchability: .notLaunchable,
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .error,
+                        code: "sshLaunchFailed",
+                        message: error.localizedDescription
+                    )
+                ]
+            )
+        }
+
+        guard result.exitStatus == 0 else {
+            let detail = firstDiagnosticLine(stdout: result.stdout, stderr: result.stderr)
+            let classification = classifyRemoteCLIProbeFailure(
+                detail: detail,
+                providerName: "Pi",
+                notFoundMarker: remoteExecutableNotFoundMarker(commandName: "pi")
+            )
+            return ProviderHealthSummary(
+                state: classification.state,
+                summary: classification.summary,
+                launchability: .notLaunchable,
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .error,
+                        code: classification.code,
+                        message: classification.message ?? (detail.isEmpty ? classification.summary : detail)
+                    )
+                ]
+            )
+        }
+
+        let outputLines = result.stdout
+            .split(whereSeparator: \.isNewline)
+            .map(String.init)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.isEmpty == false }
+        guard let executable = outputLines.first else {
+            return ProviderHealthSummary(
+                state: .misconfigured,
+                summary: "Pi executable resolution returned no executable path",
+                launchability: .notLaunchable,
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .error,
+                        code: "remoteExecutableResolutionFailed",
+                        message: "The remote Pi executable resolution probe did not return an executable path."
+                    )
+                ]
+            )
+        }
+        let version = outputLines.dropFirst().first
+
+        do {
+            switch try remotePiReadinessProbe.probe(host: host, executable: executable, workingDirectory: workspace.folderPath) {
+            case .ready:
+                return ProviderHealthSummary(
+                    state: .available,
+                    summary: version.map { "Pi \($0) is available" } ?? "Pi is available",
+                    resolvedExecutable: executable,
+                    version: version,
+                    launchability: .launchable,
+                    diagnostics: [
+                        ProviderHealthDiagnostic(
+                            severity: .info,
+                            code: "remoteProbe",
+                            message: "Validated remote Pi launch prerequisites on \(host.name) for \(workspace.folderPath)."
+                        )
+                    ]
+                )
+            case let .authenticationRequired(message):
+                return ProviderHealthSummary(
+                    state: .unavailable,
+                    summary: "Pi requires authentication on the Remote Workspace",
+                    resolvedExecutable: executable,
+                    version: version,
+                    launchability: .notLaunchable,
+                    diagnostics: [
+                        ProviderHealthDiagnostic(
+                            severity: .error,
+                            code: "remoteAuthRequired",
+                            message: message
+                        )
+                    ]
+                )
+            case let .authenticationUncertain(message):
+                var diagnostics = [
+                    ProviderHealthDiagnostic(
+                        severity: .info,
+                        code: "remoteProbe",
+                        message: "Validated remote Pi launch prerequisites on \(host.name) for \(workspace.folderPath)."
+                    )
+                ]
+                if let message, message.isEmpty == false {
+                    diagnostics.append(
+                        ProviderHealthDiagnostic(
+                            severity: .warning,
+                            code: "remoteAuthUncertain",
+                            message: message
+                        )
+                    )
+                }
+                return ProviderHealthSummary(
+                    state: .available,
+                    summary: version.map { "Pi \($0) is available" } ?? "Pi is available",
+                    resolvedExecutable: executable,
+                    version: version,
+                    launchability: .launchable,
+                    diagnostics: diagnostics
+                )
+            }
+        } catch {
+            return ProviderHealthSummary(
+                state: .misconfigured,
+                summary: "Pi is installed but failed the remote protocol-native readiness probe",
                 resolvedExecutable: executable,
                 version: version,
                 launchability: .notLaunchable,
@@ -741,6 +897,42 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
         return "cd \(shellQuoted(workspace.folderPath)) || { echo 'NEXUS_REMOTE_WORKSPACE_UNAVAILABLE' >&2; exit 1; }; \(resolveFunctionName)() { for shell in \(shellCandidates); do [ -n \"$shell\" ] || continue; [ -x \"$shell\" ] || continue; case \"${shell##*/}\" in csh|tcsh) CANDIDATE=\"$(\"$shell\" -i -c \"if ( -f ~/.login ) source ~/.login; command -v codex\" 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -c \"if ( -f ~/.login ) source ~/.login; command -v codex\" 2>/dev/null)\" || continue ;; fish) CANDIDATE=\"$(\"$shell\" -i -c \"command -v codex\" 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -l -c \"command -v codex\" 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -c \"command -v codex\" 2>/dev/null)\" || continue ;; *) CANDIDATE=\"$(\"$shell\" -lic \(shellCommand) 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -lc \(shellCommand) 2>/dev/null)\" || continue ;; esac; [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; for CANDIDATE in \(fallbackCandidates); do [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; return 1; }; \(commandPathVariable)=\"$(\(resolveFunctionName))\" || { echo '\(notFoundMarker)' >&2; exit 1; }; [ -n \"$\(commandPathVariable)\" ] || { echo '\(notFoundMarker)' >&2; exit 1; }; printf '%s\\n' \"$\(commandPathVariable)\"; \"$\(commandPathVariable)\" --version"
     }
 
+    private func remotePiExecutableResolutionArguments(workspace: Workspace, host: NexusDomain.Host) -> [String] {
+        var arguments = [
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=5"
+        ]
+        if let port = host.port {
+            arguments += ["-p", String(port)]
+        }
+        arguments += [host.sshTarget, remotePiExecutableResolutionScript(workspace: workspace)]
+        return arguments
+    }
+
+    private func remotePiExecutableResolutionScript(workspace: Workspace) -> String {
+        let commandPathVariable = "PI_PATH"
+        let resolveFunctionName = "resolve_pi_path"
+        let notFoundMarker = remoteExecutableNotFoundMarker(commandName: "pi")
+        let shellCommand = shellQuoted("command -v pi")
+        let fallbackCandidates = [
+            "$HOME/.local/bin/pi",
+            "$HOME/bin/pi",
+            "$HOME/.volta/bin/pi",
+            "$HOME/.asdf/shims/pi",
+            "$HOME/.local/share/mise/shims/pi",
+            "$HOME/.nix-profile/bin/pi",
+            "$HOME/.bun/bin/pi",
+            "$HOME/.nvm/current/bin/pi",
+            "/opt/homebrew/bin/pi",
+            "/usr/local/bin/pi",
+            "/usr/bin/pi",
+            "/bin/pi"
+        ].map { "\"\($0)\"" }.joined(separator: " ")
+        let shellCandidates = ShellSupport.remoteShellCandidateListScript()
+
+        return "cd \(shellQuoted(workspace.folderPath)) || { echo 'NEXUS_REMOTE_WORKSPACE_UNAVAILABLE' >&2; exit 1; }; \(resolveFunctionName)() { for shell in \(shellCandidates); do [ -n \"$shell\" ] || continue; [ -x \"$shell\" ] || continue; case \"${shell##*/}\" in csh|tcsh) CANDIDATE=\"$(\"$shell\" -i -c \"if ( -f ~/.login ) source ~/.login; command -v pi\" 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -c \"if ( -f ~/.login ) source ~/.login; command -v pi\" 2>/dev/null)\" || continue ;; fish) CANDIDATE=\"$(\"$shell\" -i -c \"command -v pi\" 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -l -c \"command -v pi\" 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -c \"command -v pi\" 2>/dev/null)\" || continue ;; *) CANDIDATE=\"$(\"$shell\" -lic \(shellCommand) 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -lc \(shellCommand) 2>/dev/null)\" || continue ;; esac; [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; for CANDIDATE in \(fallbackCandidates); do [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; return 1; }; \(commandPathVariable)=\"$(\(resolveFunctionName))\" || { echo '\(notFoundMarker)' >&2; exit 1; }; [ -n \"$\(commandPathVariable)\" ] || { echo '\(notFoundMarker)' >&2; exit 1; }; printf '%s\\n' \"$\(commandPathVariable)\"; \"$\(commandPathVariable)\" --version"
+    }
+
     private func remoteCLIHealthProbeArguments(commandName: String, workspace: Workspace, host: NexusDomain.Host) -> [String] {
         var arguments = [
             "-o", "BatchMode=yes",
@@ -1054,6 +1246,121 @@ struct SSHRemoteCodexAppServerReadinessProbe: RemoteCodexReadinessProbing {
         let data = try JSONSerialization.data(withJSONObject: object)
         guard let line = String(data: data, encoding: .utf8) else {
             throw NSError(domain: "SSHRemoteCodexAppServerReadinessProbe", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to encode remote Codex readiness probe request."])
+        }
+        return line
+    }
+}
+
+struct SSHRemotePiRPCReadinessProbe: RemotePiReadinessProbing {
+    typealias TransportFactory = (_ executable: String, _ arguments: [String], _ workingDirectory: String?) throws -> any PiRPCTransporting
+
+    private let transportFactory: TransportFactory
+
+    init(transportFactory: @escaping TransportFactory = { executable, arguments, workingDirectory in
+        try ProcessPiRPCTransport(
+            executable: executable,
+            arguments: arguments,
+            workingDirectory: workingDirectory
+        )
+    }) {
+        self.transportFactory = transportFactory
+    }
+
+    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) throws -> RemotePiReadinessOutcome {
+        let transport = try transportFactory(
+            "/usr/bin/ssh",
+            sshArguments(host: host, executable: executable, workingDirectory: workingDirectory),
+            nil
+        )
+
+        let semaphore = DispatchSemaphore(value: 0)
+        let state = CodexReadinessProbeState()
+        let responseID = "nexus-pi-readiness-get-state"
+
+        transport.setStdoutLineHandler { line in
+            guard let data = line.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  object["type"] as? String == "response",
+                  object["id"] as? String == responseID else {
+                return
+            }
+
+            if object["success"] as? Bool == true {
+                semaphore.signal()
+                return
+            }
+
+            let message = object["error"] as? String ?? "Pi RPC readiness probe failed."
+            state.error = NSError(domain: "SSHRemotePiRPCReadinessProbe", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+            semaphore.signal()
+        }
+        transport.setTerminationHandler { status in
+            if status != 0, state.error == nil {
+                state.error = NSError(
+                    domain: "SSHRemotePiRPCReadinessProbe",
+                    code: Int(status),
+                    userInfo: [NSLocalizedDescriptionKey: "Pi RPC mode exited before remote readiness completed."]
+                )
+                semaphore.signal()
+            }
+        }
+
+        try transport.start()
+        try transport.sendLine(Self.jsonLine(["id": responseID, "type": "get_state"]))
+
+        defer {
+            try? transport.terminate()
+        }
+
+        guard semaphore.wait(timeout: .now() + 5) == .success else {
+            return .authenticationUncertain("Pi RPC mode did not answer the remote readiness probe in time.")
+        }
+
+        if let error = state.error {
+            let message = error.localizedDescription
+            if isExplicitAuthenticationFailure(message) {
+                return .authenticationRequired(message)
+            }
+            throw error
+        }
+
+        return .ready
+    }
+
+    private func sshArguments(host: NexusDomain.Host, executable: String, workingDirectory: String) -> [String] {
+        var arguments = [
+            "-T",
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=5"
+        ]
+        if let port = host.port {
+            arguments += ["-p", String(port)]
+        }
+        arguments += [host.sshTarget, remoteCommand(executable: executable, workingDirectory: workingDirectory)]
+        return arguments
+    }
+
+    private func remoteCommand(executable: String, workingDirectory: String) -> String {
+        "cd \(shellQuoted(workingDirectory)) || { echo 'NEXUS_REMOTE_WORKSPACE_UNAVAILABLE' >&2; exit 1; }; exec \(shellQuoted(executable)) --mode rpc"
+    }
+
+    private func shellQuoted(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+
+    private func isExplicitAuthenticationFailure(_ message: String) -> Bool {
+        let normalized = message.lowercased()
+        return normalized.contains("auth")
+            || normalized.contains("login")
+            || normalized.contains("not logged in")
+            || normalized.contains("not authenticated")
+            || normalized.contains("unauthorized")
+    }
+
+    private static func jsonLine(_ object: [String: Any]) throws -> String {
+        let data = try JSONSerialization.data(withJSONObject: object)
+        guard let line = String(data: data, encoding: .utf8) else {
+            throw NSError(domain: "SSHRemotePiRPCReadinessProbe", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to encode remote Pi readiness probe request."])
         }
         return line
     }

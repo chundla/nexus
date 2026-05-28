@@ -88,7 +88,7 @@ struct NexusServicePiProviderReadinessTests {
         #expect(providerDetail.capabilities == providerCard.capabilities)
     }
 
-    @Test func remotePiRemainsUnsupportedAndNotLaunchable() throws {
+    @Test func remotePiProviderCardAndDetailBecomeLaunchableOnHealthyRemoteWorkspace() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -97,8 +97,9 @@ struct NexusServicePiProviderReadinessTests {
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthEvaluator(
                 executableResolver: PiStubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
-                commandRunner: PiStubCommandRunner(results: [:]),
-                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+                commandRunner: RemotePiStubCommandRunner(),
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
+                remotePiReadinessProbe: ReadyRemotePiReadinessProbe()
             ),
             hostValidationEvaluator: AvailableHostValidationEvaluator(),
             workspaceAvailabilityEvaluator: AvailableWorkspaceAvailabilityEvaluator()
@@ -118,16 +119,16 @@ struct NexusServicePiProviderReadinessTests {
         let providerCard = try #require(overview.providerCards.first(where: { $0.provider.id == .pi }))
         let providerDetail = try service.getProviderDetail(workspaceID: workspace.id, providerID: .pi)
 
-        #expect(providerCard.health.state == .notChecked)
-        #expect(providerCard.health.summary == "Remote Pi execution is not implemented yet")
-        #expect(providerCard.health.launchability == .notChecked)
-        #expect(providerCard.capabilities.launchDefaultSession.isSupported == false)
-        #expect(providerCard.capabilities.launchDefaultSession.isEnabled == false)
-        #expect(providerCard.capabilities.launchDefaultSession.disabledReason == "Pi cannot launch a Default Session on this Workspace yet.")
-        #expect(providerCard.capabilities.createNamedSession.isSupported == false)
-        #expect(providerCard.capabilities.createNamedSession.isEnabled == false)
-        #expect(providerCard.capabilities.createNamedSession.disabledReason == "Pi cannot create Named Sessions on this Workspace yet.")
+        #expect(providerCard.health.state == .available)
+        #expect(providerCard.health.summary == "Pi 0.9.0 is available")
+        #expect(providerCard.health.launchability == .launchable)
+        #expect(providerCard.capabilities.launchDefaultSession.isSupported)
+        #expect(providerCard.capabilities.launchDefaultSession.isEnabled)
+        #expect(providerCard.capabilities.createNamedSession.isSupported)
+        #expect(providerCard.capabilities.createNamedSession.isEnabled)
+        #expect(providerCard.prelaunchPrimarySurface == .structuredActivityFeed)
         #expect(providerDetail.capabilities == providerCard.capabilities)
+        #expect(providerDetail.prelaunchPrimarySurface == .structuredActivityFeed)
     }
 }
 
@@ -165,6 +166,18 @@ private struct PiStubCommandRunner: ProviderCommandRunning {
         case let .success(stdout, stderr, exitStatus):
             return ProviderCommandResult(exitStatus: exitStatus, stdout: stdout, stderr: stderr)
         }
+    }
+}
+
+private struct ReadyRemotePiReadinessProbe: RemotePiReadinessProbing {
+    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) throws -> RemotePiReadinessOutcome {
+        .ready
+    }
+}
+
+private struct RemotePiStubCommandRunner: ProviderCommandRunning {
+    func run(executable: String, arguments: [String], currentDirectoryURL: URL?) throws -> ProviderCommandResult {
+        ProviderCommandResult(exitStatus: 0, stdout: "/tmp/fake-pi\n0.9.0\n", stderr: "")
     }
 }
 

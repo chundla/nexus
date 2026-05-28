@@ -226,6 +226,194 @@ struct ProviderHealthEvaluatorLocalShellResolutionTests {
         #expect(recorder.transport.sentLines.first?.contains("\"method\":\"initialize\"") == true)
     }
 
+    @Test func remotePiHealthUsesShellAwareDiscoveryAndDirectRPCReadinessProbe() {
+        let workspaceID = UUID()
+        let hostID = UUID()
+        let host = NexusDomain.Host(id: hostID, name: "Build Server", sshTarget: "build-box")
+        let runner = RecordingRemoteCommandRunner(
+            stdout: "/home/tester/.local/bin/pi\n0.9.0\n"
+        )
+        let readinessProbe = RecordingRemotePiReadinessProbe()
+        let evaluator = ProviderHealthEvaluator(
+            executableResolver: TestExecutableResolver(executables: [:]),
+            commandRunner: runner,
+            remotePiReadinessProbe: readinessProbe
+        )
+
+        let health = evaluator.healthSummary(
+            for: .pi,
+            workspace: Workspace(
+                id: workspaceID,
+                name: "Remote",
+                kind: .remote,
+                folderPath: "/srv/api",
+                primaryGroupID: UUID(),
+                remoteHostID: hostID
+            ),
+            remoteContext: RemoteWorkspaceHealthContext(
+                host: host,
+                hostValidation: HostValidationSnapshot(
+                    hostID: hostID,
+                    state: .available,
+                    summary: "Host is available",
+                    checkedAt: Date()
+                ),
+                workspaceAvailability: WorkspaceAvailabilitySnapshot(
+                    workspaceID: workspaceID,
+                    state: .available,
+                    summary: "Workspace is available",
+                    checkedAt: Date()
+                )
+            )
+        )
+
+        #expect(health.state == .available)
+        #expect(health.summary == "Pi 0.9.0 is available")
+        #expect(health.resolvedExecutable == "/home/tester/.local/bin/pi")
+        #expect(health.version == "0.9.0")
+        #expect(health.launchability == .launchable)
+        #expect(runner.lastInvocation?.executable == "/usr/bin/ssh")
+        #expect(runner.lastInvocation?.arguments.last?.contains("command -v pi") == true)
+        #expect(runner.lastInvocation?.arguments.last?.contains("$HOME/.local/bin/pi") == true)
+        #expect(runner.lastInvocation?.arguments.last?.contains("tmux") == false)
+        #expect(runner.lastInvocation?.arguments.last?.contains("--help") == false)
+        #expect(readinessProbe.invocations.count == 1)
+        #expect(readinessProbe.invocations.first?.hostID == hostID)
+        #expect(readinessProbe.invocations.first?.executable == "/home/tester/.local/bin/pi")
+        #expect(readinessProbe.invocations.first?.workingDirectory == "/srv/api")
+    }
+
+    @Test func remotePiReadinessProbeLaunchesDirectSSHRPCWithoutPTY() throws {
+        let recorder = RecordingRemotePiTransportFactory()
+        let probe = SSHRemotePiRPCReadinessProbe(transportFactory: recorder.makeTransport)
+        let host = NexusDomain.Host(id: UUID(), name: "Build Server", sshTarget: "build-box", port: 2222)
+
+        let outcome = try probe.probe(
+            host: host,
+            executable: "/home/tester/.local/bin/pi",
+            workingDirectory: "/srv/api"
+        )
+
+        #expect(outcome == .ready)
+        #expect(recorder.lastInvocation?.executable == "/usr/bin/ssh")
+        #expect(recorder.lastInvocation?.arguments.prefix(6) == ["-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-p"])
+        #expect(recorder.lastInvocation?.arguments.dropFirst(6).first == "2222")
+        #expect(recorder.lastInvocation?.arguments.last == "cd '/srv/api' || { echo 'NEXUS_REMOTE_WORKSPACE_UNAVAILABLE' >&2; exit 1; }; exec '/home/tester/.local/bin/pi' --mode rpc")
+        #expect(recorder.lastInvocation?.arguments.last?.contains("tmux") == false)
+        #expect(recorder.transport.sentLines.count == 1)
+        #expect(recorder.transport.sentLines.first?.contains("\"id\":\"nexus-pi-readiness-get-state\"") == true)
+        #expect(recorder.transport.sentLines.first?.contains("\"type\":\"get_state\"") == true)
+    }
+
+    @Test func remotePiHealthMarksExplicitAuthFailureAsNotLaunchable() {
+        let workspaceID = UUID()
+        let hostID = UUID()
+        let host = NexusDomain.Host(id: hostID, name: "Build Server", sshTarget: "build-box")
+        let runner = RecordingRemoteCommandRunner(stdout: "/home/tester/.local/bin/pi\n0.9.0\n")
+        let evaluator = ProviderHealthEvaluator(
+            executableResolver: TestExecutableResolver(executables: [:]),
+            commandRunner: runner,
+            remotePiReadinessProbe: StubRemotePiReadinessProbe(outcome: .authenticationRequired("Run `pi auth login` on the Host."))
+        )
+
+        let health = evaluator.healthSummary(
+            for: .pi,
+            workspace: Workspace(
+                id: workspaceID,
+                name: "Remote",
+                kind: .remote,
+                folderPath: "/srv/api",
+                primaryGroupID: UUID(),
+                remoteHostID: hostID
+            ),
+            remoteContext: RemoteWorkspaceHealthContext(
+                host: host,
+                hostValidation: HostValidationSnapshot(
+                    hostID: hostID,
+                    state: .available,
+                    summary: "Host is available",
+                    checkedAt: Date()
+                ),
+                workspaceAvailability: WorkspaceAvailabilitySnapshot(
+                    workspaceID: workspaceID,
+                    state: .available,
+                    summary: "Workspace is available",
+                    checkedAt: Date()
+                )
+            )
+        )
+
+        #expect(health.state == .unavailable)
+        #expect(health.summary == "Pi requires authentication on the Remote Workspace")
+        #expect(health.resolvedExecutable == "/home/tester/.local/bin/pi")
+        #expect(health.version == "0.9.0")
+        #expect(health.launchability == .notLaunchable)
+        #expect(health.diagnostics == [
+            ProviderHealthDiagnostic(
+                severity: .error,
+                code: "remoteAuthRequired",
+                message: "Run `pi auth login` on the Host."
+            )
+        ])
+    }
+
+    @Test func remotePiHealthKeepsPiLaunchableWhenAuthReadinessIsUncertain() {
+        let workspaceID = UUID()
+        let hostID = UUID()
+        let host = NexusDomain.Host(id: hostID, name: "Build Server", sshTarget: "build-box")
+        let runner = RecordingRemoteCommandRunner(stdout: "/home/tester/.local/bin/pi\n0.9.0\n")
+        let evaluator = ProviderHealthEvaluator(
+            executableResolver: TestExecutableResolver(executables: [:]),
+            commandRunner: runner,
+            remotePiReadinessProbe: StubRemotePiReadinessProbe(outcome: .authenticationUncertain("Pi auth readiness could not be confirmed."))
+        )
+
+        let health = evaluator.healthSummary(
+            for: .pi,
+            workspace: Workspace(
+                id: workspaceID,
+                name: "Remote",
+                kind: .remote,
+                folderPath: "/srv/api",
+                primaryGroupID: UUID(),
+                remoteHostID: hostID
+            ),
+            remoteContext: RemoteWorkspaceHealthContext(
+                host: host,
+                hostValidation: HostValidationSnapshot(
+                    hostID: hostID,
+                    state: .available,
+                    summary: "Host is available",
+                    checkedAt: Date()
+                ),
+                workspaceAvailability: WorkspaceAvailabilitySnapshot(
+                    workspaceID: workspaceID,
+                    state: .available,
+                    summary: "Workspace is available",
+                    checkedAt: Date()
+                )
+            )
+        )
+
+        #expect(health.state == .available)
+        #expect(health.summary == "Pi 0.9.0 is available")
+        #expect(health.resolvedExecutable == "/home/tester/.local/bin/pi")
+        #expect(health.version == "0.9.0")
+        #expect(health.launchability == .launchable)
+        #expect(health.diagnostics == [
+            ProviderHealthDiagnostic(
+                severity: .info,
+                code: "remoteProbe",
+                message: "Validated remote Pi launch prerequisites on Build Server for /srv/api."
+            ),
+            ProviderHealthDiagnostic(
+                severity: .warning,
+                code: "remoteAuthUncertain",
+                message: "Pi auth readiness could not be confirmed."
+            )
+        ])
+    }
+
     @Test func remoteCodexHealthMarksExplicitAuthFailureAsNotLaunchable() {
         let workspaceID = UUID()
         let hostID = UUID()
@@ -456,10 +644,27 @@ private final class RecordingRemoteCodexReadinessProbe: RemoteCodexReadinessProb
     }
 }
 
+private final class RecordingRemotePiReadinessProbe: RemotePiReadinessProbing, @unchecked Sendable {
+    private(set) var invocations: [(hostID: UUID, executable: String, workingDirectory: String)] = []
+
+    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) throws -> RemotePiReadinessOutcome {
+        invocations.append((host.id, executable, workingDirectory))
+        return .ready
+    }
+}
+
 private struct StubRemoteCodexReadinessProbe: RemoteCodexReadinessProbing {
     let outcome: RemoteCodexReadinessOutcome
 
     func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) throws -> RemoteCodexReadinessOutcome {
+        outcome
+    }
+}
+
+private struct StubRemotePiReadinessProbe: RemotePiReadinessProbing {
+    let outcome: RemotePiReadinessOutcome
+
+    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) throws -> RemotePiReadinessOutcome {
         outcome
     }
 }
@@ -475,6 +680,16 @@ private final class RecordingRemoteCodexTransportFactory: @unchecked Sendable {
     private(set) var lastInvocation: (executable: String, arguments: [String])?
 
     func makeTransport(executable: String, arguments: [String], workingDirectory: String?) throws -> any CodexAppServerTransporting {
+        lastInvocation = (executable, arguments)
+        return transport
+    }
+}
+
+private final class RecordingRemotePiTransportFactory: @unchecked Sendable {
+    let transport = ImmediateReadyRemotePiTransport()
+    private(set) var lastInvocation: (executable: String, arguments: [String])?
+
+    func makeTransport(executable: String, arguments: [String], workingDirectory: String?) throws -> any PiRPCTransporting {
         lastInvocation = (executable, arguments)
         return transport
     }
@@ -502,6 +717,31 @@ private final class ImmediateReadyRemoteCodexTransport: CodexAppServerTransporti
 
     func terminate() throws {
         terminationHandler?(CodexAppServerTermination(status: 0, stderr: nil))
+    }
+}
+
+private final class ImmediateReadyRemotePiTransport: PiRPCTransporting, @unchecked Sendable {
+    private var stdoutLineHandler: (@Sendable (String) -> Void)?
+    private var terminationHandler: (@Sendable (Int32) -> Void)?
+    private(set) var sentLines: [String] = []
+
+    func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
+        stdoutLineHandler = handler
+    }
+
+    func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?) {
+        terminationHandler = handler
+    }
+
+    func start() throws {}
+
+    func sendLine(_ line: String) throws {
+        sentLines.append(line)
+        stdoutLineHandler?("{\"id\":\"nexus-pi-readiness-get-state\",\"type\":\"response\",\"success\":true,\"data\":{\"sessionId\":\"pi-session-1\"}}")
+    }
+
+    func terminate() throws {
+        terminationHandler?(0)
     }
 }
 #endif

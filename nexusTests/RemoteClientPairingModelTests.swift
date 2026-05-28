@@ -598,7 +598,7 @@ struct RemoteClientPairingModelTests {
         #expect(model.focusedSessionSurfaceSupport == .supported)
     }
 
-    @Test func focusedRemoteSessionSurfaceSupportKeepsExistingStructuredRemotePiSessionsUnsupportedOnIPhone() async throws {
+    @Test func focusedRemoteSessionSurfaceSupportSupportsExistingStructuredRemotePiSessionsOnIPhone() async throws {
         let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
@@ -649,7 +649,7 @@ struct RemoteClientPairingModelTests {
         await Task.yield()
 
         #expect(model.focusedSessionScreen == screen)
-        #expect(model.focusedSessionSurfaceSupport == .unsupported)
+        #expect(model.focusedSessionSurfaceSupport == .supported)
     }
 
     @Test func sendingStructuredPromptUsesGenericSessionInputRouteAndUpdatesFocusedScreen() async throws {

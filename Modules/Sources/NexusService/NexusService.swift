@@ -1267,9 +1267,10 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 healthSummaryEvaluator: { workspace, remoteContext, providerHealthEvaluator in
                     providerHealthEvaluator.healthSummary(for: .pi, workspace: workspace, remoteContext: remoteContext)
                 },
-                defaultSessionLaunchSupportEvaluator: { $0.kind == .local },
-                namedSessionSupportEvaluator: { $0.kind == .local },
-                primarySurfaceEvaluator: { _ in .structuredActivityFeed }
+                primarySurfaceEvaluator: { _ in .structuredActivityFeed },
+                shouldReuseRemoteHealthSnapshot: { snapshot, remoteContext in
+                    shouldReuseRemoteCLIHealthSnapshot(snapshot, remoteContext: remoteContext)
+                }
             )
         ]
 

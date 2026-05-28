@@ -173,10 +173,8 @@ private func structuredRemoteClientSessionSurfaceSupport(
     workspaceKind: Workspace.Kind?
 ) -> SessionSurfaceSupport {
     switch providerID {
-    case .codex:
+    case .codex, .pi:
         .supported
-    case .pi:
-        workspaceKind == .local ? .supported : .unsupported
     case .claude, .ibmBob:
         .unsupported
     }
