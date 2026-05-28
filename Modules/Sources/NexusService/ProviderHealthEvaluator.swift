@@ -110,10 +110,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
         case .pi:
             return localCLIHealthSummary(commandName: "pi", providerName: "Pi", workspace: workspace)
         case .ibmBob:
-            return ProviderHealthSummary(
-                state: .notChecked,
-                summary: "Health checks coming soon"
-            )
+            return localIBMBobHealthSummary(workspace: workspace)
         }
     }
 
@@ -646,6 +643,93 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
         )
     }
 
+    private func localIBMBobHealthSummary(workspace: Workspace) -> ProviderHealthSummary {
+        let resolution = resolvedLocalExecutable(named: "bob")
+        guard let executable = resolution.resolvedExecutable else {
+            return ProviderHealthSummary(
+                state: .unavailable,
+                summary: "IBM Bob executable was not found",
+                launchability: .notLaunchable,
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .error,
+                        code: "executableNotFound",
+                        message: "IBM Bob executable was not found in the service search paths."
+                    ),
+                    ProviderHealthDiagnostic(
+                        severity: .info,
+                        code: "searchedDirectories",
+                        message: "Searched directories: \(resolution.searchedDirectories.joined(separator: ", "))"
+                    ),
+                    ProviderHealthDiagnostic(
+                        severity: .info,
+                        code: "homeDirectories",
+                        message: "Resolved home directories: \(resolution.homeDirectories.joined(separator: ", "))"
+                    ),
+                    ProviderHealthDiagnostic(
+                        severity: .info,
+                        code: "pathEnvironment",
+                        message: "PATH: \(resolution.pathEnvironment ?? "<unset>")"
+                    )
+                ]
+            )
+        }
+
+        var diagnostics: [ProviderHealthDiagnostic] = []
+        let version = detectLocalVersion(executable: executable, providerName: "IBM Bob", diagnostics: &diagnostics)
+
+        do {
+            let launchProbe = try runLocalCommandThroughShell(
+                executable: executable,
+                arguments: ["--list-sessions"],
+                currentDirectoryURL: URL(fileURLWithPath: workspace.folderPath, isDirectory: true)
+            )
+
+            guard launchProbe.exitStatus == 0 else {
+                let detail = launchProbeFailureMessage(stdout: launchProbe.stdout, stderr: launchProbe.stderr, providerName: "IBM Bob")
+                let classification = classifyLocalIBMBobPassiveProbeFailure(detail: detail)
+                return ProviderHealthSummary(
+                    state: classification.state,
+                    summary: classification.summary(version),
+                    resolvedExecutable: executable,
+                    version: version,
+                    launchability: classification.launchability,
+                    diagnostics: diagnostics + [
+                        ProviderHealthDiagnostic(
+                            severity: classification.severity,
+                            code: classification.code,
+                            message: classification.message
+                        )
+                    ]
+                )
+            }
+        } catch {
+            return ProviderHealthSummary(
+                state: .misconfigured,
+                summary: "IBM Bob is installed but failed the passive readiness probe",
+                resolvedExecutable: executable,
+                version: version,
+                launchability: .notLaunchable,
+                diagnostics: diagnostics + [
+                    ProviderHealthDiagnostic(
+                        severity: .error,
+                        code: "launchProbeFailed",
+                        message: error.localizedDescription
+                    )
+                ]
+            )
+        }
+
+        return ProviderHealthSummary(
+            state: .available,
+            summary: version.map { "IBM Bob \($0) is available" } ?? "IBM Bob is available",
+            resolvedExecutable: executable,
+            version: version,
+            launchability: .launchable,
+            diagnostics: diagnostics
+        )
+    }
+
     private func localCLIHealthSummary(commandName: String, providerName: String, workspace: Workspace) -> ProviderHealthSummary {
         let resolution = resolvedLocalExecutable(named: commandName)
         guard let executable = resolution.resolvedExecutable else {
@@ -1031,6 +1115,71 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating {
 
         return (.misconfigured, "\(providerName) is installed but failed the remote launch probe", "remoteLaunchProbeFailed", nil)
     }
+
+    private func classifyLocalIBMBobPassiveProbeFailure(detail: String) -> (
+        state: ProviderHealthSummary.State,
+        summary: (String?) -> String,
+        launchability: ProviderHealthSummary.Launchability,
+        severity: ProviderHealthDiagnostic.Severity,
+        code: String,
+        message: String
+    ) {
+        let normalized = detail.lowercased()
+
+        if normalized.contains("license") || normalized.contains("licence") {
+            return (
+                .misconfigured,
+                { _ in "IBM Bob requires license acceptance" },
+                .notLaunchable,
+                .error,
+                "licenseRequired",
+                detail
+            )
+        }
+
+        if isExplicitAuthenticationFailure(normalized) {
+            return (
+                .unavailable,
+                { _ in "IBM Bob requires authentication" },
+                .notLaunchable,
+                .error,
+                "authenticationRequired",
+                detail
+            )
+        }
+
+        if normalized.contains("setup")
+            || normalized.contains("configure")
+            || normalized.contains("configuration")
+            || normalized.contains("install") {
+            return (
+                .misconfigured,
+                { _ in "IBM Bob requires setup" },
+                .notLaunchable,
+                .error,
+                "setupRequired",
+                detail
+            )
+        }
+
+        return (
+            .available,
+            { version in version.map { "IBM Bob \($0) is available" } ?? "IBM Bob is available" },
+            .launchable,
+            .warning,
+            "passiveProbeInconclusive",
+            detail
+        )
+    }
+
+    private func isExplicitAuthenticationFailure(_ message: String) -> Bool {
+        let normalized = message.lowercased()
+        return normalized.contains("auth")
+            || normalized.contains("login")
+            || normalized.contains("not logged in")
+            || normalized.contains("not authenticated")
+            || normalized.contains("unauthorized")
+        }
 
     private func launchProbeFailureMessage(stdout: String, stderr: String, providerName: String) -> String {
         let detail = firstDiagnosticLine(stdout: stdout, stderr: stderr)

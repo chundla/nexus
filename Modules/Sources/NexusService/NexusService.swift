@@ -1315,7 +1315,9 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 supportsNamedSessions: false,
                 healthSummaryEvaluator: { workspace, remoteContext, providerHealthEvaluator in
                     providerHealthEvaluator.healthSummary(for: .ibmBob, workspace: workspace, remoteContext: remoteContext)
-                }
+                },
+                defaultSessionLaunchSupportEvaluator: { $0.kind == .local },
+                namedSessionSupportEvaluator: { $0.kind == .local }
             ),
             .pi: ServiceProviderAdapter(
                 providerID: .pi,
