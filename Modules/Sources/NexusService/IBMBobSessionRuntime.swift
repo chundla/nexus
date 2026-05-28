@@ -438,7 +438,9 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
             let text = stringValue(in: object, keys: ["text", "status", "message"]) ?? "IBM Bob turn started"
             return BobEvent(kind: .status, text: text)
         case "message", "assistant_message", "message_delta", "text":
-            guard let text = stringValue(in: object, keys: ["text", "message", "content", "delta"]), text.isEmpty == false else {
+            guard shouldProjectMessageEvent(rawType: rawType, object: object),
+                  let text = messageText(in: object),
+                  text.isEmpty == false else {
                 return nil
             }
             return BobEvent(kind: .message, text: text)
@@ -447,6 +449,15 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
                 return nil
             }
             return BobEvent(kind: .command, text: text)
+        case "tool_result":
+            if stringValue(in: object, keys: ["status"])?.lowercased() == "success" {
+                guard let text = stringValue(in: object, keys: ["output", "text", "message", "result"]), text.isEmpty == false else {
+                    return nil
+                }
+                return BobEvent(kind: .message, text: text)
+            }
+            let text = stringValue(in: object, keys: ["output", "text", "error", "message", "detail"]) ?? "IBM Bob reported an error."
+            return BobEvent(kind: .error, text: text)
         case "diff", "patch":
             guard let text = stringValue(in: object, keys: ["text", "diff", "patch", "message"]), text.isEmpty == false else {
                 return nil
@@ -461,6 +472,66 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
         default:
             return nil
         }
+    }
+
+    private func shouldProjectMessageEvent(rawType: String, object: [String: Any]) -> Bool {
+        if rawType == "assistant_message" {
+            return true
+        }
+
+        guard let role = messageRole(in: object) else {
+            return true
+        }
+
+        switch role {
+        case "assistant", "model", "ai", "bot":
+            return true
+        case "user", "human", "tool", "system":
+            return false
+        default:
+            return true
+        }
+    }
+
+    private func messageRole(in object: [String: Any]) -> String? {
+        if let role = stringValue(in: object, keys: ["role", "author", "sender"])?.lowercased() {
+            return role
+        }
+
+        if let message = object["message"] as? [String: Any],
+           let role = stringValue(in: message, keys: ["role", "author", "sender"])?.lowercased() {
+            return role
+        }
+
+        return nil
+    }
+
+    private func messageText(in object: [String: Any]) -> String? {
+        if let text = stringValue(in: object, keys: ["text", "message", "content", "delta"]) {
+            return text
+        }
+
+        if let message = object["message"] as? [String: Any],
+           let text = nestedTextContent(in: message) {
+            return text
+        }
+
+        return nestedTextContent(in: object)
+    }
+
+    private func nestedTextContent(in object: [String: Any]) -> String? {
+        guard let content = object["content"] as? [[String: Any]] else {
+            return nil
+        }
+
+        let text = content.compactMap { block -> String? in
+            guard stringValue(in: block, keys: ["type"])?.lowercased() == "text" else {
+                return nil
+            }
+            return stringValue(in: block, keys: ["text", "delta", "content"])
+        }.joined()
+
+        return text.isEmpty ? nil : text
     }
 
     private func resolvedSessionID(from object: [String: Any]) -> String? {

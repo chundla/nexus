@@ -109,6 +109,119 @@ struct IBMBobSessionRuntimeTests {
             "Done"
         ])
     }
+
+    @Test func ignoresBobUserRoleMessagesSoOnlyAssistantRepliesAppearAsBobOutput() throws {
+        let runtime = try IBMBobSessionRuntime(
+            executable: "/tmp/fake-bob",
+            workingDirectory: "/tmp/workspace",
+            terminationStatusMessageBuilder: { status in "IBM Bob exited with status \(status)." },
+            transportFactory: { _, _, _ in
+                SynchronousIBMBobTransport(
+                    stdoutLines: [
+                        #"{"type":"status","text":"Bob turn started"}"#,
+                        #"{"type":"message","role":"user","text":"hey"}"#,
+                        #"{"type":"message","role":"assistant","text":"I am IBM Bob"}"#,
+                        #"{"type":"completion","text":"Done"}"#
+                    ],
+                    terminationStatus: 0
+                )
+            }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .ibmBob,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("hey")
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(screen.activityItems.map(\.text) == [
+            "IBM Bob Session ready. Send a prompt to start IBM Bob.",
+            "You: hey",
+            "Bob turn started",
+            "I am IBM Bob",
+            "Done"
+        ])
+    }
+
+    @Test func readsAssistantTextFromNestedBobMessagePayloadAfterUserEchoIsFiltered() throws {
+        let runtime = try IBMBobSessionRuntime(
+            executable: "/tmp/fake-bob",
+            workingDirectory: "/tmp/workspace",
+            terminationStatusMessageBuilder: { status in "IBM Bob exited with status \(status)." },
+            transportFactory: { _, _, _ in
+                SynchronousIBMBobTransport(
+                    stdoutLines: [
+                        #"{"type":"status","text":"Bob turn started"}"#,
+                        #"{"type":"message","role":"user","text":"Hey who are you"}"#,
+                        #"{"type":"message","message":{"role":"assistant","content":[{"type":"text","text":"I am IBM Bob"}]}}"#,
+                        #"{"type":"completion","text":"Done"}"#
+                    ],
+                    terminationStatus: 0
+                )
+            }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .ibmBob,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("Hey who are you")
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(screen.activityItems.map(\.text) == [
+            "IBM Bob Session ready. Send a prompt to start IBM Bob.",
+            "You: Hey who are you",
+            "Bob turn started",
+            "I am IBM Bob",
+            "Done"
+        ])
+    }
+
+    @Test func readsAssistantReplyFromSuccessfulAttemptCompletionToolResult() throws {
+        let runtime = try IBMBobSessionRuntime(
+            executable: "/tmp/fake-bob",
+            workingDirectory: "/tmp/workspace",
+            terminationStatusMessageBuilder: { status in "IBM Bob exited with status \(status)." },
+            transportFactory: { _, _, _ in
+                SynchronousIBMBobTransport(
+                    stdoutLines: [
+                        #"{"type":"init","session_id":"bob-session-1"}"#,
+                        #"{"type":"message","role":"user","content":"Hey who are you"}"#,
+                        #"{"type":"tool_use","tool_name":"attempt_completion","tool_id":"tool-1","parameters":{"result":"I am Bob."}}"#,
+                        #"{"type":"tool_result","tool_id":"tool-1","status":"success","output":"I am Bob."}"#,
+                        #"{"type":"result","status":"success"}"#
+                    ],
+                    terminationStatus: 0
+                )
+            }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .ibmBob,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("Hey who are you")
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(screen.activityItems.map(\.text) == [
+            "IBM Bob Session ready. Send a prompt to start IBM Bob.",
+            "You: Hey who are you",
+            "I am Bob."
+        ])
+    }
 }
 
 private final class IBMBobLaunchRecorder: @unchecked Sendable {
