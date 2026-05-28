@@ -1243,6 +1243,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     private let workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating
     private let sessionRuntimeManager: any SessionRuntimeManaging
     private let remoteAccessRuntime: RemoteAccessRuntime
+    private let ibmBobNativeSessionCleaner: any IBMBobNativeSessionCleaning
     private let providerAdapters: [ProviderID: ServiceProviderAdapter]
     private let sessionControllerRegistry = SessionControllerRegistry()
 
@@ -1255,6 +1256,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating,
         sessionRuntimeManager: any SessionRuntimeManaging,
         remoteAccessRuntime: RemoteAccessRuntime,
+        ibmBobNativeSessionCleaner: any IBMBobNativeSessionCleaning,
         providerAdapters: [ProviderID: ServiceProviderAdapter]
     ) {
         self.listener = listener
@@ -1265,6 +1267,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         self.workspaceAvailabilityEvaluator = workspaceAvailabilityEvaluator
         self.sessionRuntimeManager = sessionRuntimeManager
         self.remoteAccessRuntime = remoteAccessRuntime
+        self.ibmBobNativeSessionCleaner = ibmBobNativeSessionCleaner
         self.providerAdapters = providerAdapters
         super.init()
         self.sessionRuntimeManager.setRuntimeChangeHandler { [weak self] sessionID in
@@ -1302,7 +1305,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating = WorkspaceAvailabilityEvaluator(),
         sessionRuntimeManager: any SessionRuntimeManaging = InMemorySessionRuntimeManager(),
         remoteAccessRuntime: RemoteAccessRuntime = RemoteAccessRuntime(),
-        providerAdapters: [ProviderID: ServiceProviderAdapter]? = nil
+        providerAdapters: [ProviderID: ServiceProviderAdapter]? = nil,
+        ibmBobNativeSessionCleaner: any IBMBobNativeSessionCleaning = IBMBobNativeSessionCleaner()
     ) throws -> NexusService {
         try bootstrap(
             rootURL: rootURL,
@@ -1311,7 +1315,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
             sessionRuntimeManager: sessionRuntimeManager,
             remoteAccessRuntime: remoteAccessRuntime,
-            providerAdapters: providerAdapters
+            providerAdapters: providerAdapters,
+            ibmBobNativeSessionCleaner: ibmBobNativeSessionCleaner
         )
     }
 
@@ -1320,14 +1325,16 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         hostValidationEvaluator: any HostValidationEvaluating,
         workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating = WorkspaceAvailabilityEvaluator(),
         sessionRuntimeManager: any SessionRuntimeManaging = InMemorySessionRuntimeManager(),
-        remoteAccessRuntime: RemoteAccessRuntime = RemoteAccessRuntime()
+        remoteAccessRuntime: RemoteAccessRuntime = RemoteAccessRuntime(),
+        ibmBobNativeSessionCleaner: any IBMBobNativeSessionCleaning = IBMBobNativeSessionCleaner()
     ) throws -> NexusService {
         try bootstrap(
             rootURL: rootURL,
             hostValidationEvaluator: hostValidationEvaluator,
             workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
             sessionRuntimeManager: sessionRuntimeManager,
-            remoteAccessRuntime: remoteAccessRuntime
+            remoteAccessRuntime: remoteAccessRuntime,
+            ibmBobNativeSessionCleaner: ibmBobNativeSessionCleaner
         )
     }
 
@@ -1338,7 +1345,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating = WorkspaceAvailabilityEvaluator(),
         sessionRuntimeManager: any SessionRuntimeManaging = InMemorySessionRuntimeManager(),
         remoteAccessRuntime: RemoteAccessRuntime = RemoteAccessRuntime(),
-        providerAdapters: [ProviderID: ServiceProviderAdapter]? = nil
+        providerAdapters: [ProviderID: ServiceProviderAdapter]? = nil,
+        ibmBobNativeSessionCleaner: any IBMBobNativeSessionCleaning = IBMBobNativeSessionCleaner()
     ) throws -> NexusService {
         try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
 
@@ -1358,6 +1366,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
             sessionRuntimeManager: sessionRuntimeManager,
             remoteAccessRuntime: remoteAccessRuntime,
+            ibmBobNativeSessionCleaner: ibmBobNativeSessionCleaner,
             providerAdapters: defaultProviderAdapters(overrides: providerAdapters)
         )
     }
@@ -1960,9 +1969,20 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         }
 
         let resolvedSession = try reconcileSessionRuntimeState(session)
-        guard resolvedSession.state != .ready else {
+        if resolvedSession.state == .ready,
+           try readySessionRecordMayBeDeleted(resolvedSession) == false {
             throw NexusMetadataStoreError.sessionRecordDeletionRequiresStoppedSession
         }
+
+        guard let workspace = try metadataStore.workspace(id: resolvedSession.workspaceID) else {
+            throw NexusMetadataStoreError.workspaceNotFound
+        }
+        let sessionRecordAdapterMetadata = try metadataStore.sessionRecordAdapterMetadata(sessionID: resolvedSession.id)
+        ibmBobNativeSessionCleaner.bestEffortDeleteStoredContinuity(
+            for: resolvedSession,
+            workspace: workspace,
+            sessionRecordAdapterMetadata: sessionRecordAdapterMetadata
+        )
 
         sessionRuntimeManager.remove(session: resolvedSession)
         return try metadataStore.deleteSession(id: sessionID)
@@ -3867,6 +3887,20 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     private func sessionMayRemainReadyWithoutRuntime(_ session: Session, workspace: Workspace?) throws -> Bool {
         guard try stopRequiresActiveIBMBobTurn(session, workspace: workspace) else {
             return false
+        }
+
+        return try metadataStore.sessionRecordAdapterMetadata(sessionID: session.id)?.ibmBobTurnInProgress != true
+    }
+
+    private func readySessionRecordMayBeDeleted(_ session: Session) throws -> Bool {
+        guard session.state == .ready,
+              let workspace = try metadataStore.workspace(id: session.workspaceID),
+              try stopRequiresActiveIBMBobTurn(session, workspace: workspace) else {
+            return false
+        }
+
+        if let runtimeLinkage = sessionRuntimeManager.sessionRecordAdapterMetadata(for: session)?.ibmBobSessionLinkage {
+            return runtimeLinkage.turnInProgress == false
         }
 
         return try metadataStore.sessionRecordAdapterMetadata(sessionID: session.id)?.ibmBobTurnInProgress != true

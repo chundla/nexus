@@ -7,15 +7,7 @@ struct RemoteDefaultSessionSectionState: Equatable {
 
     init(detail: ProviderDetail?) {
         session = detail?.defaultSession
-        canDeleteSessionRecord = Self.canDeleteSessionRecord(detail?.defaultSession)
-    }
-
-    private static func canDeleteSessionRecord(_ session: Session?) -> Bool {
-        guard let session else {
-            return false
-        }
-
-        return session.isDefault && session.state != .ready
+        canDeleteSessionRecord = detail?.defaultSession.map { $0.isDefault && remoteSessionRecordCanBeDeleted($0, workspace: detail?.workspace) } ?? false
     }
 }
 
@@ -42,7 +34,11 @@ struct RemoteNamedSessionsSectionState: Equatable {
 
         if let detail {
             content = detail.alternateSessions.isEmpty ? .empty : .sessions(detail.alternateSessions)
-            deletableSessionIDs = Set(detail.alternateSessions.filter(Self.canDeleteSessionRecord).map(\.id))
+            deletableSessionIDs = Set(
+                detail.alternateSessions
+                    .filter { $0.isDefault == false && remoteSessionRecordCanBeDeleted($0, workspace: detail.workspace) }
+                    .map(\.id)
+            )
         } else if errorMessage == nil {
             content = .loading
             deletableSessionIDs = []
@@ -61,8 +57,12 @@ struct RemoteNamedSessionsSectionState: Equatable {
             createDisabledReason = nil
         }
     }
+}
 
-    private static func canDeleteSessionRecord(_ session: Session) -> Bool {
-        session.isDefault == false && session.state != .ready
+private func remoteSessionRecordCanBeDeleted(_ session: Session, workspace: Workspace?) -> Bool {
+    if session.state != .ready {
+        return true
     }
+
+    return session.providerID == .ibmBob && workspace?.kind == .local
 }

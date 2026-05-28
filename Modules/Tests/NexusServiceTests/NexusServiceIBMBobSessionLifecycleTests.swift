@@ -107,6 +107,40 @@ struct NexusServiceIBMBobSessionLifecycleTests {
         #expect(providerCard.defaultSession.state == .ready)
         #expect(providerCard.defaultSession.actionTitle == "Resume")
     }
+
+    @Test func localIBMBobIdleReadySessionRecordDeletesWithoutStoredContinuity() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
+
+        let service = try makeIBMBobService(rootURL: rootURL)
+        let group = try service.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try service.createLocalWorkspace(
+            name: "Local Bob",
+            folderPath: workspaceFolder.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+
+        let launchedSession = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
+        let deleted = try service.deleteSessionRecord(sessionID: launchedSession.id)
+        let providerDetail = try service.getProviderDetail(workspaceID: workspace.id, providerID: .ibmBob)
+
+        #expect(deleted)
+        #expect(providerDetail.defaultSession == nil)
+        do {
+            _ = try service.getSessionRecord(sessionID: launchedSession.id)
+            Issue.record("Expected deleted IBM Bob Session Record to be removed")
+        } catch let error as NexusMetadataStoreError {
+            switch error {
+            case .sessionNotFound:
+                break
+            default:
+                Issue.record("Expected sessionNotFound after deleting idle IBM Bob Session Record")
+            }
+        }
+    }
 }
 
 private func makeIBMBobService(rootURL: URL) throws -> NexusService {

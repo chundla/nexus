@@ -3922,6 +3922,36 @@ struct RemoteClientPairingModelTests {
         #expect(section.canDeleteSessionRecord == false)
     }
 
+    @Test func defaultSessionSectionAllowsIdleReadyLocalIBMBobSessionRecordDeletion() {
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: UUID()
+        )
+        let readySession = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .ibmBob,
+            isDefault: true,
+            state: .ready
+        )
+        let detail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .ibmBob),
+            health: ProviderHealthSummary(state: .available, summary: "IBM Bob available"),
+            defaultSession: readySession,
+            alternateSessions: [],
+            failedSessions: []
+        )
+
+        let section = RemoteDefaultSessionSectionState(detail: detail)
+
+        #expect(section.session == readySession)
+        #expect(section.canDeleteSessionRecord)
+    }
+
     @Test func namedSessionSectionShowsEmptyStateAndEnabledCreateActionForLaunchableClaudeProvider() {
         let workspace = Workspace(
             id: UUID(),
@@ -4058,6 +4088,41 @@ struct RemoteClientPairingModelTests {
         #expect(section.canCreateSession == false)
         #expect(section.createDisabledReason == "Claude is unavailable on this Workspace.")
         #expect(section.deletableSessionIDs == [exitedSession.id, interruptedSession.id])
+    }
+
+    @Test func namedSessionSectionAllowsIdleReadyLocalIBMBobSessionRecordDeletion() {
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: UUID()
+        )
+        let readySession = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .ibmBob,
+            name: "Review",
+            isDefault: false,
+            state: .ready
+        )
+        let detail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .ibmBob),
+            health: ProviderHealthSummary(state: .available, summary: "IBM Bob available"),
+            defaultSession: nil,
+            alternateSessions: [readySession],
+            failedSessions: []
+        )
+
+        let section = RemoteNamedSessionsSectionState(
+            capabilities: detail.capabilities,
+            detail: detail,
+            errorMessage: nil
+        )
+
+        #expect(section.content == .sessions([readySession]))
+        #expect(section.deletableSessionIDs == [readySession.id])
     }
 
     @Test func namedSessionSectionKeepsUnsupportedProvidersVisibleButDisabled() {

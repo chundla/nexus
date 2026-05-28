@@ -414,12 +414,12 @@ struct ContentView: View {
                                 primaryAction: {
                                     selection = .session(defaultSession.id)
                                 },
-                                secondaryActionTitle: defaultSession.state == .ready ? "Stop" : "Delete",
+                                secondaryActionTitle: providerSessionCanDeleteRecord(defaultSession, workspace: detail.workspace) ? "Delete" : "Stop",
                                 secondaryAction: {
-                                    if defaultSession.state == .ready {
-                                        stopSession(defaultSession, workspaceID: workspaceID, providerID: providerID)
-                                    } else {
+                                    if providerSessionCanDeleteRecord(defaultSession, workspace: detail.workspace) {
                                         deleteSessionRecord(defaultSession, workspaceID: workspaceID, providerID: providerID)
+                                    } else {
+                                        stopSession(defaultSession, workspaceID: workspaceID, providerID: providerID)
                                     }
                                 }
                             )
@@ -472,12 +472,12 @@ struct ContentView: View {
                                     primaryAction: {
                                         selection = .session(session.id)
                                     },
-                                    secondaryActionTitle: session.state == .ready ? "Stop" : "Delete",
+                                    secondaryActionTitle: providerSessionCanDeleteRecord(session, workspace: detail.workspace) ? "Delete" : "Stop",
                                     secondaryAction: {
-                                        if session.state == .ready {
-                                            stopSession(session, workspaceID: workspaceID, providerID: providerID)
-                                        } else {
+                                        if providerSessionCanDeleteRecord(session, workspace: detail.workspace) {
                                             deleteSessionRecord(session, workspaceID: workspaceID, providerID: providerID)
+                                        } else {
+                                            stopSession(session, workspaceID: workspaceID, providerID: providerID)
                                         }
                                     }
                                 )
@@ -882,6 +882,14 @@ struct ContentView: View {
         }
 
         return session.state == .ready ? "Resume" : "Relaunch"
+    }
+
+    private func providerSessionCanDeleteRecord(_ session: Session, workspace: Workspace) -> Bool {
+        if session.state != .ready {
+            return true
+        }
+
+        return session.providerID == .ibmBob && workspace.kind == .local
     }
 
     private func navigate(to target: NavigationTarget) {
