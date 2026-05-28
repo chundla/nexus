@@ -38,6 +38,89 @@ struct NexusServiceRemoteCodexStructuredSessionTests {
         #expect(launch.arguments.last?.contains("app-server") == true)
     }
 
+    @Test func remoteCodexApprovalRequestsAppearOnSharedStructuredSessionSurface() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let transportHarness = RemoteCodexTransportHarness()
+        let service = try makeRemoteCodexService(rootURL: rootURL, transportHarness: transportHarness)
+
+        let group = try service.createWorkspaceGroup(name: "Remote")
+        let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
+        _ = try service.validateHost(hostID: host.id)
+        let workspace = try service.createRemoteWorkspace(
+            name: "Remote Codex",
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .codex)
+        transportHarness.emitCommandApprovalRequestOnLatestTransport(
+            requestID: "approval-1",
+            itemID: "command-1",
+            command: "deploy --prod",
+            reason: "Codex needs approval to deploy to production."
+        )
+
+        let screen = try service.getSessionScreen(sessionID: session.id)
+
+        #expect(screen.primarySurface == .structuredActivityFeed)
+        #expect(screen.activityItems.suffix(2).map(\.text) == [
+            "Codex shared Session stream connected",
+            "Approval Request: deploy --prod"
+        ])
+        #expect(screen.approvalRequests.count == 1)
+        #expect(screen.approvalRequests.first?.title == "deploy --prod")
+        #expect(screen.approvalRequests.first?.text == "Codex needs approval to deploy to production.")
+        #expect(screen.approvalRequests.first?.state == .pending)
+    }
+
+    @Test func remoteCodexApprovalDecisionsFlowBackThroughSharedServiceContract() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let transportHarness = RemoteCodexTransportHarness()
+        let service = try makeRemoteCodexService(rootURL: rootURL, transportHarness: transportHarness)
+
+        let group = try service.createWorkspaceGroup(name: "Remote")
+        let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
+        _ = try service.validateHost(hostID: host.id)
+        let workspace = try service.createRemoteWorkspace(
+            name: "Remote Codex",
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .codex)
+        transportHarness.emitCommandApprovalRequestOnLatestTransport(
+            requestID: "approval-1",
+            itemID: "command-1",
+            command: "deploy --prod",
+            reason: "Codex needs approval to deploy to production."
+        )
+
+        let pendingScreen = try service.getSessionScreen(sessionID: session.id)
+        let approvalRequest = try #require(pendingScreen.approvalRequests.first)
+        let approvedScreen = try service.respondToApprovalRequest(
+            sessionID: session.id,
+            approvalRequestID: approvalRequest.id,
+            decision: .approve
+        )
+
+        #expect(approvedScreen.primarySurface == .structuredActivityFeed)
+        #expect(approvedScreen.activityItems.suffix(2).map(\.text) == [
+            "Approval Request: deploy --prod",
+            "Approved: deploy --prod"
+        ])
+        #expect(approvedScreen.approvalRequests.first?.state == .approved)
+        #expect(transportHarness.sentMessagesOnLatestTransport().last?["id"] as? String == "approval-1")
+        #expect((transportHarness.sentMessagesOnLatestTransport().last?["result"] as? [String: String])?["decision"] == "accept")
+    }
+
     @Test func restartedRemoteCodexDefaultSessionRecoversThroughAttachExistingBridgeAndThreadResume() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)
@@ -542,6 +625,20 @@ private final class RemoteCodexTransportHarness: @unchecked Sendable {
         transport?.disconnect(status: status)
     }
 
+    func emitCommandApprovalRequestOnLatestTransport(requestID: String, itemID: String, command: String, reason: String) {
+        lock.lock()
+        let transport = activeTransports.last
+        lock.unlock()
+        transport?.emitCommandApprovalRequest(requestID: requestID, itemID: itemID, command: command, reason: reason)
+    }
+
+    func sentMessagesOnLatestTransport() -> [[String: Any]] {
+        lock.lock()
+        let transport = activeTransports.last
+        lock.unlock()
+        return transport?.sentMessages ?? []
+    }
+
     func register(_ transport: RemoteCodexTransport) {
         lock.lock()
         activeTransports.append(transport)
@@ -557,6 +654,7 @@ private final class RemoteCodexTransport: CodexAppServerTransporting, @unchecked
     private let harness: RemoteCodexTransportHarness
     private var stdoutLineHandler: (@Sendable (String) -> Void)?
     private var terminationHandler: (@Sendable (CodexAppServerTermination) -> Void)?
+    private(set) var sentMessages: [[String: Any]] = []
 
     init(executable: String, arguments: [String], startupFailureMessage: String?, resumeFailureMessage: String?, harness: RemoteCodexTransportHarness) {
         self.executable = executable
@@ -581,6 +679,8 @@ private final class RemoteCodexTransport: CodexAppServerTransporting, @unchecked
               let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return
         }
+
+        sentMessages.append(object)
 
         switch object["method"] as? String {
         case "initialize":
@@ -629,6 +729,23 @@ private final class RemoteCodexTransport: CodexAppServerTransporting, @unchecked
 
     func disconnect(status: Int32) {
         terminationHandler?(CodexAppServerTermination(status: status, stderr: nil))
+    }
+
+    func emitCommandApprovalRequest(requestID: String, itemID: String, command: String, reason: String) {
+        emit([
+            "jsonrpc": "2.0",
+            "id": requestID,
+            "method": "item/commandExecution/requestApproval",
+            "params": [
+                "threadId": harness.launches().last?.resolvedThreadID ?? "codex-thread-1",
+                "turnId": "turn-1",
+                "itemId": itemID,
+                "startedAtMs": 1,
+                "reason": reason,
+                "command": command,
+                "cwd": "/srv/api"
+            ]
+        ])
     }
 
     private func emit(_ object: [String: Any]) {
