@@ -1124,29 +1124,27 @@ private struct RemoteSessionScreenView: View {
 
     @ViewBuilder
     private func structuredSessionContent(_ screen: SessionScreen) -> some View {
-        let copy = structuredSessionPresentationCopy(for: screen)
-        let rows = structuredSessionActivityRows(for: screen)
-        let pendingApprovalRequests = screen.approvalRequests.filter { $0.state == .pending }
+        let presentation = structuredSessionFeedPresentation(for: screen)
 
         VStack(alignment: .leading, spacing: 12) {
-            if pendingApprovalRequests.isEmpty == false {
+            if presentation.pendingApprovalRequests.isEmpty == false {
                 VStack(alignment: .leading, spacing: 10) {
-                    ForEach(pendingApprovalRequests) { request in
+                    ForEach(presentation.pendingApprovalRequests) { request in
                         structuredSessionApprovalRequestView(request)
                     }
                 }
             }
 
-            if rows.isEmpty {
+            if presentation.activityRows.isEmpty {
                 ContentUnavailableView(
-                    copy.emptyStateTitle,
+                    presentation.copy.emptyStateTitle,
                     systemImage: "sparkles.rectangle.stack",
-                    description: Text(copy.emptyStateDescription)
+                    description: Text(presentation.copy.emptyStateDescription)
                 )
                 .frame(maxWidth: .infinity, minHeight: 220)
             } else {
                 VStack(alignment: .leading, spacing: 10) {
-                    ForEach(rows) { row in
+                    ForEach(presentation.activityRows) { row in
                         structuredSessionActivityRowView(row)
                     }
                 }

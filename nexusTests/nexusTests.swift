@@ -207,6 +207,44 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func structuredSessionFeedPresentationKeepsSharedRowsCopyAndPendingApprovalRequestsAligned() {
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .codex,
+            isDefault: true,
+            state: .ready
+        )
+        let pendingRequest = SessionApprovalRequest(title: "Deploy", text: "Deploy to production?", state: .pending)
+        let approvedRequest = SessionApprovalRequest(title: "Cleanup", text: "Delete temp files?", state: .approved)
+        let screen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [SessionActivityItem(kind: .progress, text: "Gathering context")],
+            approvalRequests: [pendingRequest, approvedRequest]
+        )
+
+        #expect(structuredSessionFeedPresentation(for: screen) == StructuredSessionFeedPresentation(
+            copy: StructuredSessionPresentationCopy(
+                emptyStateTitle: "No Session activity yet",
+                emptyStateDescription: "Send a prompt to start the Codex Session.",
+                composerPlaceholder: "Send a prompt to Codex"
+            ),
+            activityRows: [
+                StructuredSessionActivityRow(
+                    id: screen.activityItems[0].id,
+                    title: "Progress",
+                    systemImage: "hourglass",
+                    text: "Gathering context",
+                    emphasis: .accent
+                )
+            ],
+            pendingApprovalRequests: [pendingRequest]
+        ))
+    }
+
+    @MainActor
     @Test func structuredSessionComposerPresentationKeepsViewerPromptVisibleButDisabledUntilControllerTaken() {
         let codexScreen = SessionScreen(
             session: Session(

@@ -27,6 +27,12 @@ struct StructuredSessionPresentationCopy: Equatable {
     let composerPlaceholder: String
 }
 
+struct StructuredSessionFeedPresentation: Equatable {
+    let copy: StructuredSessionPresentationCopy
+    let activityRows: [StructuredSessionActivityRow]
+    let pendingApprovalRequests: [SessionApprovalRequest]
+}
+
 struct StructuredSessionComposerPresentation: Equatable {
     let placeholder: String
     let isEnabled: Bool
@@ -57,6 +63,14 @@ func structuredSessionActivityRows(for screen: SessionScreen) -> [StructuredSess
             emphasis: structuredSessionActivityEmphasis(for: item.kind)
         )
     }
+}
+
+func structuredSessionFeedPresentation(for screen: SessionScreen) -> StructuredSessionFeedPresentation {
+    StructuredSessionFeedPresentation(
+        copy: structuredSessionPresentationCopy(for: screen),
+        activityRows: structuredSessionActivityRows(for: screen),
+        pendingApprovalRequests: screen.approvalRequests.filter { $0.state == .pending }
+    )
 }
 
 func structuredSessionPresentationCopy(for screen: SessionScreen) -> StructuredSessionPresentationCopy {

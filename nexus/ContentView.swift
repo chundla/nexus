@@ -1133,30 +1133,28 @@ struct ContentView: View {
 
     @ViewBuilder
     private func structuredSessionFeed(screen: SessionScreen, isReady: Bool) -> some View {
-        let rows = structuredSessionActivityRows(for: screen)
-        let copy = structuredSessionPresentationCopy(for: screen)
-        let pendingApprovalRequests = screen.approvalRequests.filter { $0.state == .pending }
+        let presentation = structuredSessionFeedPresentation(for: screen)
 
         VStack(alignment: .leading, spacing: 12) {
-            if pendingApprovalRequests.isEmpty == false {
+            if presentation.pendingApprovalRequests.isEmpty == false {
                 VStack(alignment: .leading, spacing: 10) {
-                    ForEach(pendingApprovalRequests) { request in
+                    ForEach(presentation.pendingApprovalRequests) { request in
                         structuredSessionApprovalRequestView(request)
                     }
                 }
             }
 
             ScrollView {
-                if rows.isEmpty {
+                if presentation.activityRows.isEmpty {
                     ContentUnavailableView(
-                        copy.emptyStateTitle,
+                        presentation.copy.emptyStateTitle,
                         systemImage: "sparkles.rectangle.stack",
-                        description: Text(copy.emptyStateDescription)
+                        description: Text(presentation.copy.emptyStateDescription)
                     )
                     .frame(maxWidth: .infinity, minHeight: 240)
                 } else {
                     LazyVStack(alignment: .leading, spacing: 10) {
-                        ForEach(rows) { row in
+                        ForEach(presentation.activityRows) { row in
                             structuredSessionActivityRowView(row)
                         }
                     }
@@ -1167,7 +1165,7 @@ struct ContentView: View {
 
             if isReady {
                 HStack(alignment: .bottom, spacing: 12) {
-                    TextField(copy.composerPlaceholder, text: $structuredSessionPrompt)
+                    TextField(presentation.copy.composerPlaceholder, text: $structuredSessionPrompt)
                         .textFieldStyle(.roundedBorder)
 
                     Button("Send") {
