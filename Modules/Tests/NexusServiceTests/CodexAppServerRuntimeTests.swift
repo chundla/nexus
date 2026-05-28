@@ -51,6 +51,42 @@ struct CodexAppServerRuntimeTests {
         #expect(resumeParameters["cwd"] as? String == "/tmp/workspace")
     }
 
+    @Test func sendingPromptStartsCodexTurnAndSurfacesCompletedAgentMessage() throws {
+        let transport = TestCodexAppServerTransport(
+            threadID: "codex-thread-1",
+            completedAgentMessageText: "Hello. What would you like to work on in `nexus`?"
+        )
+        let runtime = try CodexAppServerRuntime(
+            executable: "/tmp/fake-codex",
+            workingDirectory: "/tmp/workspace",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .codex,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("Hello")
+        let screen = runtime.sessionScreen(for: session)
+        let turnStart = try #require(transport.sentMessages.last)
+        let turnStartParameters = try #require(turnStart["params"] as? [String: Any])
+        let input = try #require(turnStartParameters["input"] as? [[String: String]])
+
+        #expect(transport.sentMessages.compactMap { $0["method"] as? String } == ["initialize", "initialized", "thread/start", "turn/start"])
+        #expect(turnStart["method"] as? String == "turn/start")
+        #expect(turnStartParameters["threadId"] as? String == "codex-thread-1")
+        #expect(input == [["type": "text", "text": "Hello"]])
+        #expect(screen.activityItems.map(\.text) == [
+            "Codex shared Session stream connected",
+            "You: Hello",
+            "Codex: Hello. What would you like to work on in `nexus`?"
+        ])
+    }
+
     @Test func surfacesPendingCommandApprovalRequestInSharedSessionStream() throws {
         let transport = TestCodexAppServerTransport(threadID: "codex-thread-1")
         let runtime = try CodexAppServerRuntime(
@@ -277,12 +313,14 @@ private final class ExitDuringThreadStartCodexTransport: CodexAppServerTransport
 
 private final class TestCodexAppServerTransport: CodexAppServerTransporting, @unchecked Sendable {
     private let threadID: String
+    private let completedAgentMessageText: String?
     private var stdoutLineHandler: (@Sendable (String) -> Void)?
     private var terminationHandler: (@Sendable (Int32) -> Void)?
     private(set) var sentMessages: [[String: Any]] = []
 
-    init(threadID: String) {
+    init(threadID: String, completedAgentMessageText: String? = nil) {
         self.threadID = threadID
+        self.completedAgentMessageText = completedAgentMessageText
     }
 
     func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
@@ -341,6 +379,35 @@ private final class TestCodexAppServerTransport: CodexAppServerTransporting, @un
                     "sandbox": ["type": "readOnly", "networkAccess": false]
                 ]
             ]))
+        case "turn/start":
+            stdoutLineHandler?(jsonLine([
+                "id": object["id"] ?? 0,
+                "result": [
+                    "turn": [
+                        "id": "turn-1",
+                        "items": [],
+                        "itemsView": "notLoaded",
+                        "status": "inProgress"
+                    ]
+                ]
+            ]))
+            if let completedAgentMessageText {
+                stdoutLineHandler?(jsonLine([
+                    "jsonrpc": "2.0",
+                    "method": "item/completed",
+                    "params": [
+                        "item": [
+                            "type": "agentMessage",
+                            "id": "agent-message-1",
+                            "text": completedAgentMessageText,
+                            "phase": "final_answer"
+                        ],
+                        "threadId": threadID,
+                        "turnId": "turn-1",
+                        "completedAtMs": 1
+                    ]
+                ]))
+            }
         default:
             break
         }

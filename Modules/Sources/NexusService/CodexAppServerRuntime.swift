@@ -82,6 +82,9 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
     private var activityItems: [SessionActivityItem] = []
     private var approvalRequests: [SessionApprovalRequest] = []
     private var pendingApprovalRequests: [UUID: PendingCodexApprovalRequest] = [:]
+    private var pendingTurnRequestIDs: Set<String> = []
+    private var nextTurnRequestSequence = 0
+    private var completedAgentMessageItemIDs: Set<String> = []
     private var sessionLinkage: CodexSessionLinkage?
     private var changeHandler: (@Sendable () -> Void)?
     private var didRequestStop = false
@@ -135,6 +138,9 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
             }
 
             if startupState.didResolveThread {
+                if self.handleRequestResponse(object) {
+                    return
+                }
                 self.handleNotification(object)
             }
         }
@@ -215,7 +221,44 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
         notifyChange()
     }
 
-    func sendInput(_ text: String) throws {}
+    func sendInput(_ text: String) throws {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty == false else {
+            return
+        }
+
+        let requestID: String
+        lock.lock()
+        nextTurnRequestSequence += 1
+        requestID = "nexus-codex-turn-\(nextTurnRequestSequence)"
+        pendingTurnRequestIDs.insert(requestID)
+        appendActivityItemLocked(SessionActivityItem(kind: .message, text: "You: \(trimmed)"))
+        lock.unlock()
+        notifyChange()
+
+        do {
+            try transport.sendLine(
+                Self.jsonLine([
+                    "jsonrpc": "2.0",
+                    "id": requestID,
+                    "method": "turn/start",
+                    "params": [
+                        "threadId": sessionLinkage?.threadID ?? "",
+                        "input": [[
+                            "type": "text",
+                            "text": trimmed
+                        ]]
+                    ]
+                ])
+            )
+        } catch {
+            lock.lock()
+            pendingTurnRequestIDs.remove(requestID)
+            lock.unlock()
+            throw error
+        }
+    }
+
     func sendText(_ text: String) throws {}
     func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool) throws {}
     func respondToApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision) throws {
@@ -270,6 +313,33 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
         notifyChange()
     }
 
+    private func handleRequestResponse(_ object: [String: Any]) -> Bool {
+        guard let id = string(for: "id", in: object) else {
+            return false
+        }
+
+        let shouldHandle: Bool
+        lock.lock()
+        shouldHandle = pendingTurnRequestIDs.contains(id)
+        if shouldHandle {
+            pendingTurnRequestIDs.remove(id)
+        }
+        lock.unlock()
+
+        guard shouldHandle else {
+            return false
+        }
+
+        if let error = rpcErrorMessage(from: object) {
+            lock.lock()
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: error))
+            lock.unlock()
+            notifyChange()
+        }
+
+        return true
+    }
+
     private func handleNotification(_ object: [String: Any]) {
         guard let method = string(for: "method", in: object) else {
             return
@@ -284,6 +354,8 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
                 lock.unlock()
                 notifyChange()
             }
+        case "item/completed":
+            handleCompletedItem(object["params"] as? [String: Any])
         case "item/commandExecution/requestApproval":
             handleCommandExecutionApprovalRequest(
                 object["params"] as? [String: Any],
@@ -296,6 +368,30 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
             )
         default:
             return
+        }
+    }
+
+    private func handleCompletedItem(_ params: [String: Any]?) {
+        guard let item = params?["item"] as? [String: Any],
+              string(for: "type", in: item) == "agentMessage",
+              let itemID = string(for: "id", in: item) else {
+            return
+        }
+
+        let text = string(for: "text", in: item)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard text.isEmpty == false else {
+            return
+        }
+
+        lock.lock()
+        let inserted = completedAgentMessageItemIDs.insert(itemID).inserted
+        if inserted {
+            appendActivityItemLocked(SessionActivityItem(kind: .message, text: "Codex: \(text)"))
+        }
+        lock.unlock()
+
+        if inserted {
+            notifyChange()
         }
     }
 
