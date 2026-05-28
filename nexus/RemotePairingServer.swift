@@ -334,6 +334,25 @@ final class RemotePairingServer {
         }
 
         if request.method == "POST",
+           let sessionInputRequest = sessionInputRequest(from: request) {
+            await respondToAuthorizedRequest(
+                operation: .sendSessionInput,
+                request: request,
+                over: connection,
+                sessionID: sessionInputRequest.sessionID
+            ) { [self] in
+                let pairedDeviceID = try self.pairedDeviceID(from: request)
+                let body = try JSONDecoder().decode(RemoteSessionInputRequest.self, from: request.body)
+                return try await self.client.sendRemoteSessionInput(
+                    sessionID: sessionInputRequest.sessionID,
+                    pairedDeviceID: pairedDeviceID,
+                    text: body.text
+                )
+            }
+            return
+        }
+
+        if request.method == "POST",
            let sessionTextRequest = sessionTextRequest(from: request) {
             await respondToAuthorizedRequest(
                 operation: .sendSessionText,
@@ -629,6 +648,19 @@ final class RemotePairingServer {
         }
 
         return SessionScreenControlRequest(sessionID: sessionID)
+    }
+
+    private func sessionInputRequest(from request: ParsedRequest) -> SessionScreenRequest? {
+        let components = request.path.split(separator: "/")
+        guard components.count == 4,
+              components[0] == "remote-client",
+              components[1] == "sessions",
+              let sessionID = UUID(uuidString: String(components[2])),
+              components[3] == "input" else {
+            return nil
+        }
+
+        return SessionScreenRequest(sessionID: sessionID)
     }
 
     private func sessionTextRequest(from request: ParsedRequest) -> SessionScreenRequest? {

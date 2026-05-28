@@ -207,6 +207,27 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func structuredSessionComposerPresentationKeepsViewerPromptVisibleButDisabledUntilControllerTaken() {
+        let codexScreen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .codex,
+                isDefault: true,
+                state: .ready
+            ),
+            primarySurface: .structuredActivityFeed,
+            transcript: ""
+        )
+
+        #expect(structuredSessionComposerPresentation(for: codexScreen, isController: false) == StructuredSessionComposerPresentation(
+            placeholder: "Send a prompt to Codex",
+            isEnabled: false,
+            disabledReason: "Take Controller to send a prompt from this iPhone."
+        ))
+    }
+
+    @MainActor
     @Test func remoteSessionSurfacePresentationSupportsExistingStructuredCodexSessionsOnIPhone() {
         let screen = SessionScreen(
             session: Session(
@@ -8505,6 +8526,17 @@ private final class TrackingServiceClient: NexusServiceClient {
         return screenValue
     }
 
+    func sendRemoteSessionInput(sessionID: UUID, pairedDeviceID: UUID, text: String) async throws -> SessionScreen {
+        screenValue = SessionScreen(
+            session: sessionValue,
+            controller: .pairedDevice(pairedDeviceID),
+            transcript: screenValue.transcript + "\n> \(text)",
+            terminalColumns: screenValue.terminalColumns,
+            terminalRows: screenValue.terminalRows
+        )
+        return screenValue
+    }
+
     func sendRemoteSessionText(sessionID: UUID, pairedDeviceID: UUID, text: String) async throws -> SessionScreen {
         screenValue = SessionScreen(
             session: sessionValue,
@@ -8691,6 +8723,10 @@ private struct FailingServiceClient: NexusServiceClient {
     }
 
     func releaseRemoteSessionControl(sessionID: UUID, pairedDeviceID: UUID) async throws -> SessionScreen {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func sendRemoteSessionInput(sessionID: UUID, pairedDeviceID: UUID, text: String) async throws -> SessionScreen {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 

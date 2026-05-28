@@ -61,6 +61,7 @@ public protocol SessionScreenObservation: Sendable {
     func resizeSession(sessionID: String, columns: Int, rows: Int, reply: @escaping (Data?, NSString?) -> Void)
     func takeRemoteSessionControl(sessionID: String, pairedDeviceID: String, columns: Int, rows: Int, reply: @escaping (Data?, NSString?) -> Void)
     func releaseRemoteSessionControl(sessionID: String, pairedDeviceID: String, reply: @escaping (Data?, NSString?) -> Void)
+    func sendRemoteSessionInput(sessionID: String, pairedDeviceID: String, text: String, reply: @escaping (Data?, NSString?) -> Void)
     func sendRemoteSessionText(sessionID: String, pairedDeviceID: String, text: String, reply: @escaping (Data?, NSString?) -> Void)
     func sendRemoteSessionInputKey(sessionID: String, pairedDeviceID: String, key: String, reply: @escaping (Data?, NSString?) -> Void)
 }
@@ -105,6 +106,7 @@ public protocol NexusServiceClient {
     func resizeSession(sessionID: UUID, columns: Int, rows: Int) async throws -> SessionScreen
     func takeRemoteSessionControl(sessionID: UUID, pairedDeviceID: UUID, columns: Int, rows: Int) async throws -> SessionScreen
     func releaseRemoteSessionControl(sessionID: UUID, pairedDeviceID: UUID) async throws -> SessionScreen
+    func sendRemoteSessionInput(sessionID: UUID, pairedDeviceID: UUID, text: String) async throws -> SessionScreen
     func sendRemoteSessionText(sessionID: UUID, pairedDeviceID: UUID, text: String) async throws -> SessionScreen
     func sendRemoteSessionInputKey(sessionID: UUID, pairedDeviceID: UUID, key: SessionInputKey) async throws -> SessionScreen
 }
@@ -433,6 +435,17 @@ public final class NexusIPCClient: NexusServiceClient, @unchecked Sendable {
             proxy.releaseRemoteSessionControl(
                 sessionID: sessionID.uuidString,
                 pairedDeviceID: pairedDeviceID.uuidString,
+                reply: reply
+            )
+        }
+    }
+
+    nonisolated public func sendRemoteSessionInput(sessionID: UUID, pairedDeviceID: UUID, text: String) async throws -> SessionScreen {
+        try await requestDecodable { proxy, reply in
+            proxy.sendRemoteSessionInput(
+                sessionID: sessionID.uuidString,
+                pairedDeviceID: pairedDeviceID.uuidString,
+                text: text,
                 reply: reply
             )
         }

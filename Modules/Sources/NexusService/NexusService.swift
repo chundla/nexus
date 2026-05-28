@@ -156,11 +156,14 @@ final class SessionControllerRegistry: @unchecked Sendable {
 
 enum NexusSessionControlError: LocalizedError {
     case remoteControllerRequired
+    case remoteSessionInputControllerRequired
 
     var errorDescription: String? {
         switch self {
         case .remoteControllerRequired:
             "Take Controller on this iPhone before sending terminal input."
+        case .remoteSessionInputControllerRequired:
+            "Take Controller on this iPhone before sending Session input."
         }
     }
 }
@@ -1986,6 +1989,15 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         return normalizedSessionScreen(resizedScreen)
     }
 
+    func sendRemoteSessionInput(sessionID: UUID, pairedDeviceID: UUID, text: String) throws -> SessionScreen {
+        let resolvedSession = try readyRemoteControlledSession(
+            sessionID: sessionID,
+            pairedDeviceID: pairedDeviceID,
+            controllerError: .remoteSessionInputControllerRequired
+        )
+        return normalizedSessionScreen(try sessionRuntimeManager.sendInput(text, to: resolvedSession))
+    }
+
     func sendRemoteSessionText(sessionID: UUID, pairedDeviceID: UUID, text: String) throws -> SessionScreen {
         let resolvedSession = try readyRemoteControlledSession(sessionID: sessionID, pairedDeviceID: pairedDeviceID)
         let screenBeforeInput = normalizedSessionScreen(try sessionRuntimeManager.sessionScreen(for: resolvedSession))
@@ -2088,7 +2100,11 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         return latestScreen
     }
 
-    private func readyRemoteControlledSession(sessionID: UUID, pairedDeviceID: UUID) throws -> Session {
+    private func readyRemoteControlledSession(
+        sessionID: UUID,
+        pairedDeviceID: UUID,
+        controllerError: NexusSessionControlError = .remoteControllerRequired
+    ) throws -> Session {
         guard let session = try metadataStore.session(id: sessionID) else {
             throw NexusMetadataStoreError.sessionNotFound
         }
@@ -2098,7 +2114,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             throw NexusMetadataStoreError.sessionNotReady
         }
         guard sessionControllerRegistry.isRemoteController(sessionID: resolvedSession.id, pairedDeviceID: pairedDeviceID) else {
-            throw NexusSessionControlError.remoteControllerRequired
+            throw controllerError
         }
         return resolvedSession
     }
@@ -3803,6 +3819,19 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
                 try service.releaseRemoteSessionControl(
                     sessionID: resolveUUID(sessionID),
                     pairedDeviceID: resolveUUID(pairedDeviceID)
+                )
+            },
+            reply: reply
+        )
+    }
+
+    func sendRemoteSessionInput(sessionID: String, pairedDeviceID: String, text: String, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(
+            with: {
+                try service.sendRemoteSessionInput(
+                    sessionID: resolveUUID(sessionID),
+                    pairedDeviceID: resolveUUID(pairedDeviceID),
+                    text: text
                 )
             },
             reply: reply

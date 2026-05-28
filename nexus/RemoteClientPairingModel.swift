@@ -16,6 +16,7 @@ protocol RemotePairingClient {
     func fetchSessionScreen(for pairedMac: PairedMac, sessionID: UUID) async throws -> SessionScreen
     func takeSessionControl(for pairedMac: PairedMac, sessionID: UUID, columns: Int, rows: Int) async throws -> SessionScreen
     func releaseSessionControl(for pairedMac: PairedMac, sessionID: UUID) async throws -> SessionScreen
+    func sendSessionInput(for pairedMac: PairedMac, sessionID: UUID, text: String) async throws -> SessionScreen
     func sendSessionText(for pairedMac: PairedMac, sessionID: UUID, text: String) async throws -> SessionScreen
     func sendSessionInputKey(for pairedMac: PairedMac, sessionID: UUID, key: SessionInputKey) async throws -> SessionScreen
     func observeSessionScreen(
@@ -558,6 +559,34 @@ final class RemoteClientPairingModel {
 
         if preserveAttachment == false {
             stopFocusingRemoteSession()
+        }
+    }
+
+    func sendInputToFocusedRemoteSession(_ text: String) async throws {
+        guard let pairedMac = activePairedMac,
+              let sessionID = focusedSessionID else {
+            throw RemoteClientPairingModelError.focusedSessionUnavailable
+        }
+        guard focusedSessionIsController else {
+            throw RemoteClientPairingModelError.sessionInputControllerRequired
+        }
+
+        let screenBeforeRequest = focusedSessionScreen
+
+        do {
+            let screen = try await client.sendSessionInput(for: pairedMac, sessionID: sessionID, text: text)
+            applyFocusedSessionInputResponse(
+                screen,
+                sessionID: sessionID,
+                screenBeforeRequest: screenBeforeRequest
+            )
+        } catch {
+            throw loggedRemoteActionError(
+                error,
+                operation: .sendSessionInput,
+                pairedMac: pairedMac,
+                sessionID: sessionID
+            )
         }
     }
 
@@ -1107,6 +1136,7 @@ enum RemoteClientPairingModelError: LocalizedError {
     case pairedMacNotFound
     case focusedSessionUnavailable
     case controllerRequired
+    case sessionInputControllerRequired
     case actionRecovery(String)
 
     var errorDescription: String? {
@@ -1119,6 +1149,8 @@ enum RemoteClientPairingModelError: LocalizedError {
             "Open a Session before trying to control it"
         case .controllerRequired:
             "Take Controller on this iPhone before sending terminal input"
+        case .sessionInputControllerRequired:
+            "Take Controller on this iPhone before sending Session input"
         case .actionRecovery(let message):
             message
         }

@@ -767,6 +767,7 @@ private struct RemoteSessionScreenView: View {
 
     @Environment(\.scenePhase) private var scenePhase
     @State private var terminalDraft = ""
+    @State private var structuredPrompt = ""
     @State private var terminalViewportSize: CGSize = .zero
     @State private var isShowingStopConfirmation = false
     @State private var activeAction: RemoteSessionAction?
@@ -907,6 +908,12 @@ private struct RemoteSessionScreenView: View {
                     } else {
                         Text("Loading Session screen…")
                             .foregroundStyle(.secondary)
+                    }
+                }
+
+                if let screen {
+                    Section("Prompt") {
+                        structuredSessionPromptComposer(screen)
                     }
                 }
             } else {
@@ -1145,6 +1152,31 @@ private struct RemoteSessionScreenView: View {
         .padding(.vertical, 4)
     }
 
+    @ViewBuilder
+    private func structuredSessionPromptComposer(_ screen: SessionScreen) -> some View {
+        let composer = structuredSessionComposerPresentation(for: screen, isController: model.focusedSessionIsController)
+
+        TextField(composer.placeholder, text: $structuredPrompt)
+            .textInputAutocapitalization(.sentences)
+            .autocorrectionDisabled()
+            .submitLabel(.send)
+            .disabled(composer.isEnabled == false || isPerformingAction)
+            .onSubmit {
+                sendStructuredPrompt()
+            }
+
+        Button("Send Prompt") {
+            sendStructuredPrompt()
+        }
+        .disabled(composer.isEnabled == false || structuredPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isPerformingAction)
+
+        if let disabledReason = composer.disabledReason {
+            Text(disabledReason)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+
     private func structuredSessionActivityRowView(_ row: StructuredSessionActivityRow) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: row.systemImage)
@@ -1209,6 +1241,23 @@ private struct RemoteSessionScreenView: View {
     private var terminalCellWidth: CGFloat { 8.5 }
 
     private var terminalCellHeight: CGFloat { 20 }
+
+    private func sendStructuredPrompt() {
+        let prompt = structuredPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard prompt.isEmpty == false else {
+            return
+        }
+
+        structuredPrompt = ""
+        Task {
+            do {
+                try await model.sendInputToFocusedRemoteSession(prompt)
+            } catch {
+                presentedError = RemoteClientHomePresentedError(message: error.localizedDescription)
+                structuredPrompt = prompt
+            }
+        }
+    }
 
     private func terminalViewport() -> (columns: Int, rows: Int) {
         if terminalViewportSize != .zero {

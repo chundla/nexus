@@ -27,6 +27,12 @@ struct StructuredSessionPresentationCopy: Equatable {
     let composerPlaceholder: String
 }
 
+struct StructuredSessionComposerPresentation: Equatable {
+    let placeholder: String
+    let isEnabled: Bool
+    let disabledReason: String?
+}
+
 func focusedSessionSurface(for screen: SessionScreen) -> FocusedSessionSurface {
     switch screen.primarySurface {
     case .terminal:
@@ -53,6 +59,15 @@ func structuredSessionPresentationCopy(for screen: SessionScreen) -> StructuredS
         emptyStateTitle: "No Session activity yet",
         emptyStateDescription: "Send a prompt to start the \(screen.session.providerID.displayName) Session.",
         composerPlaceholder: "Send a prompt to \(screen.session.providerID.displayName)"
+    )
+}
+
+func structuredSessionComposerPresentation(for screen: SessionScreen, isController: Bool) -> StructuredSessionComposerPresentation {
+    let copy = structuredSessionPresentationCopy(for: screen)
+    return StructuredSessionComposerPresentation(
+        placeholder: copy.composerPlaceholder,
+        isEnabled: isController,
+        disabledReason: isController ? nil : "Take Controller to send a prompt from this iPhone."
     )
 }
 

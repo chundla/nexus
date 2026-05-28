@@ -551,6 +551,64 @@ struct RemotePairingNetworkTests {
         #expect(sessionSurfaceSupport(for: screen, on: .remoteClient, workspaceKind: .local) == .supported)
     }
 
+    @Test func remoteControllerSendsStructuredPromptOverGenericSessionInputDedicatedNetworkAPI() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(stdout: "Usage: codex\n")
+                ])
+            ),
+            sessionRuntimeManager: StructuredPromptSessionRuntimeManager(providerName: "Codex")
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
+
+        _ = try await client.setRemoteAccessEnabled(true)
+        let pairing = try await client.startPairing()
+        let group = try await client.createWorkspaceGroup(name: "Client Work")
+        let workspace = try await client.createLocalWorkspace(
+            name: "Nexus",
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+
+        let remoteClient = RemotePairingHTTPClient()
+        let pairedMac = try await remoteClient.completePairing(
+            host: server.displayHost,
+            port: server.port,
+            pairingCode: pairing.code,
+            deviceName: "Chris’s iPhone"
+        )
+        let session = try await remoteClient.launchOrResumeDefaultSession(
+            for: pairedMac,
+            workspaceID: workspace.id,
+            providerID: .codex
+        )
+
+        _ = try await remoteClient.takeSessionControl(for: pairedMac, sessionID: session.id, columns: 44, rows: 12)
+        let responseScreen = try await remoteClient.sendSessionInput(for: pairedMac, sessionID: session.id, text: "Ship it")
+        let fetchedScreen = try await remoteClient.fetchSessionScreen(for: pairedMac, sessionID: session.id)
+
+        #expect(responseScreen.controller == .pairedDevice(try #require(pairedMac.pairedDeviceID)))
+        #expect(responseScreen.primarySurface == .structuredActivityFeed)
+        #expect(responseScreen.activityItems.map(\.text) == [
+            "Codex shared Session stream connected",
+            "You: Ship it",
+            "Codex: Acknowledged Ship it"
+        ])
+        #expect(fetchedScreen == responseScreen)
+    }
+
     @Test func createsCodexNamedSessionOverDedicatedNetworkAPIWithoutDefaultSession() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)
@@ -1717,6 +1775,159 @@ private final class DelayedEchoSessionRuntimeManager: SessionRuntimeManaging, @u
             terminalColumns: runtime.columns,
             terminalRows: runtime.rows
         )
+    }
+
+    private func record(for session: Session) throws -> RuntimeRecord {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let runtime = runtimes[session.id] else {
+            throw NexusMetadataStoreError.sessionNotFound
+        }
+        return runtime
+    }
+
+    private func notifyUpdateObservers(for sessionID: UUID) {
+        let observers: [@Sendable () -> Void]
+        lock.lock()
+        observers = Array(updateObservers[sessionID, default: [:]].values)
+        lock.unlock()
+        observers.forEach { $0() }
+    }
+}
+
+private final class StructuredPromptSessionRuntimeManager: SessionRuntimeManaging, @unchecked Sendable {
+    private struct RuntimeRecord {
+        var session: Session
+        var terminalColumns: Int = 80
+        var terminalRows: Int = 24
+        var activityItems: [SessionActivityItem]
+    }
+
+    private let lock = NSLock()
+    private let providerName: String
+    private var runtimes: [UUID: RuntimeRecord] = [:]
+    private var updateObservers: [UUID: [UUID: @Sendable () -> Void]] = [:]
+    private var observedSessionIDs: [UUID: UUID] = [:]
+
+    init(providerName: String) {
+        self.providerName = providerName
+    }
+
+    func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) throws {
+        lock.lock()
+        runtimes[session.id] = RuntimeRecord(
+            session: session,
+            activityItems: [SessionActivityItem(kind: .status, text: "\(providerName) shared Session stream connected")]
+        )
+        lock.unlock()
+        notifyUpdateObservers(for: session.id)
+    }
+
+    func stop(session: Session) throws {
+        lock.lock()
+        runtimes.removeValue(forKey: session.id)
+        lock.unlock()
+        notifyUpdateObservers(for: session.id)
+    }
+
+    func remove(session: Session) {
+        lock.lock()
+        runtimes.removeValue(forKey: session.id)
+        updateObservers.removeValue(forKey: session.id)
+        observedSessionIDs = observedSessionIDs.filter { $0.value != session.id }
+        lock.unlock()
+    }
+
+    func hasRuntime(for session: Session) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return runtimes[session.id] != nil
+    }
+
+    func runtimeState(for session: Session) -> Session.State? {
+        hasRuntime(for: session) ? .ready : nil
+    }
+
+    func sessionRecordAdapterMetadata(for session: Session) -> SessionRecordAdapterMetadata? {
+        nil
+    }
+
+    func sessionScreen(for session: Session) throws -> SessionScreen {
+        let runtime = try record(for: session)
+        return SessionScreen(
+            session: runtime.session,
+            primarySurface: .structuredActivityFeed,
+            transcript: runtime.activityItems.map(\.text).joined(separator: "\n"),
+            terminalColumns: runtime.terminalColumns,
+            terminalRows: runtime.terminalRows,
+            activityItems: runtime.activityItems
+        )
+    }
+
+    func addUpdateObserver(id: UUID, for session: Session, observer: @escaping @Sendable () -> Void) {
+        lock.lock()
+        updateObservers[session.id, default: [:]][id] = observer
+        observedSessionIDs[id] = session.id
+        lock.unlock()
+    }
+
+    func removeUpdateObserver(id: UUID) {
+        lock.lock()
+        guard let sessionID = observedSessionIDs.removeValue(forKey: id) else {
+            lock.unlock()
+            return
+        }
+
+        updateObservers[sessionID]?.removeValue(forKey: id)
+        if updateObservers[sessionID]?.isEmpty == true {
+            updateObservers.removeValue(forKey: sessionID)
+        }
+        lock.unlock()
+    }
+
+    func sendInput(_ text: String, to session: Session) throws -> SessionScreen {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty == false else {
+            return try sessionScreen(for: session)
+        }
+
+        lock.lock()
+        guard var runtime = runtimes[session.id] else {
+            lock.unlock()
+            throw NexusMetadataStoreError.sessionNotFound
+        }
+        runtime.activityItems.append(SessionActivityItem(kind: .message, text: "You: \(trimmed)"))
+        runtime.activityItems.append(SessionActivityItem(kind: .message, text: "\(providerName): Acknowledged \(trimmed)"))
+        runtimes[session.id] = runtime
+        lock.unlock()
+        notifyUpdateObservers(for: session.id)
+        return try sessionScreen(for: session)
+    }
+
+    func sendText(_ text: String, to session: Session) throws -> SessionScreen {
+        try sessionScreen(for: session)
+    }
+
+    func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool, to session: Session) throws -> SessionScreen {
+        try sessionScreen(for: session)
+    }
+
+    func respondToApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision, to session: Session) throws -> SessionScreen {
+        throw NexusSessionApprovalError.approvalRequestsUnavailable
+    }
+
+    func resize(session: Session, columns: Int, rows: Int) throws -> SessionScreen {
+        lock.lock()
+        guard var runtime = runtimes[session.id] else {
+            lock.unlock()
+            throw NexusMetadataStoreError.sessionNotFound
+        }
+        runtime.terminalColumns = columns
+        runtime.terminalRows = rows
+        runtimes[session.id] = runtime
+        lock.unlock()
+        notifyUpdateObservers(for: session.id)
+        return try sessionScreen(for: session)
     }
 
     private func record(for session: Session) throws -> RuntimeRecord {

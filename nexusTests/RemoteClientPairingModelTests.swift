@@ -652,6 +652,86 @@ struct RemoteClientPairingModelTests {
         #expect(model.focusedSessionSurfaceSupport == .unsupported)
     }
 
+    @Test func sendingStructuredPromptUsesGenericSessionInputRouteAndUpdatesFocusedScreen() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: UUID()
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .codex,
+            isDefault: true,
+            state: .ready
+        )
+        let pairedDeviceID = UUID()
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: pairedDeviceID
+        )
+        let initialScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "Codex shared Session stream connected",
+            activityItems: [SessionActivityItem(kind: .status, text: "Codex shared Session stream connected")]
+        )
+        let controlledScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            controller: .pairedDevice(pairedDeviceID),
+            transcript: "Codex shared Session stream connected",
+            terminalColumns: 44,
+            terminalRows: 12,
+            activityItems: [SessionActivityItem(kind: .status, text: "Codex shared Session stream connected")]
+        )
+        let updatedScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            controller: .pairedDevice(pairedDeviceID),
+            transcript: "Codex shared Session stream connected\nYou: Ship it",
+            terminalColumns: 44,
+            terminalRows: 12,
+            activityItems: [
+                SessionActivityItem(kind: .status, text: "Codex shared Session stream connected"),
+                SessionActivityItem(kind: .message, text: "You: Ship it")
+            ]
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let client = StubRemotePairingClient(
+            result: pairedMac,
+            sessionScreen: initialScreen,
+            takeSessionControlResult: .success(controlledScreen),
+            sendSessionInputResult: .success(updatedScreen)
+        )
+        let model = RemoteClientPairingModel(client: client, store: store)
+        model.catalog = RemoteWorkspaceCatalog(
+            workspaceGroups: [],
+            recentNavigation: [],
+            workspaceOverviews: [WorkspaceOverview(workspace: workspace, providerCards: [])]
+        )
+
+        await model.focusRemoteSession(sessionID: session.id)
+        try await model.takeFocusedRemoteSessionControl(columns: 44, rows: 12)
+        try await model.sendInputToFocusedRemoteSession("Ship it")
+
+        #expect(client.requestLog.contains("sendSessionInput"))
+        #expect(client.requestLog.contains("sendSessionText") == false)
+        #expect(model.focusedSessionScreen == updatedScreen)
+    }
+
     @Test func focusingRemoteSessionFetchesInitialScreenWhenObservationStartsWithoutSnapshot() async throws {
         let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -3177,6 +3257,7 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
     let providerDetailFetchGate: AsyncGate?
     let takeSessionControlResult: Result<SessionScreen, any Error>?
     let releaseSessionControlResult: Result<SessionScreen, any Error>?
+    let sendSessionInputResult: Result<SessionScreen, any Error>?
     let sendSessionTextResult: Result<SessionScreen, any Error>?
     let sendSessionInputKeyResult: Result<SessionScreen, any Error>?
     private let defaultSessionScreen: SessionScreen
@@ -3239,6 +3320,7 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
         providerDetailFetchGate: AsyncGate? = nil,
         takeSessionControlResult: Result<SessionScreen, any Error>? = nil,
         releaseSessionControlResult: Result<SessionScreen, any Error>? = nil,
+        sendSessionInputResult: Result<SessionScreen, any Error>? = nil,
         sendSessionTextResult: Result<SessionScreen, any Error>? = nil,
         sendSessionInputKeyResult: Result<SessionScreen, any Error>? = nil,
         emitsInitialObservedScreen: Bool = true,
@@ -3260,6 +3342,7 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
         self.providerDetailFetchGate = providerDetailFetchGate
         self.takeSessionControlResult = takeSessionControlResult
         self.releaseSessionControlResult = releaseSessionControlResult
+        self.sendSessionInputResult = sendSessionInputResult
         self.sendSessionTextResult = sendSessionTextResult
         self.sendSessionInputKeyResult = sendSessionInputKeyResult
         self.providerDetailResults = providerDetailResults
@@ -3371,6 +3454,25 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
             transcript: defaultSessionScreen.transcript,
             terminalColumns: defaultSessionScreen.terminalColumns,
             terminalRows: defaultSessionScreen.terminalRows
+        )
+    }
+
+    func sendSessionInput(for pairedMac: PairedMac, sessionID: UUID, text: String) async throws -> SessionScreen {
+        requestLog.append("sendSessionInput")
+
+        if let sendSessionInputResult {
+            return try sendSessionInputResult.get()
+        }
+
+        return SessionScreen(
+            session: defaultSessionScreen.session,
+            primarySurface: defaultSessionScreen.primarySurface,
+            controller: .pairedDevice(pairedMac.pairedDeviceID ?? UUID()),
+            transcript: defaultSessionScreen.transcript + text,
+            terminalColumns: defaultSessionScreen.terminalColumns,
+            terminalRows: defaultSessionScreen.terminalRows,
+            activityItems: defaultSessionScreen.activityItems,
+            approvalRequests: defaultSessionScreen.approvalRequests
         )
     }
 
