@@ -449,11 +449,19 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
 
     init(
         localShellCommandBuilder: LocalShellCommandBuilder = LocalShellCommandBuilder(),
+        piTransportFactory: PiRPCSessionRuntime.TransportFactory? = nil,
         codexTransportFactory: CodexAppServerRuntime.TransportFactory? = nil,
         localProtocolNativeRuntimeFactories: [ProviderID: ProtocolNativeRuntimeFactory]? = nil,
         remoteProtocolNativeRuntimeFactories: [ProviderID: ProtocolNativeRuntimeFactory] = [:],
         remoteProtocolSessionCommandBuilder: RemoteProtocolSessionCommandBuilder = RemoteProtocolSessionCommandBuilder()
     ) {
+        let resolvedPiTransportFactory: PiRPCSessionRuntime.TransportFactory = piTransportFactory ?? { executable, arguments, workingDirectory in
+            try ProcessPiRPCTransport(
+                executable: executable,
+                arguments: arguments,
+                workingDirectory: workingDirectory
+            )
+        }
         let resolvedCodexTransportFactory: CodexAppServerRuntime.TransportFactory = codexTransportFactory ?? { executable, arguments, workingDirectory in
             try ProcessCodexAppServerTransport(
                 executable: executable,
@@ -485,6 +493,50 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
 
         if remoteProtocolNativeRuntimeFactories.isEmpty {
             self.remoteProtocolNativeRuntimeFactories = [
+                .pi: { launchConfiguration, _, _ in
+                    guard let remoteHost = launchConfiguration.remoteHost,
+                          let runtimeIdentifier = launchConfiguration.remoteRuntimeIdentifier else {
+                        throw NSError(
+                            domain: "ProcessSessionRuntimeLauncher",
+                            code: 1,
+                            userInfo: [NSLocalizedDescriptionKey: "Remote Pi launch requires a Host and runtime identifier."]
+                        )
+                    }
+
+                    let bridgeArguments = remoteProtocolSessionCommandBuilder.bridgeArguments(
+                        host: remoteHost,
+                        runtimeIdentifier: runtimeIdentifier,
+                        workingDirectory: launchConfiguration.workingDirectory,
+                        executable: launchConfiguration.executable,
+                        providerArguments: PiRPCSessionRuntime.transportArguments(
+                            sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.piSessionLinkage
+                        ),
+                        launchMode: launchConfiguration.remoteRuntimeLaunchMode
+                    )
+
+                    return try PiRPCSessionRuntime(
+                        executable: "/usr/bin/ssh",
+                        workingDirectory: launchConfiguration.workingDirectory,
+                        sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.piSessionLinkage,
+                        terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
+                        unexpectedTerminationState: .interrupted,
+                        unexpectedTerminationMessageBuilder: { _ in
+                            "Pi Session stream disconnected. Relaunch to reconnect to the tmux-backed remote runtime."
+                        },
+                        stopHandler: {
+                            try Self.runCommand(
+                                executable: "/usr/bin/ssh",
+                                arguments: remoteProtocolSessionCommandBuilder.stopArguments(
+                                    runtimeIdentifier: runtimeIdentifier,
+                                    host: remoteHost
+                                )
+                            )
+                        },
+                        transportFactory: { _, _, _ in
+                            try resolvedPiTransportFactory("/usr/bin/ssh", bridgeArguments, nil)
+                        }
+                    )
+                },
                 .codex: { launchConfiguration, _, _ in
                     guard let remoteHost = launchConfiguration.remoteHost,
                           let runtimeIdentifier = launchConfiguration.remoteRuntimeIdentifier else {
