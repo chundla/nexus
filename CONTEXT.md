@@ -49,11 +49,11 @@ A Nexus client, such as the iOS app, that attaches to Mac-managed Sessions over 
 _Avoid_: remote workspace, execution host
 
 **Controller**:
-The one attached client currently allowed to send input to a Session.
+The one attached client currently allowed to perform Session-writing actions such as sending terminal input, structured prompts, or **Approval Request** decisions.
 _Avoid_: owner, active viewer
 
 **Viewer**:
-An attached client that can observe a Session without sending input.
+An attached client that can observe a Session without performing Session-writing actions.
 _Avoid_: passive controller, read-only owner
 
 **Pairing**:
@@ -200,4 +200,8 @@ _Avoid_: stop, close
 - provider-native words like "thread" or "conversation" could leak into product language — resolved: Nexus keeps **Session** as the public concept and stores provider-native identifiers as adapter details.
 - a **Provider** identity could be mistaken for a fixed UI shape — resolved: **Session Surface** is chosen per Session/runtime context, so the same **Provider** may appear through different surfaces.
 - **Session Surface** could be mistaken for an exclusive all-or-nothing mode — resolved: a **Session** has one primary **Session Surface** and may still expose secondary capabilities.
+- **Session Surface Support** could be mistaken for provider-specific branding rules — resolved: when a client supports a primary **Session Surface**, that support applies across all launchable **Sessions** using that surface unless a separate product limit says otherwise.
+- **Session Surface Support** could be mistaken for current write authority — resolved: it describes whether a client can present and operate a surface type at all, while **Controller** vs **Viewer** decides whether that attached client may perform Session-writing actions right now.
 - approvals could be confused with provider login or auth — resolved: **Approval Request** is Session-time control over provider work, while provider authentication remains provider-native readiness/auth state.
+- "send input" could be mistaken for terminal keystrokes only — resolved: the **Controller** owns all Session-writing actions, including structured prompts and **Approval Request** decisions.
+- **Controller** could be mistaken for always owning a visible terminal-size concept — resolved: for structured **Sessions**, **Controller** is still the writer-authority concept; any viewport mechanics are implementation details rather than product language.
