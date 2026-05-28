@@ -335,7 +335,7 @@ struct nexusTests {
     }
 
     @MainActor
-    @Test func remoteProviderActionStateKeepsStructuredNamedSessionCreationBlockedOnIPhone() {
+    @Test func remoteProviderActionStateEnablesSupportedStructuredNamedSessionCreationOnIPhone() {
         let createState = RemoteProviderActionState(
             capability: ProviderCapability(
                 action: .createNamedSession,
@@ -348,8 +348,8 @@ struct nexusTests {
         )
 
         #expect(createState == RemoteProviderActionState(
-            isEnabled: false,
-            disabledReason: "Open this Workspace on the paired Mac to create a Codex Named Session because this iPhone cannot create structured Named Sessions yet."
+            isEnabled: true,
+            disabledReason: nil
         ))
     }
 

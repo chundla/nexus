@@ -49,7 +49,7 @@ struct RemoteProviderActionState: Equatable {
             case .launchDefaultSession:
                 disabledReason = "Open this Workspace on the paired Mac to launch \(provider.displayName) because this iPhone cannot operate its primary Session surface yet."
             case .createNamedSession:
-                disabledReason = "Open this Workspace on the paired Mac to create a \(provider.displayName) Named Session because this iPhone cannot create structured Named Sessions yet."
+                disabledReason = "Open this Workspace on the paired Mac to create a \(provider.displayName) Named Session because this iPhone cannot operate its primary Session surface yet."
             }
             self.init(isEnabled: false, disabledReason: disabledReason)
             return
@@ -160,7 +160,10 @@ private func remoteClientSupportsProviderAction(
                 workspaceKind: workspaceKind
             ) == .supported
         case .createNamedSession:
-            false
+            structuredRemoteClientSessionSurfaceSupport(
+                providerID: providerID,
+                workspaceKind: workspaceKind
+            ) == .supported
         }
     }
 }

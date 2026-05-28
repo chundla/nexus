@@ -2193,7 +2193,13 @@ struct RemoteClientPairingModelTests {
                 result: pairedMac,
                 catalog: refreshedCatalog,
                 providerDetail: refreshedDetail,
-                sessionScreen: SessionScreen(session: session, transcript: "Codex ready"),
+                sessionScreen: SessionScreen(
+                    session: session,
+                    primarySurface: .structuredActivityFeed,
+                    controller: .mac,
+                    transcript: "Codex ready",
+                    activityItems: [SessionActivityItem(kind: .status, text: "Codex ready")]
+                ),
                 createdNamedSession: session
             ),
             store: store
@@ -2206,6 +2212,10 @@ struct RemoteClientPairingModelTests {
         #expect(model.catalog == refreshedCatalog)
         #expect(model.focusedSessionID == session.id)
         #expect(model.focusedSessionScreen?.session.id == session.id)
+        #expect(model.focusedSessionScreen?.primarySurface == .structuredActivityFeed)
+        #expect(model.focusedSessionScreen?.controller == .mac)
+        #expect(model.focusedSessionSurfaceSupport == .supported)
+        #expect(model.focusedSessionIsController == false)
         #expect(model.providerDetail(for: workspace.id, providerID: .codex)?.alternateSessions.map { $0.id } == [session.id])
     }
 
@@ -2994,6 +3004,80 @@ struct RemoteClientPairingModelTests {
         #expect(model.focusedSessionID == failedSession.id)
         #expect(model.focusedSessionScreen?.session.state == .failed)
         #expect(model.providerDetail(for: workspace.id, providerID: .claude)?.failedSessions.map { $0.id } == [failedSession.id])
+    }
+
+    @Test func creatingFailedStructuredNamedRemoteSessionStillFocusesInspectableSessionRecord() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: UUID()
+        )
+        let failedSession = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .codex,
+            name: "Session 1",
+            isDefault: false,
+            state: .failed,
+            failureMessage: "Codex executable was not found in the service search paths."
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let refreshedDetail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .codex),
+            health: ProviderHealthSummary(
+                state: .unavailable,
+                summary: "Codex executable was not found in the service search paths.",
+                launchability: .notLaunchable
+            ),
+            defaultSession: nil,
+            alternateSessions: [],
+            failedSessions: [failedSession]
+        )
+        let failedScreen = SessionScreen(
+            session: failedSession,
+            primarySurface: .structuredActivityFeed,
+            controller: .mac,
+            transcript: failedSession.failureMessage ?? "",
+            activityItems: [SessionActivityItem(kind: .error, text: failedSession.failureMessage ?? "")]
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let model = RemoteClientPairingModel(
+            client: StubRemotePairingClient(
+                result: pairedMac,
+                providerDetail: refreshedDetail,
+                sessionScreen: failedScreen,
+                createdNamedSession: failedSession
+            ),
+            store: store
+        )
+
+        let createdSession = try await model.createNamedSession(workspaceID: workspace.id, providerID: .codex)
+        await Task.yield()
+
+        #expect(createdSession.state == .failed)
+        #expect(model.focusedSessionID == failedSession.id)
+        #expect(model.focusedSessionScreen?.session.state == .failed)
+        #expect(model.focusedSessionScreen?.primarySurface == .structuredActivityFeed)
+        #expect(model.focusedSessionScreen?.activityItems.map(\.kind) == [.error])
+        #expect(model.focusedSessionSurfaceSupport == .supported)
+        #expect(model.focusedSessionIsController == false)
+        #expect(model.providerDetail(for: workspace.id, providerID: .codex)?.failedSessions.map { $0.id } == [failedSession.id])
     }
 
     @Test func relaunchingRemoteSessionRecordRefreshesProviderDetailAndFocusesSession() async throws {
