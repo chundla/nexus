@@ -3065,6 +3065,112 @@ struct RemoteClientPairingModelTests {
         #expect(model.providerDetail(for: workspace.id, providerID: .claude)?.alternateSessions.first?.state == .ready)
     }
 
+    @Test func relaunchingFailedStructuredRemoteSessionKeepsInspectableIPhoneSurfaceSupport() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: UUID()
+        )
+        let failedSession = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .codex,
+            name: "Review",
+            isDefault: false,
+            state: .failed,
+            failureMessage: "Codex executable was not found in the service search paths."
+        )
+        let readySession = Session(
+            id: failedSession.id,
+            workspaceID: workspace.id,
+            providerID: .codex,
+            name: "Review",
+            isDefault: false,
+            state: .ready
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let failedScreen = SessionScreen(
+            session: failedSession,
+            primarySurface: .structuredActivityFeed,
+            transcript: failedSession.failureMessage ?? "",
+            activityItems: [SessionActivityItem(kind: .error, text: failedSession.failureMessage ?? "")]
+        )
+        let readyScreen = SessionScreen(
+            session: readySession,
+            primarySurface: .structuredActivityFeed,
+            transcript: "Codex shared Session stream connected",
+            activityItems: [SessionActivityItem(kind: .status, text: "Codex shared Session stream connected")]
+        )
+        let initialDetail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .codex),
+            health: ProviderHealthSummary(state: .unavailable, summary: "Codex executable was not found in the service search paths."),
+            defaultSession: nil,
+            alternateSessions: [],
+            failedSessions: [failedSession]
+        )
+        let refreshedDetail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .codex),
+            health: ProviderHealthSummary(state: .available, summary: "Codex available"),
+            defaultSession: nil,
+            alternateSessions: [readySession],
+            failedSessions: []
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let client = StubRemotePairingClient(
+            result: pairedMac,
+            providerDetail: refreshedDetail,
+            providerDetailResults: [initialDetail, refreshedDetail],
+            sessionScreen: readyScreen,
+            sessionScreenResults: [.success(failedScreen), .success(readyScreen)],
+            launchedSession: readySession
+        )
+        let model = RemoteClientPairingModel(client: client, store: store)
+        model.catalog = RemoteWorkspaceCatalog(
+            workspaceGroups: [],
+            recentNavigation: [],
+            workspaceOverviews: [WorkspaceOverview(workspace: workspace, providerCards: [])]
+        )
+
+        await model.loadProviderDetail(workspaceID: workspace.id, providerID: .codex)
+        await model.focusRemoteSession(sessionID: failedSession.id)
+        await Task.yield()
+
+        #expect(model.focusedSessionSurfaceSupport == .supported)
+        #expect(model.focusedSessionScreen?.activityItems.map(\.kind) == [.error])
+
+        let relaunchedSession = try await model.launchOrResumeSession(
+            sessionID: failedSession.id,
+            workspaceID: workspace.id,
+            providerID: .codex
+        )
+        try await Task.sleep(nanoseconds: 20_000_000)
+        await Task.yield()
+
+        #expect(relaunchedSession.state == .ready)
+        #expect(model.focusedSessionSurfaceSupport == .supported)
+        #expect(model.focusedSessionScreen?.session.state == .ready)
+        #expect(model.focusedSessionScreen?.primarySurface == .structuredActivityFeed)
+        #expect(model.providerDetail(for: workspace.id, providerID: .codex)?.failedSessions.isEmpty == true)
+        #expect(model.providerDetail(for: workspace.id, providerID: .codex)?.alternateSessions.first?.state == .ready)
+    }
+
     @Test func defaultSessionSectionAllowsDeletingNonRunningDefaultSessionRecord() {
         let workspace = Workspace(
             id: UUID(),

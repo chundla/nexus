@@ -2470,12 +2470,16 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
 
     private func staticSessionActivityItems(for session: Session, transcript: String, primarySurface: SessionSurface) -> [SessionActivityItem] {
         guard primarySurface == .structuredActivityFeed,
-              session.state == .interrupted,
               transcript.isEmpty == false else {
             return []
         }
 
-        return [SessionActivityItem(kind: .error, text: transcript)]
+        switch session.state {
+        case .failed, .interrupted:
+            return [SessionActivityItem(kind: .error, text: transcript)]
+        case .ready, .exited:
+            return []
+        }
     }
 
     private func navigationItem(_ target: NavigationTarget) throws -> NavigationItem? {
