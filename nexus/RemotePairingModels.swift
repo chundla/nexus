@@ -232,6 +232,23 @@ struct RemotePairingHTTPClient {
         return try JSONDecoder().decode(SessionScreen.self, from: data)
     }
 
+    func respondToApprovalRequest(
+        for pairedMac: PairedMac,
+        sessionID: UUID,
+        approvalRequestID: UUID,
+        decision: ApprovalRequestDecision
+    ) async throws -> SessionScreen {
+        var request = try authenticatedRequest(
+            for: pairedMac,
+            path: "/remote-client/sessions/\(sessionID.uuidString)/approval-requests/\(approvalRequestID.uuidString)/decision"
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(RemoteApprovalRequestDecisionRequest(decision: decision))
+        let data = try await send(request)
+        return try JSONDecoder().decode(SessionScreen.self, from: data)
+    }
+
     func sendSessionText(for pairedMac: PairedMac, sessionID: UUID, text: String) async throws -> SessionScreen {
         var request = try authenticatedRequest(
             for: pairedMac,
@@ -502,6 +519,10 @@ struct RemoteSessionInputRequest: Codable, Sendable {
 
 struct RemoteSessionTextRequest: Codable, Sendable {
     let text: String
+}
+
+struct RemoteApprovalRequestDecisionRequest: Codable, Sendable {
+    let decision: ApprovalRequestDecision
 }
 
 struct RemoteSessionKeyRequest: Codable, Sendable {

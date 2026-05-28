@@ -228,6 +228,14 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func structuredSessionApprovalRequestPresentationKeepsViewerActionsVisibleButDisabledUntilControllerTaken() {
+        #expect(structuredSessionApprovalRequestPresentation(isController: false) == StructuredSessionApprovalRequestPresentation(
+            actionsAreEnabled: false,
+            disabledReason: "Take Controller to respond to Approval Requests from this iPhone."
+        ))
+    }
+
+    @MainActor
     @Test func remoteSessionSurfacePresentationSupportsExistingStructuredCodexSessionsOnIPhone() {
         let screen = SessionScreen(
             session: Session(
@@ -8537,6 +8545,42 @@ private final class TrackingServiceClient: NexusServiceClient {
         return screenValue
     }
 
+    func respondToRemoteApprovalRequest(
+        sessionID: UUID,
+        pairedDeviceID: UUID,
+        approvalRequestID: UUID,
+        decision: ApprovalRequestDecision
+    ) async throws -> SessionScreen {
+        respondedApprovalRequests.append((sessionID: sessionID, approvalRequestID: approvalRequestID, decision: decision))
+        let updatedApprovalRequests = screenValue.approvalRequests.map { request in
+            guard request.id == approvalRequestID else {
+                return request
+            }
+
+            return SessionApprovalRequest(
+                id: request.id,
+                title: request.title,
+                text: request.text,
+                state: decision == .approve ? .approved : .denied
+            )
+        }
+        screenValue = SessionScreen(
+            session: sessionValue,
+            controller: .pairedDevice(pairedDeviceID),
+            transcript: screenValue.transcript,
+            terminalColumns: screenValue.terminalColumns,
+            terminalRows: screenValue.terminalRows,
+            activityItems: screenValue.activityItems + [
+                SessionActivityItem(
+                    kind: .approvalDecision,
+                    text: "\(decision == .approve ? "Approved" : "Denied"): \(screenValue.approvalRequests.first(where: { $0.id == approvalRequestID })?.title ?? "Approval Request")"
+                )
+            ],
+            approvalRequests: updatedApprovalRequests
+        )
+        return screenValue
+    }
+
     func sendRemoteSessionText(sessionID: UUID, pairedDeviceID: UUID, text: String) async throws -> SessionScreen {
         screenValue = SessionScreen(
             session: sessionValue,
@@ -8727,6 +8771,10 @@ private struct FailingServiceClient: NexusServiceClient {
     }
 
     func sendRemoteSessionInput(sessionID: UUID, pairedDeviceID: UUID, text: String) async throws -> SessionScreen {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func respondToRemoteApprovalRequest(sessionID: UUID, pairedDeviceID: UUID, approvalRequestID: UUID, decision: ApprovalRequestDecision) async throws -> SessionScreen {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 

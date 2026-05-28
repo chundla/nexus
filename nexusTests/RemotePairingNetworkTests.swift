@@ -551,6 +551,143 @@ struct RemotePairingNetworkTests {
         #expect(sessionSurfaceSupport(for: screen, on: .remoteClient, workspaceKind: .local) == .supported)
     }
 
+    @Test func remoteControllerApprovesStructuredApprovalRequestOverDedicatedNetworkAPI() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let approvalRequest = SessionApprovalRequest(
+            title: "deploy --prod",
+            text: "Codex needs approval to deploy to production.",
+            state: .pending
+        )
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(stdout: "Usage: codex\n")
+                ])
+            ),
+            sessionRuntimeManager: StructuredPromptSessionRuntimeManager(
+                providerName: "Codex",
+                approvalRequests: [approvalRequest]
+            )
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
+
+        _ = try await client.setRemoteAccessEnabled(true)
+        let pairing = try await client.startPairing()
+        let group = try await client.createWorkspaceGroup(name: "Client Work")
+        let workspace = try await client.createLocalWorkspace(
+            name: "Nexus",
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+
+        let remoteClient = RemotePairingHTTPClient()
+        let pairedMac = try await remoteClient.completePairing(
+            host: server.displayHost,
+            port: server.port,
+            pairingCode: pairing.code,
+            deviceName: "Chris’s iPhone"
+        )
+        let session = try await remoteClient.launchOrResumeDefaultSession(
+            for: pairedMac,
+            workspaceID: workspace.id,
+            providerID: .codex
+        )
+
+        _ = try await remoteClient.takeSessionControl(for: pairedMac, sessionID: session.id, columns: 44, rows: 12)
+        let responseScreen = try await remoteClient.respondToApprovalRequest(
+            for: pairedMac,
+            sessionID: session.id,
+            approvalRequestID: approvalRequest.id,
+            decision: .approve
+        )
+        let fetchedScreen = try await remoteClient.fetchSessionScreen(for: pairedMac, sessionID: session.id)
+
+        #expect(responseScreen.controller == .pairedDevice(try #require(pairedMac.pairedDeviceID)))
+        #expect(responseScreen.primarySurface == .structuredActivityFeed)
+        #expect(responseScreen.activityItems.map(\.text) == [
+            "Codex shared Session stream connected",
+            "Approval Request: deploy --prod",
+            "Approved: deploy --prod"
+        ])
+        #expect(responseScreen.approvalRequests.first?.state == .approved)
+        #expect(fetchedScreen == responseScreen)
+    }
+
+    @Test func remoteViewerCannotApproveStructuredApprovalRequestOverDedicatedNetworkAPI() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let approvalRequest = SessionApprovalRequest(
+            title: "deploy --prod",
+            text: "Codex needs approval to deploy to production.",
+            state: .pending
+        )
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(stdout: "Usage: codex\n")
+                ])
+            ),
+            sessionRuntimeManager: StructuredPromptSessionRuntimeManager(
+                providerName: "Codex",
+                approvalRequests: [approvalRequest]
+            )
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
+
+        _ = try await client.setRemoteAccessEnabled(true)
+        let pairing = try await client.startPairing()
+        let group = try await client.createWorkspaceGroup(name: "Client Work")
+        let workspace = try await client.createLocalWorkspace(
+            name: "Nexus",
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+
+        let remoteClient = RemotePairingHTTPClient()
+        let pairedMac = try await remoteClient.completePairing(
+            host: server.displayHost,
+            port: server.port,
+            pairingCode: pairing.code,
+            deviceName: "Chris’s iPhone"
+        )
+        let session = try await remoteClient.launchOrResumeDefaultSession(
+            for: pairedMac,
+            workspaceID: workspace.id,
+            providerID: .codex
+        )
+
+        do {
+            _ = try await remoteClient.respondToApprovalRequest(
+                for: pairedMac,
+                sessionID: session.id,
+                approvalRequestID: approvalRequest.id,
+                decision: .deny
+            )
+            Issue.record("Expected viewer approval decision to require Controller first")
+        } catch {
+            #expect(error.localizedDescription == "Take Controller on this iPhone before responding to Approval Requests.")
+        }
+    }
+
     @Test func remoteControllerSendsStructuredPromptOverGenericSessionInputDedicatedNetworkAPI() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)
@@ -1801,16 +1938,19 @@ private final class StructuredPromptSessionRuntimeManager: SessionRuntimeManagin
         var terminalColumns: Int = 80
         var terminalRows: Int = 24
         var activityItems: [SessionActivityItem]
+        var approvalRequests: [SessionApprovalRequest]
     }
 
     private let lock = NSLock()
     private let providerName: String
+    private let initialApprovalRequests: [SessionApprovalRequest]
     private var runtimes: [UUID: RuntimeRecord] = [:]
     private var updateObservers: [UUID: [UUID: @Sendable () -> Void]] = [:]
     private var observedSessionIDs: [UUID: UUID] = [:]
 
-    init(providerName: String) {
+    init(providerName: String, approvalRequests: [SessionApprovalRequest] = []) {
         self.providerName = providerName
+        self.initialApprovalRequests = approvalRequests
     }
 
     func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) throws {
@@ -1818,6 +1958,8 @@ private final class StructuredPromptSessionRuntimeManager: SessionRuntimeManagin
         runtimes[session.id] = RuntimeRecord(
             session: session,
             activityItems: [SessionActivityItem(kind: .status, text: "\(providerName) shared Session stream connected")]
+                + initialApprovalRequests.map { SessionActivityItem(kind: .approvalRequest, text: "Approval Request: \($0.title)") },
+            approvalRequests: initialApprovalRequests
         )
         lock.unlock()
         notifyUpdateObservers(for: session.id)
@@ -1860,7 +2002,8 @@ private final class StructuredPromptSessionRuntimeManager: SessionRuntimeManagin
             transcript: runtime.activityItems.map(\.text).joined(separator: "\n"),
             terminalColumns: runtime.terminalColumns,
             terminalRows: runtime.terminalRows,
-            activityItems: runtime.activityItems
+            activityItems: runtime.activityItems,
+            approvalRequests: runtime.approvalRequests
         )
     }
 
@@ -1913,7 +2056,33 @@ private final class StructuredPromptSessionRuntimeManager: SessionRuntimeManagin
     }
 
     func respondToApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision, to session: Session) throws -> SessionScreen {
-        throw NexusSessionApprovalError.approvalRequestsUnavailable
+        lock.lock()
+        guard var runtime = runtimes[session.id] else {
+            lock.unlock()
+            throw NexusMetadataStoreError.sessionNotFound
+        }
+        guard let index = runtime.approvalRequests.firstIndex(where: { $0.id == approvalRequestID }) else {
+            lock.unlock()
+            throw NexusSessionApprovalError.approvalRequestsUnavailable
+        }
+
+        let approvalRequest = runtime.approvalRequests[index]
+        runtime.approvalRequests[index] = SessionApprovalRequest(
+            id: approvalRequest.id,
+            title: approvalRequest.title,
+            text: approvalRequest.text,
+            state: decision == .approve ? .approved : .denied
+        )
+        runtime.activityItems.append(
+            SessionActivityItem(
+                kind: .approvalDecision,
+                text: "\(decision == .approve ? "Approved" : "Denied"): \(approvalRequest.title)"
+            )
+        )
+        runtimes[session.id] = runtime
+        lock.unlock()
+        notifyUpdateObservers(for: session.id)
+        return try sessionScreen(for: session)
     }
 
     func resize(session: Session, columns: Int, rows: Int) throws -> SessionScreen {

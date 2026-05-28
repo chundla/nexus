@@ -157,6 +157,7 @@ final class SessionControllerRegistry: @unchecked Sendable {
 enum NexusSessionControlError: LocalizedError {
     case remoteControllerRequired
     case remoteSessionInputControllerRequired
+    case remoteApprovalRequestControllerRequired
 
     var errorDescription: String? {
         switch self {
@@ -164,6 +165,8 @@ enum NexusSessionControlError: LocalizedError {
             "Take Controller on this iPhone before sending terminal input."
         case .remoteSessionInputControllerRequired:
             "Take Controller on this iPhone before sending Session input."
+        case .remoteApprovalRequestControllerRequired:
+            "Take Controller on this iPhone before responding to Approval Requests."
         }
     }
 }
@@ -1996,6 +1999,26 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             controllerError: .remoteSessionInputControllerRequired
         )
         return normalizedSessionScreen(try sessionRuntimeManager.sendInput(text, to: resolvedSession))
+    }
+
+    func respondToRemoteApprovalRequest(
+        sessionID: UUID,
+        pairedDeviceID: UUID,
+        approvalRequestID: UUID,
+        decision: ApprovalRequestDecision
+    ) throws -> SessionScreen {
+        let resolvedSession = try readyRemoteControlledSession(
+            sessionID: sessionID,
+            pairedDeviceID: pairedDeviceID,
+            controllerError: .remoteApprovalRequestControllerRequired
+        )
+        return normalizedSessionScreen(
+            try sessionRuntimeManager.respondToApprovalRequest(
+                approvalRequestID,
+                decision: decision,
+                to: resolvedSession
+            )
+        )
     }
 
     func sendRemoteSessionText(sessionID: UUID, pairedDeviceID: UUID, text: String) throws -> SessionScreen {
@@ -3832,6 +3855,24 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol {
                     sessionID: resolveUUID(sessionID),
                     pairedDeviceID: resolveUUID(pairedDeviceID),
                     text: text
+                )
+            },
+            reply: reply
+        )
+    }
+
+    func respondToRemoteApprovalRequest(sessionID: String, pairedDeviceID: String, approvalRequestID: String, decision: String, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(
+            with: {
+                guard let resolvedDecision = ApprovalRequestDecision(rawValue: decision) else {
+                    throw CocoaError(.coderInvalidValue)
+                }
+
+                return try service.respondToRemoteApprovalRequest(
+                    sessionID: resolveUUID(sessionID),
+                    pairedDeviceID: resolveUUID(pairedDeviceID),
+                    approvalRequestID: resolveUUID(approvalRequestID),
+                    decision: resolvedDecision
                 )
             },
             reply: reply

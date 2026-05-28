@@ -17,6 +17,7 @@ protocol RemotePairingClient {
     func takeSessionControl(for pairedMac: PairedMac, sessionID: UUID, columns: Int, rows: Int) async throws -> SessionScreen
     func releaseSessionControl(for pairedMac: PairedMac, sessionID: UUID) async throws -> SessionScreen
     func sendSessionInput(for pairedMac: PairedMac, sessionID: UUID, text: String) async throws -> SessionScreen
+    func respondToApprovalRequest(for pairedMac: PairedMac, sessionID: UUID, approvalRequestID: UUID, decision: ApprovalRequestDecision) async throws -> SessionScreen
     func sendSessionText(for pairedMac: PairedMac, sessionID: UUID, text: String) async throws -> SessionScreen
     func sendSessionInputKey(for pairedMac: PairedMac, sessionID: UUID, key: SessionInputKey) async throws -> SessionScreen
     func observeSessionScreen(
@@ -590,6 +591,39 @@ final class RemoteClientPairingModel {
         }
     }
 
+    func respondToFocusedRemoteSessionApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision) async throws {
+        guard let pairedMac = activePairedMac,
+              let sessionID = focusedSessionID else {
+            throw RemoteClientPairingModelError.focusedSessionUnavailable
+        }
+        guard focusedSessionIsController else {
+            throw RemoteClientPairingModelError.approvalRequestControllerRequired
+        }
+
+        let screenBeforeRequest = focusedSessionScreen
+
+        do {
+            let screen = try await client.respondToApprovalRequest(
+                for: pairedMac,
+                sessionID: sessionID,
+                approvalRequestID: approvalRequestID,
+                decision: decision
+            )
+            applyFocusedSessionInputResponse(
+                screen,
+                sessionID: sessionID,
+                screenBeforeRequest: screenBeforeRequest
+            )
+        } catch {
+            throw loggedRemoteActionError(
+                error,
+                operation: .respondToApprovalRequest,
+                pairedMac: pairedMac,
+                sessionID: sessionID
+            )
+        }
+    }
+
     func sendTextToFocusedRemoteSession(_ text: String) async throws {
         guard let pairedMac = activePairedMac,
               let sessionID = focusedSessionID else {
@@ -1137,6 +1171,7 @@ enum RemoteClientPairingModelError: LocalizedError {
     case focusedSessionUnavailable
     case controllerRequired
     case sessionInputControllerRequired
+    case approvalRequestControllerRequired
     case actionRecovery(String)
 
     var errorDescription: String? {
@@ -1151,6 +1186,8 @@ enum RemoteClientPairingModelError: LocalizedError {
             "Take Controller on this iPhone before sending terminal input"
         case .sessionInputControllerRequired:
             "Take Controller on this iPhone before sending Session input"
+        case .approvalRequestControllerRequired:
+            "Take Controller on this iPhone before responding to Approval Requests"
         case .actionRecovery(let message):
             message
         }

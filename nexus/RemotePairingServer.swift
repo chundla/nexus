@@ -353,6 +353,26 @@ final class RemotePairingServer {
         }
 
         if request.method == "POST",
+           let approvalDecisionRequest = approvalDecisionRequest(from: request) {
+            await respondToAuthorizedRequest(
+                operation: .respondToApprovalRequest,
+                request: request,
+                over: connection,
+                sessionID: approvalDecisionRequest.sessionID
+            ) { [self] in
+                let pairedDeviceID = try self.pairedDeviceID(from: request)
+                let body = try JSONDecoder().decode(RemoteApprovalRequestDecisionRequest.self, from: request.body)
+                return try await self.client.respondToRemoteApprovalRequest(
+                    sessionID: approvalDecisionRequest.sessionID,
+                    pairedDeviceID: pairedDeviceID,
+                    approvalRequestID: approvalDecisionRequest.approvalRequestID,
+                    decision: body.decision
+                )
+            }
+            return
+        }
+
+        if request.method == "POST",
            let sessionTextRequest = sessionTextRequest(from: request) {
             await respondToAuthorizedRequest(
                 operation: .sendSessionText,
@@ -663,6 +683,21 @@ final class RemotePairingServer {
         return SessionScreenRequest(sessionID: sessionID)
     }
 
+    private func approvalDecisionRequest(from request: ParsedRequest) -> SessionApprovalDecisionRequest? {
+        let components = request.path.split(separator: "/")
+        guard components.count == 6,
+              components[0] == "remote-client",
+              components[1] == "sessions",
+              let sessionID = UUID(uuidString: String(components[2])),
+              components[3] == "approval-requests",
+              let approvalRequestID = UUID(uuidString: String(components[4])),
+              components[5] == "decision" else {
+            return nil
+        }
+
+        return SessionApprovalDecisionRequest(sessionID: sessionID, approvalRequestID: approvalRequestID)
+    }
+
     private func sessionTextRequest(from request: ParsedRequest) -> SessionScreenRequest? {
         let components = request.path.split(separator: "/")
         guard components.count == 4,
@@ -900,6 +935,11 @@ private struct SessionScreenRequest {
 
 private struct SessionScreenControlRequest {
     let sessionID: UUID
+}
+
+private struct SessionApprovalDecisionRequest {
+    let sessionID: UUID
+    let approvalRequestID: UUID
 }
 
 private enum RemotePairingServerError: LocalizedError {

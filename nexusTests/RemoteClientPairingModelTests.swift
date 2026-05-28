@@ -732,6 +732,133 @@ struct RemoteClientPairingModelTests {
         #expect(model.focusedSessionScreen == updatedScreen)
     }
 
+    @Test func controllerCanRespondToFocusedRemoteSessionApprovalRequest() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: UUID()
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .codex,
+            isDefault: true,
+            state: .ready
+        )
+        let approvalRequest = SessionApprovalRequest(
+            title: "deploy --prod",
+            text: "Codex needs approval to deploy to production.",
+            state: .pending
+        )
+        let pairedDeviceID = UUID()
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: pairedDeviceID
+        )
+        let initialScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "Codex shared Session stream connected\nApproval Request: deploy --prod",
+            activityItems: [
+                SessionActivityItem(kind: .status, text: "Codex shared Session stream connected"),
+                SessionActivityItem(kind: .approvalRequest, text: "Approval Request: deploy --prod")
+            ],
+            approvalRequests: [approvalRequest]
+        )
+        let controlledScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            controller: .pairedDevice(pairedDeviceID),
+            transcript: initialScreen.transcript,
+            terminalColumns: 44,
+            terminalRows: 12,
+            activityItems: initialScreen.activityItems,
+            approvalRequests: initialScreen.approvalRequests
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let client = StubRemotePairingClient(
+            result: pairedMac,
+            sessionScreen: initialScreen,
+            takeSessionControlResult: .success(controlledScreen)
+        )
+        let model = RemoteClientPairingModel(client: client, store: store)
+
+        await model.focusRemoteSession(sessionID: session.id)
+        try await model.takeFocusedRemoteSessionControl(columns: 44, rows: 12)
+        try await model.respondToFocusedRemoteSessionApprovalRequest(approvalRequest.id, decision: .approve)
+
+        #expect(client.requestLog.contains("respondToApprovalRequest"))
+        #expect(model.focusedSessionScreen?.approvalRequests.first?.state == .approved)
+        #expect(model.focusedSessionScreen?.activityItems.map(\.text) == [
+            "Codex shared Session stream connected",
+            "Approval Request: deploy --prod",
+            "Approved: deploy --prod"
+        ])
+    }
+
+    @Test func respondingToFocusedRemoteSessionApprovalRequestRequiresController() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .codex,
+            isDefault: true,
+            state: .ready
+        )
+        let approvalRequest = SessionApprovalRequest(
+            title: "deploy --prod",
+            text: "Codex needs approval to deploy to production.",
+            state: .pending
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let screen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "Codex shared Session stream connected\nApproval Request: deploy --prod",
+            activityItems: [
+                SessionActivityItem(kind: .status, text: "Codex shared Session stream connected"),
+                SessionActivityItem(kind: .approvalRequest, text: "Approval Request: deploy --prod")
+            ],
+            approvalRequests: [approvalRequest]
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let client = StubRemotePairingClient(result: pairedMac, sessionScreen: screen)
+        let model = RemoteClientPairingModel(client: client, store: store)
+
+        await model.focusRemoteSession(sessionID: session.id)
+
+        do {
+            try await model.respondToFocusedRemoteSessionApprovalRequest(approvalRequest.id, decision: .deny)
+            Issue.record("Expected responding to an Approval Request as a Viewer to require taking Controller first")
+        } catch {
+            #expect(error.localizedDescription == "Take Controller on this iPhone before responding to Approval Requests")
+        }
+    }
+
     @Test func focusingRemoteSessionFetchesInitialScreenWhenObservationStartsWithoutSnapshot() async throws {
         let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -3473,6 +3600,44 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
             terminalRows: defaultSessionScreen.terminalRows,
             activityItems: defaultSessionScreen.activityItems,
             approvalRequests: defaultSessionScreen.approvalRequests
+        )
+    }
+
+    func respondToApprovalRequest(
+        for pairedMac: PairedMac,
+        sessionID: UUID,
+        approvalRequestID: UUID,
+        decision: ApprovalRequestDecision
+    ) async throws -> SessionScreen {
+        requestLog.append("respondToApprovalRequest")
+
+        let updatedApprovalRequests = defaultSessionScreen.approvalRequests.map { request in
+            guard request.id == approvalRequestID else {
+                return request
+            }
+
+            return SessionApprovalRequest(
+                id: request.id,
+                title: request.title,
+                text: request.text,
+                state: decision == .approve ? .approved : .denied
+            )
+        }
+
+        return SessionScreen(
+            session: defaultSessionScreen.session,
+            primarySurface: defaultSessionScreen.primarySurface,
+            controller: .pairedDevice(pairedMac.pairedDeviceID ?? UUID()),
+            transcript: defaultSessionScreen.transcript,
+            terminalColumns: defaultSessionScreen.terminalColumns,
+            terminalRows: defaultSessionScreen.terminalRows,
+            activityItems: defaultSessionScreen.activityItems + [
+                SessionActivityItem(
+                    kind: .approvalDecision,
+                    text: "\(decision == .approve ? "Approved" : "Denied"): \(defaultSessionScreen.approvalRequests.first(where: { $0.id == approvalRequestID })?.title ?? "Approval Request")"
+                )
+            ],
+            approvalRequests: updatedApprovalRequests
         )
     }
 

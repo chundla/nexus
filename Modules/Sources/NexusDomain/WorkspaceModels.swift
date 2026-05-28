@@ -459,6 +459,7 @@ public enum RemoteClientDiagnosticOperation: String, Codable, Equatable, Sendabl
     case takeSessionControl
     case releaseSessionControl
     case sendSessionInput
+    case respondToApprovalRequest
     case sendSessionText
     case sendSessionInputKey
 }

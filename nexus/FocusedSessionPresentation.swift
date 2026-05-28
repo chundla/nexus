@@ -33,6 +33,11 @@ struct StructuredSessionComposerPresentation: Equatable {
     let disabledReason: String?
 }
 
+struct StructuredSessionApprovalRequestPresentation: Equatable {
+    let actionsAreEnabled: Bool
+    let disabledReason: String?
+}
+
 func focusedSessionSurface(for screen: SessionScreen) -> FocusedSessionSurface {
     switch screen.primarySurface {
     case .terminal:
@@ -68,6 +73,13 @@ func structuredSessionComposerPresentation(for screen: SessionScreen, isControll
         placeholder: copy.composerPlaceholder,
         isEnabled: isController,
         disabledReason: isController ? nil : "Take Controller to send a prompt from this iPhone."
+    )
+}
+
+func structuredSessionApprovalRequestPresentation(isController: Bool) -> StructuredSessionApprovalRequestPresentation {
+    StructuredSessionApprovalRequestPresentation(
+        actionsAreEnabled: isController,
+        disabledReason: isController ? nil : "Take Controller to respond to Approval Requests from this iPhone."
     )
 }
 

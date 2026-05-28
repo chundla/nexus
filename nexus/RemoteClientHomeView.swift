@@ -771,6 +771,7 @@ private struct RemoteSessionScreenView: View {
     @State private var terminalViewportSize: CGSize = .zero
     @State private var isShowingStopConfirmation = false
     @State private var activeAction: RemoteSessionAction?
+    @State private var activeApprovalRequestID: UUID?
     @State private var presentedError: RemoteClientHomePresentedError?
     @FocusState private var isTerminalInputFocused: Bool
 
@@ -809,7 +810,7 @@ private struct RemoteSessionScreenView: View {
     }
 
     private var isPerformingAction: Bool {
-        activeAction != nil
+        activeAction != nil || activeApprovalRequestID != nil
     }
 
     private var controllerActionTitle: String {
@@ -1203,7 +1204,10 @@ private struct RemoteSessionScreenView: View {
     }
 
     private func structuredSessionApprovalRequestView(_ request: SessionApprovalRequest) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let presentation = structuredSessionApprovalRequestPresentation(isController: model.focusedSessionIsController)
+        let isApproving = activeApprovalRequestID == request.id
+
+        return VStack(alignment: .leading, spacing: 10) {
             Label("Approval Request", systemImage: "hand.raised.fill")
                 .font(.headline)
                 .foregroundStyle(.accent)
@@ -1215,6 +1219,25 @@ private struct RemoteSessionScreenView: View {
             Text(request.text)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: 10) {
+                Button(isApproving ? "Denying…" : "Deny", role: .destructive) {
+                    respondToStructuredApprovalRequest(request.id, decision: .deny)
+                }
+                .disabled(presentation.actionsAreEnabled == false || isPerformingAction)
+
+                Button(isApproving ? "Approving…" : "Approve") {
+                    respondToStructuredApprovalRequest(request.id, decision: .approve)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(presentation.actionsAreEnabled == false || isPerformingAction)
+            }
+
+            if let disabledReason = presentation.disabledReason {
+                Text(disabledReason)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1255,6 +1278,18 @@ private struct RemoteSessionScreenView: View {
             } catch {
                 presentedError = RemoteClientHomePresentedError(message: error.localizedDescription)
                 structuredPrompt = prompt
+            }
+        }
+    }
+
+    private func respondToStructuredApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision) {
+        activeApprovalRequestID = approvalRequestID
+        Task {
+            defer { activeApprovalRequestID = nil }
+            do {
+                try await model.respondToFocusedRemoteSessionApprovalRequest(approvalRequestID, decision: decision)
+            } catch {
+                presentedError = RemoteClientHomePresentedError(message: error.localizedDescription)
             }
         }
     }
