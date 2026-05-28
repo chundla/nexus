@@ -40,6 +40,91 @@ struct NexusServiceRemotePiStructuredSessionTests {
         #expect(launch.arguments.last?.contains("rpc") == true)
     }
 
+    @Test func remotePiStructuredPromptFlowsThroughSharedSessionSurface() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let transportHarness = RemotePiTransportHarness()
+        let service = try makeRemotePiService(rootURL: rootURL, transportHarness: transportHarness)
+
+        let group = try service.createWorkspaceGroup(name: "Remote")
+        let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
+        _ = try service.validateHost(hostID: host.id)
+        let workspace = try service.createRemoteWorkspace(
+            name: "Remote Pi",
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+        let screen = try service.sendSessionInput(sessionID: session.id, text: "hello")
+
+        #expect(screen.primarySurface == .structuredActivityFeed)
+        #expect(screen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "You: hello",
+            "Pi: Remote hello"
+        ])
+        #expect(screen.transcript == "> hello\nRemote hello")
+    }
+
+    @Test func remotePiApprovalRequestsAndDecisionsFlowThroughSharedServiceContract() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let transportHarness = RemotePiTransportHarness()
+        let service = try makeRemotePiService(rootURL: rootURL, transportHarness: transportHarness)
+
+        let group = try service.createWorkspaceGroup(name: "Remote")
+        let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
+        _ = try service.validateHost(hostID: host.id)
+        let workspace = try service.createRemoteWorkspace(
+            name: "Remote Pi",
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+        let pendingScreen = try service.sendSessionInput(sessionID: session.id, text: "deploy")
+        let approvalRequest = try #require(pendingScreen.approvalRequests.first)
+        let approvedScreen = try service.respondToApprovalRequest(
+            sessionID: session.id,
+            approvalRequestID: approvalRequest.id,
+            decision: .approve
+        )
+
+        #expect(pendingScreen.activityItems.suffix(2).map(\.text) == [
+            "You: deploy",
+            "Approval Request: Deploy to production?"
+        ])
+        #expect(pendingScreen.approvalRequests == [
+            SessionApprovalRequest(
+                id: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
+                title: "Deploy to production?",
+                text: "Pi wants to run deploy --prod.",
+                state: .pending
+            )
+        ])
+        #expect(approvedScreen.activityItems.suffix(3).map(\.text) == [
+            "Approval Request: Deploy to production?",
+            "Approved: Deploy to production?",
+            "Pi: Deployment approved"
+        ])
+        #expect(approvedScreen.approvalRequests == [
+            SessionApprovalRequest(
+                id: approvalRequest.id,
+                title: approvalRequest.title,
+                text: approvalRequest.text,
+                state: .approved
+            )
+        ])
+        #expect(approvedScreen.transcript == "> deploy\nDeployment approved")
+    }
+
     @Test func restartedRemotePiDefaultSessionStaysInterruptedUntilExplicitResumeRecoversExistingRuntime() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)
@@ -262,6 +347,41 @@ struct NexusServiceRemotePiStructuredSessionTests {
         #expect(detail.defaultSession == nil)
         #expect(detail.alternateSessions.isEmpty)
         #expect(detail.failedSessions.map(\.id) == [failedSession.id])
+    }
+
+    @Test func resumedRemotePiSessionAcceptsStructuredPromptAfterExplicitRecovery() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let transportHarness = RemotePiTransportHarness()
+        let service = try makeRemotePiService(rootURL: rootURL, transportHarness: transportHarness)
+
+        let group = try service.createWorkspaceGroup(name: "Remote")
+        let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: nil)
+        _ = try service.validateHost(hostID: host.id)
+        let workspace = try service.createRemoteWorkspace(
+            name: "Remote Pi",
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+        transportHarness.disconnectLatestTransport(status: 255)
+
+        let resumedSession = try service.launchOrResumeSession(sessionID: session.id)
+        let resumedScreen = try service.sendSessionInput(sessionID: resumedSession.id, text: "again")
+
+        #expect(resumedSession.id == session.id)
+        #expect(resumedScreen.session.state == .ready)
+        #expect(resumedScreen.primarySurface == .structuredActivityFeed)
+        #expect(resumedScreen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "You: again",
+            "Pi: Remote again"
+        ])
+        #expect(resumedScreen.transcript == "> again\nRemote again")
     }
 
     @Test func remotePiBridgeLossLeavesInterruptedInspectableSessionUntilExplicitResume() throws {
@@ -610,30 +730,85 @@ private final class RemotePiTransport: PiRPCTransporting, @unchecked Sendable {
 
     func sendLine(_ line: String) throws {
         guard let data = line.data(using: .utf8),
-              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              object["type"] as? String == "get_state" else {
+              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return
         }
 
-        if let startupFailureMessage {
+        switch object["type"] as? String {
+        case "get_state":
+            if let startupFailureMessage {
+                emit([
+                    "id": object["id"] as? String ?? "state",
+                    "type": "response",
+                    "success": false,
+                    "error": startupFailureMessage
+                ])
+                return
+            }
+
             emit([
                 "id": object["id"] as? String ?? "state",
                 "type": "response",
-                "success": false,
-                "error": startupFailureMessage
+                "success": true,
+                "data": [
+                    "sessionId": sessionID,
+                    "sessionFile": sessionFile
+                ]
             ])
+        case "prompt":
+            let prompt = object["message"] as? String ?? ""
+            emit([
+                "type": "response",
+                "command": "prompt",
+                "success": true
+            ])
+
+            if prompt == "deploy" {
+                emit([
+                    "type": "approval_request",
+                    "id": "11111111-1111-1111-1111-111111111111",
+                    "title": "Deploy to production?",
+                    "text": "Pi wants to run deploy --prod."
+                ])
+                return
+            }
+
+            let responseText = prompt.isEmpty ? "Remote Pi ready" : "Remote \(prompt)"
+            emit([
+                "type": "message_update",
+                "assistantMessageEvent": [
+                    "type": "text_delta",
+                    "delta": responseText
+                ]
+            ])
+            emit([
+                "type": "turn_end",
+                "message": [
+                    "content": [
+                        [
+                            "type": "text",
+                            "text": responseText
+                        ]
+                    ]
+                ]
+            ])
+        case "approval_response":
+            let decision = object["decision"] as? String ?? "deny"
+            let responseText = decision == "approve" ? "Deployment approved" : "Deployment denied"
+            emit([
+                "type": "turn_end",
+                "message": [
+                    "content": [
+                        [
+                            "type": "text",
+                            "text": responseText
+                        ]
+                    ]
+                ]
+            ])
+        default:
             return
         }
-
-        emit([
-            "id": object["id"] as? String ?? "state",
-            "type": "response",
-            "success": true,
-            "data": [
-                "sessionId": sessionID,
-                "sessionFile": sessionFile
-            ]
-        ])
     }
 
     func terminate() throws {
