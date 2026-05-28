@@ -266,6 +266,27 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func structuredSessionComposerPresentationUsesPiCopyWhileKeepingViewerPromptVisibleButDisabledUntilControllerTaken() {
+        let piScreen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            ),
+            primarySurface: .structuredActivityFeed,
+            transcript: ""
+        )
+
+        #expect(structuredSessionComposerPresentation(for: piScreen, isController: false) == StructuredSessionComposerPresentation(
+            placeholder: "Send a prompt to Pi",
+            isEnabled: false,
+            disabledReason: "Take Controller to send a prompt from this iPhone."
+        ))
+    }
+
+    @MainActor
     @Test func structuredSessionApprovalRequestPresentationKeepsViewerActionsVisibleButDisabledUntilControllerTaken() {
         #expect(structuredSessionApprovalRequestPresentation(isController: false) == StructuredSessionApprovalRequestPresentation(
             actionsAreEnabled: false,

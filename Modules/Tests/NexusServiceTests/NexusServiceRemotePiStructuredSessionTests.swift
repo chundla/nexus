@@ -125,6 +125,99 @@ struct NexusServiceRemotePiStructuredSessionTests {
         #expect(approvedScreen.transcript == "> deploy\nDeployment approved")
     }
 
+    @Test func remoteControllerCanSendStructuredPromptToRemotePiThroughGenericRemoteSessionInputAPI() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let transportHarness = RemotePiTransportHarness()
+        let service = try makeRemotePiService(rootURL: rootURL, transportHarness: transportHarness)
+
+        let group = try service.createWorkspaceGroup(name: "Remote")
+        let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
+        _ = try service.validateHost(hostID: host.id)
+        let workspace = try service.createRemoteWorkspace(
+            name: "Remote Pi",
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+
+        let pairedDeviceID = UUID()
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+        let controlledScreen = try service.takeRemoteSessionControl(
+            sessionID: session.id,
+            pairedDeviceID: pairedDeviceID,
+            columns: 44,
+            rows: 12
+        )
+        let promptedScreen = try service.sendRemoteSessionInput(
+            sessionID: session.id,
+            pairedDeviceID: pairedDeviceID,
+            text: "hello"
+        )
+
+        #expect(controlledScreen.controller == .pairedDevice(pairedDeviceID))
+        #expect(promptedScreen.primarySurface == .structuredActivityFeed)
+        #expect(promptedScreen.controller == .pairedDevice(pairedDeviceID))
+        #expect(promptedScreen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "You: hello",
+            "Pi: Remote hello"
+        ])
+        #expect(promptedScreen.transcript == "> hello\nRemote hello")
+    }
+
+    @Test func remoteControllerCanRespondToRemotePiApprovalRequestThroughGenericDecisionAPI() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let transportHarness = RemotePiTransportHarness()
+        let service = try makeRemotePiService(rootURL: rootURL, transportHarness: transportHarness)
+
+        let group = try service.createWorkspaceGroup(name: "Remote")
+        let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
+        _ = try service.validateHost(hostID: host.id)
+        let workspace = try service.createRemoteWorkspace(
+            name: "Remote Pi",
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+
+        let pairedDeviceID = UUID()
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+        _ = try service.takeRemoteSessionControl(
+            sessionID: session.id,
+            pairedDeviceID: pairedDeviceID,
+            columns: 44,
+            rows: 12
+        )
+        let pendingScreen = try service.sendRemoteSessionInput(
+            sessionID: session.id,
+            pairedDeviceID: pairedDeviceID,
+            text: "deploy"
+        )
+        let approvalRequest = try #require(pendingScreen.approvalRequests.first)
+        let approvedScreen = try service.respondToRemoteApprovalRequest(
+            sessionID: session.id,
+            pairedDeviceID: pairedDeviceID,
+            approvalRequestID: approvalRequest.id,
+            decision: .approve
+        )
+
+        #expect(approvedScreen.primarySurface == .structuredActivityFeed)
+        #expect(approvedScreen.controller == .pairedDevice(pairedDeviceID))
+        #expect(approvedScreen.activityItems.suffix(3).map(\.text) == [
+            "Approval Request: Deploy to production?",
+            "Approved: Deploy to production?",
+            "Pi: Deployment approved"
+        ])
+        #expect(approvedScreen.approvalRequests.first?.state == .approved)
+        #expect(approvedScreen.transcript == "> deploy\nDeployment approved")
+    }
+
     @Test func restartedRemotePiDefaultSessionStaysInterruptedUntilExplicitResumeRecoversExistingRuntime() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)

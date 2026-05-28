@@ -808,6 +808,166 @@ struct RemoteClientPairingModelTests {
         ])
     }
 
+    @Test func sendingStructuredPromptToFocusedRemotePiSessionUsesGenericSessionInputRouteAndUpdatesFocusedScreen() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Remote Pi",
+            kind: .remote,
+            folderPath: "/srv/api",
+            primaryGroupID: UUID(),
+            remoteHostID: UUID()
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let pairedDeviceID = UUID()
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: pairedDeviceID
+        )
+        let initialScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            controller: .mac,
+            transcript: "Pi shared Session stream connected",
+            activityItems: [SessionActivityItem(kind: .status, text: "Pi shared Session stream connected")]
+        )
+        let controlledScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            controller: .pairedDevice(pairedDeviceID),
+            transcript: initialScreen.transcript,
+            terminalColumns: 44,
+            terminalRows: 12,
+            activityItems: initialScreen.activityItems
+        )
+        let updatedScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            controller: .pairedDevice(pairedDeviceID),
+            transcript: "> deploy\nRemote deploy",
+            terminalColumns: 44,
+            terminalRows: 12,
+            activityItems: [
+                SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"),
+                SessionActivityItem(kind: .message, text: "You: deploy"),
+                SessionActivityItem(kind: .message, text: "Pi: Remote deploy")
+            ]
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let client = StubRemotePairingClient(
+            result: pairedMac,
+            sessionScreen: initialScreen,
+            takeSessionControlResult: .success(controlledScreen),
+            sendSessionInputResult: .success(updatedScreen)
+        )
+        let model = RemoteClientPairingModel(client: client, store: store)
+        model.catalog = RemoteWorkspaceCatalog(
+            workspaceGroups: [],
+            recentNavigation: [],
+            workspaceOverviews: [WorkspaceOverview(workspace: workspace, providerCards: [])]
+        )
+
+        await model.focusRemoteSession(sessionID: session.id)
+        try await model.takeFocusedRemoteSessionControl(columns: 44, rows: 12)
+        try await model.sendInputToFocusedRemoteSession("deploy")
+
+        #expect(client.requestLog.contains("sendSessionInput"))
+        #expect(client.requestLog.contains("sendSessionText") == false)
+        #expect(model.focusedSessionScreen == updatedScreen)
+    }
+
+    @Test func controllerCanRespondToFocusedRemotePiApprovalRequest() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Remote Pi",
+            kind: .remote,
+            folderPath: "/srv/api",
+            primaryGroupID: UUID(),
+            remoteHostID: UUID()
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let approvalRequest = SessionApprovalRequest(
+            title: "Deploy to production?",
+            text: "Pi wants to run deploy --prod.",
+            state: .pending
+        )
+        let pairedDeviceID = UUID()
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: pairedDeviceID
+        )
+        let initialScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "Pi shared Session stream connected\nApproval Request: Deploy to production?",
+            activityItems: [
+                SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"),
+                SessionActivityItem(kind: .approvalRequest, text: "Approval Request: Deploy to production?")
+            ],
+            approvalRequests: [approvalRequest]
+        )
+        let controlledScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            controller: .pairedDevice(pairedDeviceID),
+            transcript: initialScreen.transcript,
+            terminalColumns: 44,
+            terminalRows: 12,
+            activityItems: initialScreen.activityItems,
+            approvalRequests: initialScreen.approvalRequests
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let client = StubRemotePairingClient(
+            result: pairedMac,
+            sessionScreen: initialScreen,
+            takeSessionControlResult: .success(controlledScreen)
+        )
+        let model = RemoteClientPairingModel(client: client, store: store)
+
+        await model.focusRemoteSession(sessionID: session.id)
+        try await model.takeFocusedRemoteSessionControl(columns: 44, rows: 12)
+        try await model.respondToFocusedRemoteSessionApprovalRequest(approvalRequest.id, decision: .approve)
+
+        #expect(client.requestLog.contains("respondToApprovalRequest"))
+        #expect(model.focusedSessionScreen?.approvalRequests.first?.state == .approved)
+        #expect(model.focusedSessionScreen?.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "Approval Request: Deploy to production?",
+            "Approved: Deploy to production?"
+        ])
+    }
+
     @Test func respondingToFocusedRemoteSessionApprovalRequestRequiresController() async throws {
         let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -1012,6 +1172,97 @@ struct RemoteClientPairingModelTests {
             "observeSessionScreen",
             "fetchSessionScreen"
         ])
+    }
+
+    @Test func reconnectedFocusedRemotePiSessionKeepsStaleStructuredContentAndRequiresExplicitControllerRetake() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Remote Pi",
+            kind: .remote,
+            folderPath: "/srv/api",
+            primaryGroupID: UUID(),
+            remoteHostID: UUID()
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let pairedDeviceID = UUID()
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: pairedDeviceID
+        )
+        let initialScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            controller: .mac,
+            transcript: "Pi shared Session stream connected",
+            activityItems: [SessionActivityItem(kind: .status, text: "Pi shared Session stream connected")]
+        )
+        let controlledScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            controller: .pairedDevice(pairedDeviceID),
+            transcript: initialScreen.transcript,
+            terminalColumns: 44,
+            terminalRows: 12,
+            activityItems: initialScreen.activityItems
+        )
+        let recoveredViewerScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            controller: .mac,
+            transcript: initialScreen.transcript,
+            activityItems: initialScreen.activityItems
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let client = StubRemotePairingClient(
+            result: pairedMac,
+            sessionScreen: initialScreen,
+            sessionScreenResults: [
+                .success(initialScreen),
+                .success(recoveredViewerScreen)
+            ],
+            takeSessionControlResult: .success(controlledScreen)
+        )
+        let model = RemoteClientPairingModel(client: client, store: store)
+
+        await model.focusRemoteSession(sessionID: session.id)
+        try await model.takeFocusedRemoteSessionControl(columns: 44, rows: 12)
+        await client.disconnectObservedSession(NSError(domain: NSURLErrorDomain, code: NSURLErrorCannotConnectToHost))
+        await Task.yield()
+
+        #expect(model.focusedSessionScreen == controlledScreen)
+        #expect(model.focusedSessionIsStale)
+        #expect(model.focusedSessionSurfaceSupport == .supported)
+
+        try await Task.sleep(nanoseconds: 1_100_000_000)
+        await Task.yield()
+
+        #expect(model.focusedSessionScreen == recoveredViewerScreen)
+        #expect(model.focusedSessionIsStale == false)
+        #expect(model.focusedSessionIsController == false)
+        #expect(model.focusedSessionSurfaceSupport == .supported)
+
+        do {
+            try await model.sendInputToFocusedRemoteSession("deploy")
+            Issue.record("Expected reconnected remote Pi Session to require taking Controller again before sending a structured prompt")
+        } catch {
+            #expect(error.localizedDescription == "Take Controller on this iPhone before sending Session input")
+        }
     }
 
     @Test func recordsReconnectFailureBreadcrumbWhenObservedSessionDisconnects() async throws {
