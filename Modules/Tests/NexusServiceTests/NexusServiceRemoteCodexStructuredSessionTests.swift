@@ -81,6 +81,74 @@ struct NexusServiceRemoteCodexStructuredSessionTests {
         #expect(resumedLaunch.arguments.last?.contains("attach-session") == false)
     }
 
+    @Test func remoteCodexBridgeLossLeavesInterruptedInspectableSessionUntilExplicitResume() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let transportHarness = RemoteCodexTransportHarness()
+        let service = try makeRemoteCodexService(rootURL: rootURL, transportHarness: transportHarness)
+
+        let group = try service.createWorkspaceGroup(name: "Remote")
+        let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: nil)
+        _ = try service.validateHost(hostID: host.id)
+        let workspace = try service.createRemoteWorkspace(
+            name: "Remote Codex",
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .codex)
+        transportHarness.disconnectLatestTransport(status: 255)
+
+        let screen = try service.getSessionScreen(sessionID: session.id)
+        let detail = try service.getProviderDetail(workspaceID: workspace.id, providerID: .codex)
+
+        #expect(screen.session.state == .interrupted)
+        #expect(screen.primarySurface == .structuredActivityFeed)
+        #expect(detail.defaultSession?.state == .interrupted)
+        #expect(transportHarness.launches().count == 1)
+    }
+
+    @Test func remoteCodexBridgeLossRecoversThroughExplicitResumeToExistingRemoteRuntime() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let transportHarness = RemoteCodexTransportHarness()
+        let service = try makeRemoteCodexService(rootURL: rootURL, transportHarness: transportHarness)
+
+        let group = try service.createWorkspaceGroup(name: "Remote")
+        let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: nil)
+        _ = try service.validateHost(hostID: host.id)
+        let workspace = try service.createRemoteWorkspace(
+            name: "Remote Codex",
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .codex)
+        let firstLaunch = try #require(transportHarness.launches().last)
+        transportHarness.disconnectLatestTransport(status: 255)
+
+        let resumedSession = try service.launchOrResumeSession(sessionID: session.id)
+        let resumedScreen = try service.getSessionScreen(sessionID: resumedSession.id)
+        let launches = transportHarness.launches()
+        let resumedLaunch = try #require(launches.last)
+
+        #expect(resumedSession.id == session.id)
+        #expect(resumedScreen.session.state == .ready)
+        #expect(resumedScreen.primarySurface == .structuredActivityFeed)
+        #expect(launches.count == 2)
+        #expect(resumedLaunch.method == "thread/resume")
+        #expect(resumedLaunch.requestedThreadID == firstLaunch.resolvedThreadID)
+        #expect(resumedLaunch.resolvedThreadID == firstLaunch.resolvedThreadID)
+        #expect(resumedLaunch.arguments.last?.contains("tmux has-session") == true)
+        #expect(resumedLaunch.arguments.last?.contains("tmux new-session") == false)
+    }
+
     @Test func remoteCodexNamedSessionUsesStructuredSurfaceAndOwnThreadLinkageAlongsideDefaultSession() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)
@@ -217,13 +285,16 @@ private final class RemoteCodexTransportHarness: @unchecked Sendable {
     private let lock = NSLock()
     private var recordedLaunches: [Launch] = []
     private var pendingTransportArguments: [[String]] = []
+    private var activeTransports: [RemoteCodexTransport] = []
     private var nextThreadNumber = 0
 
     func makeTransport(executable: String, arguments: [String], workingDirectory: String?) throws -> any CodexAppServerTransporting {
         lock.lock()
         pendingTransportArguments.append(arguments)
         lock.unlock()
-        return RemoteCodexTransport(executable: executable, harness: self)
+        let transport = RemoteCodexTransport(executable: executable, harness: self)
+        register(transport)
+        return transport
     }
 
     func recordLaunch(executable: String, method: String, requestedThreadID: String?) -> Launch {
@@ -253,6 +324,19 @@ private final class RemoteCodexTransportHarness: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return recordedLaunches
+    }
+
+    func disconnectLatestTransport(status: Int32) {
+        lock.lock()
+        let transport = activeTransports.last
+        lock.unlock()
+        transport?.disconnect(status: status)
+    }
+
+    func register(_ transport: RemoteCodexTransport) {
+        lock.lock()
+        activeTransports.append(transport)
+        lock.unlock()
     }
 }
 
@@ -310,6 +394,10 @@ private final class RemoteCodexTransport: CodexAppServerTransporting, @unchecked
 
     func terminate() throws {
         terminationHandler?(0)
+    }
+
+    func disconnect(status: Int32) {
+        terminationHandler?(status)
     }
 
     private func emit(_ object: [String: Any]) {

@@ -503,6 +503,10 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
                         workingDirectory: launchConfiguration.workingDirectory,
                         sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.codexSessionLinkage,
                         terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
+                        unexpectedTerminationState: .interrupted,
+                        unexpectedTerminationMessageBuilder: { _ in
+                            "Codex Session stream disconnected. Relaunch to reconnect to the tmux-backed remote runtime."
+                        },
                         stopHandler: {
                             try Self.runCommand(
                                 executable: "/usr/bin/ssh",
@@ -2172,7 +2176,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             return false
         }
 
-        guard sessionRuntimeManager.hasRuntime(for: session) == false else {
+        let runtimeState = sessionRuntimeManager.runtimeState(for: session)
+        if sessionRuntimeManager.hasRuntime(for: session), runtimeState != .interrupted {
             return false
         }
 
@@ -3389,6 +3394,21 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         if let runtimeState = sessionRuntimeManager.runtimeState(for: session) {
             guard runtimeState != .ready else {
                 return session
+            }
+
+            if runtimeState == .interrupted {
+                let runtimeTranscript = try? sessionRuntimeManager.sessionScreen(for: session).transcript
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let fallbackFailureMessage = try interruptedSessionFailureMessage(
+                    for: session,
+                    workspace: metadataStore.workspace(id: session.workspaceID)
+                )
+                let failureMessage = runtimeTranscript.flatMap { $0.isEmpty ? nil : $0 } ?? fallbackFailureMessage
+                return try metadataStore.updateSession(
+                    id: session.id,
+                    state: .interrupted,
+                    failureMessage: failureMessage
+                )
             }
 
             return try metadataStore.updateSession(

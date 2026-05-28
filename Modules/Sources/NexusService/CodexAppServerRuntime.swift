@@ -74,6 +74,8 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
     private let transport: any CodexAppServerTransporting
     private let stopHandler: (() throws -> Void)?
     private let terminationStatusMessageBuilder: (Int32) -> String
+    private let unexpectedTerminationState: Session.State
+    private let unexpectedTerminationMessageBuilder: (Int32) -> String
     private let initializeRequestID = "nexus-codex-initialize"
     private let startupThreadRequestID = "nexus-codex-thread-start"
     private var runtimeState: Session.State = .ready
@@ -96,6 +98,8 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
         workingDirectory: String,
         sessionLinkage: CodexSessionLinkage? = nil,
         terminationStatusMessageBuilder: @escaping (Int32) -> String,
+        unexpectedTerminationState: Session.State = .exited,
+        unexpectedTerminationMessageBuilder: ((Int32) -> String)? = nil,
         stopHandler: (() throws -> Void)? = nil,
         transportFactory: TransportFactory = { executable, arguments, workingDirectory in
             try ProcessCodexAppServerTransport(
@@ -106,6 +110,8 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
         }
     ) throws {
         self.terminationStatusMessageBuilder = terminationStatusMessageBuilder
+        self.unexpectedTerminationState = unexpectedTerminationState
+        self.unexpectedTerminationMessageBuilder = unexpectedTerminationMessageBuilder ?? terminationStatusMessageBuilder
         self.sessionLinkage = sessionLinkage
         self.stopHandler = stopHandler
         self.transport = try transportFactory(executable, ["app-server"], workingDirectory)
@@ -521,13 +527,21 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
     private func handleTermination(status: Int32) {
         let shouldNotify: Bool
         let statusMessage: String
+        let resolvedState: Session.State
 
         lock.lock()
-        shouldNotify = runtimeState != .exited || didRequestStop == false
-        runtimeState = .exited
-        statusMessage = didRequestStop ? "" : terminationStatusMessageBuilder(status)
-        if statusMessage.isEmpty == false {
-            appendActivityItemLocked(SessionActivityItem(kind: .status, text: statusMessage.trimmingCharacters(in: .whitespacesAndNewlines)))
+        resolvedState = didRequestStop ? .exited : unexpectedTerminationState
+        shouldNotify = runtimeState != resolvedState || didRequestStop == false
+        runtimeState = resolvedState
+        statusMessage = didRequestStop ? "" : unexpectedTerminationMessageBuilder(status)
+        let trimmedStatusMessage = statusMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedStatusMessage.isEmpty == false {
+            if resolvedState == .interrupted {
+                transcript = trimmedStatusMessage
+                appendActivityItemLocked(SessionActivityItem(kind: .error, text: trimmedStatusMessage))
+            } else {
+                appendActivityItemLocked(SessionActivityItem(kind: .status, text: trimmedStatusMessage))
+            }
         }
         lock.unlock()
 
