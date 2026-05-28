@@ -27,19 +27,29 @@ struct RemoteProviderActionState: Equatable {
     let isEnabled: Bool
     let disabledReason: String?
 
-    init(capability: ProviderCapability, provider: Provider, prelaunchPrimarySurface: SessionSurface) {
+    init(
+        capability: ProviderCapability,
+        provider: Provider,
+        prelaunchPrimarySurface: SessionSurface,
+        workspaceKind: Workspace.Kind? = nil
+    ) {
         if capability.isEnabled == false {
             self.init(isEnabled: false, disabledReason: capability.disabledReason)
             return
         }
 
-        if sessionSurfaceSupport(for: prelaunchPrimarySurface, on: .remoteClient) == .unsupported {
+        if remoteClientSupportsProviderAction(
+            capability.action,
+            providerID: provider.id,
+            prelaunchPrimarySurface: prelaunchPrimarySurface,
+            workspaceKind: workspaceKind
+        ) == false {
             let disabledReason: String
             switch capability.action {
             case .launchDefaultSession:
                 disabledReason = "Open this Workspace on the paired Mac to launch \(provider.displayName) because this iPhone cannot operate its primary Session surface yet."
             case .createNamedSession:
-                disabledReason = "Open this Workspace on the paired Mac to create a \(provider.displayName) Named Session because this iPhone cannot operate its primary Session surface yet."
+                disabledReason = "Open this Workspace on the paired Mac to create a \(provider.displayName) Named Session because this iPhone cannot create structured Named Sessions yet."
             }
             self.init(isEnabled: false, disabledReason: disabledReason)
             return
@@ -131,6 +141,28 @@ func remoteSessionSurfacePresentation(
         relaunchDisabledReason: relaunchDisabledReason,
         unsupportedCopy: unsupportedCopy
     )
+}
+
+private func remoteClientSupportsProviderAction(
+    _ action: ProviderCapability.Action,
+    providerID: ProviderID,
+    prelaunchPrimarySurface: SessionSurface,
+    workspaceKind: Workspace.Kind?
+) -> Bool {
+    switch prelaunchPrimarySurface {
+    case .terminal:
+        true
+    case .structuredActivityFeed:
+        switch action {
+        case .launchDefaultSession:
+            structuredRemoteClientSessionSurfaceSupport(
+                providerID: providerID,
+                workspaceKind: workspaceKind
+            ) == .supported
+        case .createNamedSession:
+            false
+        }
+    }
 }
 
 private func structuredRemoteClientSessionSurfaceSupport(

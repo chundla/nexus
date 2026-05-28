@@ -2006,13 +2006,19 @@ struct RemoteClientPairingModelTests {
         try store.savePairedMacs([pairedMac])
         store.saveActivePairedMacID(pairedMac.id)
 
+        let launchedScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "Codex ready",
+            activityItems: [SessionActivityItem(kind: .status, text: "Codex ready")]
+        )
         let model = RemoteClientPairingModel(
             client: StubRemotePairingClient(
                 result: pairedMac,
                 catalog: refreshedCatalog,
                 providerDetail: refreshedDetail,
                 providerDetailResults: [initialDetail, refreshedDetail],
-                sessionScreen: SessionScreen(session: session, transcript: "Codex ready"),
+                sessionScreen: launchedScreen,
                 launchedDefaultSession: session
             ),
             store: store
@@ -2025,7 +2031,9 @@ struct RemoteClientPairingModelTests {
         #expect(launchedSession.id == session.id)
         #expect(model.catalog == refreshedCatalog)
         #expect(model.focusedSessionID == session.id)
-        #expect(model.focusedSessionScreen?.session.id == session.id)
+        #expect(model.focusedSessionScreen == launchedScreen)
+        #expect(model.focusedSessionScreen?.controller == nil)
+        #expect(model.focusedSessionIsController == false)
         #expect(model.providerDetail(for: workspace.id, providerID: .codex)?.defaultSession?.id == session.id)
     }
 

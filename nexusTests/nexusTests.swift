@@ -316,16 +316,26 @@ struct nexusTests {
     }
 
     @MainActor
-    @Test func remoteProviderActionStateDisablesUnsupportedStructuredLaunchAndCreateOnIPhone() {
+    @Test func remoteProviderActionStateEnablesSupportedStructuredDefaultLaunchOnIPhone() {
         let launchState = RemoteProviderActionState(
             capability: ProviderCapability(
                 action: .launchDefaultSession,
                 isSupported: true,
                 isEnabled: true
             ),
-            provider: Provider(id: .codex),
-            prelaunchPrimarySurface: .structuredActivityFeed
+            provider: Provider(id: .pi),
+            prelaunchPrimarySurface: .structuredActivityFeed,
+            workspaceKind: .local
         )
+
+        #expect(launchState == RemoteProviderActionState(
+            isEnabled: true,
+            disabledReason: nil
+        ))
+    }
+
+    @MainActor
+    @Test func remoteProviderActionStateKeepsStructuredNamedSessionCreationBlockedOnIPhone() {
         let createState = RemoteProviderActionState(
             capability: ProviderCapability(
                 action: .createNamedSession,
@@ -333,16 +343,52 @@ struct nexusTests {
                 isEnabled: true
             ),
             provider: Provider(id: .codex),
-            prelaunchPrimarySurface: .structuredActivityFeed
+            prelaunchPrimarySurface: .structuredActivityFeed,
+            workspaceKind: .remote
+        )
+
+        #expect(createState == RemoteProviderActionState(
+            isEnabled: false,
+            disabledReason: "Open this Workspace on the paired Mac to create a Codex Named Session because this iPhone cannot create structured Named Sessions yet."
+        ))
+    }
+
+    @MainActor
+    @Test func remoteProviderActionStateKeepsUnsupportedStructuredDefaultLaunchBlockedOnIPhone() {
+        let launchState = RemoteProviderActionState(
+            capability: ProviderCapability(
+                action: .launchDefaultSession,
+                isSupported: true,
+                isEnabled: true
+            ),
+            provider: Provider(id: .pi),
+            prelaunchPrimarySurface: .structuredActivityFeed,
+            workspaceKind: .remote
         )
 
         #expect(launchState == RemoteProviderActionState(
             isEnabled: false,
-            disabledReason: "Open this Workspace on the paired Mac to launch Codex because this iPhone cannot operate its primary Session surface yet."
+            disabledReason: "Open this Workspace on the paired Mac to launch Pi because this iPhone cannot operate its primary Session surface yet."
         ))
-        #expect(createState == RemoteProviderActionState(
+    }
+
+    @MainActor
+    @Test func remoteProviderActionStateUsesProviderHealthGuidanceWhenStructuredLaunchIsNotLaunchable() {
+        let launchState = RemoteProviderActionState(
+            capability: ProviderCapability(
+                action: .launchDefaultSession,
+                isSupported: true,
+                isEnabled: false,
+                disabledReason: "Codex requires signing in on the paired Mac before launch."
+            ),
+            provider: Provider(id: .codex),
+            prelaunchPrimarySurface: .structuredActivityFeed,
+            workspaceKind: .remote
+        )
+
+        #expect(launchState == RemoteProviderActionState(
             isEnabled: false,
-            disabledReason: "Open this Workspace on the paired Mac to create a Codex Named Session because this iPhone cannot operate its primary Session surface yet."
+            disabledReason: "Codex requires signing in on the paired Mac before launch."
         ))
     }
 
