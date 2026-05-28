@@ -326,6 +326,156 @@ struct NexusServiceRemoteIBMBobStructuredSessionTests {
         ])
     }
 
+    @Test func remoteIBMBobStopSessionInterruptsOnlyActiveTurnAndPreservesPartialHistory() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let transportHarness = InFlightRemoteIBMBobTransportHarness(turns: [
+            .init(initialStdoutLines: [
+                #"{"type":"status","text":"Bob turn started","session_id":"bob-session-1"}"#,
+                #"{"type":"message","text":"Partial remote reply"}"#
+            ])
+        ])
+        let service = try makeRemoteIBMBobService(rootURL: rootURL, transportFactory: transportHarness.makeTransport)
+
+        let group = try service.createWorkspaceGroup(name: "Remote")
+        let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
+        _ = try service.validateHost(hostID: host.id)
+        let workspace = try service.createRemoteWorkspace(
+            name: "Remote Bob",
+            hostID: host.id,
+            remotePath: "/srv/bob",
+            primaryGroupID: group.id
+        )
+
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
+        let partialScreen = try service.sendSessionInput(sessionID: session.id, text: "ship it")
+        let stoppedSession = try service.stopSession(sessionID: session.id)
+        let stoppedScreen = try service.getSessionScreen(sessionID: session.id)
+        let metadataStore = try NexusMetadataStore(storeURL: service.storeURL)
+        let metadata = try metadataStore.sessionRecordAdapterMetadata(sessionID: session.id)
+
+        #expect(partialScreen.activityItems.map(\.text) == [
+            "IBM Bob Session ready. Send a prompt to start IBM Bob.",
+            "You: ship it",
+            "Bob turn started",
+            "Partial remote reply"
+        ])
+        #expect(stoppedSession.id == session.id)
+        #expect(stoppedSession.state == .ready)
+        #expect(stoppedScreen.session.state == .ready)
+        #expect(stoppedScreen.activityItems.map(\.text) == [
+            "IBM Bob Session ready. Send a prompt to start IBM Bob.",
+            "You: ship it",
+            "Bob turn started",
+            "Partial remote reply",
+            "IBM Bob turn stopped."
+        ])
+        #expect(metadata?.ibmBobTurnInProgress == false)
+        #expect(metadata?.ibmBobPersistedActivityItems?.map(\.text) == stoppedScreen.activityItems.map(\.text))
+    }
+
+    @Test func remoteIBMBobServiceRestartLeavesInterruptedInspectableSessionUntilExplicitRelaunch() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let transportHarness = InFlightRemoteIBMBobTransportHarness(turns: [
+            .init(initialStdoutLines: [
+                #"{"type":"status","text":"Bob turn started","session_id":"bob-session-1"}"#,
+                #"{"type":"message","text":"Partial remote reply"}"#
+            ])
+        ])
+        func makeService() throws -> NexusService {
+            try makeRemoteIBMBobService(rootURL: rootURL, transportFactory: transportHarness.makeTransport)
+        }
+
+        let service = try makeService()
+        let group = try service.createWorkspaceGroup(name: "Remote")
+        let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
+        _ = try service.validateHost(hostID: host.id)
+        let workspace = try service.createRemoteWorkspace(
+            name: "Remote Bob",
+            hostID: host.id,
+            remotePath: "/srv/bob",
+            primaryGroupID: group.id
+        )
+
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
+        let partialScreen = try service.sendSessionInput(sessionID: session.id, text: "ship it")
+
+        let restartedService = try makeService()
+        let interruptedSession = try restartedService.getSessionRecord(sessionID: session.id)
+        let interruptedScreen = try restartedService.getSessionScreen(sessionID: session.id)
+        let relaunchedSession = try restartedService.launchOrResumeSession(sessionID: session.id)
+        let relaunchedScreen = try restartedService.getSessionScreen(sessionID: session.id)
+
+        #expect(partialScreen.activityItems.map(\.text) == [
+            "IBM Bob Session ready. Send a prompt to start IBM Bob.",
+            "You: ship it",
+            "Bob turn started",
+            "Partial remote reply"
+        ])
+        #expect(interruptedSession.state == .interrupted)
+        #expect(interruptedScreen.session.state == .interrupted)
+        #expect(interruptedScreen.activityItems == partialScreen.activityItems)
+        #expect(relaunchedSession.id == session.id)
+        #expect(relaunchedSession.state == .ready)
+        #expect(relaunchedScreen.session.state == .ready)
+        #expect(relaunchedScreen.activityItems == partialScreen.activityItems)
+    }
+
+    @Test func remoteIBMBobBridgeLossLeavesInterruptedInspectableSessionUntilExplicitRelaunch() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let transportHarness = InFlightRemoteIBMBobTransportHarness(turns: [
+            .init(initialStdoutLines: [
+                #"{"type":"status","text":"Bob turn started","session_id":"bob-session-1"}"#,
+                #"{"type":"message","text":"Partial remote reply"}"#
+            ])
+        ])
+        let service = try makeRemoteIBMBobService(rootURL: rootURL, transportFactory: transportHarness.makeTransport)
+
+        let group = try service.createWorkspaceGroup(name: "Remote")
+        let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
+        _ = try service.validateHost(hostID: host.id)
+        let workspace = try service.createRemoteWorkspace(
+            name: "Remote Bob",
+            hostID: host.id,
+            remotePath: "/srv/bob",
+            primaryGroupID: group.id
+        )
+
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
+        let partialScreen = try service.sendSessionInput(sessionID: session.id, text: "ship it")
+
+        transportHarness.disconnectLatestTransport(status: 255)
+
+        let interruptedSession = try service.getSessionRecord(sessionID: session.id)
+        let interruptedScreen = try service.getSessionScreen(sessionID: session.id)
+        let detail = try service.getProviderDetail(workspaceID: workspace.id, providerID: .ibmBob)
+        let relaunchedSession = try service.launchOrResumeSession(sessionID: session.id)
+        let relaunchedScreen = try service.getSessionScreen(sessionID: session.id)
+
+        #expect(partialScreen.activityItems.map(\.text) == [
+            "IBM Bob Session ready. Send a prompt to start IBM Bob.",
+            "You: ship it",
+            "Bob turn started",
+            "Partial remote reply"
+        ])
+        #expect(interruptedSession.state == .interrupted)
+        #expect(interruptedScreen.session.state == .interrupted)
+        #expect(interruptedScreen.activityItems.prefix(4).map(\.text) == partialScreen.activityItems.map(\.text))
+        #expect(detail.defaultSession?.state == .interrupted)
+        #expect(relaunchedSession.id == session.id)
+        #expect(relaunchedSession.state == .ready)
+        #expect(relaunchedScreen.session.state == .ready)
+        #expect(Array(relaunchedScreen.activityItems.map(\.text).prefix(4)) == partialScreen.activityItems.map(\.text))
+    }
+
     @Test func remoteControllerSeesSharedRemoteIBMBobActivityAndMacCanReopenSameReadyHistory() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)
@@ -371,7 +521,11 @@ struct NexusServiceRemoteIBMBobStructuredSessionTests {
 }
 
 private func makeRemoteIBMBobService(rootURL: URL, transportHarness: RemoteIBMBobTransportHarness) throws -> NexusService {
-    let launcher = ProcessSessionRuntimeLauncher(ibmBobTransportFactory: transportHarness.makeTransport)
+    try makeRemoteIBMBobService(rootURL: rootURL, transportFactory: transportHarness.makeTransport)
+}
+
+private func makeRemoteIBMBobService(rootURL: URL, transportFactory: @escaping IBMBobSessionRuntime.TransportFactory) throws -> NexusService {
+    let launcher = ProcessSessionRuntimeLauncher(ibmBobTransportFactory: transportFactory)
 
     return try NexusService.bootstrapForTests(
         rootURL: rootURL,
@@ -521,5 +675,80 @@ private final class RemoteIBMBobSynchronousTransport: IBMBobTransporting, @unche
     }
 
     func terminate() throws {}
+}
+
+private final class InFlightRemoteIBMBobTransportHarness: @unchecked Sendable {
+    struct Turn {
+        let initialStdoutLines: [String]
+    }
+
+    private let lock = NSLock()
+    private let turns: [Turn]
+    private var activeTransports: [InFlightRemoteIBMBobTransport] = []
+
+    init(turns: [Turn]) {
+        self.turns = turns
+    }
+
+    func makeTransport(executable: String, arguments: [String], workingDirectory: String?) throws -> any IBMBobTransporting {
+        let turn: Turn
+        lock.lock()
+        turn = turns[min(activeTransports.count, turns.count - 1)]
+        lock.unlock()
+
+        let transport = InFlightRemoteIBMBobTransport(turn: turn)
+        register(transport)
+        return transport
+    }
+
+    func disconnectLatestTransport(status: Int32) {
+        lock.lock()
+        let transport = activeTransports.last
+        lock.unlock()
+        transport?.disconnect(status: status)
+    }
+
+    private func register(_ transport: InFlightRemoteIBMBobTransport) {
+        lock.lock()
+        activeTransports.append(transport)
+        lock.unlock()
+    }
+}
+
+private final class InFlightRemoteIBMBobTransport: IBMBobTransporting, @unchecked Sendable {
+    private let turn: InFlightRemoteIBMBobTransportHarness.Turn
+    private var stdoutLineHandler: (@Sendable (String) -> Void)?
+    private var stderrLineHandler: (@Sendable (String) -> Void)?
+    private var terminationHandler: (@Sendable (Int32) -> Void)?
+
+    init(turn: InFlightRemoteIBMBobTransportHarness.Turn) {
+        self.turn = turn
+    }
+
+    func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
+        stdoutLineHandler = handler
+    }
+
+    func setStderrLineHandler(_ handler: (@Sendable (String) -> Void)?) {
+        stderrLineHandler = handler
+    }
+
+    func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?) {
+        terminationHandler = handler
+    }
+
+    func start() throws {
+        for line in turn.initialStdoutLines {
+            stdoutLineHandler?(line)
+        }
+    }
+
+    func terminate() throws {
+        terminationHandler?(1)
+    }
+
+    func disconnect(status: Int32) {
+        terminationHandler?(status)
+    }
 }
 #endif

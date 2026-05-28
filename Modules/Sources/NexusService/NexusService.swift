@@ -629,6 +629,7 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
                         workingDirectory: launchConfiguration.workingDirectory,
                         sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.ibmBobSessionLinkage,
                         terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
+                        unexpectedTerminationState: .interrupted,
                         transportFactory: { executable, arguments, workingDirectory in
                             try resolvedIBMBobTransportFactory(
                                 "/usr/bin/ssh",
@@ -2566,7 +2567,19 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             return .stored
         }
 
-        let storedSessionID = try metadataStore.sessionRecordAdapterMetadata(sessionID: session.id)?.ibmBobSessionLinkage?.sessionID
+        let storedMetadata = try metadataStore.sessionRecordAdapterMetadata(sessionID: session.id)
+        if session.state == .interrupted,
+           let linkage = storedMetadata?.ibmBobSessionLinkage {
+            return .explicit(
+                SessionRecordAdapterMetadata.ibmBob(
+                    sessionID: linkage.sessionID,
+                    activityItems: linkage.persistedActivityItems,
+                    turnInProgress: false
+                )
+            )
+        }
+
+        let storedSessionID = storedMetadata?.ibmBobSessionLinkage?.sessionID
         return .explicit(SessionRecordAdapterMetadata.ibmBob(sessionID: storedSessionID))
     }
 

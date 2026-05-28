@@ -30,6 +30,7 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
     private let executable: String
     private let workingDirectory: String
     private let terminationStatusMessageBuilder: (Int32) -> String
+    private let unexpectedTerminationState: Session.State
     private let transportFactory: TransportFactory
     private let lock = NSLock()
     private var sessionLinkage: IBMBobSessionLinkage?
@@ -51,6 +52,7 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
         workingDirectory: String,
         sessionLinkage: IBMBobSessionLinkage? = nil,
         terminationStatusMessageBuilder: @escaping (Int32) -> String,
+        unexpectedTerminationState: Session.State = .failed,
         transportFactory: @escaping TransportFactory = { executable, arguments, workingDirectory in
             try ProcessIBMBobTransport(
                 executable: executable,
@@ -63,6 +65,7 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
         self.workingDirectory = workingDirectory
         self.sessionLinkage = sessionLinkage.map { IBMBobSessionLinkage(sessionID: $0.sessionID) }
         self.terminationStatusMessageBuilder = terminationStatusMessageBuilder
+        self.unexpectedTerminationState = unexpectedTerminationState
         self.transportFactory = transportFactory
         let restoredActivityItems = sessionLinkage?.persistedActivityItems ?? []
         self.activityItems = restoredActivityItems.isEmpty ? Self.defaultActivityItems : restoredActivityItems
@@ -280,7 +283,7 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
                 )
             )
         } else if shouldAppendError {
-            runtimeState = .failed
+            runtimeState = unexpectedTerminationState
             activityItems.append(SessionActivityItem(kind: .error, text: errorText))
         } else {
             runtimeState = .ready
