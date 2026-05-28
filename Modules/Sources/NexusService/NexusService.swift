@@ -456,6 +456,7 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
         localShellCommandBuilder: LocalShellCommandBuilder = LocalShellCommandBuilder(),
         piTransportFactory: PiRPCSessionRuntime.TransportFactory? = nil,
         codexTransportFactory: CodexAppServerRuntime.TransportFactory? = nil,
+        ibmBobTransportFactory: IBMBobSessionRuntime.TransportFactory? = nil,
         localProtocolNativeRuntimeFactories: [ProviderID: ProtocolNativeRuntimeFactory]? = nil,
         remoteProtocolNativeRuntimeFactories: [ProviderID: ProtocolNativeRuntimeFactory] = [:],
         remoteProtocolSessionCommandBuilder: RemoteProtocolSessionCommandBuilder = RemoteProtocolSessionCommandBuilder()
@@ -476,6 +477,14 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
         }
 
         self.localShellCommandBuilder = localShellCommandBuilder
+        let resolvedIBMBobTransportFactory: IBMBobSessionRuntime.TransportFactory = ibmBobTransportFactory ?? { executable, arguments, workingDirectory in
+            try ProcessIBMBobTransport(
+                executable: executable,
+                arguments: arguments,
+                workingDirectory: workingDirectory
+            )
+        }
+
         self.localProtocolNativeRuntimeFactories = localProtocolNativeRuntimeFactories ?? [
             .pi: { launchConfiguration, _, _ in
                 try PiRPCSessionRuntime(
@@ -494,11 +503,12 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
                     transportFactory: resolvedCodexTransportFactory
                 )
             },
-            .ibmBob: { _, _, _ in
-                IdleStructuredSessionRuntime(
-                    activityItems: [
-                        SessionActivityItem(kind: .status, text: "IBM Bob Session ready. Send a prompt to start IBM Bob.")
-                    ]
+            .ibmBob: { launchConfiguration, _, _ in
+                try IBMBobSessionRuntime(
+                    executable: launchConfiguration.executable,
+                    workingDirectory: launchConfiguration.workingDirectory,
+                    terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
+                    transportFactory: resolvedIBMBobTransportFactory
                 )
             }
         ]
