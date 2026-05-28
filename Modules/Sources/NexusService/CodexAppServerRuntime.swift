@@ -109,6 +109,8 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
 
         let startupSemaphore = DispatchSemaphore(value: 0)
         let startupState = CodexStartupState()
+        let shouldAttemptStartupResume = sessionLinkage?.isEmpty == false
+        let startupFreshThreadFallbackRequestID = "nexus-codex-thread-start-fallback"
 
         transport.setStdoutLineHandler { [weak self] line in
             guard let self, let object = self.responseObject(from: line) else {
@@ -122,9 +124,32 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
                 return
             }
 
-            if id == self.startupThreadRequestID {
+            if id == self.startupThreadRequestID || id == startupFreshThreadFallbackRequestID {
                 if self.captureThreadLinkage(from: object, appendConnectedStatus: true) {
                     startupState.markResolvedThread()
+                    startupSemaphore.signal()
+                    return
+                }
+
+                if let error = self.rpcErrorMessage(from: object) {
+                    if id == self.startupThreadRequestID,
+                       shouldAttemptStartupResume,
+                       self.shouldRetryStartupWithFreshThread(after: error) {
+                        do {
+                            try self.transport.sendLine(Self.jsonLine([
+                                "jsonrpc": "2.0",
+                                "id": startupFreshThreadFallbackRequestID,
+                                "method": "thread/start",
+                                "params": self.startupThreadParameters(workingDirectory: workingDirectory, sessionLinkage: nil)
+                            ]))
+                        } catch {
+                            startupState.record(error: error)
+                            startupSemaphore.signal()
+                        }
+                        return
+                    }
+
+                    startupState.record(error: CodexAppServerRuntimeError.startupFailed(error))
                     startupSemaphore.signal()
                 }
                 return
@@ -180,7 +205,7 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
         try transport.sendLine(Self.jsonLine([
             "jsonrpc": "2.0",
             "id": startupThreadRequestID,
-            "method": sessionLinkage?.isEmpty == false ? "thread/resume" : "thread/start",
+            "method": shouldAttemptStartupResume ? "thread/resume" : "thread/start",
             "params": startupThreadParameters(workingDirectory: workingDirectory, sessionLinkage: sessionLinkage)
         ]))
 
@@ -546,6 +571,12 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
             return nil
         }
         return string(for: "message", in: error) ?? "Codex app-server startup failed."
+    }
+
+    private func shouldRetryStartupWithFreshThread(after error: String) -> Bool {
+        let normalizedError = error.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalizedError.contains("no rollout found for thread id")
+            || normalizedError.contains("invalid thread id")
     }
 
     private func responseObject(from line: String) -> [String: Any]? {

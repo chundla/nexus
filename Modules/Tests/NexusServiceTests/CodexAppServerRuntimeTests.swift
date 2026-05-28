@@ -51,6 +51,29 @@ struct CodexAppServerRuntimeTests {
         #expect(resumeParameters["cwd"] as? String == "/tmp/workspace")
     }
 
+    @Test func resumeMissingRolloutFallsBackToFreshThreadStart() throws {
+        let runtime = try CodexAppServerRuntime(
+            executable: "/tmp/fake-codex",
+            workingDirectory: "/tmp/workspace",
+            sessionLinkage: CodexSessionLinkage(threadID: "019e6c21-c0b8-7340-af92-845bae5817ee"),
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in ResumeMissingRolloutThenStartCodexTransport() }
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .codex,
+            isDefault: true,
+            state: .ready
+        )
+
+        #expect(runtime.sessionRecordAdapterMetadata == SessionRecordAdapterMetadata(
+            providerID: .codex,
+            values: ["threadID": "codex-thread-2"]
+        ))
+        #expect(runtime.sessionScreen(for: session).activityItems.map(\.text) == ["Codex shared Session stream connected"])
+    }
+
     @Test func startupCanResolveThreadLinkageFromThreadStartedNotification() throws {
         let transport = TestCodexAppServerTransport(
             threadID: "codex-thread-1",
@@ -235,6 +258,19 @@ struct CodexAppServerRuntimeTests {
         #expect((transport.sentMessages.last?["result"] as? [String: String])?["decision"] == "decline")
     }
 
+    @Test func startupFailureSurfacesStartupThreadRPCErrorInsteadOfTimingOut() {
+        #expect {
+            try CodexAppServerRuntime(
+                executable: "/tmp/fake-codex",
+                workingDirectory: "/tmp/workspace",
+                terminationStatusMessageBuilder: { _ in "" },
+                transportFactory: { _, _, _ in StartupThreadRPCErrorCodexTransport() }
+            )
+        } throws: { error in
+            error.localizedDescription == "no rollout found for thread id 019e6c46-8a54-7693-ac37-36a268b62556"
+        }
+    }
+
     @Test func startupFailureSurfacesEarlyThreadStartTerminationInsteadOfTimingOut() {
         #expect {
             try CodexAppServerRuntime(
@@ -302,6 +338,135 @@ private final class LockedValue<Value>: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return value
+    }
+}
+
+private final class ResumeMissingRolloutThenStartCodexTransport: CodexAppServerTransporting, @unchecked Sendable {
+    private var stdoutLineHandler: (@Sendable (String) -> Void)?
+    private var terminationHandler: (@Sendable (Int32) -> Void)?
+
+    func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
+        stdoutLineHandler = handler
+    }
+
+    func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?) {
+        terminationHandler = handler
+    }
+
+    func start() throws {}
+
+    func sendLine(_ line: String) throws {
+        guard let data = line.data(using: .utf8),
+              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return
+        }
+
+        switch object["method"] as? String {
+        case "initialize":
+            stdoutLineHandler?(jsonLine([
+                "id": object["id"] ?? 0,
+                "result": [
+                    "userAgent": "nexus-test",
+                    "codexHome": "/tmp/codex-home",
+                    "platformFamily": "unix",
+                    "platformOs": "macos"
+                ]
+            ]))
+        case "thread/resume":
+            stdoutLineHandler?(jsonLine([
+                "id": object["id"] ?? 0,
+                "error": [
+                    "code": -32600,
+                    "message": "no rollout found for thread id 019e6c21-c0b8-7340-af92-845bae5817ee"
+                ]
+            ]))
+        case "thread/start":
+            stdoutLineHandler?(jsonLine([
+                "id": object["id"] ?? 0,
+                "result": [
+                    "thread": [
+                        "id": "codex-thread-2",
+                        "sessionId": "codex-thread-2",
+                        "preview": "",
+                        "ephemeral": false,
+                        "modelProvider": "openai",
+                        "createdAt": 0,
+                        "updatedAt": 0,
+                        "status": ["type": "idle"],
+                        "path": "/tmp/codex-thread-2.jsonl",
+                        "cwd": "/tmp/workspace",
+                        "cliVersion": "0.132.0",
+                        "source": "appServer",
+                        "turns": []
+                    ]
+                ]
+            ]))
+        default:
+            break
+        }
+    }
+
+    func terminate() throws {
+        terminationHandler?(0)
+    }
+
+    private func jsonLine(_ object: [String: Any]) -> String {
+        let data = try! JSONSerialization.data(withJSONObject: object)
+        return String(decoding: data, as: UTF8.self)
+    }
+}
+
+private final class StartupThreadRPCErrorCodexTransport: CodexAppServerTransporting, @unchecked Sendable {
+    private var stdoutLineHandler: (@Sendable (String) -> Void)?
+    private var terminationHandler: (@Sendable (Int32) -> Void)?
+
+    func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
+        stdoutLineHandler = handler
+    }
+
+    func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?) {
+        terminationHandler = handler
+    }
+
+    func start() throws {}
+
+    func sendLine(_ line: String) throws {
+        guard let data = line.data(using: .utf8),
+              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return
+        }
+
+        switch object["method"] as? String {
+        case "initialize":
+            stdoutLineHandler?(jsonLine([
+                "id": object["id"] ?? 0,
+                "result": [
+                    "userAgent": "nexus-test",
+                    "codexHome": "/tmp/codex-home",
+                    "platformFamily": "unix",
+                    "platformOs": "macos"
+                ]
+            ]))
+        case "thread/start":
+            stdoutLineHandler?(jsonLine([
+                "id": object["id"] ?? 0,
+                "error": [
+                    "code": -32600,
+                    "message": "no rollout found for thread id 019e6c46-8a54-7693-ac37-36a268b62556"
+                ]
+            ]))
+        default:
+            break
+        }
+    }
+
+    func terminate() throws {
+        terminationHandler?(0)
+    }
+
+    private func jsonLine(_ object: [String: Any]) -> String {
+        let data = try! JSONSerialization.data(withJSONObject: object)
+        return String(decoding: data, as: UTF8.self)
     }
 }
 
