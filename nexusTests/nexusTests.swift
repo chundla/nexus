@@ -287,6 +287,42 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func structuredSessionComposerSendAffordanceAppearsAfterTheFirstSendableCharacter() {
+        let composer = StructuredSessionComposerPresentation(
+            placeholder: "Send a prompt to Codex",
+            isEnabled: true,
+            disabledReason: nil
+        )
+
+        #expect(structuredSessionComposerSendAffordance(
+            for: "H",
+            composer: composer,
+            isPerformingAction: false
+        ) == StructuredSessionComposerSendAffordance(
+            isVisible: true,
+            isEnabled: true
+        ))
+    }
+
+    @MainActor
+    @Test func structuredSessionComposerSendAffordanceStaysHiddenForWhitespaceOnlyDrafts() {
+        let composer = StructuredSessionComposerPresentation(
+            placeholder: "Send a prompt to Pi",
+            isEnabled: true,
+            disabledReason: nil
+        )
+
+        #expect(structuredSessionComposerSendAffordance(
+            for: " \n ",
+            composer: composer,
+            isPerformingAction: false
+        ) == StructuredSessionComposerSendAffordance(
+            isVisible: false,
+            isEnabled: false
+        ))
+    }
+
+    @MainActor
     @Test func structuredSessionApprovalRequestPresentationKeepsViewerActionsVisibleButDisabledUntilControllerTaken() {
         #expect(structuredSessionApprovalRequestPresentation(isController: false) == StructuredSessionApprovalRequestPresentation(
             actionsAreEnabled: false,

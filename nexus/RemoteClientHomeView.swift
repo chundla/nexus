@@ -1678,18 +1678,45 @@ private struct RemoteSessionScreenView: View {
     private var structuredComposerBar: some View {
         if let screen {
             let composer = structuredSessionComposerPresentation(for: screen, isController: model.focusedSessionIsController)
+            let sendAffordance = structuredSessionComposerSendAffordance(
+                for: structuredPrompt,
+                composer: composer,
+                isPerformingAction: isPerformingAction
+            )
 
             VStack(spacing: 8) {
                 if composer.isEnabled {
-                    TextField(composer.placeholder, text: $structuredPrompt, axis: .vertical)
-                        .textInputAutocapitalization(.sentences)
-                        .autocorrectionDisabled()
-                        .submitLabel(.send)
-                        .disabled(isPerformingAction)
-                        .nexusIOSTextField(tint: NexusIOSTheme.gold)
-                        .onSubmit {
-                            sendStructuredPrompt()
+                    HStack(alignment: .bottom, spacing: 10) {
+                        TextField(composer.placeholder, text: $structuredPrompt, axis: .vertical)
+                            .textInputAutocapitalization(.sentences)
+                            .autocorrectionDisabled()
+                            .lineLimit(1 ... 6)
+                            .disabled(isPerformingAction)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .nexusIOSTextField(tint: NexusIOSTheme.gold)
+
+                        if sendAffordance.isVisible {
+                            Button {
+                                sendStructuredPrompt()
+                            } label: {
+                                Image(systemName: "arrow.up")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 34, height: 34)
+                                    .background(
+                                        sendAffordance.isEnabled
+                                            ? NexusIOSTheme.gold
+                                            : NexusIOSTheme.gold.opacity(0.32),
+                                        in: Circle()
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(sendAffordance.isEnabled == false)
+                            .accessibilityLabel("Send")
+                            .transition(.scale(scale: 0.92).combined(with: .opacity))
                         }
+                    }
+                    .animation(.easeOut(duration: 0.16), value: sendAffordance.isVisible)
                 } else {
                     HStack(spacing: 12) {
                         Text(composer.disabledReason ?? "Take over to reply from this iPhone.")

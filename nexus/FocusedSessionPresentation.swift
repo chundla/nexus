@@ -39,6 +39,11 @@ struct StructuredSessionComposerPresentation: Equatable {
     let disabledReason: String?
 }
 
+struct StructuredSessionComposerSendAffordance: Equatable {
+    let isVisible: Bool
+    let isEnabled: Bool
+}
+
 struct StructuredSessionApprovalRequestPresentation: Equatable {
     let actionsAreEnabled: Bool
     let disabledReason: String?
@@ -87,6 +92,18 @@ func structuredSessionComposerPresentation(for screen: SessionScreen, isControll
         placeholder: copy.composerPlaceholder,
         isEnabled: isController,
         disabledReason: isController ? nil : "Take Controller to send a prompt from this iPhone."
+    )
+}
+
+func structuredSessionComposerSendAffordance(
+    for draft: String,
+    composer: StructuredSessionComposerPresentation,
+    isPerformingAction: Bool
+) -> StructuredSessionComposerSendAffordance {
+    let hasSendableDraft = draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+    return StructuredSessionComposerSendAffordance(
+        isVisible: composer.isEnabled && hasSendableDraft,
+        isEnabled: composer.isEnabled && hasSendableDraft && isPerformingAction == false
     )
 }
 
