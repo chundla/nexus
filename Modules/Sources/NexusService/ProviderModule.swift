@@ -28,7 +28,14 @@ enum ProviderModuleOpenSessionRequest {
 }
 
 struct ProviderModuleOpenSessionActions {
-    let executeSharedOpen: () async throws -> Session
+    let defaultSession: (_ workspaceID: UUID, _ providerID: ProviderID) throws -> Session?
+    let listSessions: (_ workspaceID: UUID, _ providerID: ProviderID) throws -> [Session]
+    let resolveNamedSessionName: (_ requestedName: String?, _ existingSessions: [Session]) -> String
+    let providerHealthSummary: (_ providerID: ProviderID, _ workspace: Workspace) async throws -> ProviderHealthSummary
+    let createDefaultSession: (_ workspaceID: UUID, _ providerID: ProviderID, _ state: Session.State, _ failureMessage: String?) throws -> Session
+    let createNamedSession: (_ workspaceID: UUID, _ providerID: ProviderID, _ name: String, _ state: Session.State, _ failureMessage: String?) throws -> Session
+    let launchFreshSession: (_ session: Session, _ workspace: Workspace, _ primarySurface: SessionSurface, _ executable: String) async throws -> Session
+    let launchPersistedSession: (_ session: Session, _ workspace: Workspace) async throws -> Session
 }
 
 struct ProviderModulePersistedSessionLaunchActions {
@@ -48,6 +55,10 @@ struct ProviderModulePersistedSessionLaunchRequest {
 
 protocol ProviderModule {
     var provider: Provider { get }
+
+    func supportsDefaultSessionLaunch(in workspace: Workspace) -> Bool
+
+    func supportsNamedSessions(in workspace: Workspace) -> Bool
 
     func providerHealthSummary(
         for workspace: Workspace,
@@ -83,13 +94,120 @@ extension ProviderModule {
         _ request: ProviderModuleOpenSessionRequest,
         actions: ProviderModuleOpenSessionActions
     ) async throws -> Session {
-        try await actions.executeSharedOpen()
+        try await executeSharedOpenSession(request, actions: actions)
     }
 
     func launchPersistedSession(
         _ request: ProviderModulePersistedSessionLaunchRequest
     ) async throws -> Session {
         try await request.actions.executeSharedLaunch()
+    }
+
+    func executeSharedOpenSession(
+        _ request: ProviderModuleOpenSessionRequest,
+        actions: ProviderModuleOpenSessionActions
+    ) async throws -> Session {
+        switch request {
+        case let .launchOrResumeDefaultSession(workspace, providerID):
+            return try await launchOrResumeDefaultSession(
+                workspaceID: workspace.id,
+                providerID: providerID,
+                workspace: workspace,
+                actions: actions
+            )
+        case let .createNamedSession(workspace, providerID, name):
+            return try await createNamedSession(
+                workspaceID: workspace.id,
+                providerID: providerID,
+                name: name,
+                workspace: workspace,
+                actions: actions
+            )
+        case let .launchOrResumePersistedSession(session, workspace):
+            return try await launchOrResumePersistedSession(session, workspace: workspace, actions: actions)
+        }
+    }
+
+    private func launchOrResumeDefaultSession(
+        workspaceID: UUID,
+        providerID: ProviderID,
+        workspace: Workspace,
+        actions: ProviderModuleOpenSessionActions
+    ) async throws -> Session {
+        guard supportsDefaultSessionLaunch(in: workspace) else {
+            throw NexusMetadataStoreError.providerNotSupported
+        }
+
+        if let existingSession = try actions.defaultSession(workspaceID, providerID) {
+            return try await actions.launchPersistedSession(existingSession, workspace)
+        }
+
+        let health = try await actions.providerHealthSummary(providerID, workspace)
+        guard health.launchability == .launchable, let executable = health.resolvedExecutable else {
+            return try actions.createDefaultSession(
+                workspaceID,
+                providerID,
+                .failed,
+                providerHealthFailureMessage(from: health)
+            )
+        }
+
+        let session = try actions.createDefaultSession(workspaceID, providerID, .ready, nil)
+        return try await actions.launchFreshSession(
+            session,
+            workspace,
+            prelaunchPrimarySurface(in: workspace),
+            executable
+        )
+    }
+
+    private func createNamedSession(
+        workspaceID: UUID,
+        providerID: ProviderID,
+        name: String?,
+        workspace: Workspace,
+        actions: ProviderModuleOpenSessionActions
+    ) async throws -> Session {
+        guard supportsNamedSessions(in: workspace) else {
+            throw NexusMetadataStoreError.providerNotSupported
+        }
+
+        let existingSessions = try actions.listSessions(workspaceID, providerID)
+        let resolvedName = actions.resolveNamedSessionName(name, existingSessions)
+        let health = try await actions.providerHealthSummary(providerID, workspace)
+
+        guard health.launchability == .launchable, let executable = health.resolvedExecutable else {
+            return try actions.createNamedSession(
+                workspaceID,
+                providerID,
+                resolvedName,
+                .failed,
+                providerHealthFailureMessage(from: health)
+            )
+        }
+
+        let session = try actions.createNamedSession(workspaceID, providerID, resolvedName, .ready, nil)
+        return try await actions.launchFreshSession(
+            session,
+            workspace,
+            prelaunchPrimarySurface(in: workspace),
+            executable
+        )
+    }
+
+    private func launchOrResumePersistedSession(
+        _ session: Session,
+        workspace: Workspace,
+        actions: ProviderModuleOpenSessionActions
+    ) async throws -> Session {
+        let isSupported = session.isDefault
+            ? supportsDefaultSessionLaunch(in: workspace)
+            : supportsNamedSessions(in: workspace)
+        guard isSupported else {
+            throw NexusMetadataStoreError.providerNotSupported
+        }
+
+        return try await actions.launchPersistedSession(session, workspace)
     }
 }
 
@@ -171,11 +289,23 @@ private func providerCapabilityDisabledReason(
     return health.summary
 }
 
+private func providerHealthFailureMessage(from health: ProviderHealthSummary) -> String {
+    health.diagnostics.first(where: { $0.severity == .error })?.message ?? health.summary
+}
+
 private struct UnsupportedProviderModule: ProviderModule {
     let provider: Provider
 
     init(providerID: ProviderID) {
         self.provider = Provider(id: providerID)
+    }
+
+    func supportsDefaultSessionLaunch(in workspace: Workspace) -> Bool {
+        false
+    }
+
+    func supportsNamedSessions(in workspace: Workspace) -> Bool {
+        false
     }
 
     func providerHealthSummary(
@@ -193,8 +323,8 @@ private struct UnsupportedProviderModule: ProviderModule {
     ) -> ProviderCapabilities {
         makeProviderCapabilities(
             provider: provider,
-            supportsDefaultSessionLaunch: false,
-            supportsNamedSessions: false,
+            supportsDefaultSessionLaunch: supportsDefaultSessionLaunch(in: workspace),
+            supportsNamedSessions: supportsNamedSessions(in: workspace),
             health: health,
             defaultSession: defaultSession
         )
@@ -239,6 +369,14 @@ struct PiProviderModule: ProviderModule {
         }
     }
 
+    func supportsDefaultSessionLaunch(in workspace: Workspace) -> Bool {
+        defaultSessionLaunchSupportEvaluator(workspace)
+    }
+
+    func supportsNamedSessions(in workspace: Workspace) -> Bool {
+        namedSessionSupportEvaluator(workspace)
+    }
+
     func providerHealthSummary(
         for workspace: Workspace,
         remoteContext: RemoteWorkspaceHealthContext?,
@@ -254,8 +392,8 @@ struct PiProviderModule: ProviderModule {
     ) -> ProviderCapabilities {
         makeProviderCapabilities(
             provider: provider,
-            supportsDefaultSessionLaunch: defaultSessionLaunchSupportEvaluator(workspace),
-            supportsNamedSessions: namedSessionSupportEvaluator(workspace),
+            supportsDefaultSessionLaunch: supportsDefaultSessionLaunch(in: workspace),
+            supportsNamedSessions: supportsNamedSessions(in: workspace),
             health: health,
             defaultSession: defaultSession
         )
@@ -270,6 +408,31 @@ struct PiProviderModule: ProviderModule {
         remoteContext: RemoteWorkspaceHealthContext?
     ) -> Bool {
         remoteHealthSnapshotReuseEvaluator(snapshot, remoteContext)
+    }
+
+    func openSession(
+        _ request: ProviderModuleOpenSessionRequest,
+        actions: ProviderModuleOpenSessionActions
+    ) async throws -> Session {
+        switch request {
+        case let .launchOrResumeDefaultSession(workspace, providerID):
+            return try await launchOrResumeDefaultSession(
+                workspaceID: workspace.id,
+                providerID: providerID,
+                workspace: workspace,
+                actions: actions
+            )
+        case let .createNamedSession(workspace, providerID, name):
+            return try await createNamedSession(
+                workspaceID: workspace.id,
+                providerID: providerID,
+                name: name,
+                workspace: workspace,
+                actions: actions
+            )
+        case let .launchOrResumePersistedSession(session, workspace):
+            return try await launchOrResumePersistedSession(session, workspace: workspace, actions: actions)
+        }
     }
 
     func launchPersistedSession(
@@ -292,6 +455,88 @@ struct PiProviderModule: ProviderModule {
                 sessionRecordAdapterMetadataSource: request.execution.sessionRecordAdapterMetadataSource
             )
         }
+    }
+
+    private func launchOrResumeDefaultSession(
+        workspaceID: UUID,
+        providerID: ProviderID,
+        workspace: Workspace,
+        actions: ProviderModuleOpenSessionActions
+    ) async throws -> Session {
+        guard supportsDefaultSessionLaunch(in: workspace) else {
+            throw NexusMetadataStoreError.providerNotSupported
+        }
+
+        if let existingSession = try actions.defaultSession(workspaceID, providerID) {
+            return try await actions.launchPersistedSession(existingSession, workspace)
+        }
+
+        let health = try await actions.providerHealthSummary(providerID, workspace)
+        guard health.launchability == .launchable, let executable = health.resolvedExecutable else {
+            return try actions.createDefaultSession(
+                workspaceID,
+                providerID,
+                .failed,
+                providerHealthFailureMessage(from: health)
+            )
+        }
+
+        let session = try actions.createDefaultSession(workspaceID, providerID, .ready, nil)
+        return try await actions.launchFreshSession(
+            session,
+            workspace,
+            prelaunchPrimarySurface(in: workspace),
+            executable
+        )
+    }
+
+    private func createNamedSession(
+        workspaceID: UUID,
+        providerID: ProviderID,
+        name: String?,
+        workspace: Workspace,
+        actions: ProviderModuleOpenSessionActions
+    ) async throws -> Session {
+        guard supportsNamedSessions(in: workspace) else {
+            throw NexusMetadataStoreError.providerNotSupported
+        }
+
+        let existingSessions = try actions.listSessions(workspaceID, providerID)
+        let resolvedName = actions.resolveNamedSessionName(name, existingSessions)
+        let health = try await actions.providerHealthSummary(providerID, workspace)
+
+        guard health.launchability == .launchable, let executable = health.resolvedExecutable else {
+            return try actions.createNamedSession(
+                workspaceID,
+                providerID,
+                resolvedName,
+                .failed,
+                providerHealthFailureMessage(from: health)
+            )
+        }
+
+        let session = try actions.createNamedSession(workspaceID, providerID, resolvedName, .ready, nil)
+        return try await actions.launchFreshSession(
+            session,
+            workspace,
+            prelaunchPrimarySurface(in: workspace),
+            executable
+        )
+    }
+
+    private func launchOrResumePersistedSession(
+        _ session: Session,
+        workspace: Workspace,
+        actions: ProviderModuleOpenSessionActions
+    ) async throws -> Session {
+        let isSupported = session.isDefault
+            ? supportsDefaultSessionLaunch(in: workspace)
+            : supportsNamedSessions(in: workspace)
+        guard isSupported else {
+            throw NexusMetadataStoreError.providerNotSupported
+        }
+
+        return try await actions.launchPersistedSession(session, workspace)
     }
 
     private func recoverRemotePersistedSession(

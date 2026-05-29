@@ -36,14 +36,22 @@ struct PiProviderModuleTests {
             isDefault: false,
             state: .ready
         )
-        let tracker = SharedActionTracker()
+        let openTracker = OpenActionTracker()
+        let launchTracker = PersistedLaunchTracker()
 
         let openResult = try await module.openSession(
             .launchOrResumeDefaultSession(workspace: workspace, providerID: .claude),
-            actions: ProviderModuleOpenSessionActions(
-                executeSharedOpen: {
-                    tracker.sharedOpenCount += 1
-                    return openedSession
+            actions: makeOpenSessionActions(
+                tracker: openTracker,
+                defaultSessions: [workspace.id: openedSession],
+                namedSessions: [:],
+                healthSummary: { _, _ in
+                    ProviderHealthSummary(
+                        state: .available,
+                        summary: "Ready",
+                        resolvedExecutable: "/tmp/fake-claude",
+                        launchability: .launchable
+                    )
                 }
             )
         )
@@ -65,7 +73,7 @@ struct PiProviderModuleTests {
                 ),
                 actions: ProviderModulePersistedSessionLaunchActions(
                     executeSharedLaunch: {
-                        tracker.sharedLaunchCount += 1
+                        launchTracker.didUseSharedLaunch = true
                         return launchedSession
                     },
                     attemptRemoteRuntimeRecovery: { launchedSession },
@@ -87,8 +95,20 @@ struct PiProviderModuleTests {
 
         #expect(openResult == openedSession)
         #expect(launchResult == launchedSession)
-        #expect(tracker.sharedOpenCount == 1)
-        #expect(tracker.sharedLaunchCount == 1)
+        #expect(openTracker.defaultSessionLookups == [
+            .init(workspaceID: workspace.id, providerID: .claude)
+        ])
+        #expect(openTracker.healthRequests == [
+            .init(workspaceID: workspace.id, providerID: .claude)
+        ])
+        #expect(openTracker.createdDefaultSessions == [
+            .init(workspaceID: workspace.id, providerID: .claude, state: .ready, failureMessage: nil)
+        ])
+        #expect(openTracker.freshLaunches == [
+            .init(sessionID: openedSession.id, workspaceID: workspace.id, primarySurface: .terminal, executable: "/tmp/fake-claude")
+        ])
+        #expect(openTracker.persistedLaunches.isEmpty)
+        #expect(launchTracker.didUseSharedLaunch)
     }
 
     @Test func piProviderModuleOwnsOpenSessionSeamForLocalAndRemotePiSessions() async throws {
@@ -117,12 +137,28 @@ struct PiProviderModuleTests {
             primaryGroupID: UUID(),
             remoteHostID: UUID()
         )
-        let tracker = SharedActionTracker()
+        let tracker = OpenActionTracker()
         let localDefaultSession = Session(
             id: UUID(),
             workspaceID: localWorkspace.id,
             providerID: .pi,
             isDefault: true,
+            state: .ready
+        )
+        let localNamedSession = Session(
+            id: UUID(),
+            workspaceID: localWorkspace.id,
+            providerID: .pi,
+            name: "Review",
+            isDefault: false,
+            state: .ready
+        )
+        let localPersistedSession = Session(
+            id: UUID(),
+            workspaceID: localWorkspace.id,
+            providerID: .pi,
+            name: "Persisted Local",
+            isDefault: false,
             state: .ready
         )
         let remoteDefaultSession = Session(
@@ -132,65 +168,87 @@ struct PiProviderModuleTests {
             isDefault: true,
             state: .ready
         )
-        let remoteNamedSession = Session(
+        let remotePersistedSession = Session(
             id: UUID(),
             workspaceID: remoteWorkspace.id,
             providerID: .pi,
-            name: "Review",
+            name: "Persisted Remote",
             isDefault: false,
             state: .ready
         )
-        let persistedRemoteSession = Session(
-            id: UUID(),
-            workspaceID: remoteWorkspace.id,
-            providerID: .pi,
-            name: "Persisted",
-            isDefault: false,
-            state: .ready
+        let actions = makeOpenSessionActions(
+            tracker: tracker,
+            defaultSessions: [
+                localWorkspace.id: localDefaultSession,
+                remoteWorkspace.id: remoteDefaultSession
+            ],
+            namedSessions: [
+                localWorkspace.id: localNamedSession
+            ],
+            healthSummary: { _, workspace in
+                ProviderHealthSummary(
+                    state: .available,
+                    summary: "Ready",
+                    resolvedExecutable: workspace.kind == .remote ? "/tmp/remote-pi" : "/tmp/local-pi",
+                    launchability: .launchable
+                )
+            }
         )
 
-        let localOpen = try await module.openSession(
+        let localDefaultOpen = try await module.openSession(
             .launchOrResumeDefaultSession(workspace: localWorkspace, providerID: .pi),
-            actions: ProviderModuleOpenSessionActions(
-                executeSharedOpen: {
-                    tracker.sharedOpenCount += 1
-                    return localDefaultSession
-                }
-            )
+            actions: actions
+        )
+        let localNamedOpen = try await module.openSession(
+            .createNamedSession(workspace: localWorkspace, providerID: .pi, name: localNamedSession.name),
+            actions: actions
+        )
+        let localPersistedOpen = try await module.openSession(
+            .launchOrResumePersistedSession(localPersistedSession, workspace: localWorkspace),
+            actions: actions
         )
         let remoteDefaultOpen = try await module.openSession(
             .launchOrResumeDefaultSession(workspace: remoteWorkspace, providerID: .pi),
-            actions: ProviderModuleOpenSessionActions(
-                executeSharedOpen: {
-                    tracker.sharedOpenCount += 1
-                    return remoteDefaultSession
-                }
-            )
-        )
-        let remoteNamedOpen = try await module.openSession(
-            .createNamedSession(workspace: remoteWorkspace, providerID: .pi, name: remoteNamedSession.name),
-            actions: ProviderModuleOpenSessionActions(
-                executeSharedOpen: {
-                    tracker.sharedOpenCount += 1
-                    return remoteNamedSession
-                }
-            )
+            actions: actions
         )
         let remotePersistedOpen = try await module.openSession(
-            .launchOrResumePersistedSession(persistedRemoteSession, workspace: remoteWorkspace),
-            actions: ProviderModuleOpenSessionActions(
-                executeSharedOpen: {
-                    tracker.sharedOpenCount += 1
-                    return persistedRemoteSession
-                }
-            )
+            .launchOrResumePersistedSession(remotePersistedSession, workspace: remoteWorkspace),
+            actions: actions
         )
 
-        #expect(localOpen == localDefaultSession)
+        #expect(localDefaultOpen == localDefaultSession)
+        #expect(localNamedOpen == localNamedSession)
+        #expect(localPersistedOpen == localPersistedSession)
         #expect(remoteDefaultOpen == remoteDefaultSession)
-        #expect(remoteNamedOpen == remoteNamedSession)
-        #expect(remotePersistedOpen == persistedRemoteSession)
-        #expect(tracker.sharedOpenCount == 4)
+        #expect(remotePersistedOpen == remotePersistedSession)
+        #expect(tracker.defaultSessionLookups == [
+            .init(workspaceID: localWorkspace.id, providerID: .pi),
+            .init(workspaceID: remoteWorkspace.id, providerID: .pi)
+        ])
+        #expect(tracker.listSessionRequests == [
+            .init(workspaceID: localWorkspace.id, providerID: .pi)
+        ])
+        #expect(tracker.healthRequests == [
+            .init(workspaceID: localWorkspace.id, providerID: .pi),
+            .init(workspaceID: localWorkspace.id, providerID: .pi),
+            .init(workspaceID: remoteWorkspace.id, providerID: .pi)
+        ])
+        #expect(tracker.createdDefaultSessions == [
+            .init(workspaceID: localWorkspace.id, providerID: .pi, state: .ready, failureMessage: nil),
+            .init(workspaceID: remoteWorkspace.id, providerID: .pi, state: .ready, failureMessage: nil)
+        ])
+        #expect(tracker.createdNamedSessions == [
+            .init(workspaceID: localWorkspace.id, providerID: .pi, name: "Review", state: .ready, failureMessage: nil)
+        ])
+        #expect(tracker.freshLaunches == [
+            .init(sessionID: localDefaultSession.id, workspaceID: localWorkspace.id, primarySurface: .structuredActivityFeed, executable: "/tmp/local-pi"),
+            .init(sessionID: localNamedSession.id, workspaceID: localWorkspace.id, primarySurface: .structuredActivityFeed, executable: "/tmp/local-pi"),
+            .init(sessionID: remoteDefaultSession.id, workspaceID: remoteWorkspace.id, primarySurface: .structuredActivityFeed, executable: "/tmp/remote-pi")
+        ])
+        #expect(tracker.persistedLaunches == [
+            .init(sessionID: localPersistedSession.id, workspaceID: localWorkspace.id),
+            .init(sessionID: remotePersistedSession.id, workspaceID: remoteWorkspace.id)
+        ])
     }
 
     @Test func piProviderModuleOwnsRemoteRecoveryAndInvalidContinuityFallback() async throws {
@@ -461,9 +519,95 @@ struct PiProviderModuleTests {
     }
 }
 
-private final class SharedActionTracker: @unchecked Sendable {
-    var sharedOpenCount = 0
-    var sharedLaunchCount = 0
+private func makeOpenSessionActions(
+    tracker: OpenActionTracker,
+    defaultSessions: [UUID: Session],
+    namedSessions: [UUID: Session],
+    healthSummary: @escaping (ProviderID, Workspace) -> ProviderHealthSummary
+) -> ProviderModuleOpenSessionActions {
+    ProviderModuleOpenSessionActions(
+        defaultSession: { workspaceID, providerID in
+            tracker.defaultSessionLookups.append(.init(workspaceID: workspaceID, providerID: providerID))
+            return nil
+        },
+        listSessions: { workspaceID, providerID in
+            tracker.listSessionRequests.append(.init(workspaceID: workspaceID, providerID: providerID))
+            return []
+        },
+        resolveNamedSessionName: { requestedName, existingSessions in
+            tracker.namedSessionNameRequests.append((requestedName, existingSessions.map { $0.id }))
+            return requestedName ?? "Session 1"
+        },
+        providerHealthSummary: { providerID, workspace in
+            tracker.healthRequests.append(.init(workspaceID: workspace.id, providerID: providerID))
+            return healthSummary(providerID, workspace)
+        },
+        createDefaultSession: { workspaceID, providerID, state, failureMessage in
+            tracker.createdDefaultSessions.append(
+                .init(workspaceID: workspaceID, providerID: providerID, state: state, failureMessage: failureMessage)
+            )
+            return try #require(defaultSessions[workspaceID])
+        },
+        createNamedSession: { workspaceID, providerID, name, state, failureMessage in
+            tracker.createdNamedSessions.append(
+                .init(workspaceID: workspaceID, providerID: providerID, name: name, state: state, failureMessage: failureMessage)
+            )
+            return try #require(namedSessions[workspaceID])
+        },
+        launchFreshSession: { session, workspace, primarySurface, executable in
+            tracker.freshLaunches.append(
+                .init(sessionID: session.id, workspaceID: workspace.id, primarySurface: primarySurface, executable: executable)
+            )
+            return session
+        },
+        launchPersistedSession: { session, workspace in
+            tracker.persistedLaunches.append(.init(sessionID: session.id, workspaceID: workspace.id))
+            return session
+        }
+    )
+}
+
+private final class OpenActionTracker: @unchecked Sendable {
+    struct SessionRequest: Equatable {
+        let workspaceID: UUID
+        let providerID: ProviderID
+    }
+
+    struct CreatedDefaultSession: Equatable {
+        let workspaceID: UUID
+        let providerID: ProviderID
+        let state: Session.State
+        let failureMessage: String?
+    }
+
+    struct CreatedNamedSession: Equatable {
+        let workspaceID: UUID
+        let providerID: ProviderID
+        let name: String
+        let state: Session.State
+        let failureMessage: String?
+    }
+
+    struct FreshLaunch: Equatable {
+        let sessionID: UUID
+        let workspaceID: UUID
+        let primarySurface: SessionSurface
+        let executable: String
+    }
+
+    struct PersistedLaunch: Equatable {
+        let sessionID: UUID
+        let workspaceID: UUID
+    }
+
+    var defaultSessionLookups: [SessionRequest] = []
+    var listSessionRequests: [SessionRequest] = []
+    var namedSessionNameRequests: [(requestedName: String?, existingSessionIDs: [UUID])] = []
+    var healthRequests: [SessionRequest] = []
+    var createdDefaultSessions: [CreatedDefaultSession] = []
+    var createdNamedSessions: [CreatedNamedSession] = []
+    var freshLaunches: [FreshLaunch] = []
+    var persistedLaunches: [PersistedLaunch] = []
 }
 
 private final class PersistedLaunchTracker: @unchecked Sendable {

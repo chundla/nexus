@@ -1203,9 +1203,6 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                     try self.metadataStore.workspace(id: $0)
                 },
                 sessionRecordStore: self.sessionRecordStore,
-                providerAdapter: { [unowned self] providerID in
-                    self.providerAdapter(for: providerID)
-                },
                 providerModule: { [unowned self] providerID in
                     self.providerModuleRegistry.module(for: providerID)
                 },

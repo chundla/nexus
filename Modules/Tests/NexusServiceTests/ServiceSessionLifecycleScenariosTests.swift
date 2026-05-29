@@ -82,6 +82,41 @@ struct ServiceSessionLifecycleScenariosTests {
         ])
     }
 
+    @Test func localPiDefaultSessionLaunchUsesProviderModuleSupportAndStructuredPrelaunchSurface() async throws {
+        let fixture = try ServiceSessionLifecycleFixture(
+            health: ProviderHealthSummary(
+                state: .available,
+                summary: "Ready",
+                resolvedExecutable: "/tmp/pi",
+                launchability: .launchable
+            )
+        )
+        let lifecycle = fixture.makeLifecycle(
+            providerModule: PiProviderModule(
+                adapter: ServiceProviderAdapter(
+                    providerID: .pi,
+                    supportsDefaultSessionLaunch: true,
+                    supportsNamedSessions: true,
+                    healthSummaryEvaluator: { _, _, _ in fixture.health },
+                    primarySurfaceEvaluator: { _ in .terminal }
+                )
+            )
+        )
+
+        let session = try await lifecycle.launchOrResumeDefaultSession(
+            workspaceID: fixture.workspace.id,
+            providerID: .pi
+        )
+        let launch = try #require(fixture.tracker.freshLaunches.first)
+        let launchSnapshot = try #require(try fixture.store.launchSnapshot(sessionID: session.id))
+
+        #expect(session.providerID == .pi)
+        #expect(session.isDefault)
+        #expect(session.state == .ready)
+        #expect(launch.launchSnapshot.primarySurface == .structuredActivityFeed)
+        #expect(launchSnapshot.primarySurface == .structuredActivityFeed)
+    }
+
     @Test func launchOrResumeSessionPlansPersistedLaunchThroughSessionModule() async throws {
         let fixture = try ServiceSessionLifecycleFixture()
         let existingSession = try fixture.store.createDefaultSession(
@@ -169,21 +204,6 @@ struct ServiceSessionLifecycleScenariosTests {
             dependencies: ServiceSessionLifecycleDependencies(
                 workspace: { try store.workspace(id: $0) },
                 sessionRecordStore: TrackingSessionRecordStore(metadataStore: store),
-                providerAdapter: { providerID in
-                    ServiceProviderAdapter(
-                        providerID: providerID,
-                        supportsDefaultSessionLaunch: true,
-                        supportsNamedSessions: true,
-                        healthSummaryEvaluator: { _, _, _ in
-                            ProviderHealthSummary(
-                                state: .available,
-                                summary: "Ready",
-                                resolvedExecutable: "/tmp/pi",
-                                launchability: .launchable
-                            )
-                        }
-                    )
-                },
                 providerModule: { providerID in
                     ServiceProviderAdapter(
                         providerID: providerID,
@@ -313,14 +333,6 @@ struct ServiceSessionLifecycleScenariosTests {
             dependencies: ServiceSessionLifecycleDependencies(
                 workspace: { try fixture.store.workspace(id: $0) },
                 sessionRecordStore: sessionRecordStore,
-                providerAdapter: { providerID in
-                    ServiceProviderAdapter(
-                        providerID: providerID,
-                        supportsDefaultSessionLaunch: true,
-                        supportsNamedSessions: true,
-                        healthSummaryEvaluator: { _, _, _ in fixture.health }
-                    )
-                },
                 providerModule: { providerID in
                     ServiceProviderAdapter(
                         providerID: providerID,
@@ -539,9 +551,6 @@ private struct ServiceSessionLifecycleFixture {
             dependencies: ServiceSessionLifecycleDependencies(
                 workspace: { try store.workspace(id: $0) },
                 sessionRecordStore: TrackingSessionRecordStore(metadataStore: store),
-                providerAdapter: { providerID in
-                    adapter(for: providerID)
-                },
                 providerModule: { providerID in
                     providerModule ?? adapter(for: providerID)
                 },
@@ -601,6 +610,14 @@ private struct RecordingOpenProviderModule: ProviderModule {
         self.tracker = tracker
     }
 
+    func supportsDefaultSessionLaunch(in workspace: Workspace) -> Bool {
+        true
+    }
+
+    func supportsNamedSessions(in workspace: Workspace) -> Bool {
+        true
+    }
+
     func providerHealthSummary(
         for workspace: Workspace,
         remoteContext: RemoteWorkspaceHealthContext?,
@@ -636,7 +653,7 @@ private struct RecordingOpenProviderModule: ProviderModule {
         actions: ProviderModuleOpenSessionActions
     ) async throws -> Session {
         tracker.requests.append(.init(request: request))
-        return try await actions.executeSharedOpen()
+        return try await executeSharedOpenSession(request, actions: actions)
     }
 }
 

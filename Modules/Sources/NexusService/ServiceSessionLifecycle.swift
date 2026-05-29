@@ -18,7 +18,6 @@ struct PersistedSessionLaunchExecution {
 struct ServiceSessionLifecycleDependencies {
     let workspace: (UUID) throws -> Workspace?
     let sessionRecordStore: any SessionRecordStore
-    let providerAdapter: (ProviderID) -> ServiceProviderAdapter
     let providerModule: (ProviderID) -> any ProviderModule
     let remoteWorkspaceHealthContext: (Workspace) throws -> RemoteWorkspaceHealthContext?
     let providerHealthSummary: (ProviderID, Workspace, RemoteWorkspaceHealthContext?) async throws -> ProviderHealthSummary
@@ -60,108 +59,53 @@ final class ServiceSessionLifecycle: SessionLifecycleManaging {
         try await dependencies.providerModule(request.providerID).openSession(
             request,
             actions: ProviderModuleOpenSessionActions(
-                executeSharedOpen: { [self] in
-                    try await self.openSharedSession(request)
+                defaultSession: { [sessionRecordStore = dependencies.sessionRecordStore] workspaceID, providerID in
+                    try sessionRecordStore.defaultSession(workspaceID: workspaceID, providerID: providerID)
+                },
+                listSessions: { [sessionRecordStore = dependencies.sessionRecordStore] workspaceID, providerID in
+                    try sessionRecordStore.listSessions(workspaceID: workspaceID, providerID: providerID)
+                },
+                resolveNamedSessionName: dependencies.resolveNamedSessionName,
+                providerHealthSummary: { [self] providerID, workspace in
+                    try await self.providerHealthSummary(for: providerID, workspace: workspace)
+                },
+                createDefaultSession: { [sessionRecordStore = dependencies.sessionRecordStore] workspaceID, providerID, state, failureMessage in
+                    try sessionRecordStore.createDefaultSession(
+                        workspaceID: workspaceID,
+                        providerID: providerID,
+                        state: state,
+                        failureMessage: failureMessage
+                    )
+                },
+                createNamedSession: { [sessionRecordStore = dependencies.sessionRecordStore] workspaceID, providerID, name, state, failureMessage in
+                    try sessionRecordStore.createNamedSession(
+                        workspaceID: workspaceID,
+                        providerID: providerID,
+                        name: name,
+                        state: state,
+                        failureMessage: failureMessage
+                    )
+                },
+                launchFreshSession: { [self] session, workspace, primarySurface, executable in
+                    try await self.launchFreshSession(
+                        session,
+                        workspace: workspace,
+                        primarySurface: primarySurface,
+                        executable: executable
+                    )
+                },
+                launchPersistedSession: { [self] session, workspace in
+                    try await self.launchPersistedSession(session, workspace: workspace)
                 }
             )
         )
     }
 
-    private func openSharedSession(_ request: ProviderModuleOpenSessionRequest) async throws -> Session {
-        switch request {
-        case let .launchOrResumeDefaultSession(workspace, providerID):
-            return try await launchOrResumeDefaultSharedSession(
-                workspaceID: workspace.id,
-                providerID: providerID,
-                workspace: workspace
-            )
-        case let .createNamedSession(workspace, providerID, name):
-            return try await createNamedSharedSession(
-                workspaceID: workspace.id,
-                providerID: providerID,
-                name: name,
-                workspace: workspace
-            )
-        case let .launchOrResumePersistedSession(session, workspace):
-            return try await launchPersistedSession(session, workspace: workspace)
-        }
-    }
-
-    private func launchOrResumeDefaultSharedSession(
-        workspaceID: UUID,
-        providerID: ProviderID,
-        workspace: Workspace
-    ) async throws -> Session {
-        let adapter = dependencies.providerAdapter(providerID)
-
-        guard adapter.supportsDefaultSessionLaunch(in: workspace) else {
-            throw NexusMetadataStoreError.providerNotSupported
-        }
-
-        if let existingSession = try dependencies.sessionRecordStore.defaultSession(workspaceID: workspaceID, providerID: providerID) {
-            return try await launchPersistedSession(existingSession, workspace: workspace)
-        }
-
-        let health = try await providerHealthSummary(for: providerID, workspace: workspace)
-        guard health.launchability == .launchable, let executable = health.resolvedExecutable else {
-            return try dependencies.sessionRecordStore.createDefaultSession(
-                workspaceID: workspaceID,
-                providerID: providerID,
-                state: .failed,
-                failureMessage: failureMessage(from: health)
-            )
-        }
-
-        let session = try dependencies.sessionRecordStore.createDefaultSession(
-            workspaceID: workspaceID,
-            providerID: providerID,
-            state: .ready,
-            failureMessage: nil
-        )
-        return try await launchFreshSession(session, workspace: workspace, adapter: adapter, executable: executable)
-    }
-
-    private func createNamedSharedSession(
-        workspaceID: UUID,
-        providerID: ProviderID,
-        name: String?,
-        workspace: Workspace
-    ) async throws -> Session {
-        let adapter = dependencies.providerAdapter(providerID)
-
-        guard adapter.supportsNamedSessions(in: workspace) else {
-            throw NexusMetadataStoreError.providerNotSupported
-        }
-
-        let existingSessions = try dependencies.sessionRecordStore.listSessions(workspaceID: workspaceID, providerID: providerID)
-        let resolvedName = dependencies.resolveNamedSessionName(name, existingSessions)
-        let health = try await providerHealthSummary(for: providerID, workspace: workspace)
-
-        guard health.launchability == .launchable, let executable = health.resolvedExecutable else {
-            return try dependencies.sessionRecordStore.createNamedSession(
-                workspaceID: workspaceID,
-                providerID: providerID,
-                name: resolvedName,
-                state: .failed,
-                failureMessage: failureMessage(from: health)
-            )
-        }
-
-        let session = try dependencies.sessionRecordStore.createNamedSession(
-            workspaceID: workspaceID,
-            providerID: providerID,
-            name: resolvedName,
-            state: .ready,
-            failureMessage: nil
-        )
-        return try await launchFreshSession(session, workspace: workspace, adapter: adapter, executable: executable)
-    }
-
     private func launchPersistedSession(_ session: Session, workspace: Workspace) async throws -> Session {
-        let adapter = dependencies.providerAdapter(session.providerID)
+        let providerModule = dependencies.providerModule(session.providerID)
         let isSupported = session.isDefault
-            ? adapter.supportsDefaultSessionLaunch(in: workspace)
-            : adapter.supportsNamedSessions(in: workspace)
+            ? providerModule.supportsDefaultSessionLaunch(in: workspace)
+            : providerModule.supportsNamedSessions(in: workspace)
         guard isSupported else {
             throw NexusMetadataStoreError.providerNotSupported
         }
@@ -202,7 +146,7 @@ final class ServiceSessionLifecycle: SessionLifecycleManaging {
             sessionID: readySession.id,
             workspaceID: readySession.workspaceID,
             providerID: readySession.providerID,
-            primarySurface: adapter.primarySurface(in: workspace),
+            primarySurface: providerModule.prelaunchPrimarySurface(in: workspace),
             resolvedExecutable: executable,
             resolvedWorkingDirectory: workspace.folderPath
         )
@@ -232,14 +176,14 @@ final class ServiceSessionLifecycle: SessionLifecycleManaging {
     private func launchFreshSession(
         _ session: Session,
         workspace: Workspace,
-        adapter: ServiceProviderAdapter,
+        primarySurface: SessionSurface,
         executable: String
     ) async throws -> Session {
         let launchSnapshot = try dependencies.sessionRecordStore.ensureLaunchSnapshot(
             sessionID: session.id,
             workspaceID: session.workspaceID,
             providerID: session.providerID,
-            primarySurface: adapter.primarySurface(in: workspace),
+            primarySurface: primarySurface,
             resolvedExecutable: executable,
             resolvedWorkingDirectory: workspace.folderPath
         )

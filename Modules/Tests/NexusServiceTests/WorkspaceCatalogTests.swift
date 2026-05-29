@@ -150,6 +150,14 @@ private struct StubProviderModule: ProviderModule {
         self.prelaunchPrimarySurface = prelaunchPrimarySurface
     }
 
+    func supportsDefaultSessionLaunch(in workspace: Workspace) -> Bool {
+        capabilities.launchDefaultSession.isSupported
+    }
+
+    func supportsNamedSessions(in workspace: Workspace) -> Bool {
+        capabilities.createNamedSession.isSupported
+    }
+
     func providerHealthSummary(
         for workspace: Workspace,
         remoteContext: RemoteWorkspaceHealthContext?,
