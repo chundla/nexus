@@ -1295,6 +1295,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     private let workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating
     private let sessionRuntimeManager: any SessionRuntimeManaging
     private var sessionLifecycle: (any SessionLifecycleManaging)!
+    private var sessionInteraction: (any SessionInteractionManaging)!
     private let remoteAccessRuntime: RemoteAccessRuntime
     private let ibmBobNativeSessionCleaner: any IBMBobNativeSessionCleaning
     private let providerAdapters: [ProviderID: ServiceProviderAdapter]
@@ -1310,6 +1311,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating,
         sessionRuntimeManager: any SessionRuntimeManaging,
         sessionLifecycle: (any SessionLifecycleManaging)? = nil,
+        sessionInteraction: (any SessionInteractionManaging)? = nil,
         remoteAccessRuntime: RemoteAccessRuntime,
         ibmBobNativeSessionCleaner: any IBMBobNativeSessionCleaning,
         providerAdapters: [ProviderID: ServiceProviderAdapter]
@@ -1323,6 +1325,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         self.workspaceAvailabilityEvaluator = workspaceAvailabilityEvaluator
         self.sessionRuntimeManager = sessionRuntimeManager
         self.sessionLifecycle = sessionLifecycle
+        self.sessionInteraction = sessionInteraction
         self.remoteAccessRuntime = remoteAccessRuntime
         self.ibmBobNativeSessionCleaner = ibmBobNativeSessionCleaner
         self.providerAdapters = providerAdapters
@@ -1369,6 +1372,55 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 }
             )
         )
+        self.sessionInteraction = sessionInteraction ?? ServiceSessionInteraction(
+            dependencies: ServiceSessionInteractionDependencies(
+                sessionRecord: { [unowned self] in
+                    try self.sessionRecordStore.session(id: $0)
+                },
+                reconcileSessionRuntimeState: { [unowned self] in
+                    try self.reconcileSessionRuntimeState($0)
+                },
+                interactiveReadySession: { [unowned self] in
+                    try await self.interactiveReadySession(for: $0)
+                },
+                hasRuntime: { [unowned self] in
+                    self.sessionRuntimeManager.hasRuntime(for: $0)
+                },
+                runtimeSessionScreen: { [unowned self] in
+                    try self.sessionRuntimeManager.sessionScreen(for: $0)
+                },
+                staticSessionScreen: { [unowned self] in
+                    try self.staticSessionScreen(for: $0, transcript: $1)
+                },
+                normalizedSessionScreen: { [unowned self] in
+                    self.normalizedSessionScreen($0)
+                },
+                addUpdateObserver: { [unowned self] observationID, session, observer in
+                    self.sessionRuntimeManager.addUpdateObserver(id: observationID, for: session, observer: observer)
+                },
+                removeUpdateObserver: { [unowned self] in
+                    self.sessionRuntimeManager.removeUpdateObserver(id: $0)
+                },
+                isRemoteController: { [unowned self] sessionID, pairedDeviceID in
+                    self.sessionControllerRegistry.isRemoteController(sessionID: sessionID, pairedDeviceID: pairedDeviceID)
+                },
+                sendInput: { [unowned self] in
+                    try self.sessionRuntimeManager.sendInput($0, to: $1)
+                },
+                sendText: { [unowned self] in
+                    try self.sessionRuntimeManager.sendText($0, to: $1)
+                },
+                sendInputKey: { [unowned self] in
+                    try self.sessionRuntimeManager.sendInputKey($0, applicationCursorMode: $1, to: $2)
+                },
+                respondToApprovalRequest: { [unowned self] in
+                    try self.sessionRuntimeManager.respondToApprovalRequest($0, decision: $1, to: $2)
+                },
+                stabilizedScreenAfterTerminalInput: { [unowned self] in
+                    self.stabilizedScreenAfterTerminalInput(for: $0, screenBeforeInput: $1, immediateResponseScreen: $2)
+                }
+            )
+        )
         self.sessionRuntimeManager.setRuntimeChangeHandler { [weak self] sessionID in
             self?.persistRuntimeLinkageAfterRuntimeChange(sessionID: sessionID)
             self?.persistSessionStateAfterRuntimeChange(sessionID: sessionID)
@@ -1404,6 +1456,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating = WorkspaceAvailabilityEvaluator(),
         sessionRuntimeManager: any SessionRuntimeManaging = InMemorySessionRuntimeManager(),
         sessionLifecycle: (any SessionLifecycleManaging)? = nil,
+        sessionInteraction: (any SessionInteractionManaging)? = nil,
         sessionRecordStoreFactory: ((NexusMetadataStore) -> any SessionRecordStore)? = nil,
         remoteAccessRuntime: RemoteAccessRuntime = RemoteAccessRuntime(),
         providerAdapters: [ProviderID: ServiceProviderAdapter]? = nil,
@@ -1416,6 +1469,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
             sessionRuntimeManager: sessionRuntimeManager,
             sessionLifecycle: sessionLifecycle,
+            sessionInteraction: sessionInteraction,
             sessionRecordStoreFactory: sessionRecordStoreFactory,
             remoteAccessRuntime: remoteAccessRuntime,
             providerAdapters: providerAdapters,
@@ -1429,6 +1483,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating = WorkspaceAvailabilityEvaluator(),
         sessionRuntimeManager: any SessionRuntimeManaging = InMemorySessionRuntimeManager(),
         sessionLifecycle: (any SessionLifecycleManaging)? = nil,
+        sessionInteraction: (any SessionInteractionManaging)? = nil,
         sessionRecordStoreFactory: ((NexusMetadataStore) -> any SessionRecordStore)? = nil,
         remoteAccessRuntime: RemoteAccessRuntime = RemoteAccessRuntime(),
         ibmBobNativeSessionCleaner: any IBMBobNativeSessionCleaning = IBMBobNativeSessionCleaner()
@@ -1439,6 +1494,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
             sessionRuntimeManager: sessionRuntimeManager,
             sessionLifecycle: sessionLifecycle,
+            sessionInteraction: sessionInteraction,
             sessionRecordStoreFactory: sessionRecordStoreFactory,
             remoteAccessRuntime: remoteAccessRuntime,
             ibmBobNativeSessionCleaner: ibmBobNativeSessionCleaner
@@ -1452,6 +1508,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating = WorkspaceAvailabilityEvaluator(),
         sessionRuntimeManager: any SessionRuntimeManaging = InMemorySessionRuntimeManager(),
         sessionLifecycle: (any SessionLifecycleManaging)? = nil,
+        sessionInteraction: (any SessionInteractionManaging)? = nil,
         sessionRecordStoreFactory: ((NexusMetadataStore) -> any SessionRecordStore)? = nil,
         remoteAccessRuntime: RemoteAccessRuntime = RemoteAccessRuntime(),
         providerAdapters: [ProviderID: ServiceProviderAdapter]? = nil,
@@ -1477,6 +1534,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
             sessionRuntimeManager: sessionRuntimeManager,
             sessionLifecycle: sessionLifecycle,
+            sessionInteraction: sessionInteraction,
             remoteAccessRuntime: remoteAccessRuntime,
             ibmBobNativeSessionCleaner: ibmBobNativeSessionCleaner,
             providerAdapters: defaultProviderAdapters(overrides: providerAdapters)
@@ -2033,37 +2091,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     func getSessionScreen(sessionID: UUID) throws -> SessionScreen {
-        guard let session = try sessionRecordStore.session(id: sessionID) else {
-            throw NexusMetadataStoreError.sessionNotFound
-        }
-
-        let resolvedSession = try reconcileSessionRuntimeState(session)
-
-        switch resolvedSession.state {
-        case .failed:
-            return try staticSessionScreen(
-                for: resolvedSession,
-                transcript: resolvedSession.failureMessage ?? "Session launch failed"
-            )
-        case .interrupted:
-            return try staticSessionScreen(
-                for: resolvedSession,
-                transcript: resolvedSession.failureMessage ?? "Session interrupted"
-            )
-        case .exited:
-            if sessionRuntimeManager.hasRuntime(for: resolvedSession) {
-                return normalizedSessionScreen(try sessionRuntimeManager.sessionScreen(for: resolvedSession))
-            }
-            return try staticSessionScreen(
-                for: resolvedSession,
-                transcript: resolvedSession.failureMessage ?? "Session exited"
-            )
-        case .ready:
-            if sessionRuntimeManager.hasRuntime(for: resolvedSession) {
-                return normalizedSessionScreen(try sessionRuntimeManager.sessionScreen(for: resolvedSession))
-            }
-            return try staticSessionScreen(for: resolvedSession, transcript: "")
-        }
+        try sessionInteraction.getSessionScreen(sessionID: sessionID)
     }
 
     func observeSessionScreen(
@@ -2071,24 +2099,15 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         sessionID: UUID,
         onUpdate: @escaping @Sendable (SessionScreen) -> Void
     ) throws -> SessionScreenObservationStart {
-        let screen = try getSessionScreen(sessionID: sessionID)
-        sessionRuntimeManager.addUpdateObserver(id: observationID, for: screen.session) { [weak self] in
-            guard let self else {
-                return
-            }
-
-            do {
-                onUpdate(try self.getSessionScreen(sessionID: sessionID))
-            } catch {
-                return
-            }
-        }
-
-        return SessionScreenObservationStart(observationID: observationID, screen: screen)
+        try sessionInteraction.observeSessionScreen(
+            observationID: observationID,
+            sessionID: sessionID,
+            onUpdate: onUpdate
+        )
     }
 
     func cancelSessionScreenObservation(observationID: UUID) {
-        sessionRuntimeManager.removeUpdateObserver(id: observationID)
+        sessionInteraction.cancelSessionScreenObservation(observationID: observationID)
     }
 
     func sendSessionInput(sessionID: UUID, text: String) throws -> SessionScreen {
@@ -2273,12 +2292,11 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     func sendRemoteSessionInput(sessionID: UUID, pairedDeviceID: UUID, text: String) async throws -> SessionScreen {
-        let resolvedSession = try await readyRemoteControlledSession(
+        try await sessionInteraction.sendRemoteSessionInput(
             sessionID: sessionID,
             pairedDeviceID: pairedDeviceID,
-            controllerError: .remoteSessionInputControllerRequired
+            text: text
         )
-        return normalizedSessionScreen(try sessionRuntimeManager.sendInput(text, to: resolvedSession))
     }
 
     func respondToRemoteApprovalRequest(
@@ -2303,17 +2321,11 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         approvalRequestID: UUID,
         decision: ApprovalRequestDecision
     ) async throws -> SessionScreen {
-        let resolvedSession = try await readyRemoteControlledSession(
+        try await sessionInteraction.respondToRemoteApprovalRequest(
             sessionID: sessionID,
             pairedDeviceID: pairedDeviceID,
-            controllerError: .remoteApprovalRequestControllerRequired
-        )
-        return normalizedSessionScreen(
-            try sessionRuntimeManager.respondToApprovalRequest(
-                approvalRequestID,
-                decision: decision,
-                to: resolvedSession
-            )
+            approvalRequestID: approvalRequestID,
+            decision: decision
         )
     }
 
@@ -2324,13 +2336,10 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     func sendRemoteSessionText(sessionID: UUID, pairedDeviceID: UUID, text: String) async throws -> SessionScreen {
-        let resolvedSession = try await readyRemoteControlledSession(sessionID: sessionID, pairedDeviceID: pairedDeviceID)
-        let screenBeforeInput = normalizedSessionScreen(try sessionRuntimeManager.sessionScreen(for: resolvedSession))
-        let responseScreen = normalizedSessionScreen(try sessionRuntimeManager.sendText(text, to: resolvedSession))
-        return stabilizedScreenAfterTerminalInput(
-            for: resolvedSession,
-            screenBeforeInput: screenBeforeInput,
-            immediateResponseScreen: responseScreen
+        try await sessionInteraction.sendRemoteSessionText(
+            sessionID: sessionID,
+            pairedDeviceID: pairedDeviceID,
+            text: text
         )
     }
 
@@ -2341,25 +2350,10 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     func sendRemoteSessionInputKey(sessionID: UUID, pairedDeviceID: UUID, key: SessionInputKey) async throws -> SessionScreen {
-        let resolvedSession = try await readyRemoteControlledSession(sessionID: sessionID, pairedDeviceID: pairedDeviceID)
-        let currentScreen = normalizedSessionScreen(try sessionRuntimeManager.sessionScreen(for: resolvedSession))
-        let renderState = TerminalRenderer.renderState(
-            from: currentScreen.transcript,
-            terminalColumns: currentScreen.terminalColumns,
-            terminalRows: currentScreen.terminalRows
-        )
-
-        let responseScreen = normalizedSessionScreen(
-            try sessionRuntimeManager.sendInputKey(
-                key,
-                applicationCursorMode: renderState.applicationCursorMode,
-                to: resolvedSession
-            )
-        )
-        return stabilizedScreenAfterTerminalInput(
-            for: resolvedSession,
-            screenBeforeInput: currentScreen,
-            immediateResponseScreen: responseScreen
+        try await sessionInteraction.sendRemoteSessionInputKey(
+            sessionID: sessionID,
+            pairedDeviceID: pairedDeviceID,
+            key: key
         )
     }
 
@@ -2429,25 +2423,6 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         }
 
         return latestScreen
-    }
-
-    private func readyRemoteControlledSession(
-        sessionID: UUID,
-        pairedDeviceID: UUID,
-        controllerError: NexusSessionControlError = .remoteControllerRequired
-    ) async throws -> Session {
-        guard let session = try sessionRecordStore.session(id: sessionID) else {
-            throw NexusMetadataStoreError.sessionNotFound
-        }
-
-        let resolvedSession = try await interactiveReadySession(for: session)
-        guard resolvedSession.state == .ready else {
-            throw NexusMetadataStoreError.sessionNotReady
-        }
-        guard sessionControllerRegistry.isRemoteController(sessionID: resolvedSession.id, pairedDeviceID: pairedDeviceID) else {
-            throw controllerError
-        }
-        return resolvedSession
     }
 
     private func interactiveReadySession(for session: Session) async throws -> Session {
