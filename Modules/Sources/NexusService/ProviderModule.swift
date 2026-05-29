@@ -29,19 +29,19 @@ enum ProviderModuleFreshSessionOpenResult: Equatable {
     case failed(String)
 }
 
-struct ProviderModulePersistedSessionLaunchActions {
-    let executeSharedLaunch: () async throws -> Session
-    let attemptRemoteRuntimeRecovery: () async throws -> Session
-    let remoteRuntimeRecoveryFailureContext: (Error) throws -> RemoteRuntimeRecoveryFailureContext
-    let persistRemoteRecoveryFailure: (RemoteRuntimeRecoveryFailureContext) throws -> Session
-    let attemptLaunch: (_ forceFreshRemoteRuntime: Bool, _ sessionRecordAdapterMetadataSource: SessionRecordAdapterMetadataLaunchSource) async throws -> Session
-    let persistLaunchFailure: (Error) throws -> Session
-    let resolvedSessionRecordAdapterMetadata: (SessionRecordAdapterMetadataLaunchSource) throws -> SessionRecordAdapterMetadata?
+struct ProviderModuleFreshRemotePersistedSessionRelaunch: Equatable {
+    let sessionRecordAdapterMetadataSource: SessionRecordAdapterMetadataLaunchSource
+    let retriesWithoutContinuity: Bool
 }
 
-struct ProviderModulePersistedSessionLaunchRequest {
+enum ProviderModulePersistedSessionRelaunchPlan: Equatable {
+    case sharedLaunch
+    case recoverRemoteRuntime(ProviderModuleFreshRemotePersistedSessionRelaunch)
+    case launchFreshRemoteRuntime(ProviderModuleFreshRemotePersistedSessionRelaunch)
+}
+
+struct ProviderModulePersistedSessionRelaunchRequest {
     let execution: PersistedSessionLaunchExecution
-    let actions: ProviderModulePersistedSessionLaunchActions
 }
 
 protocol ProviderModule {
@@ -75,9 +75,14 @@ protocol ProviderModule {
         actions: ProviderModuleFreshSessionOpenActions
     ) async throws -> ProviderModuleFreshSessionOpenResult
 
-    func launchPersistedSession(
-        _ request: ProviderModulePersistedSessionLaunchRequest
-    ) async throws -> Session
+    func planPersistedSessionRelaunch(
+        _ request: ProviderModulePersistedSessionRelaunchRequest
+    ) -> ProviderModulePersistedSessionRelaunchPlan
+
+    func shouldRetryFreshRemotePersistedSessionRelaunchWithoutContinuity(
+        _ error: Error,
+        metadata: SessionRecordAdapterMetadata?
+    ) throws -> Bool
 }
 
 extension ProviderModule {
@@ -88,10 +93,17 @@ extension ProviderModule {
         try await executeSharedFreshSessionOpen(request, actions: actions)
     }
 
-    func launchPersistedSession(
-        _ request: ProviderModulePersistedSessionLaunchRequest
-    ) async throws -> Session {
-        try await request.actions.executeSharedLaunch()
+    func planPersistedSessionRelaunch(
+        _ request: ProviderModulePersistedSessionRelaunchRequest
+    ) -> ProviderModulePersistedSessionRelaunchPlan {
+        .sharedLaunch
+    }
+
+    func shouldRetryFreshRemotePersistedSessionRelaunchWithoutContinuity(
+        _ error: Error,
+        metadata: SessionRecordAdapterMetadata?
+    ) throws -> Bool {
+        false
     }
 
     func executeSharedFreshSessionOpen(

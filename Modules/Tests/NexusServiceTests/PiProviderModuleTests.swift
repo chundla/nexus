@@ -5,7 +5,7 @@ import NexusDomain
 import Testing
 
 struct PiProviderModuleTests {
-    @Test func genericProviderModuleUsesSharedFreshOpenAndPersistedLaunchActions() async throws {
+    @Test func genericProviderModuleUsesSharedFreshOpenAndPersistedRelaunchPlan() async throws {
         let module = ServiceProviderAdapter(
             providerID: .claude,
             supportsDefaultSessionLaunch: true,
@@ -30,7 +30,6 @@ struct PiProviderModuleTests {
             state: .ready
         )
         let openTracker = FreshOpenActionTracker()
-        let launchTracker = PersistedLaunchTracker()
 
         let openResult = try await module.openFreshSession(
             .launchDefaultSession(workspace: workspace),
@@ -47,8 +46,8 @@ struct PiProviderModuleTests {
                 }
             )
         )
-        let launchResult = try await module.launchPersistedSession(
-            ProviderModulePersistedSessionLaunchRequest(
+        let relaunchPlan = module.planPersistedSessionRelaunch(
+            ProviderModulePersistedSessionRelaunchRequest(
                 execution: PersistedSessionLaunchExecution(
                     session: launchedSession,
                     workspace: workspace,
@@ -62,25 +61,6 @@ struct PiProviderModuleTests {
                     ),
                     mode: .launch(forceFreshRemoteRuntime: false),
                     sessionRecordAdapterMetadataSource: .stored
-                ),
-                actions: ProviderModulePersistedSessionLaunchActions(
-                    executeSharedLaunch: {
-                        launchTracker.didUseSharedLaunch = true
-                        return launchedSession
-                    },
-                    attemptRemoteRuntimeRecovery: { launchedSession },
-                    remoteRuntimeRecoveryFailureContext: { _ in
-                        RemoteRuntimeRecoveryFailureContext(
-                            detail: "unused",
-                            normalizedDetail: "unused",
-                            runtimeIdentifier: "runtime-1",
-                            hostName: "Build Server"
-                        )
-                    },
-                    persistRemoteRecoveryFailure: { _ in launchedSession },
-                    attemptLaunch: { _, _ in launchedSession },
-                    persistLaunchFailure: { _ in launchedSession },
-                    resolvedSessionRecordAdapterMetadata: { _ in nil }
                 )
             )
         )
@@ -91,11 +71,125 @@ struct PiProviderModuleTests {
                 executable: "/tmp/fake-claude"
             )
         ))
-        #expect(launchResult == launchedSession)
+        #expect(relaunchPlan == .sharedLaunch)
         #expect(openTracker.healthRequests == [
             .init(workspaceID: workspace.id, providerID: .claude)
         ])
-        #expect(launchTracker.didUseSharedLaunch)
+        #expect(try module.shouldRetryFreshRemotePersistedSessionRelaunchWithoutContinuity(
+            NSError(domain: "PiProviderModuleTests", code: 1),
+            metadata: nil
+        ) == false)
+    }
+
+    @Test func piProviderModulePlansRemoteRecoveryAndFreshRemoteRelaunchBehindProviderModuleSeam() {
+        let module = PiProviderModule(
+            adapter: ServiceProviderAdapter(
+                providerID: .pi,
+                supportsDefaultSessionLaunch: true,
+                supportsNamedSessions: true,
+                healthSummaryEvaluator: { _, _, _ in
+                    ProviderHealthSummary(state: .available, summary: "Ready", resolvedExecutable: "/tmp/fake-pi", launchability: .launchable)
+                }
+            )
+        )
+        let localWorkspace = Workspace(
+            id: UUID(),
+            name: "Local Pi",
+            kind: .local,
+            folderPath: "/tmp/local-pi",
+            primaryGroupID: UUID()
+        )
+        let remoteWorkspace = Workspace(
+            id: UUID(),
+            name: "Remote Pi",
+            kind: .remote,
+            folderPath: "/srv/api",
+            primaryGroupID: UUID(),
+            remoteHostID: UUID()
+        )
+        let localSession = Session(
+            id: UUID(),
+            workspaceID: localWorkspace.id,
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let remoteSession = Session(
+            id: UUID(),
+            workspaceID: remoteWorkspace.id,
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        let localPlan = module.planPersistedSessionRelaunch(
+            ProviderModulePersistedSessionRelaunchRequest(
+                execution: PersistedSessionLaunchExecution(
+                    session: localSession,
+                    workspace: localWorkspace,
+                    launchSnapshot: LaunchSnapshot(
+                        sessionID: localSession.id,
+                        workspaceID: localWorkspace.id,
+                        providerID: .pi,
+                        primarySurface: .structuredActivityFeed,
+                        resolvedExecutable: "/tmp/pi",
+                        resolvedWorkingDirectory: localWorkspace.folderPath
+                    ),
+                    mode: .launch(forceFreshRemoteRuntime: false),
+                    sessionRecordAdapterMetadataSource: .stored
+                )
+            )
+        )
+        let remoteRecoveryPlan = module.planPersistedSessionRelaunch(
+            ProviderModulePersistedSessionRelaunchRequest(
+                execution: PersistedSessionLaunchExecution(
+                    session: remoteSession,
+                    workspace: remoteWorkspace,
+                    launchSnapshot: LaunchSnapshot(
+                        sessionID: remoteSession.id,
+                        workspaceID: remoteWorkspace.id,
+                        providerID: .pi,
+                        primarySurface: .structuredActivityFeed,
+                        resolvedExecutable: "/tmp/pi",
+                        resolvedWorkingDirectory: remoteWorkspace.folderPath
+                    ),
+                    mode: .recoverRemoteRuntime,
+                    sessionRecordAdapterMetadataSource: .stored
+                )
+            )
+        )
+        let remoteFreshPlan = module.planPersistedSessionRelaunch(
+            ProviderModulePersistedSessionRelaunchRequest(
+                execution: PersistedSessionLaunchExecution(
+                    session: remoteSession,
+                    workspace: remoteWorkspace,
+                    launchSnapshot: LaunchSnapshot(
+                        sessionID: remoteSession.id,
+                        workspaceID: remoteWorkspace.id,
+                        providerID: .pi,
+                        primarySurface: .structuredActivityFeed,
+                        resolvedExecutable: "/tmp/pi",
+                        resolvedWorkingDirectory: remoteWorkspace.folderPath
+                    ),
+                    mode: .launch(forceFreshRemoteRuntime: true),
+                    sessionRecordAdapterMetadataSource: .stored
+                )
+            )
+        )
+
+        #expect(localPlan == .sharedLaunch)
+        #expect(remoteRecoveryPlan == .recoverRemoteRuntime(
+            ProviderModuleFreshRemotePersistedSessionRelaunch(
+                sessionRecordAdapterMetadataSource: .stored,
+                retriesWithoutContinuity: true
+            )
+        ))
+        #expect(remoteFreshPlan == .launchFreshRemoteRuntime(
+            ProviderModuleFreshRemotePersistedSessionRelaunch(
+                sessionRecordAdapterMetadataSource: .stored,
+                retriesWithoutContinuity: true
+            )
+        ))
     }
 
     @Test func serviceProviderRegistryRoutesPiThroughPiProviderModule() {
@@ -229,7 +323,7 @@ struct PiProviderModuleTests {
         ])
     }
 
-    @Test func piProviderModuleOwnsRemoteRecoveryAndInvalidContinuityFallback() async throws {
+    @Test func piProviderModuleRetriesFreshRemotePersistedRelaunchWithoutContinuityOnlyForRejectedPiLinkage() throws {
         let module = PiProviderModule(
             adapter: ServiceProviderAdapter(
                 providerID: .pi,
@@ -240,218 +334,48 @@ struct PiProviderModuleTests {
                 }
             )
         )
-        let remoteWorkspace = Workspace(
-            id: UUID(),
-            name: "Remote Pi",
-            kind: .remote,
-            folderPath: "/srv/api",
-            primaryGroupID: UUID(),
-            remoteHostID: UUID()
+        let linkageMetadata = PiSessionLinkage(
+            piSessionID: "pi-session-1",
+            sessionFile: "/tmp/pi-session-1.jsonl"
+        ).sessionRecordAdapterMetadata
+
+        let invalidPiSessionRetry = try module.shouldRetryFreshRemotePersistedSessionRelaunchWithoutContinuity(
+            NSError(
+                domain: "PiProviderModuleTests",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Invalid Pi session linkage"]
+            ),
+            metadata: linkageMetadata
         )
-        let session = Session(
-            id: UUID(),
-            workspaceID: remoteWorkspace.id,
-            providerID: .pi,
-            isDefault: true,
-            state: .ready
+        let missingSessionRetry = try module.shouldRetryFreshRemotePersistedSessionRelaunchWithoutContinuity(
+            NSError(
+                domain: "PiProviderModuleTests",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "session not found"]
+            ),
+            metadata: linkageMetadata
         )
-        let tracker = PersistedLaunchTracker()
-        let recoveredSession = Session(
-            id: session.id,
-            workspaceID: session.workspaceID,
-            providerID: session.providerID,
-            isDefault: session.isDefault,
-            state: .ready
+        let unrelatedErrorRetry = try module.shouldRetryFreshRemotePersistedSessionRelaunchWithoutContinuity(
+            NSError(
+                domain: "PiProviderModuleTests",
+                code: 3,
+                userInfo: [NSLocalizedDescriptionKey: "permission denied"]
+            ),
+            metadata: linkageMetadata
+        )
+        let missingMetadataRetry = try module.shouldRetryFreshRemotePersistedSessionRelaunchWithoutContinuity(
+            NSError(
+                domain: "PiProviderModuleTests",
+                code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "Invalid Pi session linkage"]
+            ),
+            metadata: nil
         )
 
-        let launchedSession = try await module.launchPersistedSession(
-            ProviderModulePersistedSessionLaunchRequest(
-                execution: PersistedSessionLaunchExecution(
-                    session: session,
-                    workspace: remoteWorkspace,
-                    launchSnapshot: LaunchSnapshot(
-                        sessionID: session.id,
-                        workspaceID: remoteWorkspace.id,
-                        providerID: .pi,
-                        primarySurface: .structuredActivityFeed,
-                        resolvedExecutable: "/tmp/pi",
-                        resolvedWorkingDirectory: remoteWorkspace.folderPath
-                    ),
-                    mode: .recoverRemoteRuntime,
-                    sessionRecordAdapterMetadataSource: .stored
-                ),
-                actions: ProviderModulePersistedSessionLaunchActions(
-                    executeSharedLaunch: {
-                        tracker.didUseSharedLaunch = true
-                        return session
-                    },
-                    attemptRemoteRuntimeRecovery: {
-                        throw NSError(
-                            domain: "PiProviderModuleTests",
-                            code: 1,
-                            userInfo: [NSLocalizedDescriptionKey: "NEXUS_REMOTE_RUNTIME_NOT_FOUND"]
-                        )
-                    },
-                    remoteRuntimeRecoveryFailureContext: { error in
-                        tracker.recoveryFailureErrors.append(error.localizedDescription)
-                        return RemoteRuntimeRecoveryFailureContext(
-                            detail: error.localizedDescription,
-                            normalizedDetail: error.localizedDescription.lowercased(),
-                            runtimeIdentifier: "runtime-1",
-                            hostName: "Build Server"
-                        )
-                    },
-                    persistRemoteRecoveryFailure: { context in
-                        tracker.persistedRecoveryFailures.append(context)
-                        return session
-                    },
-                    attemptLaunch: { _, metadataSource in
-                        tracker.launchMetadataSources.append(metadataSource)
-                        if tracker.launchMetadataSources.count == 1 {
-                            throw NSError(
-                                domain: "PiProviderModuleTests",
-                                code: 2,
-                                userInfo: [NSLocalizedDescriptionKey: "Invalid Pi session linkage"]
-                            )
-                        }
-                        return recoveredSession
-                    },
-                    persistLaunchFailure: { error in
-                        tracker.persistedLaunchFailureErrors.append(error.localizedDescription)
-                        return session
-                    },
-                    resolvedSessionRecordAdapterMetadata: { source in
-                        switch source {
-                        case .stored:
-                            PiSessionLinkage(
-                                piSessionID: "pi-session-1",
-                                sessionFile: "/tmp/pi-session-1.jsonl"
-                            ).sessionRecordAdapterMetadata
-                        case let .explicit(metadata):
-                            metadata
-                        }
-                    }
-                )
-            )
-        )
-
-        #expect(launchedSession == recoveredSession)
-        #expect(tracker.didUseSharedLaunch == false)
-        #expect(tracker.recoveryFailureErrors == ["NEXUS_REMOTE_RUNTIME_NOT_FOUND"])
-        #expect(tracker.persistedRecoveryFailures.isEmpty)
-        #expect(tracker.launchMetadataSources.count == 2)
-        switch tracker.launchMetadataSources[0] {
-        case .stored:
-            break
-        case .explicit:
-            Issue.record("Expected first recovery fallback launch to keep stored Pi continuity")
-        }
-        switch tracker.launchMetadataSources[1] {
-        case .stored:
-            Issue.record("Expected second recovery fallback launch to clear stored Pi continuity")
-        case let .explicit(metadata):
-            #expect(metadata == nil)
-        }
-        #expect(tracker.persistedLaunchFailureErrors.isEmpty)
-    }
-
-    @Test func piProviderModulePreservesRemoteRecoveryFailureMapping() async throws {
-        let module = PiProviderModule(
-            adapter: ServiceProviderAdapter(
-                providerID: .pi,
-                supportsDefaultSessionLaunch: true,
-                supportsNamedSessions: true,
-                healthSummaryEvaluator: { _, _, _ in
-                    ProviderHealthSummary(state: .available, summary: "Ready", resolvedExecutable: "/tmp/fake-pi", launchability: .launchable)
-                }
-            )
-        )
-        let remoteWorkspace = Workspace(
-            id: UUID(),
-            name: "Remote Pi",
-            kind: .remote,
-            folderPath: "/srv/api",
-            primaryGroupID: UUID(),
-            remoteHostID: UUID()
-        )
-        let session = Session(
-            id: UUID(),
-            workspaceID: remoteWorkspace.id,
-            providerID: .pi,
-            isDefault: true,
-            state: .ready
-        )
-        let tracker = PersistedLaunchTracker()
-        let failedSession = Session(
-            id: session.id,
-            workspaceID: session.workspaceID,
-            providerID: session.providerID,
-            isDefault: session.isDefault,
-            state: .interrupted,
-            failureMessage: "Could not reach Build Server"
-        )
-
-        let launchedSession = try await module.launchPersistedSession(
-            ProviderModulePersistedSessionLaunchRequest(
-                execution: PersistedSessionLaunchExecution(
-                    session: session,
-                    workspace: remoteWorkspace,
-                    launchSnapshot: LaunchSnapshot(
-                        sessionID: session.id,
-                        workspaceID: remoteWorkspace.id,
-                        providerID: .pi,
-                        primarySurface: .structuredActivityFeed,
-                        resolvedExecutable: "/tmp/pi",
-                        resolvedWorkingDirectory: remoteWorkspace.folderPath
-                    ),
-                    mode: .recoverRemoteRuntime,
-                    sessionRecordAdapterMetadataSource: .stored
-                ),
-                actions: ProviderModulePersistedSessionLaunchActions(
-                    executeSharedLaunch: {
-                        tracker.didUseSharedLaunch = true
-                        return session
-                    },
-                    attemptRemoteRuntimeRecovery: {
-                        throw NSError(
-                            domain: "PiProviderModuleTests",
-                            code: 3,
-                            userInfo: [NSLocalizedDescriptionKey: "Connection refused"]
-                        )
-                    },
-                    remoteRuntimeRecoveryFailureContext: { error in
-                        let context = RemoteRuntimeRecoveryFailureContext(
-                            detail: error.localizedDescription,
-                            normalizedDetail: error.localizedDescription.lowercased(),
-                            runtimeIdentifier: "runtime-1",
-                            hostName: "Build Server"
-                        )
-                        tracker.persistedRecoveryFailures.append(context)
-                        return context
-                    },
-                    persistRemoteRecoveryFailure: { _ in
-                        tracker.recoveryFailureErrors.append("persisted")
-                        return failedSession
-                    },
-                    attemptLaunch: { _, _ in
-                        tracker.launchMetadataSources.append(.stored)
-                        return session
-                    },
-                    persistLaunchFailure: { error in
-                        tracker.persistedLaunchFailureErrors.append(error.localizedDescription)
-                        return session
-                    },
-                    resolvedSessionRecordAdapterMetadata: { _ in nil }
-                )
-            )
-        )
-
-        #expect(launchedSession == failedSession)
-        #expect(tracker.didUseSharedLaunch == false)
-        #expect(tracker.persistedRecoveryFailures.count == 1)
-        #expect(tracker.launchMetadataSources.isEmpty)
-        #expect(tracker.recoveryFailureErrors == ["persisted"])
-        #expect(tracker.persistedLaunchFailureErrors.isEmpty)
+        #expect(invalidPiSessionRetry)
+        #expect(missingSessionRetry)
+        #expect(unrelatedErrorRetry == false)
+        #expect(missingMetadataRetry == false)
     }
 
     @Test func piProviderModulePreservesPiCatalogReadBehavior() async {
@@ -517,14 +441,6 @@ private final class FreshOpenActionTracker: @unchecked Sendable {
     }
 
     var healthRequests: [SessionRequest] = []
-}
-
-private final class PersistedLaunchTracker: @unchecked Sendable {
-    var didUseSharedLaunch = false
-    var recoveryFailureErrors: [String] = []
-    var persistedRecoveryFailures: [RemoteRuntimeRecoveryFailureContext] = []
-    var launchMetadataSources: [SessionRecordAdapterMetadataLaunchSource] = []
-    var persistedLaunchFailureErrors: [String] = []
 }
 
 private struct UnusedPiProviderHealthEvaluator: ProviderHealthEvaluating {
