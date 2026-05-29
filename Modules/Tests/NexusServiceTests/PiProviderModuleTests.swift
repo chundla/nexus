@@ -328,6 +328,23 @@ struct PiProviderModuleTests {
         #expect(claudeModule.reusesRemoteHealthSnapshot(checkedSnapshot, remoteContext: remoteContext))
     }
 
+    @Test func serviceProviderRegistryKeepsDedicatedProviderModulesAvailableWithoutAdapterEntries() {
+        let registry = ServiceSessionProviderRegistry.providerModules(providerAdapters: [:])
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Remote Workspace",
+            kind: .remote,
+            folderPath: "/srv/api",
+            primaryGroupID: UUID(),
+            remoteHostID: UUID()
+        )
+
+        #expect(registry.module(for: .claude).supportsDefaultSessionLaunch(in: workspace))
+        #expect(registry.module(for: .codex).prelaunchPrimarySurface(in: workspace) == .structuredActivityFeed)
+        #expect(registry.module(for: .ibmBob).supportsNamedSessions(in: workspace))
+        #expect(registry.module(for: .pi).supportsNamedSessions(in: workspace))
+    }
+
     @Test func piProviderModuleOwnsFreshOpenPlanningForLocalAndRemotePiSessions() async throws {
         let module = PiProviderModule()
         let localWorkspace = Workspace(

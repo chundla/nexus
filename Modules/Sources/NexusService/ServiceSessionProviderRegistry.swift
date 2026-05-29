@@ -85,27 +85,14 @@ enum ServiceSessionProviderRegistry {
     }
 
     static func providerModules(
-        providerAdapters: [ProviderID: ServiceProviderAdapter]
+        providerAdapters _: [ProviderID: ServiceProviderAdapter]
     ) -> ProviderModuleRegistry {
-        var modules: [ProviderID: any ProviderModule] = [:]
-
-        if providerAdapters[.claude] != nil {
-            modules[.claude] = ClaudeProviderModule()
-        }
-
-        if providerAdapters[.codex] != nil {
-            modules[.codex] = CodexProviderModule()
-        }
-
-        if providerAdapters[.ibmBob] != nil {
-            modules[.ibmBob] = IBMBobProviderModule()
-        }
-
-        if providerAdapters[.pi] != nil {
-            modules[.pi] = PiProviderModule()
-        }
-
-        return ProviderModuleRegistry(modules: modules)
+        ProviderModuleRegistry(modules: [
+            .claude: ClaudeProviderModule(),
+            .codex: CodexProviderModule(),
+            .ibmBob: IBMBobProviderModule(),
+            .pi: PiProviderModule()
+        ])
     }
 
     static func localProtocolNativeRuntimeFactories(
