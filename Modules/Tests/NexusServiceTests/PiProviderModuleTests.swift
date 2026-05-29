@@ -5,6 +5,61 @@ import NexusDomain
 import Testing
 
 struct PiProviderModuleTests {
+    @Test func piProviderModuleOwnsLocalOpenSessionSeamButLeavesRemoteOpenToSharedFallback() async throws {
+        let module = PiProviderModule(
+            adapter: ServiceProviderAdapter(
+                providerID: .pi,
+                supportsDefaultSessionLaunch: true,
+                supportsNamedSessions: true,
+                healthSummaryEvaluator: { _, _, _ in
+                    ProviderHealthSummary(state: .available, summary: "Ready", resolvedExecutable: "/tmp/fake-pi", launchability: .launchable)
+                }
+            )
+        )
+        let localWorkspace = Workspace(
+            id: UUID(),
+            name: "Local Pi",
+            kind: .local,
+            folderPath: "/tmp/local-pi",
+            primaryGroupID: UUID()
+        )
+        let remoteWorkspace = Workspace(
+            id: UUID(),
+            name: "Remote Pi",
+            kind: .remote,
+            folderPath: "/srv/api",
+            primaryGroupID: UUID(),
+            remoteHostID: UUID()
+        )
+        let fallbackCounter = FallbackCounter()
+        let fallbackSession = Session(
+            id: UUID(),
+            workspaceID: localWorkspace.id,
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        let localOpen = try await module.openSession(
+            .launchOrResumeDefaultSession(workspace: localWorkspace, providerID: .pi),
+            openFallback: {
+                fallbackCounter.value += 1
+                return fallbackSession
+            }
+        )
+        let remoteOpen = try await module.openSession(
+            .launchOrResumeDefaultSession(workspace: remoteWorkspace, providerID: .pi),
+            openFallback: {
+                fallbackCounter.value += 1
+                return fallbackSession
+            }
+        )
+
+        #expect(localOpen == fallbackSession)
+        #expect(remoteOpen == nil)
+        #expect(fallbackCounter.value == 1)
+    }
+
     @Test func piProviderModulePreservesPiCatalogReadBehavior() async {
         let module = PiProviderModule(
             adapter: ServiceProviderAdapter(
@@ -46,6 +101,10 @@ struct PiProviderModuleTests {
         #expect(module.prelaunchPrimarySurface(in: workspace) == .structuredActivityFeed)
         #expect(module.reusesRemoteHealthSnapshot(ProviderHealthSummary(state: .available, summary: "reuse me"), remoteContext: nil))
     }
+}
+
+private final class FallbackCounter: @unchecked Sendable {
+    var value = 0
 }
 
 private struct UnusedPiProviderHealthEvaluator: ProviderHealthEvaluating {

@@ -2,6 +2,31 @@
 import Foundation
 import NexusDomain
 
+enum ProviderModuleOpenSessionRequest {
+    case launchOrResumeDefaultSession(workspace: Workspace, providerID: ProviderID)
+    case createNamedSession(workspace: Workspace, providerID: ProviderID, name: String?)
+    case launchOrResumePersistedSession(Session, workspace: Workspace)
+
+    var providerID: ProviderID {
+        switch self {
+        case let .launchOrResumeDefaultSession(_, providerID),
+             let .createNamedSession(_, providerID, _):
+            providerID
+        case let .launchOrResumePersistedSession(session, _):
+            session.providerID
+        }
+    }
+
+    var workspace: Workspace {
+        switch self {
+        case let .launchOrResumeDefaultSession(workspace, _),
+             let .createNamedSession(workspace, _, _),
+             let .launchOrResumePersistedSession(_, workspace):
+            workspace
+        }
+    }
+}
+
 protocol ProviderModule {
     var provider: Provider { get }
 
@@ -23,6 +48,20 @@ protocol ProviderModule {
         _ snapshot: ProviderHealthSummary,
         remoteContext: RemoteWorkspaceHealthContext?
     ) -> Bool
+
+    func openSession(
+        _ request: ProviderModuleOpenSessionRequest,
+        openFallback: @escaping () async throws -> Session
+    ) async throws -> Session?
+}
+
+extension ProviderModule {
+    func openSession(
+        _ request: ProviderModuleOpenSessionRequest,
+        openFallback: @escaping () async throws -> Session
+    ) async throws -> Session? {
+        nil
+    }
 }
 
 struct ProviderModuleRegistry {
@@ -202,6 +241,17 @@ struct PiProviderModule: ProviderModule {
         remoteContext: RemoteWorkspaceHealthContext?
     ) -> Bool {
         remoteHealthSnapshotReuseEvaluator(snapshot, remoteContext)
+    }
+
+    func openSession(
+        _ request: ProviderModuleOpenSessionRequest,
+        openFallback: @escaping () async throws -> Session
+    ) async throws -> Session? {
+        guard request.workspace.kind == .local else {
+            return nil
+        }
+
+        return try await openFallback()
     }
 }
 

@@ -19,6 +19,7 @@ struct ServiceSessionLifecycleDependencies {
     let workspace: (UUID) throws -> Workspace?
     let sessionRecordStore: any SessionRecordStore
     let providerAdapter: (ProviderID) -> ServiceProviderAdapter
+    let providerModule: (ProviderID) -> any ProviderModule
     let remoteWorkspaceHealthContext: (Workspace) throws -> RemoteWorkspaceHealthContext?
     let providerHealthSummary: (ProviderID, Workspace, RemoteWorkspaceHealthContext?) async throws -> ProviderHealthSummary
     let resolveNamedSessionName: (String?, [Session]) -> String
@@ -42,11 +43,59 @@ final class ServiceSessionLifecycle: SessionLifecycleManaging {
             throw NexusMetadataStoreError.sessionNotFound
         }
         let workspace = try requiredWorkspace(id: session.workspaceID)
-        return try await launchPersistedSession(session, workspace: workspace)
+        return try await openSession(.launchOrResumePersistedSession(session, workspace: workspace))
     }
 
     func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) async throws -> Session {
         let workspace = try requiredWorkspace(id: workspaceID)
+        return try await openSession(.launchOrResumeDefaultSession(workspace: workspace, providerID: providerID))
+    }
+
+    func createNamedSession(workspaceID: UUID, providerID: ProviderID, name: String?) async throws -> Session {
+        let workspace = try requiredWorkspace(id: workspaceID)
+        return try await openSession(.createNamedSession(workspace: workspace, providerID: providerID, name: name))
+    }
+
+    private func openSession(_ request: ProviderModuleOpenSessionRequest) async throws -> Session {
+        let fallback = { [self] in
+            try await self.openSessionWithoutProviderModule(request)
+        }
+
+        if let session = try await dependencies.providerModule(request.providerID).openSession(
+            request,
+            openFallback: fallback
+        ) {
+            return session
+        }
+
+        return try await fallback()
+    }
+
+    private func openSessionWithoutProviderModule(_ request: ProviderModuleOpenSessionRequest) async throws -> Session {
+        switch request {
+        case let .launchOrResumeDefaultSession(workspace, providerID):
+            return try await launchOrResumeDefaultSessionWithoutProviderModule(
+                workspaceID: workspace.id,
+                providerID: providerID,
+                workspace: workspace
+            )
+        case let .createNamedSession(workspace, providerID, name):
+            return try await createNamedSessionWithoutProviderModule(
+                workspaceID: workspace.id,
+                providerID: providerID,
+                name: name,
+                workspace: workspace
+            )
+        case let .launchOrResumePersistedSession(session, workspace):
+            return try await launchPersistedSession(session, workspace: workspace)
+        }
+    }
+
+    private func launchOrResumeDefaultSessionWithoutProviderModule(
+        workspaceID: UUID,
+        providerID: ProviderID,
+        workspace: Workspace
+    ) async throws -> Session {
         let adapter = dependencies.providerAdapter(providerID)
 
         guard adapter.supportsDefaultSessionLaunch(in: workspace) else {
@@ -76,8 +125,12 @@ final class ServiceSessionLifecycle: SessionLifecycleManaging {
         return try await launchFreshSession(session, workspace: workspace, adapter: adapter, executable: executable)
     }
 
-    func createNamedSession(workspaceID: UUID, providerID: ProviderID, name: String?) async throws -> Session {
-        let workspace = try requiredWorkspace(id: workspaceID)
+    private func createNamedSessionWithoutProviderModule(
+        workspaceID: UUID,
+        providerID: ProviderID,
+        name: String?,
+        workspace: Workspace
+    ) async throws -> Session {
         let adapter = dependencies.providerAdapter(providerID)
 
         guard adapter.supportsNamedSessions(in: workspace) else {

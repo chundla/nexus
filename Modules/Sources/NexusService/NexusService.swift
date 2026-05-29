@@ -1177,6 +1177,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         self.hostValidationEvaluator = hostValidationEvaluator
         self.workspaceAvailabilityEvaluator = workspaceAvailabilityEvaluator
         self.sessionRuntimeManager = sessionRuntimeManager
+        let providerModuleRegistry = ServiceSessionProviderRegistry.providerModules(providerAdapters: providerAdapters)
         self.workspaceCatalog = WorkspaceCatalog(
             dependencies: WorkspaceCatalogDependencies(
                 metadataStore: metadataStore,
@@ -1186,7 +1187,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
                 sessionRuntimeManager: sessionRuntimeManager,
                 providerAdapters: providerAdapters,
-                providerModuleRegistry: ServiceSessionProviderRegistry.providerModules(providerAdapters: providerAdapters)
+                providerModuleRegistry: providerModuleRegistry
             )
         )
         self.sessionLifecycle = sessionLifecycle
@@ -1203,6 +1204,9 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 sessionRecordStore: self.sessionRecordStore,
                 providerAdapter: { [unowned self] providerID in
                     self.providerAdapter(for: providerID)
+                },
+                providerModule: { providerID in
+                    providerModuleRegistry.module(for: providerID)
                 },
                 remoteWorkspaceHealthContext: { [unowned self] workspace in
                     try self.workspaceCatalog.remoteWorkspaceHealthContext(for: workspace, refreshHostValidation: true)
