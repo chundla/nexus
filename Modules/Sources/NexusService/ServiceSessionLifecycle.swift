@@ -42,63 +42,75 @@ final class ServiceSessionLifecycle: SessionLifecycleManaging {
             throw NexusMetadataStoreError.sessionNotFound
         }
         let workspace = try requiredWorkspace(id: session.workspaceID)
-        return try await openSession(.launchOrResumePersistedSession(session, workspace: workspace))
+        return try await launchPersistedSession(session, workspace: workspace)
     }
 
     func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) async throws -> Session {
         let workspace = try requiredWorkspace(id: workspaceID)
-        return try await openSession(.launchOrResumeDefaultSession(workspace: workspace, providerID: providerID))
+        if let existingSession = try dependencies.sessionRecordStore.defaultSession(workspaceID: workspaceID, providerID: providerID) {
+            return try await launchPersistedSession(existingSession, workspace: workspace)
+        }
+
+        return try await openFreshSession(
+            providerID: providerID,
+            request: .launchDefaultSession(workspace: workspace),
+            createSession: { [sessionRecordStore = dependencies.sessionRecordStore] state, failureMessage in
+                try sessionRecordStore.createDefaultSession(
+                    workspaceID: workspaceID,
+                    providerID: providerID,
+                    state: state,
+                    failureMessage: failureMessage
+                )
+            }
+        )
     }
 
     func createNamedSession(workspaceID: UUID, providerID: ProviderID, name: String?) async throws -> Session {
         let workspace = try requiredWorkspace(id: workspaceID)
-        return try await openSession(.createNamedSession(workspace: workspace, providerID: providerID, name: name))
+        let existingSessions = try dependencies.sessionRecordStore.listSessions(workspaceID: workspaceID, providerID: providerID)
+        let resolvedName = dependencies.resolveNamedSessionName(name, existingSessions)
+
+        return try await openFreshSession(
+            providerID: providerID,
+            request: .createNamedSession(workspace: workspace),
+            createSession: { [sessionRecordStore = dependencies.sessionRecordStore] state, failureMessage in
+                try sessionRecordStore.createNamedSession(
+                    workspaceID: workspaceID,
+                    providerID: providerID,
+                    name: resolvedName,
+                    state: state,
+                    failureMessage: failureMessage
+                )
+            }
+        )
     }
 
-    private func openSession(_ request: ProviderModuleOpenSessionRequest) async throws -> Session {
-        try await dependencies.providerModule(request.providerID).openSession(
+    private func openFreshSession(
+        providerID: ProviderID,
+        request: ProviderModuleFreshSessionOpenRequest,
+        createSession: (Session.State, String?) throws -> Session
+    ) async throws -> Session {
+        let openResult = try await dependencies.providerModule(providerID).openFreshSession(
             request,
-            actions: ProviderModuleOpenSessionActions(
-                defaultSession: { [sessionRecordStore = dependencies.sessionRecordStore] workspaceID, providerID in
-                    try sessionRecordStore.defaultSession(workspaceID: workspaceID, providerID: providerID)
-                },
-                listSessions: { [sessionRecordStore = dependencies.sessionRecordStore] workspaceID, providerID in
-                    try sessionRecordStore.listSessions(workspaceID: workspaceID, providerID: providerID)
-                },
-                resolveNamedSessionName: dependencies.resolveNamedSessionName,
-                providerHealthSummary: { [self] providerID, workspace in
+            actions: ProviderModuleFreshSessionOpenActions(
+                providerHealthSummary: { [self] workspace in
                     try await self.providerHealthSummary(for: providerID, workspace: workspace)
-                },
-                createDefaultSession: { [sessionRecordStore = dependencies.sessionRecordStore] workspaceID, providerID, state, failureMessage in
-                    try sessionRecordStore.createDefaultSession(
-                        workspaceID: workspaceID,
-                        providerID: providerID,
-                        state: state,
-                        failureMessage: failureMessage
-                    )
-                },
-                createNamedSession: { [sessionRecordStore = dependencies.sessionRecordStore] workspaceID, providerID, name, state, failureMessage in
-                    try sessionRecordStore.createNamedSession(
-                        workspaceID: workspaceID,
-                        providerID: providerID,
-                        name: name,
-                        state: state,
-                        failureMessage: failureMessage
-                    )
-                },
-                launchFreshSession: { [self] session, workspace, primarySurface, executable in
-                    try await self.launchFreshSession(
-                        session,
-                        workspace: workspace,
-                        primarySurface: primarySurface,
-                        executable: executable
-                    )
-                },
-                launchPersistedSession: { [self] session, workspace in
-                    try await self.launchPersistedSession(session, workspace: workspace)
                 }
             )
         )
+
+        switch openResult {
+        case let .failed(message):
+            return try createSession(.failed, message)
+        case let .launch(launch):
+            let session = try createSession(.ready, nil)
+            return try await launchFreshSession(
+                session,
+                workspace: request.workspace,
+                primarySurface: launch.primarySurface,
+                executable: launch.executable
+            )
+        }
     }
 
     private func launchPersistedSession(_ session: Session, workspace: Workspace) async throws -> Session {

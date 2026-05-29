@@ -5,11 +5,11 @@ import NexusDomain
 import Testing
 
 struct ServiceSessionLifecycleScenariosTests {
-    @Test func localPiDefaultSessionOpenRoutesThroughProviderModuleSeam() async throws {
+    @Test func localPiDefaultSessionFreshOpenRoutesThroughProviderModuleSeam() async throws {
         let fixture = try ServiceSessionLifecycleFixture()
-        let tracker = ProviderModuleOpenTracker()
+        let tracker = ProviderModuleFreshOpenTracker()
         let lifecycle = fixture.makeLifecycle(
-            providerModule: RecordingOpenProviderModule(
+            providerModule: RecordingFreshOpenProviderModule(
                 providerID: .pi,
                 tracker: tracker
             )
@@ -21,15 +21,15 @@ struct ServiceSessionLifecycleScenariosTests {
         )
 
         #expect(tracker.requests == [
-            .launchOrResumeDefaultSession(workspaceID: fixture.workspace.id, providerID: .pi)
+            .launchDefaultSession(workspaceID: fixture.workspace.id)
         ])
     }
 
-    @Test func localPiNamedSessionOpenRoutesThroughProviderModuleSeam() async throws {
+    @Test func localPiNamedSessionFreshOpenRoutesThroughProviderModuleSeam() async throws {
         let fixture = try ServiceSessionLifecycleFixture()
-        let tracker = ProviderModuleOpenTracker()
+        let tracker = ProviderModuleFreshOpenTracker()
         let lifecycle = fixture.makeLifecycle(
-            providerModule: RecordingOpenProviderModule(
+            providerModule: RecordingFreshOpenProviderModule(
                 providerID: .pi,
                 tracker: tracker
             )
@@ -42,43 +42,7 @@ struct ServiceSessionLifecycleScenariosTests {
         )
 
         #expect(tracker.requests == [
-            .createNamedSession(workspaceID: fixture.workspace.id, providerID: .pi, name: "Review")
-        ])
-    }
-
-    @Test func localPiPersistedSessionOpenRoutesThroughProviderModuleSeam() async throws {
-        let fixture = try ServiceSessionLifecycleFixture()
-        let tracker = ProviderModuleOpenTracker()
-        let existingSession = try fixture.store.createNamedSession(
-            workspaceID: fixture.workspace.id,
-            providerID: .pi,
-            name: "Review",
-            state: .ready,
-            failureMessage: nil
-        )
-        _ = try fixture.store.ensureLaunchSnapshot(
-            sessionID: existingSession.id,
-            workspaceID: fixture.workspace.id,
-            providerID: .pi,
-            primarySurface: .structuredActivityFeed,
-            resolvedExecutable: "/tmp/pi",
-            resolvedWorkingDirectory: fixture.workspace.folderPath
-        )
-        let lifecycle = fixture.makeLifecycle(
-            providerModule: RecordingOpenProviderModule(
-                providerID: .pi,
-                tracker: tracker
-            )
-        )
-
-        _ = try await lifecycle.launchOrResumeSession(sessionID: existingSession.id)
-
-        #expect(tracker.requests == [
-            .launchOrResumePersistedSession(
-                sessionID: existingSession.id,
-                workspaceID: fixture.workspace.id,
-                providerID: .pi
-            )
+            .createNamedSession(workspaceID: fixture.workspace.id)
         ])
     }
 
@@ -112,6 +76,43 @@ struct ServiceSessionLifecycleScenariosTests {
 
         #expect(session.providerID == .pi)
         #expect(session.isDefault)
+        #expect(session.state == .ready)
+        #expect(launch.launchSnapshot.primarySurface == .structuredActivityFeed)
+        #expect(launchSnapshot.primarySurface == .structuredActivityFeed)
+    }
+
+    @Test func localPiNamedSessionLaunchUsesProviderModuleSupportAndStructuredPrelaunchSurface() async throws {
+        let fixture = try ServiceSessionLifecycleFixture(
+            health: ProviderHealthSummary(
+                state: .available,
+                summary: "Ready",
+                resolvedExecutable: "/tmp/pi",
+                launchability: .launchable
+            )
+        )
+        let lifecycle = fixture.makeLifecycle(
+            providerModule: PiProviderModule(
+                adapter: ServiceProviderAdapter(
+                    providerID: .pi,
+                    supportsDefaultSessionLaunch: true,
+                    supportsNamedSessions: true,
+                    healthSummaryEvaluator: { _, _, _ in fixture.health },
+                    primarySurfaceEvaluator: { _ in .terminal }
+                )
+            )
+        )
+
+        let session = try await lifecycle.createNamedSession(
+            workspaceID: fixture.workspace.id,
+            providerID: .pi,
+            name: "Review"
+        )
+        let launch = try #require(fixture.tracker.freshLaunches.first)
+        let launchSnapshot = try #require(try fixture.store.launchSnapshot(sessionID: session.id))
+
+        #expect(session.providerID == .pi)
+        #expect(session.isDefault == false)
+        #expect(session.name == "Review")
         #expect(session.state == .ready)
         #expect(launch.launchSnapshot.primarySurface == .structuredActivityFeed)
         #expect(launchSnapshot.primarySurface == .structuredActivityFeed)
@@ -580,32 +581,29 @@ private struct ServiceSessionLifecycleFixture {
     }
 }
 
-private enum ProviderModuleOpenRequestExpectation: Equatable {
-    case launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID)
-    case createNamedSession(workspaceID: UUID, providerID: ProviderID, name: String?)
-    case launchOrResumePersistedSession(sessionID: UUID, workspaceID: UUID, providerID: ProviderID)
+private enum ProviderModuleFreshOpenRequestExpectation: Equatable {
+    case launchDefaultSession(workspaceID: UUID)
+    case createNamedSession(workspaceID: UUID)
 
-    init(request: ProviderModuleOpenSessionRequest) {
+    init(request: ProviderModuleFreshSessionOpenRequest) {
         switch request {
-        case let .launchOrResumeDefaultSession(workspace, providerID):
-            self = .launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: providerID)
-        case let .createNamedSession(workspace, providerID, name):
-            self = .createNamedSession(workspaceID: workspace.id, providerID: providerID, name: name)
-        case let .launchOrResumePersistedSession(session, workspace):
-            self = .launchOrResumePersistedSession(sessionID: session.id, workspaceID: workspace.id, providerID: session.providerID)
+        case let .launchDefaultSession(workspace):
+            self = .launchDefaultSession(workspaceID: workspace.id)
+        case let .createNamedSession(workspace):
+            self = .createNamedSession(workspaceID: workspace.id)
         }
     }
 }
 
-private final class ProviderModuleOpenTracker: @unchecked Sendable {
-    var requests: [ProviderModuleOpenRequestExpectation] = []
+private final class ProviderModuleFreshOpenTracker: @unchecked Sendable {
+    var requests: [ProviderModuleFreshOpenRequestExpectation] = []
 }
 
-private struct RecordingOpenProviderModule: ProviderModule {
+private struct RecordingFreshOpenProviderModule: ProviderModule {
     let provider: Provider
-    let tracker: ProviderModuleOpenTracker
+    let tracker: ProviderModuleFreshOpenTracker
 
-    init(providerID: ProviderID, tracker: ProviderModuleOpenTracker) {
+    init(providerID: ProviderID, tracker: ProviderModuleFreshOpenTracker) {
         self.provider = Provider(id: providerID)
         self.tracker = tracker
     }
@@ -648,12 +646,12 @@ private struct RecordingOpenProviderModule: ProviderModule {
         false
     }
 
-    func openSession(
-        _ request: ProviderModuleOpenSessionRequest,
-        actions: ProviderModuleOpenSessionActions
-    ) async throws -> Session {
+    func openFreshSession(
+        _ request: ProviderModuleFreshSessionOpenRequest,
+        actions: ProviderModuleFreshSessionOpenActions
+    ) async throws -> ProviderModuleFreshSessionOpenResult {
         tracker.requests.append(.init(request: request))
-        return try await executeSharedOpenSession(request, actions: actions)
+        return try await executeSharedFreshSessionOpen(request, actions: actions)
     }
 }
 
