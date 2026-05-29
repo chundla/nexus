@@ -1289,6 +1289,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     private let metadataStore: NexusMetadataStore
+    private let sessionRecordStore: any SessionRecordStore
     private let providerHealthEvaluator: any ProviderHealthEvaluating
     private let hostValidationEvaluator: any HostValidationEvaluating
     private let workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating
@@ -1303,6 +1304,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         listener: NSXPCListener,
         storeURL: URL,
         metadataStore: NexusMetadataStore,
+        sessionRecordStore: (any SessionRecordStore)? = nil,
         providerHealthEvaluator: any ProviderHealthEvaluating,
         hostValidationEvaluator: any HostValidationEvaluating,
         workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating,
@@ -1315,6 +1317,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         self.listener = listener
         self.storeURL = storeURL
         self.metadataStore = metadataStore
+        self.sessionRecordStore = sessionRecordStore ?? MetadataStoreSessionRecordStore(metadataStore: metadataStore)
         self.providerHealthEvaluator = providerHealthEvaluator
         self.hostValidationEvaluator = hostValidationEvaluator
         self.workspaceAvailabilityEvaluator = workspaceAvailabilityEvaluator
@@ -1326,7 +1329,10 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         super.init()
         self.sessionLifecycle = sessionLifecycle ?? ServiceSessionLifecycle(
             dependencies: ServiceSessionLifecycleDependencies(
-                metadataStore: metadataStore,
+                workspace: { [unowned self] in
+                    try self.metadataStore.workspace(id: $0)
+                },
+                sessionRecordStore: self.sessionRecordStore,
                 providerAdapter: { [unowned self] providerID in
                     self.providerAdapter(for: providerID)
                 },
@@ -1398,6 +1404,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating = WorkspaceAvailabilityEvaluator(),
         sessionRuntimeManager: any SessionRuntimeManaging = InMemorySessionRuntimeManager(),
         sessionLifecycle: (any SessionLifecycleManaging)? = nil,
+        sessionRecordStoreFactory: ((NexusMetadataStore) -> any SessionRecordStore)? = nil,
         remoteAccessRuntime: RemoteAccessRuntime = RemoteAccessRuntime(),
         providerAdapters: [ProviderID: ServiceProviderAdapter]? = nil,
         ibmBobNativeSessionCleaner: any IBMBobNativeSessionCleaning = IBMBobNativeSessionCleaner()
@@ -1409,6 +1416,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
             sessionRuntimeManager: sessionRuntimeManager,
             sessionLifecycle: sessionLifecycle,
+            sessionRecordStoreFactory: sessionRecordStoreFactory,
             remoteAccessRuntime: remoteAccessRuntime,
             providerAdapters: providerAdapters,
             ibmBobNativeSessionCleaner: ibmBobNativeSessionCleaner
@@ -1421,6 +1429,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating = WorkspaceAvailabilityEvaluator(),
         sessionRuntimeManager: any SessionRuntimeManaging = InMemorySessionRuntimeManager(),
         sessionLifecycle: (any SessionLifecycleManaging)? = nil,
+        sessionRecordStoreFactory: ((NexusMetadataStore) -> any SessionRecordStore)? = nil,
         remoteAccessRuntime: RemoteAccessRuntime = RemoteAccessRuntime(),
         ibmBobNativeSessionCleaner: any IBMBobNativeSessionCleaning = IBMBobNativeSessionCleaner()
     ) throws -> NexusService {
@@ -1430,6 +1439,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
             sessionRuntimeManager: sessionRuntimeManager,
             sessionLifecycle: sessionLifecycle,
+            sessionRecordStoreFactory: sessionRecordStoreFactory,
             remoteAccessRuntime: remoteAccessRuntime,
             ibmBobNativeSessionCleaner: ibmBobNativeSessionCleaner
         )
@@ -1442,6 +1452,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating = WorkspaceAvailabilityEvaluator(),
         sessionRuntimeManager: any SessionRuntimeManaging = InMemorySessionRuntimeManager(),
         sessionLifecycle: (any SessionLifecycleManaging)? = nil,
+        sessionRecordStoreFactory: ((NexusMetadataStore) -> any SessionRecordStore)? = nil,
         remoteAccessRuntime: RemoteAccessRuntime = RemoteAccessRuntime(),
         providerAdapters: [ProviderID: ServiceProviderAdapter]? = nil,
         ibmBobNativeSessionCleaner: any IBMBobNativeSessionCleaning = IBMBobNativeSessionCleaner()
@@ -1454,11 +1465,13 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         }
 
         let metadataStore = try NexusMetadataStore(storeURL: storeURL)
+        let sessionRecordStore = sessionRecordStoreFactory?(metadataStore)
         remoteAccessRuntime.restore(isEnabled: try metadataStore.remoteAccessEnabled())
         return NexusService(
             listener: NSXPCListener.anonymous(),
             storeURL: storeURL,
             metadataStore: metadataStore,
+            sessionRecordStore: sessionRecordStore,
             providerHealthEvaluator: providerHealthEvaluator,
             hostValidationEvaluator: hostValidationEvaluator,
             workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
@@ -1685,7 +1698,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             }
         }
 
-        let sessionItems = try metadataStore.listAllSessions().compactMap { session -> NavigationItem? in
+        let sessionItems = try sessionRecordStore.listAllSessions().compactMap { session -> NavigationItem? in
             guard let workspace = try metadataStore.workspace(id: session.workspaceID) else {
                 return nil
             }
@@ -1724,7 +1737,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         var providerCards: [WorkspaceProviderCard] = []
         for providerID in ProviderID.allCases {
             let health = try await providerHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
-            let defaultSession = try metadataStore.defaultSession(workspaceID: workspaceID, providerID: providerID)
+            let defaultSession = try sessionRecordStore.defaultSession(workspaceID: workspaceID, providerID: providerID)
             providerCards.append(
                 WorkspaceProviderCard(
                     provider: Provider(id: providerID),
@@ -1732,7 +1745,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                     capabilities: providerCapabilities(for: providerID, workspace: workspace, health: health, defaultSession: defaultSession),
                     prelaunchPrimarySurface: providerAdapter(for: providerID).primarySurface(in: workspace),
                     defaultSession: try defaultSessionSummary(for: workspace, providerID: providerID),
-                    alternateSessionCount: try metadataStore.listSessions(workspaceID: workspaceID, providerID: providerID)
+                    alternateSessionCount: try sessionRecordStore.listSessions(workspaceID: workspaceID, providerID: providerID)
                         .filter { $0.isDefault == false }
                         .count
                 )
@@ -1759,7 +1772,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 workspaceAvailability: $0.workspaceAvailability
             )
         }
-        let sessions = try metadataStore.listSessions(workspaceID: workspaceID, providerID: providerID)
+        let sessions = try sessionRecordStore.listSessions(workspaceID: workspaceID, providerID: providerID)
             .map(reconcileSessionRuntimeState)
         let health = try await providerHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
         let defaultSession = sessions.first(where: \.isDefault)
@@ -1945,7 +1958,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     func launchOrResumeSession(sessionID: UUID) async throws -> Session {
-        guard let session = try metadataStore.session(id: sessionID) else {
+        guard let session = try sessionRecordStore.session(id: sessionID) else {
             throw NexusMetadataStoreError.sessionNotFound
         }
         guard let workspace = try metadataStore.workspace(id: session.workspaceID) else {
@@ -1964,7 +1977,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     func stopSession(sessionID: UUID) throws -> Session {
-        guard let session = try metadataStore.session(id: sessionID) else {
+        guard let session = try sessionRecordStore.session(id: sessionID) else {
             throw NexusMetadataStoreError.sessionNotFound
         }
 
@@ -1978,14 +1991,14 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         }
 
         try sessionRuntimeManager.stop(session: resolvedSession)
-        guard let updatedSession = try metadataStore.session(id: sessionID) else {
+        guard let updatedSession = try sessionRecordStore.session(id: sessionID) else {
             throw NexusMetadataStoreError.sessionNotFound
         }
         return try reconcileSessionRuntimeState(updatedSession)
     }
 
     func deleteSessionRecord(sessionID: UUID) throws -> Bool {
-        guard let session = try metadataStore.session(id: sessionID) else {
+        guard let session = try sessionRecordStore.session(id: sessionID) else {
             throw NexusMetadataStoreError.sessionNotFound
         }
 
@@ -1999,7 +2012,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             throw NexusMetadataStoreError.workspaceNotFound
         }
         let host = try workspace.remoteHostID.flatMap { try metadataStore.host(id: $0) }
-        let sessionRecordAdapterMetadata = try metadataStore.sessionRecordAdapterMetadata(sessionID: resolvedSession.id)
+        let sessionRecordAdapterMetadata = try sessionRecordStore.sessionRecordAdapterMetadata(sessionID: resolvedSession.id)
         ibmBobNativeSessionCleaner.bestEffortDeleteStoredContinuity(
             for: resolvedSession,
             workspace: workspace,
@@ -2008,11 +2021,11 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         )
 
         sessionRuntimeManager.remove(session: resolvedSession)
-        return try metadataStore.deleteSession(id: sessionID)
+        return try sessionRecordStore.deleteSessionRecord(id: sessionID)
     }
 
     func getSessionRecord(sessionID: UUID) throws -> Session {
-        guard let session = try metadataStore.session(id: sessionID) else {
+        guard let session = try sessionRecordStore.session(id: sessionID) else {
             throw NexusMetadataStoreError.sessionNotFound
         }
 
@@ -2020,7 +2033,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     func getSessionScreen(sessionID: UUID) throws -> SessionScreen {
-        guard let session = try metadataStore.session(id: sessionID) else {
+        guard let session = try sessionRecordStore.session(id: sessionID) else {
             throw NexusMetadataStoreError.sessionNotFound
         }
 
@@ -2083,7 +2096,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     func sendSessionInput(sessionID: UUID, text: String) async throws -> SessionScreen {
-        guard let session = try metadataStore.session(id: sessionID) else {
+        guard let session = try sessionRecordStore.session(id: sessionID) else {
             throw NexusMetadataStoreError.sessionNotFound
         }
 
@@ -2101,7 +2114,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     func sendSessionText(sessionID: UUID, text: String) async throws -> SessionScreen {
-        guard let session = try metadataStore.session(id: sessionID) else {
+        guard let session = try sessionRecordStore.session(id: sessionID) else {
             throw NexusMetadataStoreError.sessionNotFound
         }
 
@@ -2124,7 +2137,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     func sendSessionInputKey(sessionID: UUID, key: SessionInputKey) async throws -> SessionScreen {
-        guard let session = try metadataStore.session(id: sessionID) else {
+        guard let session = try sessionRecordStore.session(id: sessionID) else {
             throw NexusMetadataStoreError.sessionNotFound
         }
 
@@ -2173,7 +2186,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         approvalRequestID: UUID,
         decision: ApprovalRequestDecision
     ) async throws -> SessionScreen {
-        guard let session = try metadataStore.session(id: sessionID) else {
+        guard let session = try sessionRecordStore.session(id: sessionID) else {
             throw NexusMetadataStoreError.sessionNotFound
         }
 
@@ -2197,7 +2210,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     func resizeSession(sessionID: UUID, columns: Int, rows: Int) async throws -> SessionScreen {
-        guard let session = try metadataStore.session(id: sessionID) else {
+        guard let session = try sessionRecordStore.session(id: sessionID) else {
             throw NexusMetadataStoreError.sessionNotFound
         }
 
@@ -2208,7 +2221,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
 
         _ = sessionControllerRegistry.claimMacControl(sessionID: resolvedSession.id, preferredSize: (columns, rows))
         let screen = try sessionRuntimeManager.resize(session: resolvedSession, columns: columns, rows: rows)
-        try metadataStore.updateSessionTerminalSize(
+        try sessionRecordStore.updateSessionTerminalSize(
             id: resolvedSession.id,
             columns: screen.terminalColumns,
             rows: screen.terminalRows
@@ -2228,7 +2241,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     func takeRemoteSessionControl(sessionID: UUID, pairedDeviceID: UUID, columns: Int, rows: Int) async throws -> SessionScreen {
-        guard let session = try metadataStore.session(id: sessionID) else {
+        guard let session = try sessionRecordStore.session(id: sessionID) else {
             throw NexusMetadataStoreError.sessionNotFound
         }
 
@@ -2245,7 +2258,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         )
 
         let resizedScreen = try sessionRuntimeManager.resize(session: resolvedSession, columns: columns, rows: rows)
-        try metadataStore.updateSessionTerminalSize(
+        try sessionRecordStore.updateSessionTerminalSize(
             id: resolvedSession.id,
             columns: resizedScreen.terminalColumns,
             rows: resizedScreen.terminalRows
@@ -2351,7 +2364,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     func releaseRemoteSessionControl(sessionID: UUID, pairedDeviceID: UUID) throws -> SessionScreen {
-        guard let session = try metadataStore.session(id: sessionID) else {
+        guard let session = try sessionRecordStore.session(id: sessionID) else {
             throw NexusMetadataStoreError.sessionNotFound
         }
 
@@ -2364,7 +2377,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         }
 
         let resizedScreen = try sessionRuntimeManager.resize(session: resolvedSession, columns: macSize.columns, rows: macSize.rows)
-        try metadataStore.updateSessionTerminalSize(
+        try sessionRecordStore.updateSessionTerminalSize(
             id: resolvedSession.id,
             columns: resizedScreen.terminalColumns,
             rows: resizedScreen.terminalRows
@@ -2380,7 +2393,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         }
 
         let resizedScreen = try sessionRuntimeManager.resize(session: session, columns: macSize.columns, rows: macSize.rows)
-        try metadataStore.updateSessionTerminalSize(
+        try sessionRecordStore.updateSessionTerminalSize(
             id: session.id,
             columns: resizedScreen.terminalColumns,
             rows: resizedScreen.terminalRows
@@ -2423,7 +2436,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         pairedDeviceID: UUID,
         controllerError: NexusSessionControlError = .remoteControllerRequired
     ) async throws -> Session {
-        guard let session = try metadataStore.session(id: sessionID) else {
+        guard let session = try sessionRecordStore.session(id: sessionID) else {
             throw NexusMetadataStoreError.sessionNotFound
         }
 
@@ -2468,7 +2481,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         let reconciledSession = try reconcileSessionRuntimeState(existingSession)
         let sessionRecordAdapterMetadataSource = try relaunchSessionRecordAdapterMetadataSource(for: reconciledSession)
 
-        if let launchSnapshot = try metadataStore.launchSnapshot(sessionID: reconciledSession.id) {
+        if let launchSnapshot = try sessionRecordStore.launchSnapshot(sessionID: reconciledSession.id) {
             if shouldAttemptRemoteRuntimeRecovery(for: reconciledSession, workspace: workspace) {
                 return try await recoverRemoteSession(
                     reconciledSession,
@@ -2479,7 +2492,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
 
             let session = reconciledSession.state == .ready && reconciledSession.failureMessage == nil
                 ? reconciledSession
-                : try metadataStore.updateSession(id: reconciledSession.id, state: .ready, failureMessage: nil)
+                : try sessionRecordStore.updateSession(id: reconciledSession.id, state: .ready, failureMessage: nil)
             return try await launchSession(
                 session,
                 workspace: workspace,
@@ -2504,7 +2517,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         )
         guard health.launchability == .launchable, let executable = health.resolvedExecutable else {
             let failureMessage = health.diagnostics.first(where: { $0.severity == .error })?.message ?? health.summary
-            return try metadataStore.updateSession(
+            return try sessionRecordStore.updateSession(
                 id: reconciledSession.id,
                 state: .failed,
                 failureMessage: failureMessage
@@ -2513,8 +2526,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
 
         let session = reconciledSession.state == .ready && reconciledSession.failureMessage == nil
             ? reconciledSession
-            : try metadataStore.updateSession(id: reconciledSession.id, state: .ready, failureMessage: nil)
-        let launchSnapshot = try metadataStore.ensureLaunchSnapshot(
+            : try sessionRecordStore.updateSession(id: reconciledSession.id, state: .ready, failureMessage: nil)
+        let launchSnapshot = try sessionRecordStore.ensureLaunchSnapshot(
             sessionID: session.id,
             workspaceID: session.workspaceID,
             providerID: session.providerID,
@@ -2537,7 +2550,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             return .stored
         }
 
-        let storedMetadata = try metadataStore.sessionRecordAdapterMetadata(sessionID: session.id)
+        let storedMetadata = try sessionRecordStore.sessionRecordAdapterMetadata(sessionID: session.id)
         if session.state == .interrupted,
            let linkage = storedMetadata?.ibmBobSessionLinkage {
             return .explicit(
@@ -2588,9 +2601,9 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     private func remoteRuntimeIdentifier(for session: Session, forceNew: Bool) throws -> String {
-        let currentGeneration = try metadataStore.remoteRuntimeGeneration(sessionID: session.id)
+        let currentGeneration = try sessionRecordStore.remoteRuntimeGeneration(sessionID: session.id)
         if forceNew {
-            let nextGeneration = try metadataStore.advanceRemoteRuntimeGeneration(sessionID: session.id)
+            let nextGeneration = try sessionRecordStore.advanceRemoteRuntimeGeneration(sessionID: session.id)
             return remoteRuntimeIdentifier(sessionID: session.id, generation: nextGeneration)
         }
 
@@ -2616,7 +2629,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     ) async throws -> Session {
         let readySession = session.state == .ready && session.failureMessage == nil
             ? session
-            : try metadataStore.updateSession(id: session.id, state: .ready, failureMessage: nil)
+            : try sessionRecordStore.updateSession(id: session.id, state: .ready, failureMessage: nil)
 
         do {
             try await sessionRuntimeManager.launchOrResume(
@@ -2631,7 +2644,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 )
             )
             try persistRuntimeLinkageIfNeeded(for: readySession)
-            let terminalSize = try metadataStore.sessionTerminalSize(id: readySession.id)
+            let terminalSize = try sessionRecordStore.sessionTerminalSize(id: readySession.id)
             let screen = try sessionRuntimeManager.resize(
                 session: readySession,
                 columns: terminalSize.columns,
@@ -2651,7 +2664,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             }
 
             let failure = providerAdapter(for: readySession.providerID).remoteRuntimeRecoveryFailure(for: failureContext)
-            return try metadataStore.updateSession(
+            return try sessionRecordStore.updateSession(
                 id: readySession.id,
                 state: failure.state,
                 failureMessage: failure.message
@@ -2680,7 +2693,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 )
             )
             try persistRuntimeLinkageIfNeeded(for: session)
-            let terminalSize = try metadataStore.sessionTerminalSize(id: session.id)
+            let terminalSize = try sessionRecordStore.sessionTerminalSize(id: session.id)
             let screen = try sessionRuntimeManager.resize(
                 session: session,
                 columns: terminalSize.columns,
@@ -2705,7 +2718,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 )
             }
 
-            return try metadataStore.updateSession(
+            return try sessionRecordStore.updateSession(
                 id: session.id,
                 state: .failed,
                 failureMessage: error.localizedDescription
@@ -2745,7 +2758,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     ) throws -> SessionRecordAdapterMetadata? {
         switch source {
         case .stored:
-            try metadataStore.sessionRecordAdapterMetadata(sessionID: session.id)
+            try sessionRecordStore.sessionRecordAdapterMetadata(sessionID: session.id)
         case let .explicit(metadata):
             metadata
         }
@@ -2757,11 +2770,11 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             return
         }
 
-        try metadataStore.saveSessionRecordAdapterMetadata(sessionID: session.id, metadata: metadata)
+        try sessionRecordStore.saveSessionRecordAdapterMetadata(sessionID: session.id, metadata: metadata)
     }
 
     private func persistRuntimeLinkageAfterRuntimeChange(sessionID: UUID) {
-        guard let session = (try? metadataStore.session(id: sessionID)) ?? nil else {
+        guard let session = (try? sessionRecordStore.session(id: sessionID)) ?? nil else {
             return
         }
 
@@ -2769,7 +2782,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     private func persistSessionStateAfterRuntimeChange(sessionID: UUID) {
-        guard let session = (try? metadataStore.session(id: sessionID)) ?? nil,
+        guard let session = (try? sessionRecordStore.session(id: sessionID)) ?? nil,
               let runtimeState = sessionRuntimeManager.runtimeState(for: session),
               runtimeState != .ready else {
             return
@@ -2783,7 +2796,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         case .ready:
             return session
         case .failed:
-            return try metadataStore.updateSession(
+            return try sessionRecordStore.updateSession(
                 id: session.id,
                 state: .failed,
                 failureMessage: runtimeFailureMessage(for: session) ?? "Session failed"
@@ -2796,13 +2809,13 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 workspace: metadataStore.workspace(id: session.workspaceID)
             )
             let failureMessage = runtimeTranscript.flatMap { $0.isEmpty ? nil : $0 } ?? fallbackFailureMessage
-            return try metadataStore.updateSession(
+            return try sessionRecordStore.updateSession(
                 id: session.id,
                 state: .interrupted,
                 failureMessage: failureMessage
             )
         case .exited:
-            return try metadataStore.updateSession(
+            return try sessionRecordStore.updateSession(
                 id: session.id,
                 state: .exited,
                 failureMessage: "Session exited. Relaunch to start a new live runtime."
@@ -2826,12 +2839,12 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     private func persistPrimarySurfaceIfNeeded(for session: Session, primarySurface: SessionSurface) throws {
-        guard let launchSnapshot = try metadataStore.launchSnapshot(sessionID: session.id),
+        guard let launchSnapshot = try sessionRecordStore.launchSnapshot(sessionID: session.id),
               launchSnapshot.primarySurface != primarySurface else {
             return
         }
 
-        try metadataStore.updateLaunchSnapshotPrimarySurface(sessionID: session.id, primarySurface: primarySurface)
+        try sessionRecordStore.updateLaunchSnapshotPrimarySurface(sessionID: session.id, primarySurface: primarySurface)
     }
 
     private func remoteRuntimeRecoveryFailure(
@@ -2905,7 +2918,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     private func staticSessionScreen(for session: Session, transcript: String) throws -> SessionScreen {
-        let terminalSize = try metadataStore.sessionTerminalSize(id: session.id)
+        let terminalSize = try sessionRecordStore.sessionTerminalSize(id: session.id)
         let primarySurface = try persistedPrimarySurface(for: session)
         let persistedActivityItems = try persistedStructuredActivityItems(for: session)
         return normalizedSessionScreen(
@@ -2930,7 +2943,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     private func persistedPrimarySurface(for session: Session, workspace: Workspace? = nil) throws -> SessionSurface {
-        if let launchSnapshot = try metadataStore.launchSnapshot(sessionID: session.id) {
+        if let launchSnapshot = try sessionRecordStore.launchSnapshot(sessionID: session.id) {
             return launchSnapshot.primarySurface
         }
 
@@ -2947,7 +2960,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     private func persistedStructuredActivityItems(for session: Session) throws -> [SessionActivityItem]? {
-        try metadataStore.sessionRecordAdapterMetadata(sessionID: session.id)?.ibmBobPersistedActivityItems
+        try sessionRecordStore.sessionRecordAdapterMetadata(sessionID: session.id)?.ibmBobPersistedActivityItems
     }
 
     private func staticSessionTranscript(
@@ -3027,7 +3040,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             )
         case .session:
             guard let sessionID = target.sessionID,
-                  let session = try metadataStore.session(id: sessionID),
+                  let session = try sessionRecordStore.session(id: sessionID),
                   let workspace = try metadataStore.workspace(id: session.workspaceID) else {
                 return nil
             }
@@ -3927,7 +3940,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     private func defaultSessionSummary(for workspace: Workspace, providerID: ProviderID) throws -> ProviderDefaultSessionSummary {
-        guard let session = try metadataStore.defaultSession(workspaceID: workspace.id, providerID: providerID) else {
+        guard let session = try sessionRecordStore.defaultSession(workspaceID: workspace.id, providerID: providerID) else {
             return ProviderDefaultSessionSummary(
                 state: .notCreated,
                 summary: "No default session yet",
@@ -3991,7 +4004,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             return session
         }
 
-        return try metadataStore.updateSession(
+        return try sessionRecordStore.updateSession(
             id: session.id,
             state: .interrupted,
             failureMessage: try interruptedSessionFailureMessage(for: session, workspace: workspace)
@@ -4003,7 +4016,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             return false
         }
 
-        return try metadataStore.sessionRecordAdapterMetadata(sessionID: session.id)?.ibmBobTurnInProgress != true
+        return try sessionRecordStore.sessionRecordAdapterMetadata(sessionID: session.id)?.ibmBobTurnInProgress != true
     }
 
     private func readySessionRecordMayBeDeleted(_ session: Session) throws -> Bool {
@@ -4017,7 +4030,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             return runtimeLinkage.turnInProgress == false
         }
 
-        return try metadataStore.sessionRecordAdapterMetadata(sessionID: session.id)?.ibmBobTurnInProgress != true
+        return try sessionRecordStore.sessionRecordAdapterMetadata(sessionID: session.id)?.ibmBobTurnInProgress != true
     }
 
     private func stopRequiresActiveIBMBobTurn(_ session: Session, workspace: Workspace? = nil) throws -> Bool {

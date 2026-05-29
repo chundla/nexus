@@ -3,7 +3,8 @@ import Foundation
 import NexusDomain
 
 struct ServiceSessionLifecycleDependencies {
-    let metadataStore: NexusMetadataStore
+    let workspace: (UUID) throws -> Workspace?
+    let sessionRecordStore: any SessionRecordStore
     let providerAdapter: (ProviderID) -> ServiceProviderAdapter
     let remoteWorkspaceHealthContext: (Workspace) throws -> RemoteWorkspaceHealthContext?
     let providerHealthSummary: (ProviderID, Workspace, RemoteWorkspaceHealthContext?) async throws -> ProviderHealthSummary
@@ -27,13 +28,13 @@ final class ServiceSessionLifecycle: SessionLifecycleManaging {
             throw NexusMetadataStoreError.providerNotSupported
         }
 
-        if let existingSession = try dependencies.metadataStore.defaultSession(workspaceID: workspaceID, providerID: providerID) {
+        if let existingSession = try dependencies.sessionRecordStore.defaultSession(workspaceID: workspaceID, providerID: providerID) {
             return try await dependencies.launchOrResumePersistedSession(existingSession, workspace)
         }
 
         let health = try await providerHealthSummary(for: providerID, workspace: workspace)
         guard health.launchability == .launchable, let executable = health.resolvedExecutable else {
-            return try dependencies.metadataStore.createDefaultSession(
+            return try dependencies.sessionRecordStore.createDefaultSession(
                 workspaceID: workspaceID,
                 providerID: providerID,
                 state: .failed,
@@ -41,7 +42,7 @@ final class ServiceSessionLifecycle: SessionLifecycleManaging {
             )
         }
 
-        let session = try dependencies.metadataStore.createDefaultSession(
+        let session = try dependencies.sessionRecordStore.createDefaultSession(
             workspaceID: workspaceID,
             providerID: providerID,
             state: .ready,
@@ -58,12 +59,12 @@ final class ServiceSessionLifecycle: SessionLifecycleManaging {
             throw NexusMetadataStoreError.providerNotSupported
         }
 
-        let existingSessions = try dependencies.metadataStore.listSessions(workspaceID: workspaceID, providerID: providerID)
+        let existingSessions = try dependencies.sessionRecordStore.listSessions(workspaceID: workspaceID, providerID: providerID)
         let resolvedName = dependencies.resolveNamedSessionName(name, existingSessions)
         let health = try await providerHealthSummary(for: providerID, workspace: workspace)
 
         guard health.launchability == .launchable, let executable = health.resolvedExecutable else {
-            return try dependencies.metadataStore.createNamedSession(
+            return try dependencies.sessionRecordStore.createNamedSession(
                 workspaceID: workspaceID,
                 providerID: providerID,
                 name: resolvedName,
@@ -72,7 +73,7 @@ final class ServiceSessionLifecycle: SessionLifecycleManaging {
             )
         }
 
-        let session = try dependencies.metadataStore.createNamedSession(
+        let session = try dependencies.sessionRecordStore.createNamedSession(
             workspaceID: workspaceID,
             providerID: providerID,
             name: resolvedName,
@@ -83,7 +84,7 @@ final class ServiceSessionLifecycle: SessionLifecycleManaging {
     }
 
     private func requiredWorkspace(id workspaceID: UUID) throws -> Workspace {
-        guard let workspace = try dependencies.metadataStore.workspace(id: workspaceID) else {
+        guard let workspace = try dependencies.workspace(workspaceID) else {
             throw NexusMetadataStoreError.workspaceNotFound
         }
         return workspace
@@ -100,7 +101,7 @@ final class ServiceSessionLifecycle: SessionLifecycleManaging {
         adapter: ServiceProviderAdapter,
         executable: String
     ) async throws -> Session {
-        let launchSnapshot = try dependencies.metadataStore.ensureLaunchSnapshot(
+        let launchSnapshot = try dependencies.sessionRecordStore.ensureLaunchSnapshot(
             sessionID: session.id,
             workspaceID: session.workspaceID,
             providerID: session.providerID,
