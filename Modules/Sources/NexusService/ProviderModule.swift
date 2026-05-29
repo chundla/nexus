@@ -91,6 +91,18 @@ protocol ProviderModule {
         _ request: ProviderModulePersistedSessionRelaunchRequest
     ) -> ProviderModulePersistedSessionRelaunchPlan
 
+    func persistedSessionRelaunchMetadataSource(
+        for session: Session,
+        storedMetadata: SessionRecordAdapterMetadata?
+    ) -> SessionRecordAdapterMetadataLaunchSource
+
+    func sessionMayRemainReadyWithoutRuntime(
+        _ session: Session,
+        workspace: Workspace?,
+        persistedPrimarySurface: SessionSurface,
+        storedMetadata: SessionRecordAdapterMetadata?
+    ) -> Bool
+
     func shouldRetryFreshRemotePersistedSessionRelaunchWithoutContinuity(
         _ error: Error,
         metadata: SessionRecordAdapterMetadata?
@@ -132,6 +144,22 @@ extension ProviderModule {
         _ request: ProviderModulePersistedSessionRelaunchRequest
     ) -> ProviderModulePersistedSessionRelaunchPlan {
         .sharedLaunch
+    }
+
+    func persistedSessionRelaunchMetadataSource(
+        for session: Session,
+        storedMetadata: SessionRecordAdapterMetadata?
+    ) -> SessionRecordAdapterMetadataLaunchSource {
+        .stored
+    }
+
+    func sessionMayRemainReadyWithoutRuntime(
+        _ session: Session,
+        workspace: Workspace?,
+        persistedPrimarySurface: SessionSurface,
+        storedMetadata: SessionRecordAdapterMetadata?
+    ) -> Bool {
+        false
     }
 
     func shouldRetryFreshRemotePersistedSessionRelaunchWithoutContinuity(

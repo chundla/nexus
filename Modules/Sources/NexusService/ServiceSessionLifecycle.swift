@@ -211,25 +211,10 @@ final class ServiceSessionLifecycle: SessionLifecycleManaging {
     }
 
     private func relaunchSessionRecordAdapterMetadataSource(for session: Session) throws -> SessionRecordAdapterMetadataLaunchSource {
-        guard session.providerID == .ibmBob,
-              session.state != .ready else {
-            return .stored
-        }
-
-        let storedMetadata = try dependencies.sessionRecordStore.sessionRecordAdapterMetadata(sessionID: session.id)
-        if session.state == .interrupted,
-           let linkage = storedMetadata?.ibmBobSessionLinkage {
-            return .explicit(
-                SessionRecordAdapterMetadata.ibmBob(
-                    sessionID: linkage.sessionID,
-                    activityItems: linkage.persistedActivityItems,
-                    turnInProgress: false
-                )
-            )
-        }
-
-        let storedSessionID = storedMetadata?.ibmBobSessionLinkage?.sessionID
-        return .explicit(SessionRecordAdapterMetadata.ibmBob(sessionID: storedSessionID))
+        dependencies.providerModule(session.providerID).persistedSessionRelaunchMetadataSource(
+            for: session,
+            storedMetadata: try dependencies.sessionRecordStore.sessionRecordAdapterMetadata(sessionID: session.id)
+        )
     }
 
     private func shouldAttemptRemoteRuntimeRecovery(for session: Session, workspace: Workspace) -> Bool {

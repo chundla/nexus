@@ -218,11 +218,12 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
     }
 
     func sessionMayRemainReadyWithoutRuntime(_ session: Session, workspace: Workspace?) throws -> Bool {
-        guard try stopRequiresActiveIBMBobTurn(session, workspace: workspace) else {
-            return false
-        }
-
-        return try dependencies.sessionRecordStore.sessionRecordAdapterMetadata(sessionID: session.id)?.ibmBobTurnInProgress != true
+        providerModule(for: session.providerID).sessionMayRemainReadyWithoutRuntime(
+            session,
+            workspace: workspace,
+            persistedPrimarySurface: try persistedPrimarySurface(for: session, workspace: workspace),
+            storedMetadata: try dependencies.sessionRecordStore.sessionRecordAdapterMetadata(sessionID: session.id)
+        )
     }
 
     private func providerModule(for providerID: ProviderID) -> any ProviderModule {

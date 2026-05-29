@@ -99,6 +99,10 @@ enum ServiceSessionProviderRegistry {
             modules[.codex] = CodexProviderModule()
         }
 
+        if providerAdapters[.ibmBob] != nil {
+            modules[.ibmBob] = IBMBobProviderModule()
+        }
+
         if providerAdapters[.pi] != nil {
             modules[.pi] = PiProviderModule()
         }
