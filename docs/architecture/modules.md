@@ -26,6 +26,7 @@ Responsibilities:
 - Background Service runtime
 - authoritative state and persistence
 - provider adapters
+- provider modules
 - health checks
 - launch snapshot resolution
 - session lifecycle orchestration
@@ -41,6 +42,14 @@ Current bootstrap implementation:
 - currently proves the boundary with service-owned SQLite metadata-store creation
 - the service now owns persisted Workspace Groups and local Workspaces in that store
 - the app reads and mutates that catalog over real local IPC
+
+### Current Provider Module seam
+
+- `ProviderModule` is the service-owned seam between shared **Workspace Catalog** / **Session** lifecycle orchestration and provider-owned behavior.
+- generic providers may still use `ServiceProviderAdapter` directly as the module implementation while the seam is being deepened.
+- Pi currently routes catalog reads, open/resume behavior, structured prelaunch surface selection, and remote recovery fallback through `PiProviderModule`.
+- follow-up cleanup remains a no-behavior-change sequence: split shared and Pi-owned file clusters, shrink the open seam, shrink the relaunch seam, move Pi health/support/snapshot-reuse policy into the Pi module, then remove remaining shared `providerAdapter(...)` leakage.
+- issue #115 is the roadmap umbrella for that sequence; child slices #116 through #120 carry the implementation work in order.
 
 ### NexusDomain
 

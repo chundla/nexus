@@ -15,6 +15,7 @@ Nexus is the workspace-first control center for coding agent CLIs across local a
 
 - The macOS app and **Background Service** are the primary build targets in this repo.
 - Nexus supports both terminal-backed and protocol-native **Sessions** behind one shared **Session** model.
+- The service now has an explicit `ProviderModule` seam; Pi is the first provider routing catalog and **Session** open/recovery behavior through that seam.
 - Milestone Eight established local Pi as the first documented protocol-native **Provider** path.
 - Milestone Nine generalized the protocol-native structured **Session** path to local Codex.
 - Milestone Ten expanded the protocol-native structured **Session** path to remote Codex.
@@ -73,7 +74,7 @@ Owns:
 - persistence
 - workspace groups and workspaces
 - provider configuration and health
-- provider adapters
+- provider adapters and provider modules
 - session lifecycle
 - launch snapshot creation
 - shared Session streams and presentation state
