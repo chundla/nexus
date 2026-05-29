@@ -12,82 +12,98 @@ struct HostManagementSheet: View {
     @State private var presentedError: HostManagementPresentedError?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Hosts")
-                        .font(.title2)
-                        .fontWeight(.semibold)
-                    Text("Create, edit, validate, and inspect remote Hosts.")
-                        .foregroundStyle(.secondary)
-                }
+        ZStack {
+            NexusBackdrop()
 
-                Spacer()
+            VStack(alignment: .leading, spacing: 18) {
+                HStack {
+                    NexusSectionHeader(
+                        eyebrow: "Remote catalog",
+                        title: "Hosts",
+                        detail: "Create, edit, validate, and inspect the remote Hosts that power Nexus workspaces."
+                    )
 
-                Button("Done") {
-                    isPresented = false
-                }
-            }
+                    Spacer()
 
-            HSplitView {
-                VStack(alignment: .leading, spacing: 12) {
-                    List(selection: $selection) {
-                        ForEach(appModel.hosts) { host in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(host.name)
-                                    .fontWeight(.medium)
-                                Text(host.sshTarget)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .tag(Optional(host.id))
-                        }
+                    Button("Done") {
+                        isPresented = false
                     }
-
-                    HStack {
-                        Button("New Host") {
-                            editorMode = .create
-                        }
-
-                        Button("Edit") {
-                            guard let host = selectedHost else {
-                                return
-                            }
-                            editorMode = .edit(host)
-                        }
-                        .disabled(selectedHost == nil)
-
-                        Button("Delete", role: .destructive) {
-                            pendingDeletionHost = selectedHost
-                        }
-                        .disabled(selectedHost == nil)
-                    }
+                    .buttonStyle(NexusSecondaryButtonStyle())
                 }
-                .frame(minWidth: 220)
 
-                Group {
-                    if let host = selectedHost {
-                        HostDetailPanel(
-                            host: host,
-                            detail: appModel.hostDetail(for: host.id),
-                            onEdit: {
+                HSplitView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        List(selection: $selection) {
+                            ForEach(appModel.hosts) { host in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(host.name)
+                                        .font(NexusMacTheme.bodyFont(14).weight(.semibold))
+                                        .foregroundStyle(.white)
+                                    Text(host.sshTarget)
+                                        .font(NexusMacTheme.bodyFont(12, relativeTo: .caption))
+                                        .foregroundStyle(NexusMacTheme.mutedText)
+                                }
+                                .padding(.vertical, 4)
+                                .tag(Optional(host.id))
+                                .listRowBackground(Color.clear)
+                            }
+                        }
+                        .listStyle(.sidebar)
+                        .scrollContentBackground(.hidden)
+                        .nexusPanel(tint: NexusMacTheme.gold, radius: 18)
+
+                        HStack {
+                            Button("New Host") {
+                                editorMode = .create
+                            }
+                            .buttonStyle(NexusAccentButtonStyle())
+
+                            Button("Edit") {
+                                guard let host = selectedHost else {
+                                    return
+                                }
                                 editorMode = .edit(host)
-                            },
-                            onValidate: validateSelectedHost
-                        )
-                    } else {
-                        ContentUnavailableView(
-                            "No Host selected",
-                            systemImage: "network",
-                            description: Text("Create a Host or select an existing one to inspect diagnostics.")
-                        )
+                            }
+                            .buttonStyle(NexusSecondaryButtonStyle())
+                            .disabled(selectedHost == nil)
+
+                            Button("Delete") {
+                                pendingDeletionHost = selectedHost
+                            }
+                            .buttonStyle(NexusSecondaryButtonStyle())
+                            .disabled(selectedHost == nil)
+                        }
                     }
+                    .frame(minWidth: 240)
+
+                    Group {
+                        if let host = selectedHost {
+                            HostDetailPanel(
+                                host: host,
+                                detail: appModel.hostDetail(for: host.id),
+                                onEdit: {
+                                    editorMode = .edit(host)
+                                },
+                                onValidate: validateSelectedHost
+                            )
+                        } else {
+                            ContentUnavailableView(
+                                "No Host selected",
+                                systemImage: "network",
+                                description: Text("Create a Host or select an existing one to inspect diagnostics.")
+                            )
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .nexusPanel(tint: NexusMacTheme.teal)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            .padding(24)
+            .frame(minWidth: 820, minHeight: 480)
+            .nexusPanel(tint: NexusMacTheme.teal, radius: 30)
+            .padding(28)
         }
-        .padding()
-        .frame(minWidth: 760, minHeight: 420)
         .task {
             if selection == nil {
                 selection = appModel.hosts.first?.id
@@ -183,65 +199,70 @@ private struct HostDetailPanel: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 18) {
                 HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 8) {
                         Text(host.name)
-                            .font(.title3)
-                            .fontWeight(.semibold)
+                            .font(NexusMacTheme.displayFont(26, relativeTo: .title2))
+                            .foregroundStyle(.white)
                         Text(host.sshTarget)
-                            .foregroundStyle(.secondary)
+                            .font(NexusMacTheme.bodyFont(14))
+                            .foregroundStyle(NexusMacTheme.mutedText)
                     }
 
                     Spacer()
 
                     Button("Edit", action: onEdit)
+                        .buttonStyle(NexusSecondaryButtonStyle())
                 }
 
-                LabeledContent("SSH Target", value: host.sshTarget)
-                LabeledContent("Port", value: host.port.map(String.init) ?? "Default from SSH config")
+                NexusInspectorRow(title: "SSH Target", value: host.sshTarget)
+                NexusInspectorRow(title: "Port", value: host.port.map(String.init) ?? "Default from SSH config")
 
-                Divider()
-
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 10) {
                     HStack {
-                        Label(validationStateTitle, systemImage: validationStateSymbol)
-                            .foregroundStyle(validationStateColor)
+                        NexusStatusPill(text: validationStateTitle, color: validationStateColor)
                         Spacer()
                         Button(detail?.latestValidation == nil ? "Validate" : "Revalidate", action: onValidate)
+                            .buttonStyle(NexusAccentButtonStyle())
                     }
 
                     Text(validationSummary)
-                        .foregroundStyle(.secondary)
+                        .font(NexusMacTheme.bodyFont(14))
+                        .foregroundStyle(NexusMacTheme.mutedText)
 
                     if let checkedAt = detail?.latestValidation?.checkedAt {
-                        LabeledContent("Last Checked", value: checkedAt.formatted(date: .abbreviated, time: .shortened))
+                        NexusInspectorRow(title: "Last Checked", value: checkedAt.formatted(date: .abbreviated, time: .shortened))
                     }
                 }
+                .padding(18)
+                .nexusPanel(tint: validationStateColor, radius: 18)
 
                 if let diagnostics = detail?.latestValidation?.diagnostics, diagnostics.isEmpty == false {
-                    Divider()
-
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Diagnostics")
-                            .font(.headline)
+                            .font(NexusMacTheme.displayFont(22, relativeTo: .title3))
+                            .foregroundStyle(.white)
 
                         ForEach(Array(diagnostics.enumerated()), id: \.offset) { _, diagnostic in
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(diagnostic.message)
-                                    .font(.callout)
+                                    .font(NexusMacTheme.bodyFont(14))
+                                    .foregroundStyle(.white.opacity(0.9))
                                 Text(diagnostic.code)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .font(NexusMacTheme.monoFont(11, relativeTo: .caption))
+                                    .foregroundStyle(NexusMacTheme.mutedText)
                             }
-                            .padding()
+                            .padding(16)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(.quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: 10))
+                            .nexusPanel(tint: validationStateColor, radius: 16)
                         }
                     }
                 }
             }
+            .padding(20)
             .frame(maxWidth: .infinity, alignment: .topLeading)
+            .nexusPanel(tint: NexusMacTheme.teal, radius: 22)
         }
     }
 
@@ -329,30 +350,40 @@ private struct HostEditorSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(mode.title)
-                .font(.title3)
-                .fontWeight(.semibold)
+        ZStack {
+            NexusBackdrop()
 
-            TextField("Name", text: $name)
-            TextField("SSH target or alias", text: $sshTarget)
-            TextField("Port (optional)", text: $portText)
+            VStack(alignment: .leading, spacing: 16) {
+                NexusSectionHeader(
+                    eyebrow: "Host editor",
+                    title: mode.title,
+                    detail: "Save the SSH identity Nexus should use for remote validation and remote workspace execution."
+                )
 
-            HStack {
-                Spacer()
+                TextField("Name", text: $name)
+                TextField("SSH target or alias", text: $sshTarget)
+                TextField("Port (optional)", text: $portText)
 
-                Button("Cancel") {
-                    dismiss()
+                HStack {
+                    Spacer()
+
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                    .buttonStyle(NexusSecondaryButtonStyle())
+
+                    Button(mode.actionTitle) {
+                        saveHost()
+                    }
+                    .buttonStyle(NexusAccentButtonStyle())
+                    .keyboardShortcut(.defaultAction)
                 }
-
-                Button(mode.actionTitle) {
-                    saveHost()
-                }
-                .keyboardShortcut(.defaultAction)
             }
+            .padding(24)
+            .frame(minWidth: 420)
+            .nexusPanel(tint: NexusMacTheme.gold, radius: 28)
+            .padding(28)
         }
-        .padding()
-        .frame(minWidth: 380)
     }
 
     private func saveHost() {

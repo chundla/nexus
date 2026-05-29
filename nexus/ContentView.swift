@@ -15,6 +15,7 @@ struct ContentView: View {
     @State private var isShowingRemoteAccessSheet = false
     @State private var quickSwitchQuery = ""
     @State private var quickSwitchResults: [NavigationItem] = []
+    @State private var sidebarMode: SidebarMode = .workspaces
     @State private var pendingWorkspaceFolderPath: String?
     @State private var pendingWorkspaceGroupID: UUID?
     @State private var isShowingWorkspaceGroupPicker = false
@@ -26,91 +27,36 @@ struct ContentView: View {
     private let terminalLayout = TerminalViewportLayout.live
 
     var body: some View {
-        NavigationSplitView {
-            List(selection: $selection) {
-                if appModel.recentNavigation.isEmpty == false {
-                    Section("Recents") {
-                        ForEach(appModel.recentNavigation) { item in
-                            Button {
-                                navigate(to: item.target)
-                            } label: {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Label(item.title, systemImage: navigationItemIcon(for: item.kind))
-                                    Text(item.subtitle)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
+        ZStack {
+            NexusBackdrop()
 
-                Section("Workspace Groups") {
-                    ForEach(appModel.workspaceGroups) { group in
-                        Label(group.name, systemImage: "folder.badge.plus")
-                            .tag(SidebarSelection.workspaceGroup(group.id))
-                    }
-                }
-
-                Section("Workspaces") {
-                    ForEach(appModel.workspaces) { workspace in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Label(workspace.name, systemImage: workspace.kind == .remote ? "externaldrive.connected.to.line.below" : "folder")
-                            if workspace.kind == .remote {
-                                Text(appModel.workspaceTargetSummary(for: workspace))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .tag(SidebarSelection.workspace(workspace.id))
-                    }
-                }
+            NavigationSplitView {
+                sidebarContent
+            } detail: {
+                detailView
+                    .padding(detailPadding)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
 #if os(macOS)
-            .navigationSplitViewColumnWidth(min: 220, ideal: 260)
+            .navigationSplitViewStyle(.balanced)
 #endif
-            .toolbar {
-                ToolbarItemGroup {
-                    Button("Quick Switch") {
-                        quickSwitchQuery = ""
-                        quickSwitchResults = []
-                        isShowingQuickSwitchSheet = true
-                    }
-                    .keyboardShortcut("k", modifiers: [.command])
-
-                    Button("New Workspace Group") {
-                        newWorkspaceGroupName = ""
-                        isShowingCreateWorkspaceGroupSheet = true
-                    }
-
-                    Button("Hosts") {
-                        isShowingHostsSheet = true
-                    }
-
-                    Button("Remote Access") {
-                        isShowingRemoteAccessSheet = true
-                    }
-
-                    Button("Add Local Workspace") {
-                        addLocalWorkspace()
-                    }
-
-                    Button("Add Remote Workspace") {
-                        isShowingCreateRemoteWorkspaceSheet = true
-                    }
-                }
-            }
-        } detail: {
-            detailView
-                .padding()
         }
+        .preferredColorScheme(.dark)
         .task {
             if appModel.serviceStatus == nil, appModel.serviceErrorMessage == nil {
                 await appModel.refresh()
             }
         }
         .task(id: selection) {
+            switch selection {
+            case .workspaceGroup:
+                sidebarMode = .groups
+            case .workspace, .provider, .session:
+                sidebarMode = .workspaces
+            case .none:
+                break
+            }
+
             do {
                 switch selection {
                 case .session(let sessionID):
@@ -128,6 +74,12 @@ struct ContentView: View {
             } catch {
                 presentedError = PresentedError(message: error.localizedDescription)
             }
+        }
+        .task(id: appModel.workspaces.map(\.id)) {
+            selectDefaultIfNeeded()
+        }
+        .task(id: appModel.recentNavigation.map(\.id)) {
+            selectDefaultIfNeeded()
         }
         .sheet(isPresented: $isShowingCreateWorkspaceGroupSheet) {
             createWorkspaceGroupSheet
@@ -152,6 +104,230 @@ struct ContentView: View {
         }
     }
 
+    private var sidebarContent: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Nexus")
+                            .font(NexusMacTheme.displayFont(24, relativeTo: .title2))
+                            .foregroundStyle(.white)
+                        Text("Your agent workspaces.")
+                            .font(NexusMacTheme.bodyFont(12, relativeTo: .caption))
+                            .foregroundStyle(NexusMacTheme.mutedText)
+                    }
+
+                    Spacer()
+
+                    Button {
+                        quickSwitchQuery = ""
+                        quickSwitchResults = []
+                        isShowingQuickSwitchSheet = true
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                    }
+                    .buttonStyle(NexusSecondaryButtonStyle())
+                    .help("Quick Switch")
+                }
+
+                Picker("Sidebar Mode", selection: $sidebarMode) {
+                    ForEach(SidebarMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+            .padding(14)
+            .nexusPanel(tint: NexusMacTheme.gold, radius: 18)
+
+            List(selection: $selection) {
+                switch sidebarMode {
+                case .workspaces:
+                    if sortedWorkspaces.isEmpty {
+                        ContentUnavailableView(
+                            "No Workspaces",
+                            systemImage: "bubble.left.and.text.bubble.right",
+                            description: Text("Add a local or remote workspace to start talking to your agents.")
+                        )
+                        .listRowBackground(Color.clear)
+                    } else {
+                        ForEach(sortedWorkspaces) { workspace in
+                            sidebarNavigationItemView(
+                                title: workspace.name,
+                                subtitle: appModel.workspaceTargetSummary(for: workspace),
+                                systemImage: workspace.kind == .remote ? "macbook.and.iphone" : "folder.fill",
+                                accent: workspace.kind == .remote ? NexusMacTheme.teal : NexusMacTheme.gold
+                            )
+                            .tag(SidebarSelection.workspace(workspace.id))
+                            .listRowBackground(Color.clear)
+                        }
+                    }
+                case .groups:
+                    if appModel.workspaceGroups.isEmpty {
+                        ContentUnavailableView(
+                            "No Workspace Groups",
+                            systemImage: "line.3.horizontal.decrease.circle",
+                            description: Text("Groups stay tucked away until you need them. Create one from the plus menu.")
+                        )
+                        .listRowBackground(Color.clear)
+                    } else {
+                        ForEach(sortedWorkspaceGroups) { group in
+                            sidebarNavigationItemView(
+                                title: group.name,
+                                subtitle: "\(workspaceCount(in: group.id)) workspace\(workspaceCount(in: group.id) == 1 ? "" : "s")",
+                                systemImage: "line.3.horizontal.decrease.circle.fill",
+                                accent: NexusMacTheme.gold
+                            )
+                            .tag(SidebarSelection.workspaceGroup(group.id))
+                            .listRowBackground(Color.clear)
+                        }
+                    }
+                }
+            }
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 14)
+#if os(macOS)
+        .navigationSplitViewColumnWidth(min: 280, ideal: 310)
+#endif
+        .toolbar {
+            ToolbarItemGroup {
+                Menu {
+                    Button("Local Workspace", action: addLocalWorkspace)
+                    Button("Remote Workspace") {
+                        isShowingCreateRemoteWorkspaceSheet = true
+                    }
+                    Divider()
+                    Button("Workspace Group") {
+                        newWorkspaceGroupName = ""
+                        isShowingCreateWorkspaceGroupSheet = true
+                    }
+                } label: {
+                    Image(systemName: "plus.circle")
+                }
+
+                Menu {
+                    Button("Hosts") {
+                        isShowingHostsSheet = true
+                    }
+                    Button("Remote Access") {
+                        isShowingRemoteAccessSheet = true
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+            }
+        }
+    }
+
+    private var detailPadding: CGFloat {
+        if case .session = selection {
+            return 16
+        }
+        return 20
+    }
+
+    private var sortedWorkspaceGroups: [WorkspaceGroup] {
+        appModel.workspaceGroups.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private var sortedWorkspaces: [Workspace] {
+        let ranking = workspaceRecencyRanking
+        return appModel.workspaces.sorted { lhs, rhs in
+            let lhsRank = ranking[lhs.id] ?? Int.max
+            let rhsRank = ranking[rhs.id] ?? Int.max
+            if lhsRank != rhsRank {
+                return lhsRank < rhsRank
+            }
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+    }
+
+    private var workspaceRecencyRanking: [UUID: Int] {
+        var workspaceIDs: [UUID] = []
+
+        switch selection {
+        case .workspace(let workspaceID):
+            workspaceIDs.append(workspaceID)
+        case .provider(let workspaceID, _):
+            workspaceIDs.append(workspaceID)
+        case .session:
+            if let workspaceID = appModel.focusedSessionScreen?.session.workspaceID {
+                workspaceIDs.append(workspaceID)
+            }
+        default:
+            break
+        }
+
+        for item in appModel.recentNavigation {
+            switch item.target.kind {
+            case .workspace, .provider:
+                if let workspaceID = item.target.workspaceID {
+                    workspaceIDs.append(workspaceID)
+                }
+            case .session:
+                if let sessionID = item.target.sessionID,
+                   let workspaceID = workspaceID(forSessionID: sessionID) {
+                    workspaceIDs.append(workspaceID)
+                }
+            }
+        }
+
+        var ranking: [UUID: Int] = [:]
+        for (index, workspaceID) in workspaceIDs.enumerated() where ranking[workspaceID] == nil {
+            ranking[workspaceID] = index
+        }
+        return ranking
+    }
+
+    private var defaultSidebarSelection: SidebarSelection? {
+        sortedWorkspaces.first.map { .workspace($0.id) }
+            ?? sortedWorkspaceGroups.first.map { .workspaceGroup($0.id) }
+    }
+
+    private var quickSwitchDefaultItems: [NavigationItem] {
+        sortedWorkspaces.map { workspace in
+            NavigationItem(
+                target: .workspace(workspace.id),
+                title: workspace.name,
+                subtitle: appModel.workspaceTargetSummary(for: workspace)
+            )
+        }
+    }
+
+    private func workspaceCount(in groupID: UUID) -> Int {
+        appModel.workspaces.filter { $0.primaryGroupID == groupID }.count
+    }
+
+    private func workspaceID(forSessionID sessionID: UUID) -> UUID? {
+        if appModel.focusedSessionScreen?.session.id == sessionID {
+            return appModel.focusedSessionScreen?.session.workspaceID
+        }
+
+        for detail in appModel.providerDetails.values {
+            if detail.defaultSession?.id == sessionID {
+                return detail.workspace.id
+            }
+            if detail.alternateSessions.contains(where: { $0.id == sessionID }) {
+                return detail.workspace.id
+            }
+            if detail.failedSessions.contains(where: { $0.id == sessionID }) {
+                return detail.workspace.id
+            }
+        }
+
+        return nil
+    }
+
+    private func selectDefaultIfNeeded() {
+        guard selection == nil, let defaultSidebarSelection else {
+            return
+        }
+        selection = defaultSidebarSelection
+    }
+
     @ViewBuilder
     private var detailView: some View {
         if let selection {
@@ -171,88 +347,138 @@ struct ContentView: View {
     }
 
     private var overviewDetail: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Nexus")
-                .font(.title2)
-                .fontWeight(.semibold)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                if sortedWorkspaces.isEmpty {
+                    VStack(alignment: .leading, spacing: 16) {
+                        NexusSectionHeader(
+                            eyebrow: "Get started",
+                            title: "Start with a workspace.",
+                            detail: "Keep the sidebar focused on the places you actually work, then drop into a seamless agent conversation from there."
+                        )
 
-            if let serviceStatus = appModel.serviceStatus {
-                LabeledContent("Background Service", value: serviceStatus.state.rawValue)
-                LabeledContent("Store", value: serviceStatus.store.location.path(percentEncoded: false))
-                LabeledContent("Workspace Groups", value: "\(appModel.workspaceGroups.count)")
-                LabeledContent("Workspaces", value: "\(appModel.workspaces.count)")
-                LabeledContent("Hosts", value: "\(appModel.hosts.count)")
-                LabeledContent("Remote Access", value: appModel.remoteAccessState?.isEnabled == true ? "Enabled" : "Disabled")
+                        HStack(spacing: 10) {
+                            Button("Add Local Workspace", action: addLocalWorkspace)
+                                .buttonStyle(NexusAccentButtonStyle())
 
-                HStack {
-                    Button("Manage Hosts") {
-                        isShowingHostsSheet = true
+                            Button("Add Remote Workspace") {
+                                isShowingCreateRemoteWorkspaceSheet = true
+                            }
+                            .buttonStyle(NexusSecondaryButtonStyle())
+                        }
                     }
+                    .padding(24)
+                    .nexusPanel(tint: NexusMacTheme.gold)
+                } else {
+                    VStack(alignment: .leading, spacing: 10) {
+                        NexusSectionHeader(
+                            eyebrow: "Pick up where you left off",
+                            title: "Recent workspaces stay at the top.",
+                            detail: "Nexus quietly reorders your workspaces as you move between them, so the sidebar behaves more like a conversation list."
+                        )
 
-                    Button("Manage Remote Access") {
-                        isShowingRemoteAccessSheet = true
+                        ForEach(sortedWorkspaces.prefix(6)) { workspace in
+                            Button {
+                                selection = .workspace(workspace.id)
+                            } label: {
+                                sidebarNavigationItemView(
+                                    title: workspace.name,
+                                    subtitle: appModel.workspaceTargetSummary(for: workspace),
+                                    systemImage: workspace.kind == .remote ? "macbook.and.iphone" : "folder.fill",
+                                    accent: workspace.kind == .remote ? NexusMacTheme.teal : NexusMacTheme.gold
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
+                    .padding(24)
+                    .nexusPanel(tint: NexusMacTheme.gold)
                 }
-            } else if let serviceErrorMessage = appModel.serviceErrorMessage {
-                ContentUnavailableView(
-                    "Background Service unavailable",
-                    systemImage: "exclamationmark.triangle",
-                    description: Text(serviceErrorMessage)
-                )
-            } else {
-                Text("Loading Nexus…")
-                    .foregroundStyle(.secondary)
-            }
 
-            Button("Refresh") {
-                Task {
-                    await appModel.refresh()
+                if let serviceStatus = appModel.serviceStatus {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 14)], spacing: 14) {
+                        NexusMetricTile(title: "Service", value: serviceStatus.state.rawValue.capitalized, detail: serviceStatus.store.location.lastPathComponent, accent: NexusMacTheme.gold)
+                        NexusMetricTile(title: "Workspaces", value: "\(appModel.workspaces.count)", detail: "Your active conversation list.", accent: NexusMacTheme.teal)
+                        NexusMetricTile(title: "Groups", value: "\(appModel.workspaceGroups.count)", detail: "Hidden until you need a filter.", accent: NexusMacTheme.gold)
+                        NexusMetricTile(title: "Hosts", value: "\(appModel.hosts.count)", detail: "Remote machines on call.", accent: NexusMacTheme.coral)
+                    }
+                } else if let serviceErrorMessage = appModel.serviceErrorMessage {
+                    ContentUnavailableView(
+                        "Background Service unavailable",
+                        systemImage: "exclamationmark.triangle",
+                        description: Text(serviceErrorMessage)
+                    )
+                    .frame(maxWidth: .infinity, minHeight: 260)
+                    .nexusPanel(tint: NexusMacTheme.coral)
+                } else {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ProgressView()
+                            .tint(NexusMacTheme.gold)
+                        Text("Loading Nexus…")
+                            .font(NexusMacTheme.bodyFont(15))
+                            .foregroundStyle(NexusMacTheme.mutedText)
+                    }
+                    .padding(24)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .nexusPanel(tint: NexusMacTheme.gold)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .scrollContentBackground(.hidden)
     }
 
     private var quickSwitchSheet: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Quick Switch")
-                .font(.title3)
-                .fontWeight(.semibold)
+        ZStack {
+            NexusBackdrop()
 
-            TextField("Search Workspaces, Providers, and Sessions", text: $quickSwitchQuery)
-                .textFieldStyle(.roundedBorder)
-                .onChange(of: quickSwitchQuery) { _, _ in
-                    Task {
-                        await updateQuickSwitchResults()
+            VStack(alignment: .leading, spacing: 18) {
+                NexusSectionHeader(
+                    eyebrow: "Quick switch",
+                    title: "Jump to a workspace or session.",
+                    detail: "Search when you need it. Otherwise, your workspaces are already sorted by recency."
+                )
+
+                TextField("Search Workspaces, Providers, and Sessions", text: $quickSwitchQuery)
+                    .textFieldStyle(.roundedBorder)
+                    .onChange(of: quickSwitchQuery) { _, _ in
+                        Task {
+                            await updateQuickSwitchResults()
+                        }
+                    }
+
+                List(quickSwitchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? quickSwitchDefaultItems : quickSwitchResults) { item in
+                    Button {
+                        isShowingQuickSwitchSheet = false
+                        navigate(to: item.target)
+                    } label: {
+                        sidebarNavigationItemView(
+                            title: item.title,
+                            subtitle: item.subtitle,
+                            systemImage: navigationItemIcon(for: item.kind),
+                            accent: item.kind == .session ? NexusMacTheme.teal : NexusMacTheme.gold
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .listRowBackground(Color.clear)
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .overlay {
+                    if quickSwitchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false, quickSwitchResults.isEmpty {
+                        ContentUnavailableView(
+                            "No matches",
+                            systemImage: "magnifyingglass",
+                            description: Text("Try a Workspace, Provider, or Session name.")
+                        )
                     }
                 }
-
-            List(quickSwitchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? appModel.recentNavigation : quickSwitchResults) { item in
-                Button {
-                    isShowingQuickSwitchSheet = false
-                    navigate(to: item.target)
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Label(item.title, systemImage: navigationItemIcon(for: item.kind))
-                        Text(item.subtitle)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .buttonStyle(.plain)
             }
-            .overlay {
-                if quickSwitchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false, quickSwitchResults.isEmpty {
-                    ContentUnavailableView(
-                        "No matches",
-                        systemImage: "magnifyingglass",
-                        description: Text("Try a Workspace, Provider, or Session name.")
-                    )
-                }
-            }
+            .padding(24)
+            .frame(minWidth: 480, minHeight: 380)
+            .nexusPanel(tint: NexusMacTheme.teal, radius: 28)
+            .padding(28)
         }
-        .padding()
-        .frame(minWidth: 440, minHeight: 360)
         .task {
             do {
                 try await appModel.loadRecentNavigation()
@@ -266,29 +492,61 @@ struct ContentView: View {
         let group = appModel.workspaceGroups.first(where: { $0.id == groupID })
         let workspaces = appModel.workspaces.filter { $0.primaryGroupID == groupID }
 
-        return VStack(alignment: .leading, spacing: 16) {
-            Text(group?.name ?? "Workspace Group")
-                .font(.title2)
-                .fontWeight(.semibold)
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                NexusSectionHeader(
+                    eyebrow: "Workspace group",
+                    title: group?.name ?? "Workspace Group",
+                    detail: "A curated lane for related Workspaces, ready to launch across providers."
+                )
+                .padding(26)
+                .nexusPanel(tint: NexusMacTheme.gold)
 
-            if workspaces.isEmpty {
-                Text("No Workspaces in this group yet.")
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(workspaces) { workspace in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(workspace.name)
-                            .fontWeight(.medium)
-                        Text(appModel.workspaceTargetSummary(for: workspace))
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
+                if workspaces.isEmpty {
+                    ContentUnavailableView(
+                        "No Workspaces in this group yet",
+                        systemImage: "square.grid.2x2",
+                        description: Text("Add a local or remote Workspace to start building this lane.")
+                    )
+                    .frame(maxWidth: .infinity, minHeight: 260)
+                    .nexusPanel(tint: NexusMacTheme.teal)
+                } else {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 16)], spacing: 16) {
+                        ForEach(workspaces) { workspace in
+                            Button {
+                                selection = .workspace(workspace.id)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 14) {
+                                    HStack {
+                                        NexusStatusPill(
+                                            text: workspace.kind == .remote ? "Remote" : "Local",
+                                            color: workspace.kind == .remote ? NexusMacTheme.teal : NexusMacTheme.gold
+                                        )
+                                        Spacer()
+                                        Image(systemName: "arrow.up.right")
+                                            .foregroundStyle(.white.opacity(0.5))
+                                    }
+
+                                    Text(workspace.name)
+                                        .font(NexusMacTheme.displayFont(22, relativeTo: .title3))
+                                        .foregroundStyle(.white)
+
+                                    Text(appModel.workspaceTargetSummary(for: workspace))
+                                        .font(NexusMacTheme.bodyFont(13))
+                                        .foregroundStyle(NexusMacTheme.mutedText)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .padding(20)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .nexusPanel(tint: workspace.kind == .remote ? NexusMacTheme.teal : NexusMacTheme.gold, radius: 18)
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                 }
             }
-
-            Spacer()
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private func workspaceDetail(workspaceID: UUID) -> some View {
@@ -296,35 +554,39 @@ struct ContentView: View {
         let overview = appModel.workspaceOverview(for: workspaceID)
 
         return ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text(workspace?.name ?? "Workspace")
-                    .font(.title2)
-                    .fontWeight(.semibold)
-
+            VStack(alignment: .leading, spacing: 18) {
                 if let workspace {
-                    LabeledContent("Kind", value: workspace.kind.rawValue)
-                    if let hostName = appModel.workspaceHostName(for: workspace) {
-                        LabeledContent("Host", value: hostName)
-                        LabeledContent("Remote Path", value: workspace.folderPath)
-                    } else {
-                        LabeledContent("Folder", value: workspace.folderPath)
+                    VStack(alignment: .leading, spacing: 16) {
+                        HStack(alignment: .top) {
+                            NexusSectionHeader(
+                                eyebrow: workspace.kind == .remote ? "Remote workspace" : "Local workspace",
+                                title: workspace.name,
+                                detail: "Open an agent, continue a session, or jump into a fresh one without leaving this workspace."
+                            )
+                            Spacer()
+                            NexusStatusPill(
+                                text: workspace.kind == .remote ? "Remote" : "Local",
+                                color: workspace.kind == .remote ? NexusMacTheme.teal : NexusMacTheme.gold
+                            )
+                        }
+
+                        HStack(spacing: 10) {
+                            if let hostName = appModel.workspaceHostName(for: workspace) {
+                                NexusMetaBadge(icon: "network", text: hostName)
+                            }
+                            NexusMetaBadge(icon: workspace.kind == .remote ? "point.3.connected.trianglepath.dotted" : "folder", text: workspace.folderPath)
+                            if let groupName = appModel.workspaceGroupName(for: workspace.primaryGroupID) {
+                                NexusMetaBadge(icon: "line.3.horizontal.decrease.circle", text: groupName)
+                            }
+                        }
                     }
-                    LabeledContent("Primary Group", value: appModel.workspaceGroupName(for: workspace.primaryGroupID) ?? workspace.primaryGroupID.uuidString)
+                    .padding(24)
+                    .nexusPanel(tint: workspace.kind == .remote ? NexusMacTheme.teal : NexusMacTheme.gold)
 
                     if let remoteTarget = overview?.remoteTarget {
-                        Divider()
-
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Remote Status")
-                                .font(.title3)
-                                .fontWeight(.semibold)
-
-                            Text("Last-known Host Validation and Workspace Availability for this Remote Workspace.")
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-
+                        HStack(alignment: .top, spacing: 14) {
                             remoteStatusPanel(
-                                title: "Workspace Availability",
+                                title: "Workspace",
                                 stateTitle: workspaceAvailabilityStateTitle(remoteTarget.workspaceAvailability.state),
                                 stateSymbol: workspaceAvailabilityStateSymbol(remoteTarget.workspaceAvailability.state),
                                 stateColor: workspaceAvailabilityStateColor(remoteTarget.workspaceAvailability.state),
@@ -334,7 +596,7 @@ struct ContentView: View {
                             )
 
                             remoteStatusPanel(
-                                title: "Host Validation",
+                                title: "Host",
                                 stateTitle: hostValidationStateTitle(remoteTarget.hostValidation?.state),
                                 stateSymbol: hostValidationStateSymbol(remoteTarget.hostValidation?.state),
                                 stateColor: hostValidationStateColor(remoteTarget.hostValidation?.state),
@@ -345,25 +607,33 @@ struct ContentView: View {
                         }
                     }
 
-                    Divider()
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Agents")
+                            .font(NexusMacTheme.displayFont(22, relativeTo: .title3))
+                            .foregroundStyle(.white)
 
-                    Text("Providers")
-                        .font(.title3)
-                        .fontWeight(.semibold)
-
-                    if let overview {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 16)], spacing: 16) {
-                            ForEach(overview.providerCards) { card in
-                                providerCard(workspaceID: workspace.id, card: card)
+                        if let overview {
+                            VStack(spacing: 12) {
+                                ForEach(overview.providerCards) { card in
+                                    providerCard(workspaceID: workspace.id, card: card)
+                                }
                             }
+                        } else {
+                            Text("Loading providers…")
+                                .font(NexusMacTheme.bodyFont(14))
+                                .foregroundStyle(NexusMacTheme.mutedText)
+                                .padding(18)
+                                .nexusPanel(tint: NexusMacTheme.gold, radius: 18)
                         }
-                    } else {
-                        Text("Loading provider overview…")
-                            .foregroundStyle(.secondary)
                     }
                 } else {
-                    Text("Workspace not found.")
-                        .foregroundStyle(.secondary)
+                    ContentUnavailableView(
+                        "Workspace not found",
+                        systemImage: "folder.badge.questionmark",
+                        description: Text("Refresh Nexus or choose another workspace from the sidebar.")
+                    )
+                    .frame(maxWidth: .infinity, minHeight: 280)
+                    .nexusPanel(tint: NexusMacTheme.coral)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -375,37 +645,68 @@ struct ContentView: View {
         let detail = appModel.providerDetail(for: workspaceID, providerID: providerID)
 
         return ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text(providerID.displayName)
-                    .font(.title2)
-                    .fontWeight(.semibold)
-
+            VStack(alignment: .leading, spacing: 20) {
                 if let detail {
-                    Label(detail.health.state.rawValue.replacingOccurrences(of: "Checked", with: " checked"), systemImage: "waveform.path.ecg")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 18) {
+                        HStack(alignment: .top) {
+                            NexusSectionHeader(
+                                eyebrow: "Provider briefing",
+                                title: providerID.displayName,
+                                detail: detail.health.summary
+                            )
+                            Spacer()
+                            NexusStatusPill(
+                                text: detail.health.state.rawValue,
+                                color: providerHealthColor(detail.health.state)
+                            )
+                        }
 
-                    Text(detail.health.summary)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+                        HStack(spacing: 10) {
+                            NexusMetaBadge(icon: "folder", text: detail.workspace.name)
+                            NexusMetaBadge(icon: detail.prelaunchPrimarySurface == .terminal ? "terminal" : "sparkles.rectangle.stack", text: detail.prelaunchPrimarySurface == .terminal ? "Terminal surface" : "Structured surface")
+                            if let version = detail.health.version {
+                                NexusMetaBadge(icon: "number", text: version)
+                            }
+                        }
+                    }
+                    .padding(26)
+                    .nexusPanel(tint: providerHealthColor(detail.health.state))
 
                     if detail.health.diagnostics.isEmpty == false {
-                        VStack(alignment: .leading, spacing: 4) {
+                        VStack(alignment: .leading, spacing: 10) {
                             Text("Diagnostics")
-                                .font(.headline)
+                                .font(NexusMacTheme.displayFont(22, relativeTo: .title3))
+                                .foregroundStyle(.white)
                             ForEach(Array(detail.health.diagnostics.enumerated()), id: \.offset) { _, diagnostic in
                                 Text(diagnostic.message)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .font(NexusMacTheme.bodyFont(13))
+                                    .foregroundStyle(NexusMacTheme.mutedText)
+                                    .padding(14)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .nexusPanel(tint: providerHealthColor(detail.health.state), radius: 16)
                             }
                         }
                     }
 
-                    Divider()
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Default Session")
-                            .font(.headline)
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Text("Default Session")
+                                .font(NexusMacTheme.displayFont(22, relativeTo: .title3))
+                                .foregroundStyle(.white)
+                            Spacer()
+                            Button(defaultSessionButtonTitle(for: detail)) {
+                                Task {
+                                    do {
+                                        let session = try await appModel.launchOrResumeDefaultSession(workspaceID: workspaceID, providerID: providerID)
+                                        selection = .session(session.id)
+                                    } catch {
+                                        presentedError = PresentedError(message: error.localizedDescription)
+                                    }
+                                }
+                            }
+                            .buttonStyle(NexusAccentButtonStyle())
+                            .disabled(detail.capabilities.launchDefaultSession.isEnabled == false)
+                        }
 
                         if let defaultSession = detail.defaultSession {
                             providerSessionRow(
@@ -425,28 +726,18 @@ struct ContentView: View {
                             )
                         } else {
                             Text("No default session yet.")
-                                .foregroundStyle(.secondary)
+                                .font(NexusMacTheme.bodyFont(14))
+                                .foregroundStyle(NexusMacTheme.mutedText)
+                                .padding(18)
+                                .nexusPanel(tint: NexusMacTheme.gold, radius: 18)
                         }
-
-                        Button(defaultSessionButtonTitle(for: detail)) {
-                            Task {
-                                do {
-                                    let session = try await appModel.launchOrResumeDefaultSession(workspaceID: workspaceID, providerID: providerID)
-                                    selection = .session(session.id)
-                                } catch {
-                                    presentedError = PresentedError(message: error.localizedDescription)
-                                }
-                            }
-                        }
-                        .disabled(detail.capabilities.launchDefaultSession.isEnabled == false)
                     }
 
-                    Divider()
-
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 10) {
                         HStack {
                             Text("Named Sessions")
-                                .font(.headline)
+                                .font(NexusMacTheme.displayFont(22, relativeTo: .title3))
+                                .foregroundStyle(.white)
                             Spacer()
                             Button("New Session") {
                                 Task {
@@ -458,12 +749,16 @@ struct ContentView: View {
                                     }
                                 }
                             }
+                            .buttonStyle(NexusSecondaryButtonStyle())
                             .disabled(detail.capabilities.createNamedSession.isEnabled == false)
                         }
 
                         if detail.alternateSessions.isEmpty {
                             Text("No Named Sessions yet.")
-                                .foregroundStyle(.secondary)
+                                .font(NexusMacTheme.bodyFont(14))
+                                .foregroundStyle(NexusMacTheme.mutedText)
+                                .padding(18)
+                                .nexusPanel(tint: NexusMacTheme.teal, radius: 18)
                         } else {
                             ForEach(detail.alternateSessions) { session in
                                 providerSessionRow(
@@ -486,11 +781,10 @@ struct ContentView: View {
                     }
 
                     if detail.failedSessions.isEmpty == false {
-                        Divider()
-
-                        VStack(alignment: .leading, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 10) {
                             Text("Failed Session Records")
-                                .font(.headline)
+                                .font(NexusMacTheme.displayFont(22, relativeTo: .title3))
+                                .foregroundStyle(.white)
 
                             ForEach(detail.failedSessions) { session in
                                 providerSessionRow(
@@ -509,7 +803,10 @@ struct ContentView: View {
                     }
                 } else {
                     Text("Loading provider detail…")
-                        .foregroundStyle(.secondary)
+                        .font(NexusMacTheme.bodyFont(14))
+                        .foregroundStyle(NexusMacTheme.mutedText)
+                        .padding(20)
+                        .nexusPanel(tint: NexusMacTheme.gold)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -521,94 +818,86 @@ struct ContentView: View {
         let screen = appModel.focusedSessionScreen?.session.id == sessionID ? appModel.focusedSessionScreen : nil
         let context = appModel.focusedSessionPresentationContext
 
-        return VStack(alignment: .leading, spacing: 16) {
+        return VStack(alignment: .leading, spacing: 14) {
             if let screen {
                 let isReady = screen.session.state == .ready
                 let isRemote = context?.isRemote == true
                 let surface = focusedSessionSurface(for: screen)
+                let stateColor = sessionStateColor(screen.session.state)
 
-                Text("\(screen.session.providerID.displayName) Session")
-                    .font(.title2)
-                    .fontWeight(.semibold)
+                HStack(spacing: 10) {
+                    Circle()
+                        .fill(stateColor)
+                        .frame(width: 8, height: 8)
 
-                Label(screen.session.state.rawValue.capitalized, systemImage: isReady ? "checkmark.circle" : "exclamationmark.triangle")
-                    .font(.subheadline)
-                    .foregroundStyle(isReady ? Color.secondary : Color.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(screen.session.providerID.displayName)
+                            .font(NexusMacTheme.bodyFont(17).weight(.semibold))
+                            .foregroundStyle(.white)
 
-                if let context {
-                    VStack(alignment: .leading, spacing: 6) {
-                        LabeledContent("Workspace", value: context.workspace.name)
-                        if context.isRemote {
-                            LabeledContent("Host", value: context.hostName ?? "Unavailable Host")
-                            LabeledContent("Remote Path", value: context.remotePath ?? context.workspace.folderPath)
-                        } else {
-                            LabeledContent("Path", value: context.targetSummary)
+                        if let context {
+                            Text(sessionSubtitle(for: context, surface: surface))
+                                .font(NexusMacTheme.bodyFont(12, relativeTo: .caption))
+                                .foregroundStyle(NexusMacTheme.mutedText)
                         }
                     }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
 
-                if let controllerSummary = appModel.focusedSessionControllerSummary {
-                    VStack(alignment: .leading, spacing: 6) {
-                        LabeledContent("Controller", value: controllerSummary.label)
-                        Text(controllerSummary.message)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                HStack {
-                    Text(surface == .terminal ? "Terminal: \(screen.terminalColumns) × \(screen.terminalRows)" : "Shared Session activity")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                     Spacer()
-                    if isReady {
-                        if isRemote {
+
+                    Menu {
+                        if isRemote, isReady {
                             Button("Detach") {
                                 detachSession(screen.session)
                             }
                         }
-                        Button("Stop Session", role: .destructive) {
-                            stopSession(
-                                screen.session,
-                                workspaceID: screen.session.workspaceID,
-                                providerID: screen.session.providerID
-                            )
+
+                        if isReady {
+                            Button("Stop Session") {
+                                stopSession(
+                                    screen.session,
+                                    workspaceID: screen.session.workspaceID,
+                                    providerID: screen.session.providerID
+                                )
+                            }
                         }
+
+                        if isReady == false {
+                            Button("Relaunch Session") {
+                                Task {
+                                    do {
+                                        let session = try await appModel.relaunchFocusedSession()
+                                        selection = .session(session.id)
+                                    } catch {
+                                        presentedError = PresentedError(message: error.localizedDescription)
+                                    }
+                                }
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.title3)
+                            .foregroundStyle(.white.opacity(0.86))
                     }
+                    .menuStyle(.borderlessButton)
+                    .buttonStyle(.plain)
                 }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .nexusPanel(tint: stateColor, radius: 16)
 
                 if surface == .structuredActivityFeed {
                     structuredSessionFeed(screen: screen, isReady: isReady)
                 } else {
                     terminalSessionFeed(screen: screen, isReady: isReady)
                 }
-
-                if isRemote {
-                    Text("Detach leaves the tmux-backed remote runtime alive. Stop Session terminates the remote runtime and keeps the Session record.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                if isReady == false {
-                    Button("Relaunch Session") {
-                        Task {
-                            do {
-                                let session = try await appModel.relaunchFocusedSession()
-                                selection = .session(session.id)
-                            } catch {
-                                presentedError = PresentedError(message: error.localizedDescription)
-                            }
-                        }
-                    }
-                }
             } else {
                 ContentUnavailableView(
                     "Session unavailable",
-                    systemImage: "terminal",
-                    description: Text("Launch or resume the session from a Workspace provider card.")
+                    systemImage: "message",
+                    description: Text("Open the session again from its workspace to continue the conversation.")
                 )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .nexusPanel(tint: NexusMacTheme.coral)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -617,78 +906,76 @@ struct ContentView: View {
         }
     }
 
+    private func sessionSubtitle(for context: SessionPresentationContext, surface: FocusedSessionSurface) -> String {
+        if context.isRemote {
+            return surface == .terminal
+                ? "\(context.workspace.name) • \(context.hostName ?? "Remote") • terminal"
+                : "\(context.workspace.name) • \(context.hostName ?? "Remote")"
+        }
+
+        return surface == .terminal
+            ? "\(context.workspace.name) • terminal"
+            : context.workspace.name
+    }
+
     private func providerCard(workspaceID: UUID, card: WorkspaceProviderCard) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(card.provider.displayName)
-                .font(.headline)
+        let accent = providerHealthColor(card.health.state)
 
-            Label(card.health.state.rawValue.replacingOccurrences(of: "Checked", with: " checked"), systemImage: "waveform.path.ecg")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+        return HStack(alignment: .top, spacing: 14) {
+            Image(systemName: card.prelaunchPrimarySurface == .terminal ? "terminal.fill" : "message.fill")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(accent)
+                .frame(width: 28, height: 28)
+                .background(accent.opacity(0.15), in: Circle())
 
-            Text(card.health.summary)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-
-            if let version = card.health.version {
-                LabeledContent("Version", value: version)
-                    .font(.caption)
-            }
-
-            if let resolvedExecutable = card.health.resolvedExecutable {
-                LabeledContent("Executable", value: resolvedExecutable)
-                    .font(.caption)
-            }
-
-            if card.health.diagnostics.isEmpty == false {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Diagnostics")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-
-                    ForEach(Array(card.health.diagnostics.enumerated()), id: \.offset) { _, diagnostic in
-                        Text(diagnostic.message)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(card.provider.displayName)
+                        .font(NexusMacTheme.bodyFont(16).weight(.semibold))
+                        .foregroundStyle(.white)
+                    Spacer()
+                    NexusStatusPill(text: card.health.state.rawValue.replacingOccurrences(of: "Checked", with: " checked"), color: accent)
                 }
-            }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Default Session")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
                 Text(card.defaultSession.summary)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .font(NexusMacTheme.bodyFont(14))
+                    .foregroundStyle(.white.opacity(0.92))
+
                 if let namedSessionSummary = card.namedSessionSummary {
                     Text(namedSessionSummary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(NexusMacTheme.bodyFont(12, relativeTo: .caption))
+                        .foregroundStyle(NexusMacTheme.mutedText)
+                } else {
+                    Text(card.health.summary)
+                        .font(NexusMacTheme.bodyFont(12, relativeTo: .caption))
+                        .foregroundStyle(NexusMacTheme.mutedText)
+                        .lineLimit(2)
                 }
-            }
 
-            HStack {
-                Button(card.defaultSession.actionTitle) {
-                    Task {
-                        do {
-                            let session = try await appModel.launchOrResumeDefaultSession(workspaceID: workspaceID, providerID: card.provider.id)
-                            selection = .session(session.id)
-                        } catch {
-                            presentedError = PresentedError(message: error.localizedDescription)
+                HStack(spacing: 10) {
+                    Button(card.defaultSession.actionTitle) {
+                        Task {
+                            do {
+                                let session = try await appModel.launchOrResumeDefaultSession(workspaceID: workspaceID, providerID: card.provider.id)
+                                selection = .session(session.id)
+                            } catch {
+                                presentedError = PresentedError(message: error.localizedDescription)
+                            }
                         }
                     }
-                }
-                .disabled(card.capabilities.launchDefaultSession.isEnabled == false)
+                    .buttonStyle(NexusAccentButtonStyle())
+                    .disabled(card.capabilities.launchDefaultSession.isEnabled == false)
 
-                Button("Details") {
-                    selection = .provider(workspaceID, card.provider.id)
+                    Button("Details") {
+                        selection = .provider(workspaceID, card.provider.id)
+                    }
+                    .buttonStyle(NexusSecondaryButtonStyle())
                 }
             }
         }
-        .padding()
+        .padding(18)
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
+        .nexusPanel(tint: accent, radius: 18)
     }
 
     private func remoteStatusPanel(
@@ -700,45 +987,108 @@ struct ContentView: View {
         checkedAt: Date?,
         diagnostics: [(code: String, message: String)]
     ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text(title)
-                    .font(.headline)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(title)
+                        .font(NexusMacTheme.displayFont(20, relativeTo: .title3))
+                        .foregroundStyle(.white)
+                    Text(summary)
+                        .font(NexusMacTheme.bodyFont(13))
+                        .foregroundStyle(NexusMacTheme.mutedText)
+                }
                 Spacer()
                 Label(stateTitle, systemImage: stateSymbol)
+                    .font(NexusMacTheme.bodyFont(12, relativeTo: .caption).weight(.semibold))
                     .foregroundStyle(stateColor)
             }
 
-            Text(summary)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-
-            LabeledContent("Last Checked", value: checkedAt?.formatted(date: .abbreviated, time: .shortened) ?? "Not checked")
-                .font(.caption)
+            NexusInspectorRow(
+                title: "Last Checked",
+                value: checkedAt?.formatted(date: .abbreviated, time: .shortened) ?? "Not checked"
+            )
 
             if diagnostics.isEmpty == false {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 8) {
                     Text("Diagnostics")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
+                        .font(NexusMacTheme.monoFont(11, relativeTo: .caption))
+                        .tracking(2)
+                        .foregroundStyle(NexusMacTheme.gold)
 
                     ForEach(Array(diagnostics.enumerated()), id: \.offset) { _, diagnostic in
                         VStack(alignment: .leading, spacing: 4) {
                             Text(diagnostic.message)
-                                .font(.caption)
+                                .font(NexusMacTheme.bodyFont(12, relativeTo: .caption))
+                                .foregroundStyle(.white.opacity(0.9))
                             Text(diagnostic.code)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
+                                .font(NexusMacTheme.monoFont(11, relativeTo: .caption2))
+                                .foregroundStyle(NexusMacTheme.mutedText)
                         }
-                        .padding(10)
+                        .padding(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(.quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: 10))
+                        .nexusPanel(tint: stateColor, radius: 14)
                     }
                 }
             }
         }
-        .padding()
-        .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 12))
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .nexusPanel(tint: stateColor, radius: 20)
+    }
+
+    private func sidebarNavigationItemView(
+        title: String,
+        subtitle: String,
+        systemImage: String,
+        accent: Color
+    ) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(accent)
+                .frame(width: 28, height: 28)
+                .background(accent.opacity(0.14), in: Circle())
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(NexusMacTheme.bodyFont(14).weight(.semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                Text(subtitle)
+                    .font(NexusMacTheme.bodyFont(11, relativeTo: .caption))
+                    .foregroundStyle(NexusMacTheme.mutedText)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func providerHealthColor(_ state: ProviderHealthSummary.State) -> Color {
+        switch state {
+        case .available:
+            NexusMacTheme.teal
+        case .unavailable, .blocked:
+            NexusMacTheme.gold
+        case .misconfigured:
+            NexusMacTheme.coral
+        case .notChecked:
+            Color.white.opacity(0.65)
+        }
+    }
+
+    private func sessionStateColor(_ state: Session.State) -> Color {
+        switch state {
+        case .ready:
+            NexusMacTheme.teal
+        case .interrupted:
+            NexusMacTheme.gold
+        case .exited, .failed:
+            NexusMacTheme.coral
+        }
     }
 
     private func hostValidationStateTitle(_ state: HostValidationSnapshot.State?) -> String {
@@ -826,14 +1176,17 @@ struct ContentView: View {
         secondaryActionTitle: String? = nil,
         secondaryAction: (() -> Void)? = nil
     ) -> some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(session.isDefault ? "Default Session" : (session.name ?? "Session"))
-                    .font(.subheadline)
-                    .fontWeight(.medium)
+        let accent = sessionStateColor(session.state)
+
+        return HStack(alignment: .top, spacing: 16) {
+            VStack(alignment: .leading, spacing: 8) {
+                NexusStatusPill(
+                    text: session.isDefault ? "Default session" : (session.name ?? "Named session"),
+                    color: accent
+                )
                 Text(session.failureMessage ?? session.state.rawValue.capitalized)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(NexusMacTheme.bodyFont(14))
+                    .foregroundStyle(.white.opacity(0.9))
             }
 
             Spacer()
@@ -841,12 +1194,14 @@ struct ContentView: View {
             HStack(spacing: 8) {
                 if let secondaryActionTitle, let secondaryAction {
                     Button(secondaryActionTitle, action: secondaryAction)
+                        .buttonStyle(NexusSecondaryButtonStyle())
                 }
                 Button(primaryActionTitle, action: primaryAction)
+                    .buttonStyle(NexusAccentButtonStyle())
             }
         }
-        .padding()
-        .background(.quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: 10))
+        .padding(18)
+        .nexusPanel(tint: accent, radius: 18)
     }
 
     private func stopSession(_ session: Session, workspaceID: UUID, providerID: ProviderID) {
@@ -939,37 +1294,48 @@ struct ContentView: View {
     }
 
     private var createWorkspaceGroupSheet: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("New Workspace Group")
-                .font(.title3)
-                .fontWeight(.semibold)
+        ZStack {
+            NexusBackdrop()
 
-            TextField("Name", text: $newWorkspaceGroupName)
+            VStack(alignment: .leading, spacing: 16) {
+                NexusSectionHeader(
+                    eyebrow: "Create lane",
+                    title: "New Workspace Group",
+                    detail: "Name the collection that will gather related Workspaces into one launch surface."
+                )
 
-            HStack {
-                Spacer()
+                TextField("Name", text: $newWorkspaceGroupName)
+                    .textFieldStyle(.roundedBorder)
 
-                Button("Cancel") {
-                    isShowingCreateWorkspaceGroupSheet = false
-                }
+                HStack {
+                    Spacer()
 
-                Button("Create") {
-                    let name = newWorkspaceGroupName
-                    Task {
-                        do {
-                            let group = try await appModel.createWorkspaceGroup(name: name)
-                            selection = .workspaceGroup(group.id)
-                            isShowingCreateWorkspaceGroupSheet = false
-                        } catch {
-                            presentedError = PresentedError(message: error.localizedDescription)
+                    Button("Cancel") {
+                        isShowingCreateWorkspaceGroupSheet = false
+                    }
+                    .buttonStyle(NexusSecondaryButtonStyle())
+
+                    Button("Create") {
+                        let name = newWorkspaceGroupName
+                        Task {
+                            do {
+                                let group = try await appModel.createWorkspaceGroup(name: name)
+                                selection = .workspaceGroup(group.id)
+                                isShowingCreateWorkspaceGroupSheet = false
+                            } catch {
+                                presentedError = PresentedError(message: error.localizedDescription)
+                            }
                         }
                     }
+                    .buttonStyle(NexusAccentButtonStyle())
+                    .keyboardShortcut(.defaultAction)
                 }
-                .keyboardShortcut(.defaultAction)
             }
+            .padding(24)
+            .frame(minWidth: 420)
+            .nexusPanel(tint: NexusMacTheme.gold, radius: 28)
+            .padding(28)
         }
-        .padding()
-        .frame(minWidth: 360)
     }
 
     private var remoteWorkspaceSheet: some View {
@@ -986,60 +1352,65 @@ struct ContentView: View {
     }
 
     private var workspaceGroupPickerSheet: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Choose Primary Workspace Group")
-                .font(.title3)
-                .fontWeight(.semibold)
+        ZStack {
+            NexusBackdrop()
 
-            Picker("Workspace Group", selection: Binding(get: {
-                pendingWorkspaceGroupID ?? appModel.workspaceGroups.first?.id ?? UUID()
-            }, set: { pendingWorkspaceGroupID = $0 })) {
-                ForEach(appModel.workspaceGroups) { group in
-                    Text(group.name).tag(group.id)
-                }
-            }
-            .pickerStyle(.radioGroup)
+            VStack(alignment: .leading, spacing: 16) {
+                NexusSectionHeader(
+                    eyebrow: "Route assignment",
+                    title: "Choose Primary Workspace Group",
+                    detail: "Place this Workspace into the group that should own its primary route in Nexus."
+                )
 
-            HStack {
-                Spacer()
-
-                Button("Cancel") {
-                    pendingWorkspaceFolderPath = nil
-                    pendingWorkspaceGroupID = nil
-                    isShowingWorkspaceGroupPicker = false
-                }
-
-                Button("Add Workspace") {
-                    guard let folderPath = pendingWorkspaceFolderPath else {
-                        return
+                Picker("Workspace Group", selection: Binding(get: {
+                    pendingWorkspaceGroupID ?? appModel.workspaceGroups.first?.id ?? UUID()
+                }, set: { pendingWorkspaceGroupID = $0 })) {
+                    ForEach(appModel.workspaceGroups) { group in
+                        Text(group.name).tag(group.id)
                     }
+                }
+                .pickerStyle(.radioGroup)
 
-                    let groupID = pendingWorkspaceGroupID
-                    Task {
-                        do {
-                            let workspace = try await appModel.createLocalWorkspace(folderPath: folderPath, primaryGroupID: groupID)
-                            selection = .workspace(workspace.id)
-                            pendingWorkspaceFolderPath = nil
-                            pendingWorkspaceGroupID = nil
-                            isShowingWorkspaceGroupPicker = false
-                        } catch {
-                            presentedError = PresentedError(message: error.localizedDescription)
+                HStack {
+                    Spacer()
+
+                    Button("Cancel") {
+                        pendingWorkspaceFolderPath = nil
+                        pendingWorkspaceGroupID = nil
+                        isShowingWorkspaceGroupPicker = false
+                    }
+                    .buttonStyle(NexusSecondaryButtonStyle())
+
+                    Button("Add Workspace") {
+                        guard let folderPath = pendingWorkspaceFolderPath else {
+                            return
+                        }
+
+                        let groupID = pendingWorkspaceGroupID
+                        Task {
+                            do {
+                                let workspace = try await appModel.createLocalWorkspace(folderPath: folderPath, primaryGroupID: groupID)
+                                selection = .workspace(workspace.id)
+                                pendingWorkspaceFolderPath = nil
+                                pendingWorkspaceGroupID = nil
+                                isShowingWorkspaceGroupPicker = false
+                            } catch {
+                                presentedError = PresentedError(message: error.localizedDescription)
+                            }
                         }
                     }
+                    .buttonStyle(NexusAccentButtonStyle())
+                    .keyboardShortcut(.defaultAction)
                 }
-                .keyboardShortcut(.defaultAction)
             }
+            .padding(24)
+            .frame(minWidth: 420)
+            .nexusPanel(tint: NexusMacTheme.teal, radius: 28)
+            .padding(28)
         }
-        .padding()
-        .frame(minWidth: 360)
     }
 
     private func addLocalWorkspace() {
-        guard appModel.workspaceGroups.isEmpty == false else {
-            presentedError = PresentedError(message: "Create a Workspace Group before adding a Workspace")
-            return
-        }
-
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
@@ -1052,21 +1423,14 @@ struct ContentView: View {
         }
 
         let folderPath = folderURL.path(percentEncoded: false)
-        if appModel.workspaceGroups.count == 1 {
-            Task {
-                do {
-                    let workspace = try await appModel.createLocalWorkspace(folderPath: folderPath, primaryGroupID: nil)
-                    selection = .workspace(workspace.id)
-                } catch {
-                    presentedError = PresentedError(message: error.localizedDescription)
-                }
+        Task {
+            do {
+                let workspace = try await appModel.createLocalWorkspace(folderPath: folderPath, primaryGroupID: nil)
+                selection = .workspace(workspace.id)
+            } catch {
+                presentedError = PresentedError(message: error.localizedDescription)
             }
-            return
         }
-
-        pendingWorkspaceFolderPath = folderPath
-        pendingWorkspaceGroupID = appModel.workspaceGroups.first?.id
-        isShowingWorkspaceGroupPicker = true
     }
 
     private func handleTerminalTypedText(_ text: String) {
@@ -1103,10 +1467,17 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(terminalBackgroundColor)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(alignment: .topLeading) {
+            Text("Live terminal")
+                .font(NexusMacTheme.bodyFont(11, relativeTo: .caption).weight(.medium))
+                .foregroundStyle(NexusMacTheme.mutedText)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+        }
         .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(.quaternary)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(NexusMacTheme.line, lineWidth: 1)
         }
         .background {
             GeometryReader { proxy in
@@ -1143,120 +1514,276 @@ struct ContentView: View {
     private func structuredSessionFeed(screen: SessionScreen, isReady: Bool) -> some View {
         let presentation = structuredSessionFeedPresentation(for: screen)
 
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(spacing: 0) {
             if presentation.pendingApprovalRequests.isEmpty == false {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 8) {
                     ForEach(presentation.pendingApprovalRequests) { request in
                         structuredSessionApprovalRequestView(request)
                     }
                 }
+                .padding(.horizontal, 14)
+                .padding(.top, 14)
             }
 
-            ScrollView {
-                if presentation.activityRows.isEmpty {
-                    ContentUnavailableView(
-                        presentation.copy.emptyStateTitle,
-                        systemImage: "sparkles.rectangle.stack",
-                        description: Text(presentation.copy.emptyStateDescription)
-                    )
-                    .frame(maxWidth: .infinity, minHeight: 240)
-                } else {
-                    LazyVStack(alignment: .leading, spacing: 10) {
-                        ForEach(presentation.activityRows) { row in
-                            structuredSessionActivityRowView(row)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    if presentation.activityRows.isEmpty {
+                        ContentUnavailableView(
+                            presentation.copy.emptyStateTitle,
+                            systemImage: "message",
+                            description: Text(presentation.copy.emptyStateDescription)
+                        )
+                        .frame(maxWidth: .infinity, minHeight: 220)
+                    } else {
+                        LazyVStack(spacing: 8) {
+                            ForEach(presentation.activityRows) { row in
+                                structuredSessionActivityRowView(row, providerName: screen.session.providerID.displayName)
+                                    .id(row.id)
+                            }
+
+                            Color.clear
+                                .frame(height: 1)
+                                .id("conversation-bottom")
                         }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 14)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .onAppear {
+                    DispatchQueue.main.async {
+                        proxy.scrollTo("conversation-bottom", anchor: .bottom)
+                    }
+                }
+                .onChange(of: presentation.activityRows.count) { _, _ in
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        proxy.scrollTo("conversation-bottom", anchor: .bottom)
+                    }
+                }
+                .onChange(of: presentation.pendingApprovalRequests.count) { _, _ in
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        proxy.scrollTo("conversation-bottom", anchor: .bottom)
+                    }
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             if isReady {
-                HStack(alignment: .bottom, spacing: 12) {
-                    TextField(presentation.copy.composerPlaceholder, text: $structuredSessionPrompt)
-                        .textFieldStyle(.roundedBorder)
-
-                    Button("Send") {
-                        sendStructuredSessionPrompt()
-                    }
-                    .disabled(structuredSessionPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                HStack(spacing: 8) {
+                    TextField(presentation.copy.composerPlaceholder, text: $structuredSessionPrompt, axis: .vertical)
+                        .font(NexusMacTheme.bodyFont(13))
+                        .textFieldStyle(.plain)
+                        .lineLimit(1 ... 4)
+                        .submitLabel(.send)
+                        .onSubmit {
+                            sendStructuredSessionPrompt()
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(Color.white.opacity(0.08), in: Capsule())
+                        .overlay {
+                            Capsule()
+                                .stroke(NexusMacTheme.softLine, lineWidth: 1)
+                        }
                 }
+                .padding(14)
+                .background(Color.white.opacity(0.02))
             }
         }
-        .padding(12)
-        .background(.quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: 12))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .nexusPanel(tint: NexusMacTheme.teal, radius: 22)
     }
 
-    private func structuredSessionActivityRowView(_ row: StructuredSessionActivityRow) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: row.systemImage)
-                .foregroundStyle(structuredSessionActivityColor(for: row.emphasis))
-                .frame(width: 16)
+    private func structuredSessionActivityRowView(_ row: StructuredSessionActivityRow, providerName: String) -> some View {
+        let accent = structuredSessionActivityColor(for: row.emphasis)
+        let role = structuredConversationRole(for: row, providerName: providerName)
+        let messageText = structuredConversationText(for: row)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(row.title)
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.secondary)
-                Text(row.text)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.background, in: RoundedRectangle(cornerRadius: 10))
-        .overlay {
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(structuredSessionActivityColor(for: row.emphasis).opacity(0.15))
+        switch role {
+        case .user:
+            return AnyView(
+                HStack {
+                    Spacer(minLength: 120)
+                    Text(messageText)
+                        .font(NexusMacTheme.bodyFont(13))
+                        .foregroundStyle(.white)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: 520, alignment: .leading)
+                        .background(NexusMacTheme.gold, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+            )
+        case .assistant(let label):
+            return AnyView(
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(label)
+                            .font(NexusMacTheme.bodyFont(10, relativeTo: .caption).weight(.medium))
+                            .foregroundStyle(NexusMacTheme.mutedText)
+                        Text(messageText)
+                            .font(NexusMacTheme.bodyFont(13))
+                            .foregroundStyle(.white.opacity(0.94))
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: 520, alignment: .leading)
+                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(NexusMacTheme.softLine, lineWidth: 1)
+                    }
+                    Spacer(minLength: 120)
+                }
+            )
+        case .command:
+            return AnyView(
+                HStack {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Label(row.title, systemImage: row.systemImage)
+                            .font(NexusMacTheme.monoFont(10, relativeTo: .caption))
+                            .foregroundStyle(accent)
+                        Text(messageText)
+                            .font(NexusMacTheme.monoFont(11, relativeTo: .callout))
+                            .foregroundStyle(.white.opacity(0.92))
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: 620, alignment: .leading)
+                    Spacer()
+                }
+                .padding(12)
+                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(accent.opacity(0.22), lineWidth: 1)
+                }
+            )
+        case .error:
+            return AnyView(
+                HStack {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Label("Error", systemImage: row.systemImage)
+                            .font(NexusMacTheme.bodyFont(11, relativeTo: .caption).weight(.semibold))
+                            .foregroundStyle(accent)
+                        Text(messageText)
+                            .font(NexusMacTheme.bodyFont(13))
+                            .foregroundStyle(.white.opacity(0.94))
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: 620, alignment: .leading)
+                    Spacer()
+                }
+                .padding(12)
+                .background(accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(accent.opacity(0.28), lineWidth: 1)
+                }
+            )
+        case .system:
+            return AnyView(
+                HStack {
+                    Spacer()
+                    Label(messageText, systemImage: row.systemImage)
+                        .font(NexusMacTheme.bodyFont(11, relativeTo: .caption))
+                        .foregroundStyle(NexusMacTheme.mutedText)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.white.opacity(0.05), in: Capsule())
+                    Spacer()
+                }
+            )
         }
     }
 
     private func structuredSessionApprovalRequestView(_ request: SessionApprovalRequest) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             Label("Approval Request", systemImage: "hand.raised.fill")
-                .font(.headline)
-                .foregroundStyle(.accent)
+                .font(NexusMacTheme.bodyFont(12, relativeTo: .headline).weight(.semibold))
+                .foregroundStyle(NexusMacTheme.gold)
 
             Text(request.title)
-                .font(.subheadline)
-                .fontWeight(.semibold)
+                .font(NexusMacTheme.bodyFont(14).weight(.semibold))
+                .foregroundStyle(.white)
 
             Text(request.text)
+                .font(NexusMacTheme.bodyFont(13))
+                .foregroundStyle(.white.opacity(0.92))
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            HStack(spacing: 10) {
-                Button("Deny", role: .destructive) {
+            HStack(spacing: 8) {
+                Button("Deny") {
                     respondToStructuredSessionApprovalRequest(request.id, decision: .deny)
                 }
+                .buttonStyle(NexusSecondaryButtonStyle())
 
                 Button("Approve") {
                     respondToStructuredSessionApprovalRequest(request.id, decision: .approve)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(NexusAccentButtonStyle())
             }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.background, in: RoundedRectangle(cornerRadius: 10))
-        .overlay {
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(Color.accentColor.opacity(0.2))
-        }
+        .nexusPanel(tint: NexusMacTheme.gold, radius: 16)
     }
 
     private func structuredSessionActivityColor(for emphasis: StructuredSessionActivityEmphasis) -> Color {
         switch emphasis {
         case .neutral:
-            .secondary
+            Color.white.opacity(0.55)
         case .accent:
-            .accentColor
+            NexusMacTheme.gold
         case .critical:
-            .red
+            NexusMacTheme.coral
         case .success:
-            .green
+            NexusMacTheme.teal
         }
+    }
+
+    private func structuredConversationRole(for row: StructuredSessionActivityRow, providerName: String) -> StructuredConversationRole {
+        if row.title == "Message", let split = structuredConversationPrefixSplit(for: row.text) {
+            if split.label.caseInsensitiveCompare("you") == .orderedSame {
+                return .user
+            }
+            return .assistant(label: split.label)
+        }
+
+        switch row.title {
+        case "Command", "Diff":
+            return .command
+        case "Error":
+            return .error
+        case "Message":
+            return .assistant(label: providerName)
+        default:
+            return .system
+        }
+    }
+
+    private func structuredConversationText(for row: StructuredSessionActivityRow) -> String {
+        if row.title == "Message", let split = structuredConversationPrefixSplit(for: row.text) {
+            return split.body
+        }
+        return row.text
+    }
+
+    private func structuredConversationPrefixSplit(for text: String) -> (label: String, body: String)? {
+        guard let separatorRange = text.range(of: ": ") else {
+            return nil
+        }
+
+        let label = String(text[..<separatorRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let body = String(text[separatorRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard label.isEmpty == false, body.isEmpty == false, label.count <= 24 else {
+            return nil
+        }
+        return (label, body)
     }
 
     private func sendStructuredSessionPrompt() {
@@ -1286,7 +1813,7 @@ struct ContentView: View {
     }
 
     private var terminalBackgroundColor: Color {
-        Color.black.opacity(0.92)
+        Color(red: 0.07, green: 0.08, blue: 0.10)
     }
 
     @ViewBuilder
@@ -1471,18 +1998,16 @@ private struct RemoteWorkspaceCreationSheet: View {
     @State private var isSaving = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("New Remote Workspace")
-                .font(.title3)
-                .fontWeight(.semibold)
+        ZStack {
+            NexusBackdrop()
 
-            if appModel.workspaceGroups.isEmpty {
-                ContentUnavailableView(
-                    "No Workspace Groups",
-                    systemImage: "folder.badge.questionmark",
-                    description: Text("Create a Workspace Group before adding a Remote Workspace.")
+            VStack(alignment: .leading, spacing: 16) {
+                NexusSectionHeader(
+                    eyebrow: "Remote route",
+                    title: "New Remote Workspace",
+                    detail: "Connect a saved Host to an absolute remote path so sessions can launch through Nexus from the same control deck."
                 )
-            } else {
+
                 if appModel.hosts.isEmpty == false {
                     Picker("Host", selection: $hostSource) {
                         Text("Existing Host").tag(HostSource.existing)
@@ -1505,11 +2030,13 @@ private struct RemoteWorkspaceCreationSheet: View {
                        snapshot.state == .unavailable || snapshot.state == .broken {
                         VStack(alignment: .leading, spacing: 4) {
                             Label(snapshot.summary, systemImage: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.orange)
+                                .foregroundStyle(NexusMacTheme.gold)
                             Text("You can still create this Remote Workspace, but the Host is not currently validated.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .font(NexusMacTheme.bodyFont(12, relativeTo: .caption))
+                                .foregroundStyle(NexusMacTheme.mutedText)
                         }
+                        .padding(14)
+                        .nexusPanel(tint: NexusMacTheme.gold, radius: 16)
                     }
                 } else {
                     TextField("Host Name", text: $newHostName)
@@ -1520,37 +2047,43 @@ private struct RemoteWorkspaceCreationSheet: View {
                 TextField("Workspace Name (optional)", text: $workspaceName)
                 TextField("Absolute Remote Path", text: $remotePath)
 
-                Picker("Primary Workspace Group", selection: Binding(get: {
-                    selectedGroupID ?? appModel.workspaceGroups.first?.id ?? UUID()
-                }, set: { selectedGroupID = $0 })) {
-                    ForEach(appModel.workspaceGroups) { group in
-                        Text(group.name).tag(group.id)
+                if appModel.workspaceGroups.isEmpty == false {
+                    Picker("Workspace Group", selection: $selectedGroupID) {
+                        Text("None").tag(Optional<UUID>.none)
+                        ForEach(appModel.workspaceGroups) { group in
+                            Text(group.name).tag(Optional(group.id))
+                        }
                     }
+                    .pickerStyle(.menu)
+                }
+
+                HStack {
+                    Spacer()
+
+                    Button("Cancel") {
+                        isPresented = false
+                    }
+                    .buttonStyle(NexusSecondaryButtonStyle())
+
+                    Button("Create") {
+                        createRemoteWorkspace()
+                    }
+                    .buttonStyle(NexusAccentButtonStyle())
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(canCreate == false || isSaving)
                 }
             }
-
-            HStack {
-                Spacer()
-
-                Button("Cancel") {
-                    isPresented = false
-                }
-
-                Button("Create") {
-                    createRemoteWorkspace()
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(canCreate == false || isSaving)
-            }
+            .padding(24)
+            .frame(minWidth: 460)
+            .nexusPanel(tint: NexusMacTheme.teal, radius: 28)
+            .padding(28)
         }
-        .padding()
-        .frame(minWidth: 420)
         .task {
             if appModel.hosts.isEmpty {
                 hostSource = .new
             }
             if selectedGroupID == nil {
-                selectedGroupID = appModel.workspaceGroups.first?.id
+                selectedGroupID = nil
             }
             if selectedHostID == nil {
                 selectedHostID = appModel.hosts.first?.id
@@ -1570,8 +2103,7 @@ private struct RemoteWorkspaceCreationSheet: View {
     }
 
     private var canCreate: Bool {
-        guard appModel.workspaceGroups.isEmpty == false,
-              remotePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
+        guard remotePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
             return false
         }
 
@@ -1688,6 +2220,30 @@ struct TerminalViewportLayout {
 private struct TerminalLineSegment {
     var text: String
     let style: TerminalStyle
+}
+
+private enum SidebarMode: String, CaseIterable, Identifiable {
+    case workspaces
+    case groups
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .workspaces:
+            "Workspaces"
+        case .groups:
+            "Groups"
+        }
+    }
+}
+
+private enum StructuredConversationRole {
+    case user
+    case assistant(label: String)
+    case command
+    case error
+    case system
 }
 
 private enum SidebarSelection: Hashable {
