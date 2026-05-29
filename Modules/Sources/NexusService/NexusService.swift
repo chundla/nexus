@@ -46,7 +46,7 @@ enum RemoteRuntimeLaunchMode {
     case attachExisting
 }
 
-private enum SessionRecordAdapterMetadataLaunchSource {
+enum SessionRecordAdapterMetadataLaunchSource {
     case stored
     case explicit(SessionRecordAdapterMetadata?)
 }
@@ -497,171 +497,22 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
             )
         }
 
-        self.localProtocolNativeRuntimeFactories = localProtocolNativeRuntimeFactories ?? [
-            .pi: { launchConfiguration, _, _ in
-                try await PiRPCSessionRuntime(
-                    executable: launchConfiguration.executable,
-                    workingDirectory: launchConfiguration.workingDirectory,
-                    sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.piSessionLinkage,
-                    terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder
-                )
-            },
-            .codex: { launchConfiguration, _, _ in
-                try await CodexAppServerRuntime(
-                    executable: launchConfiguration.executable,
-                    workingDirectory: launchConfiguration.workingDirectory,
-                    sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.codexSessionLinkage,
-                    terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
-                    transportFactory: resolvedCodexTransportFactory
-                )
-            },
-            .ibmBob: { launchConfiguration, _, _ in
-                try IBMBobSessionRuntime(
-                    executable: launchConfiguration.executable,
-                    workingDirectory: launchConfiguration.workingDirectory,
-                    sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.ibmBobSessionLinkage,
-                    terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
-                    transportFactory: resolvedIBMBobTransportFactory
-                )
-            }
-        ]
+        self.localProtocolNativeRuntimeFactories = localProtocolNativeRuntimeFactories ?? ServiceSessionProviderRegistry.localProtocolNativeRuntimeFactories(
+            piTransportFactory: resolvedPiTransportFactory,
+            codexTransportFactory: resolvedCodexTransportFactory,
+            ibmBobTransportFactory: resolvedIBMBobTransportFactory
+        )
 
-        if remoteProtocolNativeRuntimeFactories.isEmpty {
-            self.remoteProtocolNativeRuntimeFactories = [
-                .pi: { launchConfiguration, _, _ in
-                    guard let remoteHost = launchConfiguration.remoteHost,
-                          let runtimeIdentifier = launchConfiguration.remoteRuntimeIdentifier else {
-                        throw NSError(
-                            domain: "ProcessSessionRuntimeLauncher",
-                            code: 1,
-                            userInfo: [NSLocalizedDescriptionKey: "Remote Pi launch requires a Host and runtime identifier."]
-                        )
-                    }
-
-                    let bridgeArguments = remoteProtocolSessionCommandBuilder.bridgeArguments(
-                        host: remoteHost,
-                        runtimeIdentifier: runtimeIdentifier,
-                        workingDirectory: launchConfiguration.workingDirectory,
-                        executable: launchConfiguration.executable,
-                        providerArguments: PiRPCSessionRuntime.transportArguments(
-                            sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.piSessionLinkage
-                        ),
-                        launchMode: launchConfiguration.remoteRuntimeLaunchMode
-                    )
-
-                    return try await PiRPCSessionRuntime(
-                        executable: "/usr/bin/ssh",
-                        workingDirectory: launchConfiguration.workingDirectory,
-                        sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.piSessionLinkage,
-                        terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
-                        unexpectedTerminationState: .interrupted,
-                        unexpectedTerminationMessageBuilder: { _ in
-                            "Pi Session stream disconnected. Relaunch to reconnect to the tmux-backed remote runtime."
-                        },
-                        stopHandler: {
-                            try Self.runCommand(
-                                executable: "/usr/bin/ssh",
-                                arguments: remoteProtocolSessionCommandBuilder.stopArguments(
-                                    runtimeIdentifier: runtimeIdentifier,
-                                    host: remoteHost
-                                )
-                            )
-                        },
-                        transportFactory: { _, _, _ in
-                            try resolvedPiTransportFactory("/usr/bin/ssh", bridgeArguments, nil)
-                        }
-                    )
-                },
-                .codex: { launchConfiguration, _, _ in
-                    guard let remoteHost = launchConfiguration.remoteHost,
-                          let runtimeIdentifier = launchConfiguration.remoteRuntimeIdentifier else {
-                        throw NSError(
-                            domain: "ProcessSessionRuntimeLauncher",
-                            code: 1,
-                            userInfo: [NSLocalizedDescriptionKey: "Remote Codex launch requires a Host and runtime identifier."]
-                        )
-                    }
-
-                    let bridgeArguments = remoteProtocolSessionCommandBuilder.bridgeArguments(
-                        host: remoteHost,
-                        runtimeIdentifier: runtimeIdentifier,
-                        workingDirectory: launchConfiguration.workingDirectory,
-                        executable: launchConfiguration.executable,
-                        providerArguments: ["app-server"],
-                        launchMode: launchConfiguration.remoteRuntimeLaunchMode
-                    )
-
-                    return try await CodexAppServerRuntime(
-                        executable: "/usr/bin/ssh",
-                        workingDirectory: launchConfiguration.workingDirectory,
-                        sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.codexSessionLinkage,
-                        terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
-                        unexpectedTerminationState: .interrupted,
-                        unexpectedTerminationMessageBuilder: { _ in
-                            "Codex Session stream disconnected. Relaunch to reconnect to the tmux-backed remote runtime."
-                        },
-                        stopHandler: {
-                            try Self.runCommand(
-                                executable: "/usr/bin/ssh",
-                                arguments: remoteProtocolSessionCommandBuilder.stopArguments(
-                                    runtimeIdentifier: runtimeIdentifier,
-                                    host: remoteHost
-                                )
-                            )
-                        },
-                        transportFactory: { _, _, _ in
-                            try resolvedCodexTransportFactory("/usr/bin/ssh", bridgeArguments, nil)
-                        }
-                    )
-                },
-                .ibmBob: { launchConfiguration, _, _ in
-                    guard let remoteHost = launchConfiguration.remoteHost,
-                          let runtimeIdentifier = launchConfiguration.remoteRuntimeIdentifier else {
-                        throw NSError(
-                            domain: "ProcessSessionRuntimeLauncher",
-                            code: 1,
-                            userInfo: [NSLocalizedDescriptionKey: "Remote IBM Bob launch requires a Host and runtime identifier."]
-                        )
-                    }
-
-                    return try IBMBobSessionRuntime(
-                        executable: launchConfiguration.executable,
-                        workingDirectory: launchConfiguration.workingDirectory,
-                        sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.ibmBobSessionLinkage,
-                        terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
-                        unexpectedTerminationState: .interrupted,
-                        unexpectedTerminationStateEvaluator: { status, errorText in
-                            let normalized = errorText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                            if status == 255
-                                || normalized.contains("could not resolve hostname")
-                                || normalized.contains("operation timed out")
-                                || normalized.contains("connection refused")
-                                || normalized.contains("no route to host")
-                                || normalized.contains("connection closed by remote host")
-                                || normalized.contains("broken pipe")
-                                || normalized.contains("network is unreachable") {
-                                return .interrupted
-                            }
-                            return .failed
-                        },
-                        transportFactory: { executable, arguments, workingDirectory in
-                            try resolvedIBMBobTransportFactory(
-                                "/usr/bin/ssh",
-                                remoteIBMBobCommandBuilder.bridgeArguments(
-                                    host: remoteHost,
-                                    runtimeIdentifier: runtimeIdentifier,
-                                    workingDirectory: workingDirectory ?? launchConfiguration.workingDirectory,
-                                    executable: executable,
-                                    providerArguments: arguments
-                                ),
-                                nil
-                            )
-                        }
-                    )
-                }
-            ]
+        self.remoteProtocolNativeRuntimeFactories = if remoteProtocolNativeRuntimeFactories.isEmpty {
+            ServiceSessionProviderRegistry.remoteProtocolNativeRuntimeFactories(
+                piTransportFactory: resolvedPiTransportFactory,
+                codexTransportFactory: resolvedCodexTransportFactory,
+                ibmBobTransportFactory: resolvedIBMBobTransportFactory,
+                remoteProtocolSessionCommandBuilder: remoteProtocolSessionCommandBuilder,
+                remoteIBMBobCommandBuilder: remoteIBMBobCommandBuilder
+            )
         } else {
-            self.remoteProtocolNativeRuntimeFactories = remoteProtocolNativeRuntimeFactories
+            remoteProtocolNativeRuntimeFactories
         }
     }
 
@@ -714,7 +565,7 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
         )
     }
 
-    private static func runCommand(executable: String, arguments: [String]) throws {
+    static func runCommand(executable: String, arguments: [String]) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
@@ -1360,8 +1211,20 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 resolveNamedSessionName: { [unowned self] requestedName, existingSessions in
                     self.resolveNamedSessionName(requestedName, existingSessions: existingSessions)
                 },
-                launchOrResumePersistedSession: { [unowned self] session, workspace in
-                    try await self.launchOrResumeSession(session, workspace: workspace)
+                reconcileSessionRuntimeState: { [unowned self] in
+                    try self.reconcileSessionRuntimeState($0)
+                },
+                sessionMayRemainReadyWithoutRuntime: { [unowned self] in
+                    try self.sessionMayRemainReadyWithoutRuntime($0, workspace: $1)
+                },
+                hasRuntime: { [unowned self] in
+                    self.sessionRuntimeManager.hasRuntime(for: $0)
+                },
+                runtimeState: { [unowned self] in
+                    self.sessionRuntimeManager.runtimeState(for: $0)
+                },
+                executePersistedSessionLaunch: { [unowned self] in
+                    try await self.executePersistedSessionLaunch($0)
                 },
                 launchFreshSession: { [unowned self] session, workspace, launchSnapshot in
                     try await self.launchSession(
@@ -1541,94 +1404,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             sessionInteraction: sessionInteraction,
             remoteAccessRuntime: remoteAccessRuntime,
             ibmBobNativeSessionCleaner: ibmBobNativeSessionCleaner,
-            providerAdapters: defaultProviderAdapters(overrides: providerAdapters)
+            providerAdapters: ServiceSessionProviderRegistry.providerAdapters(overrides: providerAdapters)
         )
-    }
-
-    private static func shouldReuseRemoteCLIHealthSnapshot(
-        _ snapshot: ProviderHealthSummary,
-        remoteContext: RemoteWorkspaceHealthContext?
-    ) -> Bool {
-        guard snapshot.checkedAt != nil else {
-            return false
-        }
-
-        let hostValidationAvailable = remoteContext?.hostValidation?.state == .available
-        let workspaceAvailabilityAvailable = remoteContext?.workspaceAvailability?.state == .available
-
-        if snapshot.state == .blocked {
-            return hostValidationAvailable == false || workspaceAvailabilityAvailable == false
-        }
-
-        guard hostValidationAvailable && workspaceAvailabilityAvailable else {
-            return false
-        }
-
-        switch snapshot.state {
-        case .available:
-            return true
-        case .unavailable, .misconfigured, .notChecked:
-            return false
-        case .blocked:
-            return false
-        }
-    }
-
-    private static func defaultProviderAdapters(
-        overrides: [ProviderID: ServiceProviderAdapter]? = nil
-    ) -> [ProviderID: ServiceProviderAdapter] {
-        let defaults: [ProviderID: ServiceProviderAdapter] = [
-            .claude: ServiceProviderAdapter(
-                providerID: .claude,
-                supportsDefaultSessionLaunch: true,
-                supportsNamedSessions: true,
-                healthSummaryEvaluator: { workspace, remoteContext, providerHealthEvaluator in
-                    await providerHealthEvaluator.healthSummary(for: .claude, workspace: workspace, remoteContext: remoteContext)
-                },
-                shouldReuseRemoteHealthSnapshot: { snapshot, remoteContext in
-                    shouldReuseRemoteCLIHealthSnapshot(snapshot, remoteContext: remoteContext)
-                }
-            ),
-            .codex: ServiceProviderAdapter(
-                providerID: .codex,
-                supportsDefaultSessionLaunch: true,
-                supportsNamedSessions: true,
-                healthSummaryEvaluator: { workspace, remoteContext, providerHealthEvaluator in
-                    await providerHealthEvaluator.healthSummary(for: .codex, workspace: workspace, remoteContext: remoteContext)
-                },
-                primarySurfaceEvaluator: { _ in .structuredActivityFeed },
-                shouldReuseRemoteHealthSnapshot: { snapshot, remoteContext in
-                    shouldReuseRemoteCLIHealthSnapshot(snapshot, remoteContext: remoteContext)
-                }
-            ),
-            .ibmBob: ServiceProviderAdapter(
-                providerID: .ibmBob,
-                supportsDefaultSessionLaunch: true,
-                supportsNamedSessions: true,
-                healthSummaryEvaluator: { workspace, remoteContext, providerHealthEvaluator in
-                    await providerHealthEvaluator.healthSummary(for: .ibmBob, workspace: workspace, remoteContext: remoteContext)
-                },
-                primarySurfaceEvaluator: { _ in .structuredActivityFeed }
-            ),
-            .pi: ServiceProviderAdapter(
-                providerID: .pi,
-                supportsDefaultSessionLaunch: true,
-                supportsNamedSessions: true,
-                healthSummaryEvaluator: { workspace, remoteContext, providerHealthEvaluator in
-                    await providerHealthEvaluator.healthSummary(for: .pi, workspace: workspace, remoteContext: remoteContext)
-                },
-                primarySurfaceEvaluator: { _ in .structuredActivityFeed },
-                shouldReuseRemoteHealthSnapshot: { snapshot, remoteContext in
-                    shouldReuseRemoteCLIHealthSnapshot(snapshot, remoteContext: remoteContext)
-                }
-            )
-        ]
-
-        guard let overrides else {
-            return defaults
-        }
-
-        return defaults.merging(overrides) { _, override in override }
     }
 
     public func serviceStatus() -> NexusServiceStatus {
@@ -2415,139 +2192,27 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             return resolvedSession
         }
 
-        _ = try await launchOrResumeSession(resolvedSession, workspace: workspace)
+        _ = try await sessionLifecycle.launchOrResumeSession(sessionID: resolvedSession.id)
         return resolvedSession
     }
 
-    private func launchOrResumeSession(_ existingSession: Session, workspace: Workspace) async throws -> Session {
-        let adapter = providerAdapter(for: existingSession.providerID)
-        let isSupported = existingSession.isDefault
-            ? adapter.supportsDefaultSessionLaunch(in: workspace)
-            : adapter.supportsNamedSessions(in: workspace)
-        guard isSupported else {
-            throw NexusMetadataStoreError.providerNotSupported
-        }
-
-        let reconciledSession = try reconcileSessionRuntimeState(existingSession)
-        let sessionRecordAdapterMetadataSource = try relaunchSessionRecordAdapterMetadataSource(for: reconciledSession)
-
-        if let launchSnapshot = try sessionRecordStore.launchSnapshot(sessionID: reconciledSession.id) {
-            if shouldAttemptRemoteRuntimeRecovery(for: reconciledSession, workspace: workspace) {
-                return try await recoverRemoteSession(
-                    reconciledSession,
-                    workspace: workspace,
-                    launchSnapshot: launchSnapshot
-                )
-            }
-
-            let session = reconciledSession.state == .ready && reconciledSession.failureMessage == nil
-                ? reconciledSession
-                : try sessionRecordStore.updateSession(id: reconciledSession.id, state: .ready, failureMessage: nil)
+    private func executePersistedSessionLaunch(_ execution: PersistedSessionLaunchExecution) async throws -> Session {
+        switch execution.mode {
+        case .recoverRemoteRuntime:
+            return try await recoverRemoteSession(
+                execution.session,
+                workspace: execution.workspace,
+                launchSnapshot: execution.launchSnapshot
+            )
+        case let .launch(forceFreshRemoteRuntime):
             return try await launchSession(
-                session,
-                workspace: workspace,
-                launchSnapshot: launchSnapshot,
-                forceFreshRemoteRuntime: shouldCreateFreshRemoteRuntime(for: reconciledSession, workspace: workspace),
-                sessionRecordAdapterMetadataSource: sessionRecordAdapterMetadataSource
+                execution.session,
+                workspace: execution.workspace,
+                launchSnapshot: execution.launchSnapshot,
+                forceFreshRemoteRuntime: forceFreshRemoteRuntime,
+                sessionRecordAdapterMetadataSource: execution.sessionRecordAdapterMetadataSource
             )
         }
-
-        let remoteContext = try remoteWorkspaceTargetOverview(for: workspace, refreshHostValidation: true).map {
-            RemoteWorkspaceHealthContext(
-                host: $0.host,
-                hostValidation: $0.hostValidation,
-                workspaceAvailability: $0.workspaceAvailability
-            )
-        }
-        let health = try await providerHealthSummary(
-            for: reconciledSession.providerID,
-            workspace: workspace,
-            remoteContext: remoteContext,
-            preferFreshRemoteCheck: true
-        )
-        guard health.launchability == .launchable, let executable = health.resolvedExecutable else {
-            let failureMessage = health.diagnostics.first(where: { $0.severity == .error })?.message ?? health.summary
-            return try sessionRecordStore.updateSession(
-                id: reconciledSession.id,
-                state: .failed,
-                failureMessage: failureMessage
-            )
-        }
-
-        let session = reconciledSession.state == .ready && reconciledSession.failureMessage == nil
-            ? reconciledSession
-            : try sessionRecordStore.updateSession(id: reconciledSession.id, state: .ready, failureMessage: nil)
-        let launchSnapshot = try sessionRecordStore.ensureLaunchSnapshot(
-            sessionID: session.id,
-            workspaceID: session.workspaceID,
-            providerID: session.providerID,
-            primarySurface: providerAdapter(for: session.providerID).primarySurface(in: workspace),
-            resolvedExecutable: executable,
-            resolvedWorkingDirectory: workspace.folderPath
-        )
-        return try await launchSession(
-            session,
-            workspace: workspace,
-            launchSnapshot: launchSnapshot,
-            forceFreshRemoteRuntime: shouldCreateFreshRemoteRuntime(for: reconciledSession, workspace: workspace),
-            sessionRecordAdapterMetadataSource: sessionRecordAdapterMetadataSource
-        )
-    }
-
-    private func relaunchSessionRecordAdapterMetadataSource(for session: Session) throws -> SessionRecordAdapterMetadataLaunchSource {
-        guard session.providerID == .ibmBob,
-              session.state != .ready else {
-            return .stored
-        }
-
-        let storedMetadata = try sessionRecordStore.sessionRecordAdapterMetadata(sessionID: session.id)
-        if session.state == .interrupted,
-           let linkage = storedMetadata?.ibmBobSessionLinkage {
-            return .explicit(
-                SessionRecordAdapterMetadata.ibmBob(
-                    sessionID: linkage.sessionID,
-                    activityItems: linkage.persistedActivityItems,
-                    turnInProgress: false
-                )
-            )
-        }
-
-        let storedSessionID = storedMetadata?.ibmBobSessionLinkage?.sessionID
-        return .explicit(SessionRecordAdapterMetadata.ibmBob(sessionID: storedSessionID))
-    }
-
-    private func shouldAttemptRemoteRuntimeRecovery(for session: Session, workspace: Workspace) -> Bool {
-        guard workspace.kind == .remote else {
-            return false
-        }
-
-        if (try? sessionMayRemainReadyWithoutRuntime(session, workspace: workspace)) == true {
-            return false
-        }
-
-        let runtimeState = sessionRuntimeManager.runtimeState(for: session)
-        if sessionRuntimeManager.hasRuntime(for: session), runtimeState != .interrupted {
-            return false
-        }
-
-        switch session.state {
-        case .ready, .interrupted:
-            return true
-        case .exited, .failed:
-            return false
-        }
-    }
-
-    private func shouldCreateFreshRemoteRuntime(for session: Session, workspace: Workspace) -> Bool {
-        guard workspace.kind == .remote else {
-            return false
-        }
-
-        guard shouldAttemptRemoteRuntimeRecovery(for: session, workspace: workspace) == false else {
-            return false
-        }
-
-        return sessionRuntimeManager.runtimeState(for: session) != .ready
     }
 
     private func remoteRuntimeIdentifier(for session: Session, forceNew: Bool) throws -> String {

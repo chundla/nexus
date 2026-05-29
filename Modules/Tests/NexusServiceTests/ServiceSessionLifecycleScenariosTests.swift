@@ -5,7 +5,7 @@ import NexusDomain
 import Testing
 
 struct ServiceSessionLifecycleScenariosTests {
-    @Test func launchOrResumeSessionReusesPersistedSessionRecord() async throws {
+    @Test func launchOrResumeSessionPlansPersistedLaunchThroughSessionModule() async throws {
         let fixture = try ServiceSessionLifecycleFixture()
         let existingSession = try fixture.store.createDefaultSession(
             workspaceID: fixture.workspace.id,
@@ -16,13 +16,21 @@ struct ServiceSessionLifecycleScenariosTests {
         let lifecycle = fixture.makeLifecycle()
 
         let resumedSession = try await lifecycle.launchOrResumeSession(sessionID: existingSession.id)
+        let launchSnapshot = try #require(try fixture.store.launchSnapshot(sessionID: existingSession.id))
 
         #expect(resumedSession.id == existingSession.id)
-        #expect(fixture.tracker.resumedSessions.map { $0.0.id } == [existingSession.id])
+        #expect(fixture.tracker.resumedSessions.isEmpty)
+        #expect(fixture.tracker.persistedLaunchExecutions == [
+            PersistedLaunchExecutionExpectation(
+                sessionID: existingSession.id,
+                mode: .launchFresh(forceFreshRemoteRuntime: false),
+                launchSnapshot: launchSnapshot
+            )
+        ])
         #expect(fixture.tracker.freshLaunches.isEmpty)
     }
 
-    @Test func launchOrResumeDefaultSessionReusesExistingDefaultSessionLane() async throws {
+    @Test func launchOrResumeDefaultSessionPlansExistingDefaultSessionThroughSessionModule() async throws {
         let fixture = try ServiceSessionLifecycleFixture()
         let existingSession = try fixture.store.createDefaultSession(
             workspaceID: fixture.workspace.id,
@@ -36,10 +44,116 @@ struct ServiceSessionLifecycleScenariosTests {
             workspaceID: fixture.workspace.id,
             providerID: .claude
         )
+        let launchSnapshot = try #require(try fixture.store.launchSnapshot(sessionID: existingSession.id))
 
         #expect(resumedSession.id == existingSession.id)
-        #expect(fixture.tracker.resumedSessions.map { $0.0.id } == [existingSession.id])
+        #expect(fixture.tracker.resumedSessions.isEmpty)
+        #expect(fixture.tracker.persistedLaunchExecutions == [
+            PersistedLaunchExecutionExpectation(
+                sessionID: existingSession.id,
+                mode: .launchFresh(forceFreshRemoteRuntime: false),
+                launchSnapshot: launchSnapshot
+            )
+        ])
         #expect(fixture.tracker.freshLaunches.isEmpty)
+    }
+
+    @Test func explicitResumePlansRemoteRecoveryThroughSessionModule() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+
+        let store = try NexusMetadataStore(storeURL: rootURL.appendingPathComponent("Nexus.sqlite", isDirectory: false))
+        let group = try store.createWorkspaceGroup(name: "Remote")
+        let host = try store.createHost(name: "Build Server", sshTarget: "build-box", port: nil)
+        let workspace = try store.createRemoteWorkspace(
+            name: "Remote Pi",
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+        let existingSession = try store.createDefaultSession(
+            workspaceID: workspace.id,
+            providerID: .pi,
+            state: .interrupted,
+            failureMessage: "Session interrupted"
+        )
+        let launchSnapshot = try store.ensureLaunchSnapshot(
+            sessionID: existingSession.id,
+            workspaceID: workspace.id,
+            providerID: .pi,
+            primarySurface: .structuredActivityFeed,
+            resolvedExecutable: "/tmp/pi",
+            resolvedWorkingDirectory: workspace.folderPath
+        )
+        let tracker = SessionLifecycleTracker()
+        let lifecycle = ServiceSessionLifecycle(
+            dependencies: ServiceSessionLifecycleDependencies(
+                workspace: { try store.workspace(id: $0) },
+                sessionRecordStore: TrackingSessionRecordStore(metadataStore: store),
+                providerAdapter: { providerID in
+                    ServiceProviderAdapter(
+                        providerID: providerID,
+                        supportsDefaultSessionLaunch: true,
+                        supportsNamedSessions: true,
+                        healthSummaryEvaluator: { _, _, _ in
+                            ProviderHealthSummary(
+                                state: .available,
+                                summary: "Ready",
+                                resolvedExecutable: "/tmp/pi",
+                                launchability: .launchable
+                            )
+                        }
+                    )
+                },
+                remoteWorkspaceHealthContext: { _ in Optional<RemoteWorkspaceHealthContext>.none },
+                providerHealthSummary: { _, _, _ in
+                    ProviderHealthSummary(
+                        state: .available,
+                        summary: "Ready",
+                        resolvedExecutable: "/tmp/pi",
+                        launchability: .launchable
+                    )
+                },
+                resolveNamedSessionName: { requestedName, _ in requestedName ?? "Session 1" },
+                reconcileSessionRuntimeState: { $0 },
+                sessionMayRemainReadyWithoutRuntime: { _, _ in false },
+                hasRuntime: { _ in false },
+                runtimeState: { _ in .interrupted },
+                executePersistedSessionLaunch: { execution in
+                    tracker.persistedLaunchExecutions.append(
+                        PersistedLaunchExecutionExpectation(
+                            sessionID: execution.session.id,
+                            mode: expectedMode(for: execution.mode),
+                            launchSnapshot: execution.launchSnapshot
+                        )
+                    )
+                    return execution.session
+                },
+                launchFreshSession: { session, workspace, launchSnapshot in
+                    tracker.freshLaunches.append((session, workspace, launchSnapshot))
+                    return session
+                }
+            )
+        )
+
+        let resumedSession = try await lifecycle.launchOrResumeDefaultSession(
+            workspaceID: workspace.id,
+            providerID: .pi
+        )
+
+        #expect(resumedSession.id == existingSession.id)
+        #expect(resumedSession.state == .ready)
+        #expect(tracker.resumedSessions.isEmpty)
+        #expect(tracker.persistedLaunchExecutions == [
+            PersistedLaunchExecutionExpectation(
+                sessionID: existingSession.id,
+                mode: .recoverRemoteRuntime,
+                launchSnapshot: launchSnapshot
+            )
+        ])
+        #expect(tracker.freshLaunches.isEmpty)
     }
 
     @Test func createNamedSessionCreatesReadyNamedSessionAndLaunchSnapshot() async throws {
@@ -118,9 +232,19 @@ struct ServiceSessionLifecycleScenariosTests {
                 remoteWorkspaceHealthContext: { _ in Optional<RemoteWorkspaceHealthContext>.none },
                 providerHealthSummary: { _, _, _ in fixture.health },
                 resolveNamedSessionName: { requestedName, _ in requestedName ?? "Session 1" },
-                launchOrResumePersistedSession: { session, workspace in
-                    fixture.tracker.resumedSessions.append((session, workspace))
-                    return session
+                reconcileSessionRuntimeState: { $0 },
+                sessionMayRemainReadyWithoutRuntime: { _, _ in false },
+                hasRuntime: { _ in false },
+                runtimeState: { _ in nil },
+                executePersistedSessionLaunch: { execution in
+                    fixture.tracker.persistedLaunchExecutions.append(
+                        PersistedLaunchExecutionExpectation(
+                            sessionID: execution.session.id,
+                            mode: expectedMode(for: execution.mode),
+                            launchSnapshot: execution.launchSnapshot
+                        )
+                    )
+                    return execution.session
                 },
                 launchFreshSession: { session, workspace, launchSnapshot in
                     fixture.tracker.freshLaunches.append((session, workspace, launchSnapshot))
@@ -315,9 +439,19 @@ private struct ServiceSessionLifecycleFixture {
                 remoteWorkspaceHealthContext: { _ in Optional<RemoteWorkspaceHealthContext>.none },
                 providerHealthSummary: { _, _, _ in health },
                 resolveNamedSessionName: { requestedName, _ in requestedName ?? "Session 1" },
-                launchOrResumePersistedSession: { session, workspace in
-                    tracker.resumedSessions.append((session, workspace))
-                    return session
+                reconcileSessionRuntimeState: { $0 },
+                sessionMayRemainReadyWithoutRuntime: { _, _ in false },
+                hasRuntime: { _ in false },
+                runtimeState: { _ in nil },
+                executePersistedSessionLaunch: { execution in
+                    tracker.persistedLaunchExecutions.append(
+                        PersistedLaunchExecutionExpectation(
+                            sessionID: execution.session.id,
+                            mode: expectedMode(for: execution.mode),
+                            launchSnapshot: execution.launchSnapshot
+                        )
+                    )
+                    return execution.session
                 },
                 launchFreshSession: { session, workspace, launchSnapshot in
                     tracker.freshLaunches.append((session, workspace, launchSnapshot))
@@ -328,8 +462,29 @@ private struct ServiceSessionLifecycleFixture {
     }
 }
 
+private struct PersistedLaunchExecutionExpectation: Equatable {
+    enum Mode: Equatable {
+        case recoverRemoteRuntime
+        case launchFresh(forceFreshRemoteRuntime: Bool)
+    }
+
+    let sessionID: UUID
+    let mode: Mode
+    let launchSnapshot: LaunchSnapshot
+}
+
+private func expectedMode(for mode: PersistedSessionLaunchMode) -> PersistedLaunchExecutionExpectation.Mode {
+    switch mode {
+    case .recoverRemoteRuntime:
+        .recoverRemoteRuntime
+    case let .launch(forceFreshRemoteRuntime):
+        .launchFresh(forceFreshRemoteRuntime: forceFreshRemoteRuntime)
+    }
+}
+
 private final class SessionLifecycleTracker: @unchecked Sendable {
     var resumedSessions: [(Session, Workspace)] = []
+    var persistedLaunchExecutions: [PersistedLaunchExecutionExpectation] = []
     var freshLaunches: [(session: Session, workspace: Workspace, launchSnapshot: LaunchSnapshot)] = []
 }
 #endif

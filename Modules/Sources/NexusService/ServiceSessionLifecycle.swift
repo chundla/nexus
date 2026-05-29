@@ -2,6 +2,19 @@
 import Foundation
 import NexusDomain
 
+enum PersistedSessionLaunchMode {
+    case recoverRemoteRuntime
+    case launch(forceFreshRemoteRuntime: Bool)
+}
+
+struct PersistedSessionLaunchExecution {
+    let session: Session
+    let workspace: Workspace
+    let launchSnapshot: LaunchSnapshot
+    let mode: PersistedSessionLaunchMode
+    let sessionRecordAdapterMetadataSource: SessionRecordAdapterMetadataLaunchSource
+}
+
 struct ServiceSessionLifecycleDependencies {
     let workspace: (UUID) throws -> Workspace?
     let sessionRecordStore: any SessionRecordStore
@@ -9,7 +22,11 @@ struct ServiceSessionLifecycleDependencies {
     let remoteWorkspaceHealthContext: (Workspace) throws -> RemoteWorkspaceHealthContext?
     let providerHealthSummary: (ProviderID, Workspace, RemoteWorkspaceHealthContext?) async throws -> ProviderHealthSummary
     let resolveNamedSessionName: (String?, [Session]) -> String
-    let launchOrResumePersistedSession: (Session, Workspace) async throws -> Session
+    let reconcileSessionRuntimeState: (Session) throws -> Session
+    let sessionMayRemainReadyWithoutRuntime: (Session, Workspace) throws -> Bool
+    let hasRuntime: (Session) -> Bool
+    let runtimeState: (Session) -> Session.State?
+    let executePersistedSessionLaunch: (PersistedSessionLaunchExecution) async throws -> Session
     let launchFreshSession: (Session, Workspace, LaunchSnapshot) async throws -> Session
 }
 
@@ -25,7 +42,7 @@ final class ServiceSessionLifecycle: SessionLifecycleManaging {
             throw NexusMetadataStoreError.sessionNotFound
         }
         let workspace = try requiredWorkspace(id: session.workspaceID)
-        return try await dependencies.launchOrResumePersistedSession(session, workspace)
+        return try await launchPersistedSession(session, workspace: workspace)
     }
 
     func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) async throws -> Session {
@@ -37,7 +54,7 @@ final class ServiceSessionLifecycle: SessionLifecycleManaging {
         }
 
         if let existingSession = try dependencies.sessionRecordStore.defaultSession(workspaceID: workspaceID, providerID: providerID) {
-            return try await dependencies.launchOrResumePersistedSession(existingSession, workspace)
+            return try await launchPersistedSession(existingSession, workspace: workspace)
         }
 
         let health = try await providerHealthSummary(for: providerID, workspace: workspace)
@@ -91,6 +108,66 @@ final class ServiceSessionLifecycle: SessionLifecycleManaging {
         return try await launchFreshSession(session, workspace: workspace, adapter: adapter, executable: executable)
     }
 
+    private func launchPersistedSession(_ session: Session, workspace: Workspace) async throws -> Session {
+        let adapter = dependencies.providerAdapter(session.providerID)
+        let isSupported = session.isDefault
+            ? adapter.supportsDefaultSessionLaunch(in: workspace)
+            : adapter.supportsNamedSessions(in: workspace)
+        guard isSupported else {
+            throw NexusMetadataStoreError.providerNotSupported
+        }
+
+        let reconciledSession = try dependencies.reconcileSessionRuntimeState(session)
+        let metadataSource = try relaunchSessionRecordAdapterMetadataSource(for: reconciledSession)
+
+        if let launchSnapshot = try dependencies.sessionRecordStore.launchSnapshot(sessionID: reconciledSession.id) {
+            let readySession = try readySessionForLaunch(from: reconciledSession)
+            let mode: PersistedSessionLaunchMode = if shouldAttemptRemoteRuntimeRecovery(for: reconciledSession, workspace: workspace) {
+                .recoverRemoteRuntime
+            } else {
+                .launch(forceFreshRemoteRuntime: shouldCreateFreshRemoteRuntime(for: reconciledSession, workspace: workspace))
+            }
+
+            return try await dependencies.executePersistedSessionLaunch(
+                PersistedSessionLaunchExecution(
+                    session: readySession,
+                    workspace: workspace,
+                    launchSnapshot: launchSnapshot,
+                    mode: mode,
+                    sessionRecordAdapterMetadataSource: metadataSource
+                )
+            )
+        }
+
+        let health = try await providerHealthSummary(for: reconciledSession.providerID, workspace: workspace)
+        guard health.launchability == .launchable, let executable = health.resolvedExecutable else {
+            return try dependencies.sessionRecordStore.updateSession(
+                id: reconciledSession.id,
+                state: .failed,
+                failureMessage: failureMessage(from: health)
+            )
+        }
+
+        let readySession = try readySessionForLaunch(from: reconciledSession)
+        let launchSnapshot = try dependencies.sessionRecordStore.ensureLaunchSnapshot(
+            sessionID: readySession.id,
+            workspaceID: readySession.workspaceID,
+            providerID: readySession.providerID,
+            primarySurface: adapter.primarySurface(in: workspace),
+            resolvedExecutable: executable,
+            resolvedWorkingDirectory: workspace.folderPath
+        )
+        return try await dependencies.executePersistedSessionLaunch(
+            PersistedSessionLaunchExecution(
+                session: readySession,
+                workspace: workspace,
+                launchSnapshot: launchSnapshot,
+                mode: .launch(forceFreshRemoteRuntime: shouldCreateFreshRemoteRuntime(for: reconciledSession, workspace: workspace)),
+                sessionRecordAdapterMetadataSource: metadataSource
+            )
+        )
+    }
+
     private func requiredWorkspace(id workspaceID: UUID) throws -> Workspace {
         guard let workspace = try dependencies.workspace(workspaceID) else {
             throw NexusMetadataStoreError.workspaceNotFound
@@ -118,6 +195,70 @@ final class ServiceSessionLifecycle: SessionLifecycleManaging {
             resolvedWorkingDirectory: workspace.folderPath
         )
         return try await dependencies.launchFreshSession(session, workspace, launchSnapshot)
+    }
+
+    private func readySessionForLaunch(from session: Session) throws -> Session {
+        if session.state == .ready, session.failureMessage == nil {
+            return session
+        }
+
+        return try dependencies.sessionRecordStore.updateSession(id: session.id, state: .ready, failureMessage: nil)
+    }
+
+    private func relaunchSessionRecordAdapterMetadataSource(for session: Session) throws -> SessionRecordAdapterMetadataLaunchSource {
+        guard session.providerID == .ibmBob,
+              session.state != .ready else {
+            return .stored
+        }
+
+        let storedMetadata = try dependencies.sessionRecordStore.sessionRecordAdapterMetadata(sessionID: session.id)
+        if session.state == .interrupted,
+           let linkage = storedMetadata?.ibmBobSessionLinkage {
+            return .explicit(
+                SessionRecordAdapterMetadata.ibmBob(
+                    sessionID: linkage.sessionID,
+                    activityItems: linkage.persistedActivityItems,
+                    turnInProgress: false
+                )
+            )
+        }
+
+        let storedSessionID = storedMetadata?.ibmBobSessionLinkage?.sessionID
+        return .explicit(SessionRecordAdapterMetadata.ibmBob(sessionID: storedSessionID))
+    }
+
+    private func shouldAttemptRemoteRuntimeRecovery(for session: Session, workspace: Workspace) -> Bool {
+        guard workspace.kind == .remote else {
+            return false
+        }
+
+        if (try? dependencies.sessionMayRemainReadyWithoutRuntime(session, workspace)) == true {
+            return false
+        }
+
+        let runtimeState = dependencies.runtimeState(session)
+        if dependencies.hasRuntime(session), runtimeState != .interrupted {
+            return false
+        }
+
+        switch session.state {
+        case .ready, .interrupted:
+            return true
+        case .exited, .failed:
+            return false
+        }
+    }
+
+    private func shouldCreateFreshRemoteRuntime(for session: Session, workspace: Workspace) -> Bool {
+        guard workspace.kind == .remote else {
+            return false
+        }
+
+        guard shouldAttemptRemoteRuntimeRecovery(for: session, workspace: workspace) == false else {
+            return false
+        }
+
+        return dependencies.runtimeState(session) != .ready
     }
 
     private func failureMessage(from health: ProviderHealthSummary) -> String {
