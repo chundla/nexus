@@ -91,6 +91,10 @@ enum ServiceSessionProviderRegistry {
             partialResult[entry.key] = entry.value
         }
 
+        if providerAdapters[.claude] != nil {
+            modules[.claude] = ClaudeProviderModule()
+        }
+
         if providerAdapters[.codex] != nil {
             modules[.codex] = CodexProviderModule()
         }
