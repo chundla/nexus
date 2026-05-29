@@ -111,6 +111,59 @@ struct PiProviderModuleTests {
         #expect(launchTracker.didUseSharedLaunch)
     }
 
+    @Test func serviceProviderRegistryRoutesPiThroughPiProviderModule() {
+        let registry = ServiceSessionProviderRegistry.providerModules(
+            providerAdapters: [
+                .claude: ServiceProviderAdapter(
+                    providerID: .claude,
+                    supportsDefaultSessionLaunch: true,
+                    supportsNamedSessions: true,
+                    healthSummaryEvaluator: { _, _, _ in
+                        ProviderHealthSummary(
+                            state: .available,
+                            summary: "Claude ready",
+                            resolvedExecutable: "/tmp/fake-claude",
+                            launchability: .launchable
+                        )
+                    },
+                    primarySurfaceEvaluator: { _ in .terminal }
+                ),
+                .pi: ServiceProviderAdapter(
+                    providerID: .pi,
+                    supportsDefaultSessionLaunch: true,
+                    supportsNamedSessions: true,
+                    healthSummaryEvaluator: { _, _, _ in
+                        ProviderHealthSummary(
+                            state: .available,
+                            summary: "Pi ready",
+                            resolvedExecutable: "/tmp/fake-pi",
+                            launchability: .launchable
+                        )
+                    },
+                    primarySurfaceEvaluator: { _ in .terminal },
+                    shouldReuseRemoteHealthSnapshot: { snapshot, _ in
+                        snapshot.summary == "reuse me"
+                    }
+                )
+            ]
+        )
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Local Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: UUID()
+        )
+
+        let piModule = registry.module(for: .pi)
+        let claudeModule = registry.module(for: .claude)
+
+        #expect(piModule.prelaunchPrimarySurface(in: workspace) == .structuredActivityFeed)
+        #expect(claudeModule.prelaunchPrimarySurface(in: workspace) == .terminal)
+        #expect(piModule.reusesRemoteHealthSnapshot(ProviderHealthSummary(state: .available, summary: "reuse me"), remoteContext: nil))
+        #expect(claudeModule.reusesRemoteHealthSnapshot(ProviderHealthSummary(state: .available, summary: "reuse me"), remoteContext: nil) == false)
+    }
+
     @Test func piProviderModuleOwnsOpenSessionSeamForLocalAndRemotePiSessions() async throws {
         let module = PiProviderModule(
             adapter: ServiceProviderAdapter(
