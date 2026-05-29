@@ -6,6 +6,7 @@ protocol IBMBobNativeSessionCleaning {
     func bestEffortDeleteStoredContinuity(
         for session: Session,
         workspace: Workspace,
+        host: NexusDomain.Host?,
         sessionRecordAdapterMetadata: SessionRecordAdapterMetadata?
     )
 }
@@ -28,14 +29,40 @@ struct IBMBobNativeSessionCleaner: IBMBobNativeSessionCleaning {
     func bestEffortDeleteStoredContinuity(
         for session: Session,
         workspace: Workspace,
+        host: NexusDomain.Host?,
         sessionRecordAdapterMetadata: SessionRecordAdapterMetadata?
     ) {
         guard session.providerID == .ibmBob,
-              workspace.kind == .local,
               let nativeSessionID = trimmedNativeSessionID(from: sessionRecordAdapterMetadata) else {
             return
         }
 
+        switch workspace.kind {
+        case .local:
+            bestEffortDeleteLocalStoredContinuity(
+                for: session,
+                workspace: workspace,
+                nativeSessionID: nativeSessionID
+            )
+        case .remote:
+            guard let host else {
+                log("Skipping IBM Bob native cleanup because the Host could not be loaded for Session Record \(session.id).")
+                return
+            }
+            bestEffortDeleteRemoteStoredContinuity(
+                for: session,
+                workspace: workspace,
+                host: host,
+                nativeSessionID: nativeSessionID
+            )
+        }
+    }
+
+    private func bestEffortDeleteLocalStoredContinuity(
+        for session: Session,
+        workspace: Workspace,
+        nativeSessionID: String
+    ) {
         let resolution = executableResolver.resolveExecutable(named: "bob")
         guard let executable = resolution.resolvedExecutable else {
             log("Skipping IBM Bob native cleanup because the executable could not be resolved for Session Record \(session.id).")
@@ -43,8 +70,7 @@ struct IBMBobNativeSessionCleaner: IBMBobNativeSessionCleaning {
         }
 
         let workingDirectoryURL = URL(fileURLWithPath: workspace.folderPath, isDirectory: true)
-
-        guard let deleteTarget = resolveDeleteTarget(
+        guard let deleteTarget = resolveLocalDeleteTarget(
             executable: executable,
             workingDirectoryURL: workingDirectoryURL,
             nativeSessionID: nativeSessionID
@@ -60,7 +86,56 @@ struct IBMBobNativeSessionCleaner: IBMBobNativeSessionCleaning {
                 currentDirectoryURL: workingDirectoryURL
             )
             guard result.exitStatus == 0 else {
-                log("IBM Bob native cleanup failed for Session Record \(session.id): \(failureMessage(stdout: result.stdout, stderr: result.stderr, fallback: "IBM Bob delete exited with status \(result.exitStatus)."))")
+                let message = failureMessage(
+                    stdout: result.stdout,
+                    stderr: result.stderr,
+                    fallback: exitStatusMessage(command: "IBM Bob delete", status: result.exitStatus)
+                )
+                log("IBM Bob native cleanup failed for Session Record \(session.id): \(message)")
+                return
+            }
+        } catch {
+            log("IBM Bob native cleanup threw for Session Record \(session.id): \(error.localizedDescription)")
+        }
+    }
+
+    private func bestEffortDeleteRemoteStoredContinuity(
+        for session: Session,
+        workspace: Workspace,
+        host: NexusDomain.Host,
+        nativeSessionID: String
+    ) {
+        guard let executable = resolvedRemoteExecutable(workspace: workspace, host: host) else {
+            log("Skipping IBM Bob native cleanup because the remote executable could not be resolved for Session Record \(session.id).")
+            return
+        }
+
+        guard let deleteTarget = resolveRemoteDeleteTarget(
+            executable: executable,
+            workspace: workspace,
+            host: host,
+            nativeSessionID: nativeSessionID
+        ) else {
+            log("Skipping IBM Bob native cleanup because a safe remote delete target could not be resolved for Session Record \(session.id).")
+            return
+        }
+
+        do {
+            let result = try runRemoteCommand(
+                host: host,
+                script: remoteIBMBobCommandScript(
+                    executable: executable,
+                    workspace: workspace,
+                    arguments: ["--delete-session", deleteTarget]
+                )
+            )
+            guard result.exitStatus == 0 else {
+                let message = failureMessage(
+                    stdout: result.stdout,
+                    stderr: result.stderr,
+                    fallback: exitStatusMessage(command: "IBM Bob delete", status: result.exitStatus)
+                )
+                log("IBM Bob native cleanup failed for Session Record \(session.id): \(message)")
                 return
             }
         } catch {
@@ -73,7 +148,7 @@ struct IBMBobNativeSessionCleaner: IBMBobNativeSessionCleaning {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    private func resolveDeleteTarget(
+    private func resolveLocalDeleteTarget(
         executable: String,
         workingDirectoryURL: URL,
         nativeSessionID: String
@@ -91,11 +166,83 @@ struct IBMBobNativeSessionCleaner: IBMBobNativeSessionCleaning {
         }
 
         guard result.exitStatus == 0 else {
-            log("IBM Bob native cleanup could not list sessions: \(failureMessage(stdout: result.stdout, stderr: result.stderr, fallback: "IBM Bob list-sessions exited with status \(result.exitStatus)."))")
+            let message = failureMessage(
+                stdout: result.stdout,
+                stderr: result.stderr,
+                fallback: exitStatusMessage(command: "IBM Bob list-sessions", status: result.exitStatus)
+            )
+            log("IBM Bob native cleanup could not list sessions: \(message)")
             return nil
         }
 
-        let matches = parsedSessionEntries(from: result.stdout).filter { $0.nativeSessionID == nativeSessionID }
+        return resolvedDeleteTarget(from: result.stdout, nativeSessionID: nativeSessionID)
+    }
+
+    private func resolvedRemoteExecutable(workspace: Workspace, host: NexusDomain.Host) -> String? {
+        let result: ProviderCommandResult
+        do {
+            result = try runRemoteCommand(
+                host: host,
+                script: remoteIBMBobExecutableResolutionScript(workspace: workspace)
+            )
+        } catch {
+            log("IBM Bob native cleanup could not resolve the remote executable: \(error.localizedDescription)")
+            return nil
+        }
+
+        guard result.exitStatus == 0 else {
+            let message = failureMessage(
+                stdout: result.stdout,
+                stderr: result.stderr,
+                fallback: exitStatusMessage(command: "IBM Bob executable resolution", status: result.exitStatus)
+            )
+            log("IBM Bob native cleanup could not resolve the remote executable: \(message)")
+            return nil
+        }
+
+        return result.stdout
+            .split(whereSeparator: \.isNewline)
+            .map(String.init)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first(where: { $0.isEmpty == false })
+    }
+
+    private func resolveRemoteDeleteTarget(
+        executable: String,
+        workspace: Workspace,
+        host: NexusDomain.Host,
+        nativeSessionID: String
+    ) -> String? {
+        let result: ProviderCommandResult
+        do {
+            result = try runRemoteCommand(
+                host: host,
+                script: remoteIBMBobCommandScript(
+                    executable: executable,
+                    workspace: workspace,
+                    arguments: ["--list-sessions"]
+                )
+            )
+        } catch {
+            log("IBM Bob native cleanup could not list remote sessions: \(error.localizedDescription)")
+            return nil
+        }
+
+        guard result.exitStatus == 0 else {
+            let message = failureMessage(
+                stdout: result.stdout,
+                stderr: result.stderr,
+                fallback: exitStatusMessage(command: "IBM Bob list-sessions", status: result.exitStatus)
+            )
+            log("IBM Bob native cleanup could not list remote sessions: \(message)")
+            return nil
+        }
+
+        return resolvedDeleteTarget(from: result.stdout, nativeSessionID: nativeSessionID)
+    }
+
+    private func resolvedDeleteTarget(from stdout: String, nativeSessionID: String) -> String? {
+        let matches = parsedSessionEntries(from: stdout).filter { $0.nativeSessionID == nativeSessionID }
         guard matches.count == 1 else {
             return nil
         }
@@ -197,6 +344,63 @@ struct IBMBobNativeSessionCleaner: IBMBobNativeSessionCleaning {
             code: 1,
             userInfo: [NSLocalizedDescriptionKey: "IBM Bob native cleanup failed before the command completed."]
         )
+    }
+
+    private func runRemoteCommand(host: NexusDomain.Host, script: String) throws -> ProviderCommandResult {
+        try commandRunner.run(
+            executable: "/usr/bin/ssh",
+            arguments: remoteSSHArguments(host: host, script: script),
+            currentDirectoryURL: nil
+        )
+    }
+
+    private func remoteSSHArguments(host: NexusDomain.Host, script: String) -> [String] {
+        var arguments = [
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=5"
+        ]
+        if let port = host.port {
+            arguments += ["-p", String(port)]
+        }
+        arguments += [host.sshTarget, script]
+        return arguments
+    }
+
+    private func remoteIBMBobExecutableResolutionScript(workspace: Workspace) -> String {
+        let commandPathVariable = "BOB_PATH"
+        let resolveFunctionName = "resolve_bob_path"
+        let notFoundMarker = remoteExecutableNotFoundMarker(commandName: "bob")
+        let shellCommand = shellQuoted("command -v bob")
+        let fallbackCandidates = [
+            "$HOME/.local/bin/bob",
+            "$HOME/bin/bob",
+            "$HOME/.volta/bin/bob",
+            "$HOME/.asdf/shims/bob",
+            "$HOME/.local/share/mise/shims/bob",
+            "$HOME/.nix-profile/bin/bob",
+            "$HOME/.bun/bin/bob",
+            "$HOME/.nvm/current/bin/bob",
+            "/opt/homebrew/bin/bob",
+            "/usr/local/bin/bob",
+            "/usr/bin/bob",
+            "/bin/bob"
+        ].map { "\"\($0)\"" }.joined(separator: " ")
+        let shellCandidates = ShellSupport.remoteShellCandidateListScript()
+
+        return "cd \(shellQuoted(workspace.folderPath)) || { echo 'NEXUS_REMOTE_WORKSPACE_UNAVAILABLE' >&2; exit 1; }; \(resolveFunctionName)() { for shell in \(shellCandidates); do [ -n \"$shell\" ] || continue; [ -x \"$shell\" ] || continue; case \"${shell##*/}\" in csh|tcsh) CANDIDATE=\"$(\"$shell\" -i -c \"if ( -f ~/.login ) source ~/.login; command -v bob\" 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -c \"if ( -f ~/.login ) source ~/.login; command -v bob\" 2>/dev/null)\" || continue ;; fish) CANDIDATE=\"$(\"$shell\" -i -c \"command -v bob\" 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -l -c \"command -v bob\" 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -c \"command -v bob\" 2>/dev/null)\" || continue ;; *) CANDIDATE=\"$(\"$shell\" -lic \(shellCommand) 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -lc \(shellCommand) 2>/dev/null)\" || continue ;; esac; [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; for CANDIDATE in \(fallbackCandidates); do [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; return 1; }; \(commandPathVariable)=\"$(\(resolveFunctionName))\" || { echo '\(notFoundMarker)' >&2; exit 1; }; [ -n \"$\(commandPathVariable)\" ] || { echo '\(notFoundMarker)' >&2; exit 1; }; printf '%s\\n' \"$\(commandPathVariable)\"; \"$\(commandPathVariable)\" --version"
+    }
+
+    private func remoteIBMBobCommandScript(executable: String, workspace: Workspace, arguments: [String]) -> String {
+        let command = ([shellQuoted(executable)] + arguments.map(shellQuoted)).joined(separator: " ")
+        return "cd \(shellQuoted(workspace.folderPath)) || { echo 'NEXUS_REMOTE_WORKSPACE_UNAVAILABLE' >&2; exit 1; }; exec \(command)"
+    }
+
+    private func remoteExecutableNotFoundMarker(commandName: String) -> String {
+        "NEXUS_REMOTE_\(commandName.uppercased())_NOT_FOUND"
+    }
+
+    private func exitStatusMessage(command: String, status: Int32) -> String {
+        "\(command) exited with status \(status)."
     }
 
     private func failureMessage(stdout: String, stderr: String, fallback: String) -> String {

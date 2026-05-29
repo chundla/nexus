@@ -2044,10 +2044,12 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         guard let workspace = try metadataStore.workspace(id: resolvedSession.workspaceID) else {
             throw NexusMetadataStoreError.workspaceNotFound
         }
+        let host = try workspace.remoteHostID.flatMap { try metadataStore.host(id: $0) }
         let sessionRecordAdapterMetadata = try metadataStore.sessionRecordAdapterMetadata(sessionID: resolvedSession.id)
         ibmBobNativeSessionCleaner.bestEffortDeleteStoredContinuity(
             for: resolvedSession,
             workspace: workspace,
+            host: host,
             sessionRecordAdapterMetadata: sessionRecordAdapterMetadata
         )
 

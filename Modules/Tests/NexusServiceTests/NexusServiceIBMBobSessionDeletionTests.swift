@@ -111,6 +111,105 @@ struct NexusServiceIBMBobSessionDeletionTests {
         #expect(providerDetail.defaultSession == nil)
         #expect(commandRunner.invocations.contains(where: { $0.arguments == ["-lic", "'/tmp/fake-bob' '--delete-session' '2'"] }))
     }
+
+    @Test func remoteIBMBobDeleteAttemptsBestEffortHostCleanupWhenStoredContinuityExists() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let commandRunner = SequentialRemoteIBMBobDeletionCommandRunner(results: [
+            .success(stdout: "/tmp/fake-bob\n3.4.5\n"),
+            .success(stdout: "[]\n"),
+            .success(stdout: "/tmp/fake-bob\n3.4.5\n"),
+            .success(stdout: #"[{"session_id":"bob-session-1","index":2}]"# + "\n"),
+            .success(stdout: "deleted\n")
+        ])
+        let service = try makeRemoteIBMBobDeletionService(
+            rootURL: rootURL,
+            commandRunner: commandRunner,
+            turns: [
+                .init(stdoutLines: [
+                    #"{"type":"status","text":"Bob turn started","session_id":"bob-session-1"}"#,
+                    #"{"type":"message","text":"First reply"}"#,
+                    #"{"type":"completion","text":"First turn complete"}"#
+                ])
+            ]
+        )
+
+        let group = try service.createWorkspaceGroup(name: "Remote")
+        let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
+        _ = try service.validateHost(hostID: host.id)
+        let workspace = try service.createRemoteWorkspace(
+            name: "Remote Bob",
+            hostID: host.id,
+            remotePath: "/srv/bob",
+            primaryGroupID: group.id
+        )
+
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
+        _ = try service.sendSessionInput(sessionID: session.id, text: "ship it")
+        let deleted = try service.deleteSessionRecord(sessionID: session.id)
+        let providerDetail = try service.getProviderDetail(workspaceID: workspace.id, providerID: .ibmBob)
+        let cleanupInvocation = commandRunner.invocations.first(where: { invocation in
+            invocation.executable == "/usr/bin/ssh" && invocation.arguments.last?.contains("--delete-session") == true
+        })
+
+        #expect(deleted)
+        #expect(providerDetail.defaultSession == nil)
+        #expect(cleanupInvocation?.arguments.contains("build-box") == true)
+        #expect(cleanupInvocation?.arguments.last?.contains("--delete-session") == true)
+        #expect(cleanupInvocation?.arguments.last?.contains("'2'") == true)
+    }
+
+    @Test func remoteIBMBobDeleteStillRemovesSessionRecordWhenHostCleanupFails() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let commandRunner = SequentialRemoteIBMBobDeletionCommandRunner(results: [
+            .success(stdout: "/tmp/fake-bob\n3.4.5\n"),
+            .success(stdout: "[]\n"),
+            .success(stdout: "/tmp/fake-bob\n3.4.5\n"),
+            .success(stdout: #"[{"session_id":"bob-session-1","index":2}]"# + "\n"),
+            .success(stdout: "", stderr: "delete failed\n", exitStatus: 1),
+            .success(stdout: "/tmp/fake-bob\n3.4.5\n"),
+            .success(stdout: "[]\n")
+        ])
+        let service = try makeRemoteIBMBobDeletionService(
+            rootURL: rootURL,
+            commandRunner: commandRunner,
+            turns: [
+                .init(stdoutLines: [
+                    #"{"type":"status","text":"Bob turn started","session_id":"bob-session-1"}"#,
+                    #"{"type":"message","text":"First reply"}"#,
+                    #"{"type":"completion","text":"First turn complete"}"#
+                ])
+            ]
+        )
+
+        let group = try service.createWorkspaceGroup(name: "Remote")
+        let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
+        _ = try service.validateHost(hostID: host.id)
+        let workspace = try service.createRemoteWorkspace(
+            name: "Remote Bob",
+            hostID: host.id,
+            remotePath: "/srv/bob",
+            primaryGroupID: group.id
+        )
+
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
+        _ = try service.sendSessionInput(sessionID: session.id, text: "ship it")
+        let deleted = try service.deleteSessionRecord(sessionID: session.id)
+        let providerDetail = try service.getProviderDetail(workspaceID: workspace.id, providerID: .ibmBob)
+        let cleanupInvocation = commandRunner.invocations.first(where: { invocation in
+            invocation.executable == "/usr/bin/ssh" && invocation.arguments.last?.contains("--delete-session") == true
+        })
+
+        #expect(deleted)
+        #expect(providerDetail.defaultSession == nil)
+        #expect(cleanupInvocation?.arguments.contains("build-box") == true)
+        #expect(cleanupInvocation?.arguments.last?.contains("--delete-session") == true)
+    }
 }
 
 private func makeIBMBobDeletionService(
@@ -142,6 +241,37 @@ private func makeIBMBobDeletionService(
     )
 }
 
+private func makeRemoteIBMBobDeletionService(
+    rootURL: URL,
+    commandRunner: SequentialRemoteIBMBobDeletionCommandRunner,
+    turns: [IBMBobDeletionTransportHarness.Turn]
+) throws -> NexusService {
+    let transportHarness = IBMBobDeletionTransportHarness(turns: turns)
+    let launcher = ProcessSessionRuntimeLauncher(ibmBobTransportFactory: { executable, arguments, workingDirectory in
+        try transportHarness.makeTransport(
+            executable: executable,
+            arguments: arguments,
+            workingDirectory: workingDirectory
+        )
+    })
+    return try NexusService.bootstrapForTests(
+        rootURL: rootURL,
+        providerHealthEvaluator: ProviderHealthEvaluator(
+            executableResolver: IBMBobDeletionStubExecutableResolver(executables: [:]),
+            commandRunner: commandRunner,
+            localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+        ),
+        hostValidationEvaluator: RemoteIBMBobDeletionAvailableHostValidationEvaluator(),
+        workspaceAvailabilityEvaluator: RemoteIBMBobDeletionAvailableWorkspaceAvailabilityEvaluator(),
+        sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher),
+        ibmBobNativeSessionCleaner: IBMBobNativeSessionCleaner(
+            executableResolver: IBMBobDeletionStubExecutableResolver(executables: [:]),
+            commandRunner: commandRunner,
+            localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+        )
+    )
+}
+
 private struct IBMBobDeletionStubExecutableResolver: ProviderExecutableResolving {
     let executables: [String: String]
 
@@ -151,6 +281,34 @@ private struct IBMBobDeletionStubExecutableResolver: ProviderExecutableResolving
             searchedDirectories: ["/tmp/bin"],
             homeDirectories: ["/tmp/home"],
             pathEnvironment: "/tmp/bin"
+        )
+    }
+}
+
+private struct RemoteIBMBobDeletionAvailableHostValidationEvaluator: HostValidationEvaluating {
+    func validate(host: NexusDomain.Host) -> HostValidationResult {
+        HostValidationResult(
+            state: .available,
+            summary: "Host is available",
+            diagnostics: [
+                HostValidationDiagnostic(severity: .info, code: "sshTarget", message: "Validated \(host.sshTarget)")
+            ]
+        )
+    }
+}
+
+private struct RemoteIBMBobDeletionAvailableWorkspaceAvailabilityEvaluator: WorkspaceAvailabilityEvaluating {
+    func evaluate(workspace: Workspace, host: NexusDomain.Host, hostValidation: HostValidationSnapshot?) -> WorkspaceAvailabilityResult {
+        WorkspaceAvailabilityResult(
+            state: .available,
+            summary: "Workspace is available",
+            diagnostics: [
+                WorkspaceAvailabilityDiagnostic(
+                    severity: .info,
+                    code: "remotePath",
+                    message: "Validated remote path \(workspace.folderPath) on \(host.name)."
+                )
+            ]
         )
     }
 }
@@ -194,6 +352,39 @@ private final class RecordingIBMBobDeletionCommandRunner: ProviderCommandRunning
         }
 
         switch expectations[invocations.count - 1].result {
+        case let .success(stdout, stderr, exitStatus):
+            return ProviderCommandResult(exitStatus: exitStatus, stdout: stdout, stderr: stderr)
+        }
+    }
+}
+
+private final class SequentialRemoteIBMBobDeletionCommandRunner: ProviderCommandRunning, @unchecked Sendable {
+    struct RecordedInvocation: Equatable {
+        let executable: String
+        let arguments: [String]
+        let currentDirectoryURL: URL?
+    }
+
+    enum StubbedResult {
+        case success(stdout: String, stderr: String = "", exitStatus: Int32 = 0)
+    }
+
+    let results: [StubbedResult]
+    private(set) var invocations: [RecordedInvocation] = []
+
+    init(results: [StubbedResult]) {
+        self.results = results
+    }
+
+    func run(executable: String, arguments: [String], currentDirectoryURL: URL?) throws -> ProviderCommandResult {
+        let recordedInvocation = RecordedInvocation(executable: executable, arguments: arguments, currentDirectoryURL: currentDirectoryURL)
+        invocations.append(recordedInvocation)
+        let index = invocations.count - 1
+        guard results.indices.contains(index) else {
+            throw NSError(domain: "SequentialRemoteIBMBobDeletionCommandRunner", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing sequential stub #\(index) for \(executable) \(arguments)"])
+        }
+
+        switch results[index] {
         case let .success(stdout, stderr, exitStatus):
             return ProviderCommandResult(exitStatus: exitStatus, stdout: stdout, stderr: stderr)
         }
