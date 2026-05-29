@@ -1146,6 +1146,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     private let hostValidationEvaluator: any HostValidationEvaluating
     private let workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating
     private let sessionRuntimeManager: any SessionRuntimeManaging
+    private let workspaceCatalog: WorkspaceCatalog
     private var sessionLifecycle: (any SessionLifecycleManaging)!
     private var sessionInteraction: (any SessionInteractionManaging)!
     private let remoteAccessRuntime: RemoteAccessRuntime
@@ -1176,6 +1177,17 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         self.hostValidationEvaluator = hostValidationEvaluator
         self.workspaceAvailabilityEvaluator = workspaceAvailabilityEvaluator
         self.sessionRuntimeManager = sessionRuntimeManager
+        self.workspaceCatalog = WorkspaceCatalog(
+            dependencies: WorkspaceCatalogDependencies(
+                metadataStore: metadataStore,
+                sessionRecordStore: sessionRecordStore ?? MetadataStoreSessionRecordStore(metadataStore: metadataStore),
+                providerHealthEvaluator: providerHealthEvaluator,
+                hostValidationEvaluator: hostValidationEvaluator,
+                workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
+                sessionRuntimeManager: sessionRuntimeManager,
+                providerAdapters: providerAdapters
+            )
+        )
         self.sessionLifecycle = sessionLifecycle
         self.sessionInteraction = sessionInteraction
         self.remoteAccessRuntime = remoteAccessRuntime
@@ -1192,16 +1204,10 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                     self.providerAdapter(for: providerID)
                 },
                 remoteWorkspaceHealthContext: { [unowned self] workspace in
-                    try self.remoteWorkspaceTargetOverview(for: workspace, refreshHostValidation: true).map {
-                        RemoteWorkspaceHealthContext(
-                            host: $0.host,
-                            hostValidation: $0.hostValidation,
-                            workspaceAvailability: $0.workspaceAvailability
-                        )
-                    }
+                    try self.workspaceCatalog.remoteWorkspaceHealthContext(for: workspace, refreshHostValidation: true)
                 },
                 providerHealthSummary: { [unowned self] providerID, workspace, remoteContext in
-                    try await self.providerHealthSummary(
+                    try await self.workspaceCatalog.providerHealthSummary(
                         for: providerID,
                         workspace: workspace,
                         remoteContext: remoteContext,
@@ -1212,10 +1218,10 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                     self.resolveNamedSessionName(requestedName, existingSessions: existingSessions)
                 },
                 reconcileSessionRuntimeState: { [unowned self] in
-                    try self.reconcileSessionRuntimeState($0)
+                    try self.workspaceCatalog.reconcileSessionRuntimeState($0)
                 },
                 sessionMayRemainReadyWithoutRuntime: { [unowned self] in
-                    try self.sessionMayRemainReadyWithoutRuntime($0, workspace: $1)
+                    try self.workspaceCatalog.sessionMayRemainReadyWithoutRuntime($0, workspace: $1)
                 },
                 hasRuntime: { [unowned self] in
                     self.sessionRuntimeManager.hasRuntime(for: $0)
@@ -1242,7 +1248,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                     try self.sessionRecordStore.session(id: $0)
                 },
                 reconcileSessionRuntimeState: { [unowned self] in
-                    try self.reconcileSessionRuntimeState($0)
+                    try self.workspaceCatalog.reconcileSessionRuntimeState($0)
                 },
                 interactiveReadySession: { [unowned self] in
                     try await self.interactiveReadySession(for: $0)
@@ -1560,38 +1566,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     func getWorkspaceOverview(workspaceID: UUID) async throws -> WorkspaceOverview {
-        guard let workspace = try metadataStore.workspace(id: workspaceID) else {
-            throw NexusMetadataStoreError.workspaceNotFound
-        }
-
-        let remoteTarget = try remoteWorkspaceTargetOverview(for: workspace)
-        let remoteContext = remoteTarget.map {
-            RemoteWorkspaceHealthContext(
-                host: $0.host,
-                hostValidation: $0.hostValidation,
-                workspaceAvailability: $0.workspaceAvailability
-            )
-        }
-
-        var providerCards: [WorkspaceProviderCard] = []
-        for providerID in ProviderID.allCases {
-            let health = try await providerHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
-            let defaultSession = try sessionRecordStore.defaultSession(workspaceID: workspaceID, providerID: providerID)
-            providerCards.append(
-                WorkspaceProviderCard(
-                    provider: Provider(id: providerID),
-                    health: health,
-                    capabilities: providerCapabilities(for: providerID, workspace: workspace, health: health, defaultSession: defaultSession),
-                    prelaunchPrimarySurface: providerAdapter(for: providerID).primarySurface(in: workspace),
-                    defaultSession: try defaultSessionSummary(for: workspace, providerID: providerID),
-                    alternateSessionCount: try sessionRecordStore.listSessions(workspaceID: workspaceID, providerID: providerID)
-                        .filter { $0.isDefault == false }
-                        .count
-                )
-            )
-        }
-
-        return WorkspaceOverview(workspace: workspace, providerCards: providerCards, remoteTarget: remoteTarget)
+        try await workspaceCatalog.workspaceOverview(workspaceID: workspaceID)
     }
 
     func getProviderDetail(workspaceID: UUID, providerID: ProviderID) throws -> ProviderDetail {
@@ -1599,107 +1574,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     func getProviderDetail(workspaceID: UUID, providerID: ProviderID) async throws -> ProviderDetail {
-        guard let workspace = try metadataStore.workspace(id: workspaceID) else {
-            throw NexusMetadataStoreError.workspaceNotFound
-        }
-
-        let remoteTarget = try remoteWorkspaceTargetOverview(for: workspace)
-        let remoteContext = remoteTarget.map {
-            RemoteWorkspaceHealthContext(
-                host: $0.host,
-                hostValidation: $0.hostValidation,
-                workspaceAvailability: $0.workspaceAvailability
-            )
-        }
-        let sessions = try sessionRecordStore.listSessions(workspaceID: workspaceID, providerID: providerID)
-            .map(reconcileSessionRuntimeState)
-        let health = try await providerHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
-        let defaultSession = sessions.first(where: \.isDefault)
-
-        return ProviderDetail(
-            workspace: workspace,
-            provider: Provider(id: providerID),
-            health: health,
-            capabilities: providerCapabilities(for: providerID, workspace: workspace, health: health, defaultSession: defaultSession),
-            prelaunchPrimarySurface: providerAdapter(for: providerID).primarySurface(in: workspace),
-            defaultSession: defaultSession,
-            alternateSessions: sessions.filter { $0.isDefault == false && $0.state != .failed },
-            failedSessions: sessions.filter { $0.isDefault == false && $0.state == .failed }
-        )
-    }
-
-    private func remoteWorkspaceTargetOverview(
-        for workspace: Workspace,
-        refreshHostValidation: Bool = false
-    ) throws -> RemoteWorkspaceTargetOverview? {
-        guard workspace.kind == .remote,
-              let hostID = workspace.remoteHostID,
-              let host = try metadataStore.host(id: hostID) else {
-            return nil
-        }
-
-        let existingHostValidation = try metadataStore.hostValidation(hostID: hostID)
-        let hostValidation: HostValidationSnapshot?
-        if refreshHostValidation {
-            hostValidation = try metadataStore.saveHostValidation(
-                hostID: hostID,
-                result: hostValidationEvaluator.validate(host: host),
-                checkedAt: Date()
-            )
-        } else {
-            hostValidation = existingHostValidation
-        }
-
-        let availabilityResult = workspaceAvailabilityEvaluator.evaluate(
-            workspace: workspace,
-            host: host,
-            hostValidation: hostValidation
-        )
-        let availability = try metadataStore.saveWorkspaceAvailability(
-            workspaceID: workspace.id,
-            result: availabilityResult,
-            checkedAt: Date()
-        )
-        return RemoteWorkspaceTargetOverview(
-            host: host,
-            hostValidation: hostValidation,
-            workspaceAvailability: availability
-        )
-    }
-
-    private func providerHealthSummary(
-        for providerID: ProviderID,
-        workspace: Workspace,
-        remoteContext: RemoteWorkspaceHealthContext?,
-        preferFreshRemoteCheck: Bool = false
-    ) async throws -> ProviderHealthSummary {
-        let adapter = providerAdapter(for: providerID)
-
-        guard workspace.kind == .remote else {
-            return await adapter.healthSummary(
-                for: workspace,
-                remoteContext: remoteContext,
-                providerHealthEvaluator: providerHealthEvaluator
-            )
-        }
-
-        if preferFreshRemoteCheck == false,
-           let snapshot = try metadataStore.providerHealth(workspaceID: workspace.id, providerID: providerID),
-           adapter.shouldReuseRemoteHealthSnapshot(snapshot, remoteContext) {
-            return snapshot
-        }
-
-        let evaluated = await adapter.healthSummary(
-            for: workspace,
-            remoteContext: remoteContext,
-            providerHealthEvaluator: providerHealthEvaluator
-        )
-        return try metadataStore.saveProviderHealth(
-            workspaceID: workspace.id,
-            providerID: providerID,
-            summary: evaluated,
-            checkedAt: Date()
-        )
+        try await workspaceCatalog.providerDetail(workspaceID: workspaceID, providerID: providerID)
     }
 
     private func providerAdapter(for providerID: ProviderID) -> ServiceProviderAdapter {
@@ -1711,69 +1586,6 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 await providerHealthEvaluator.healthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
             }
         )
-    }
-
-    private func providerCapabilities(
-        for providerID: ProviderID,
-        workspace: Workspace,
-        health: ProviderHealthSummary,
-        defaultSession: Session?
-    ) -> ProviderCapabilities {
-        let adapter = providerAdapter(for: providerID)
-        let supportsDefaultSessionLaunch = adapter.supportsDefaultSessionLaunch(in: workspace)
-        let supportsNamedSessions = adapter.supportsNamedSessions(in: workspace)
-        let canLaunchDefaultSession = supportsDefaultSessionLaunch && (defaultSession != nil || health.launchability == .launchable)
-        let canCreateNamedSession = supportsNamedSessions && health.launchability == .launchable
-
-        return ProviderCapabilities(
-            launchDefaultSession: ProviderCapability(
-                action: .launchDefaultSession,
-                isSupported: supportsDefaultSessionLaunch,
-                isEnabled: canLaunchDefaultSession,
-                disabledReason: providerCapabilityDisabledReason(
-                    action: .launchDefaultSession,
-                    provider: adapter.provider,
-                    isSupported: supportsDefaultSessionLaunch,
-                    health: health,
-                    isEnabled: canLaunchDefaultSession
-                )
-            ),
-            createNamedSession: ProviderCapability(
-                action: .createNamedSession,
-                isSupported: supportsNamedSessions,
-                isEnabled: canCreateNamedSession,
-                disabledReason: providerCapabilityDisabledReason(
-                    action: .createNamedSession,
-                    provider: adapter.provider,
-                    isSupported: supportsNamedSessions,
-                    health: health,
-                    isEnabled: canCreateNamedSession
-                )
-            )
-        )
-    }
-
-    private func providerCapabilityDisabledReason(
-        action: ProviderCapability.Action,
-        provider: Provider,
-        isSupported: Bool,
-        health: ProviderHealthSummary,
-        isEnabled: Bool
-    ) -> String? {
-        guard isEnabled == false else {
-            return nil
-        }
-
-        guard isSupported else {
-            switch action {
-            case .launchDefaultSession:
-                return "\(provider.displayName) cannot launch a Default Session on this Workspace yet."
-            case .createNamedSession:
-                return "\(provider.displayName) cannot create Named Sessions on this Workspace yet."
-            }
-        }
-
-        return health.summary
     }
 
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: UUID?) throws -> Workspace {
@@ -3554,84 +3366,12 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         return "Session \(existingSessions.filter { $0.isDefault == false }.count + 1)"
     }
 
-    private func defaultSessionSummary(for workspace: Workspace, providerID: ProviderID) throws -> ProviderDefaultSessionSummary {
-        guard let session = try sessionRecordStore.defaultSession(workspaceID: workspace.id, providerID: providerID) else {
-            return ProviderDefaultSessionSummary(
-                state: .notCreated,
-                summary: "No default session yet",
-                actionTitle: "Launch"
-            )
-        }
-
-        let resolvedSession = try reconcileSessionRuntimeState(session)
-
-        switch resolvedSession.state {
-        case .ready:
-            return ProviderDefaultSessionSummary(
-                state: .ready,
-                summary: "Default session ready",
-                actionTitle: "Resume",
-                sessionID: resolvedSession.id
-            )
-        case .interrupted:
-            return ProviderDefaultSessionSummary(
-                state: .interrupted,
-                summary: resolvedSession.failureMessage ?? "Session interrupted after the service restarted",
-                actionTitle: "Relaunch",
-                sessionID: resolvedSession.id
-            )
-        case .exited:
-            return ProviderDefaultSessionSummary(
-                state: .exited,
-                summary: resolvedSession.failureMessage ?? "Session exited",
-                actionTitle: "Relaunch",
-                sessionID: resolvedSession.id
-            )
-        case .failed:
-            return ProviderDefaultSessionSummary(
-                state: .failed,
-                summary: resolvedSession.failureMessage ?? "Last launch failed",
-                actionTitle: "Relaunch",
-                sessionID: resolvedSession.id
-            )
-        }
-    }
-
     private func reconcileSessionRuntimeState(_ session: Session) throws -> Session {
-        guard session.state == .ready else {
-            return session
-        }
-
-        if let runtimeState = sessionRuntimeManager.runtimeState(for: session) {
-            guard runtimeState != .ready else {
-                return session
-            }
-
-            return try updatedSessionForRuntimeState(session, runtimeState: runtimeState)
-        }
-
-        guard sessionRuntimeManager.hasRuntime(for: session) == false else {
-            return session
-        }
-
-        let workspace = try metadataStore.workspace(id: session.workspaceID)
-        if try sessionMayRemainReadyWithoutRuntime(session, workspace: workspace) {
-            return session
-        }
-
-        return try sessionRecordStore.updateSession(
-            id: session.id,
-            state: .interrupted,
-            failureMessage: try interruptedSessionFailureMessage(for: session, workspace: workspace)
-        )
+        try workspaceCatalog.reconcileSessionRuntimeState(session)
     }
 
     private func sessionMayRemainReadyWithoutRuntime(_ session: Session, workspace: Workspace?) throws -> Bool {
-        guard try stopRequiresActiveIBMBobTurn(session, workspace: workspace) else {
-            return false
-        }
-
-        return try sessionRecordStore.sessionRecordAdapterMetadata(sessionID: session.id)?.ibmBobTurnInProgress != true
+        try workspaceCatalog.sessionMayRemainReadyWithoutRuntime(session, workspace: workspace)
     }
 
     private func readySessionRecordMayBeDeleted(_ session: Session) throws -> Bool {

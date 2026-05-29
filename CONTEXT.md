@@ -88,6 +88,18 @@ _Avoid_: operable provider, enabled provider
 A product-supported action Nexus exposes for a Provider on a specific Workspace target, such as launching the **Default Session** or creating a **Named Session**.
 _Avoid_: hidden feature flag, UI-only affordance
 
+**Workspace Overview**:
+The provider-first summary Nexus shows for one Workspace, including current Provider summaries and Session entry points.
+_Avoid_: workspace dashboard, project summary
+
+**Provider Detail**:
+The provider-focused summary Nexus shows for one Provider in one Workspace, including Session lanes and failed Session records.
+_Avoid_: provider page, tool detail
+
+**Workspace Catalog**:
+The browseable read model Nexus uses to assemble Workspace Overview and Provider Detail state for Workspace-first navigation.
+_Avoid_: cache blob, sidebar data
+
 **Approval Request**:
 A Session event that asks Nexus to collect an allow-or-deny decision for provider work before it continues.
 _Avoid_: auth prompt, provider popup
@@ -138,6 +150,8 @@ _Avoid_: stop, close
 - A **Workspace** and **Provider** pair has exactly one conceptual **Default Session** lane
 - Deleting a **Default Session Record** does not remove the conceptual **Default Session** lane for its **Workspace** and **Provider**
 - A **Workspace** and **Provider** pair may have many **Named Sessions**
+- A **Workspace Overview** belongs to exactly one **Workspace**
+- A **Provider Detail** belongs to exactly one **Workspace** and one **Provider**
 - A **Session** may be **Detached** without being stopped
 - A **Session** has exactly one **Session Record** in Nexus persistence
 - A **Session** has at most one **Controller** at a time
