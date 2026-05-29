@@ -64,6 +64,16 @@ final class NexusAppModel {
         self.remotePairingEndpoint = remotePairingServer?.endpoint
     }
 
+    nonisolated static let defaultRemoteAccessListeningPort = 9234
+
+    nonisolated static func appBootstrapListeningPort(environment: [String: String] = ProcessInfo.processInfo.environment) -> Int? {
+        if environment["XCTestConfigurationFilePath"] != nil || environment["XCTestBundlePath"] != nil {
+            return nil
+        }
+
+        return defaultRemoteAccessListeningPort
+    }
+
     static func live(listeningPort: Int? = 9234) throws -> NexusAppModel {
         let service = try NexusEmbeddedServiceBootstrap.bootstrap()
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
