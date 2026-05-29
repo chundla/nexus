@@ -27,7 +27,12 @@ enum ProviderModuleOpenSessionRequest {
     }
 }
 
+struct ProviderModuleOpenSessionActions {
+    let executeSharedOpen: () async throws -> Session
+}
+
 struct ProviderModulePersistedSessionLaunchActions {
+    let executeSharedLaunch: () async throws -> Session
     let attemptRemoteRuntimeRecovery: () async throws -> Session
     let remoteRuntimeRecoveryFailureContext: (Error) throws -> RemoteRuntimeRecoveryFailureContext
     let persistRemoteRecoveryFailure: (RemoteRuntimeRecoveryFailureContext) throws -> Session
@@ -65,28 +70,26 @@ protocol ProviderModule {
 
     func openSession(
         _ request: ProviderModuleOpenSessionRequest,
-        openFallback: @escaping () async throws -> Session
-    ) async throws -> Session?
+        actions: ProviderModuleOpenSessionActions
+    ) async throws -> Session
 
     func launchPersistedSession(
-        _ request: ProviderModulePersistedSessionLaunchRequest,
-        executeFallback: @escaping () async throws -> Session
-    ) async throws -> Session?
+        _ request: ProviderModulePersistedSessionLaunchRequest
+    ) async throws -> Session
 }
 
 extension ProviderModule {
     func openSession(
         _ request: ProviderModuleOpenSessionRequest,
-        openFallback: @escaping () async throws -> Session
-    ) async throws -> Session? {
-        nil
+        actions: ProviderModuleOpenSessionActions
+    ) async throws -> Session {
+        try await actions.executeSharedOpen()
     }
 
     func launchPersistedSession(
-        _ request: ProviderModulePersistedSessionLaunchRequest,
-        executeFallback: @escaping () async throws -> Session
-    ) async throws -> Session? {
-        nil
+        _ request: ProviderModulePersistedSessionLaunchRequest
+    ) async throws -> Session {
+        try await request.actions.executeSharedLaunch()
     }
 }
 
@@ -269,19 +272,11 @@ struct PiProviderModule: ProviderModule {
         remoteHealthSnapshotReuseEvaluator(snapshot, remoteContext)
     }
 
-    func openSession(
-        _ request: ProviderModuleOpenSessionRequest,
-        openFallback: @escaping () async throws -> Session
-    ) async throws -> Session? {
-        try await openFallback()
-    }
-
     func launchPersistedSession(
-        _ request: ProviderModulePersistedSessionLaunchRequest,
-        executeFallback: @escaping () async throws -> Session
-    ) async throws -> Session? {
+        _ request: ProviderModulePersistedSessionLaunchRequest
+    ) async throws -> Session {
         guard request.execution.workspace.kind == .remote else {
-            return nil
+            return try await request.actions.executeSharedLaunch()
         }
 
         switch request.execution.mode {
@@ -289,7 +284,7 @@ struct PiProviderModule: ProviderModule {
             return try await recoverRemotePersistedSession(request)
         case let .launch(forceFreshRemoteRuntime):
             guard forceFreshRemoteRuntime else {
-                return nil
+                return try await request.actions.executeSharedLaunch()
             }
 
             return try await launchFreshRemotePersistedSession(

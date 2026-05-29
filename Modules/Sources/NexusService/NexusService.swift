@@ -2015,62 +2015,54 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     private func executePersistedSessionLaunch(_ execution: PersistedSessionLaunchExecution) async throws -> Session {
-        let fallback = { [self] in
-            try await self.executePersistedSessionLaunchWithoutProviderModule(execution)
-        }
-
-        let request = ProviderModulePersistedSessionLaunchRequest(
-            execution: execution,
-            actions: ProviderModulePersistedSessionLaunchActions(
-                attemptRemoteRuntimeRecovery: { [self] in
-                    try await self.attemptRemoteSessionRecovery(
-                        execution.session,
-                        workspace: execution.workspace,
-                        launchSnapshot: execution.launchSnapshot
-                    )
-                },
-                remoteRuntimeRecoveryFailureContext: { [self] error in
-                    try self.remoteRuntimeRecoveryFailureContext(
-                        for: error,
-                        session: execution.session,
-                        workspace: execution.workspace
-                    )
-                },
-                persistRemoteRecoveryFailure: { [self] failureContext in
-                    try self.persistRemoteRuntimeRecoveryFailure(
-                        for: execution.session,
-                        failureContext: failureContext
-                    )
-                },
-                attemptLaunch: { [self] forceFreshRemoteRuntime, sessionRecordAdapterMetadataSource in
-                    try await self.attemptSessionLaunch(
-                        execution.session,
-                        workspace: execution.workspace,
-                        launchSnapshot: execution.launchSnapshot,
-                        forceFreshRemoteRuntime: forceFreshRemoteRuntime,
-                        sessionRecordAdapterMetadataSource: sessionRecordAdapterMetadataSource
-                    )
-                },
-                persistLaunchFailure: { [self] error in
-                    try self.persistLaunchFailure(for: execution.session, error: error)
-                },
-                resolvedSessionRecordAdapterMetadata: { [self] source in
-                    try self.resolvedSessionRecordAdapterMetadata(for: execution.session, source: source)
-                }
+        try await providerModuleRegistry.module(for: execution.session.providerID).launchPersistedSession(
+            ProviderModulePersistedSessionLaunchRequest(
+                execution: execution,
+                actions: ProviderModulePersistedSessionLaunchActions(
+                    executeSharedLaunch: { [self] in
+                        try await self.executeSharedPersistedSessionLaunch(execution)
+                    },
+                    attemptRemoteRuntimeRecovery: { [self] in
+                        try await self.attemptRemoteSessionRecovery(
+                            execution.session,
+                            workspace: execution.workspace,
+                            launchSnapshot: execution.launchSnapshot
+                        )
+                    },
+                    remoteRuntimeRecoveryFailureContext: { [self] error in
+                        try self.remoteRuntimeRecoveryFailureContext(
+                            for: error,
+                            session: execution.session,
+                            workspace: execution.workspace
+                        )
+                    },
+                    persistRemoteRecoveryFailure: { [self] failureContext in
+                        try self.persistRemoteRuntimeRecoveryFailure(
+                            for: execution.session,
+                            failureContext: failureContext
+                        )
+                    },
+                    attemptLaunch: { [self] forceFreshRemoteRuntime, sessionRecordAdapterMetadataSource in
+                        try await self.attemptSessionLaunch(
+                            execution.session,
+                            workspace: execution.workspace,
+                            launchSnapshot: execution.launchSnapshot,
+                            forceFreshRemoteRuntime: forceFreshRemoteRuntime,
+                            sessionRecordAdapterMetadataSource: sessionRecordAdapterMetadataSource
+                        )
+                    },
+                    persistLaunchFailure: { [self] error in
+                        try self.persistLaunchFailure(for: execution.session, error: error)
+                    },
+                    resolvedSessionRecordAdapterMetadata: { [self] source in
+                        try self.resolvedSessionRecordAdapterMetadata(for: execution.session, source: source)
+                    }
+                )
             )
         )
-
-        if let session = try await providerModuleRegistry.module(for: execution.session.providerID).launchPersistedSession(
-            request,
-            executeFallback: fallback
-        ) {
-            return session
-        }
-
-        return try await fallback()
     }
 
-    private func executePersistedSessionLaunchWithoutProviderModule(
+    private func executeSharedPersistedSessionLaunch(
         _ execution: PersistedSessionLaunchExecution
     ) async throws -> Session {
         switch execution.mode {

@@ -5,6 +5,92 @@ import NexusDomain
 import Testing
 
 struct PiProviderModuleTests {
+    @Test func genericProviderModuleUsesSharedOpenAndPersistedLaunchActions() async throws {
+        let module = ServiceProviderAdapter(
+            providerID: .claude,
+            supportsDefaultSessionLaunch: true,
+            supportsNamedSessions: true,
+            healthSummaryEvaluator: { _, _, _ in
+                ProviderHealthSummary(state: .available, summary: "Ready", resolvedExecutable: "/tmp/fake-claude", launchability: .launchable)
+            }
+        )
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Local Claude",
+            kind: .local,
+            folderPath: "/tmp/local-claude",
+            primaryGroupID: UUID()
+        )
+        let openedSession = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let launchedSession = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            name: "Review",
+            isDefault: false,
+            state: .ready
+        )
+        let tracker = SharedActionTracker()
+
+        let openResult = try await module.openSession(
+            .launchOrResumeDefaultSession(workspace: workspace, providerID: .claude),
+            actions: ProviderModuleOpenSessionActions(
+                executeSharedOpen: {
+                    tracker.sharedOpenCount += 1
+                    return openedSession
+                }
+            )
+        )
+        let launchResult = try await module.launchPersistedSession(
+            ProviderModulePersistedSessionLaunchRequest(
+                execution: PersistedSessionLaunchExecution(
+                    session: launchedSession,
+                    workspace: workspace,
+                    launchSnapshot: LaunchSnapshot(
+                        sessionID: launchedSession.id,
+                        workspaceID: workspace.id,
+                        providerID: .claude,
+                        primarySurface: .terminal,
+                        resolvedExecutable: "/tmp/claude",
+                        resolvedWorkingDirectory: workspace.folderPath
+                    ),
+                    mode: .launch(forceFreshRemoteRuntime: false),
+                    sessionRecordAdapterMetadataSource: .stored
+                ),
+                actions: ProviderModulePersistedSessionLaunchActions(
+                    executeSharedLaunch: {
+                        tracker.sharedLaunchCount += 1
+                        return launchedSession
+                    },
+                    attemptRemoteRuntimeRecovery: { launchedSession },
+                    remoteRuntimeRecoveryFailureContext: { _ in
+                        RemoteRuntimeRecoveryFailureContext(
+                            detail: "unused",
+                            normalizedDetail: "unused",
+                            runtimeIdentifier: "runtime-1",
+                            hostName: "Build Server"
+                        )
+                    },
+                    persistRemoteRecoveryFailure: { _ in launchedSession },
+                    attemptLaunch: { _, _ in launchedSession },
+                    persistLaunchFailure: { _ in launchedSession },
+                    resolvedSessionRecordAdapterMetadata: { _ in nil }
+                )
+            )
+        )
+
+        #expect(openResult == openedSession)
+        #expect(launchResult == launchedSession)
+        #expect(tracker.sharedOpenCount == 1)
+        #expect(tracker.sharedLaunchCount == 1)
+    }
+
     @Test func piProviderModuleOwnsOpenSessionSeamForLocalAndRemotePiSessions() async throws {
         let module = PiProviderModule(
             adapter: ServiceProviderAdapter(
@@ -31,7 +117,7 @@ struct PiProviderModuleTests {
             primaryGroupID: UUID(),
             remoteHostID: UUID()
         )
-        let fallbackCounter = FallbackCounter()
+        let tracker = SharedActionTracker()
         let localDefaultSession = Session(
             id: UUID(),
             workspaceID: localWorkspace.id,
@@ -65,38 +151,46 @@ struct PiProviderModuleTests {
 
         let localOpen = try await module.openSession(
             .launchOrResumeDefaultSession(workspace: localWorkspace, providerID: .pi),
-            openFallback: {
-                fallbackCounter.value += 1
-                return localDefaultSession
-            }
+            actions: ProviderModuleOpenSessionActions(
+                executeSharedOpen: {
+                    tracker.sharedOpenCount += 1
+                    return localDefaultSession
+                }
+            )
         )
         let remoteDefaultOpen = try await module.openSession(
             .launchOrResumeDefaultSession(workspace: remoteWorkspace, providerID: .pi),
-            openFallback: {
-                fallbackCounter.value += 1
-                return remoteDefaultSession
-            }
+            actions: ProviderModuleOpenSessionActions(
+                executeSharedOpen: {
+                    tracker.sharedOpenCount += 1
+                    return remoteDefaultSession
+                }
+            )
         )
         let remoteNamedOpen = try await module.openSession(
             .createNamedSession(workspace: remoteWorkspace, providerID: .pi, name: remoteNamedSession.name),
-            openFallback: {
-                fallbackCounter.value += 1
-                return remoteNamedSession
-            }
+            actions: ProviderModuleOpenSessionActions(
+                executeSharedOpen: {
+                    tracker.sharedOpenCount += 1
+                    return remoteNamedSession
+                }
+            )
         )
         let remotePersistedOpen = try await module.openSession(
             .launchOrResumePersistedSession(persistedRemoteSession, workspace: remoteWorkspace),
-            openFallback: {
-                fallbackCounter.value += 1
-                return persistedRemoteSession
-            }
+            actions: ProviderModuleOpenSessionActions(
+                executeSharedOpen: {
+                    tracker.sharedOpenCount += 1
+                    return persistedRemoteSession
+                }
+            )
         )
 
         #expect(localOpen == localDefaultSession)
         #expect(remoteDefaultOpen == remoteDefaultSession)
         #expect(remoteNamedOpen == remoteNamedSession)
         #expect(remotePersistedOpen == persistedRemoteSession)
-        #expect(fallbackCounter.value == 4)
+        #expect(tracker.sharedOpenCount == 4)
     }
 
     @Test func piProviderModuleOwnsRemoteRecoveryAndInvalidContinuityFallback() async throws {
@@ -151,6 +245,10 @@ struct PiProviderModuleTests {
                     sessionRecordAdapterMetadataSource: .stored
                 ),
                 actions: ProviderModulePersistedSessionLaunchActions(
+                    executeSharedLaunch: {
+                        tracker.didUseSharedLaunch = true
+                        return session
+                    },
                     attemptRemoteRuntimeRecovery: {
                         throw NSError(
                             domain: "PiProviderModuleTests",
@@ -198,15 +296,11 @@ struct PiProviderModuleTests {
                         }
                     }
                 )
-            ),
-            executeFallback: {
-                tracker.didUseFallback = true
-                return session
-            }
+            )
         )
 
         #expect(launchedSession == recoveredSession)
-        #expect(tracker.didUseFallback == false)
+        #expect(tracker.didUseSharedLaunch == false)
         #expect(tracker.recoveryFailureErrors == ["NEXUS_REMOTE_RUNTIME_NOT_FOUND"])
         #expect(tracker.persistedRecoveryFailures.isEmpty)
         #expect(tracker.launchMetadataSources.count == 2)
@@ -278,6 +372,10 @@ struct PiProviderModuleTests {
                     sessionRecordAdapterMetadataSource: .stored
                 ),
                 actions: ProviderModulePersistedSessionLaunchActions(
+                    executeSharedLaunch: {
+                        tracker.didUseSharedLaunch = true
+                        return session
+                    },
                     attemptRemoteRuntimeRecovery: {
                         throw NSError(
                             domain: "PiProviderModuleTests",
@@ -309,15 +407,11 @@ struct PiProviderModuleTests {
                     },
                     resolvedSessionRecordAdapterMetadata: { _ in nil }
                 )
-            ),
-            executeFallback: {
-                tracker.didUseFallback = true
-                return session
-            }
+            )
         )
 
         #expect(launchedSession == failedSession)
-        #expect(tracker.didUseFallback == false)
+        #expect(tracker.didUseSharedLaunch == false)
         #expect(tracker.persistedRecoveryFailures.count == 1)
         #expect(tracker.launchMetadataSources.isEmpty)
         #expect(tracker.recoveryFailureErrors == ["persisted"])
@@ -367,12 +461,13 @@ struct PiProviderModuleTests {
     }
 }
 
-private final class FallbackCounter: @unchecked Sendable {
-    var value = 0
+private final class SharedActionTracker: @unchecked Sendable {
+    var sharedOpenCount = 0
+    var sharedLaunchCount = 0
 }
 
 private final class PersistedLaunchTracker: @unchecked Sendable {
-    var didUseFallback = false
+    var didUseSharedLaunch = false
     var recoveryFailureErrors: [String] = []
     var persistedRecoveryFailures: [RemoteRuntimeRecoveryFailureContext] = []
     var launchMetadataSources: [SessionRecordAdapterMetadataLaunchSource] = []

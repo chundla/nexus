@@ -57,30 +57,26 @@ final class ServiceSessionLifecycle: SessionLifecycleManaging {
     }
 
     private func openSession(_ request: ProviderModuleOpenSessionRequest) async throws -> Session {
-        let fallback = { [self] in
-            try await self.openSessionWithoutProviderModule(request)
-        }
-
-        if let session = try await dependencies.providerModule(request.providerID).openSession(
+        try await dependencies.providerModule(request.providerID).openSession(
             request,
-            openFallback: fallback
-        ) {
-            return session
-        }
-
-        return try await fallback()
+            actions: ProviderModuleOpenSessionActions(
+                executeSharedOpen: { [self] in
+                    try await self.openSharedSession(request)
+                }
+            )
+        )
     }
 
-    private func openSessionWithoutProviderModule(_ request: ProviderModuleOpenSessionRequest) async throws -> Session {
+    private func openSharedSession(_ request: ProviderModuleOpenSessionRequest) async throws -> Session {
         switch request {
         case let .launchOrResumeDefaultSession(workspace, providerID):
-            return try await launchOrResumeDefaultSessionWithoutProviderModule(
+            return try await launchOrResumeDefaultSharedSession(
                 workspaceID: workspace.id,
                 providerID: providerID,
                 workspace: workspace
             )
         case let .createNamedSession(workspace, providerID, name):
-            return try await createNamedSessionWithoutProviderModule(
+            return try await createNamedSharedSession(
                 workspaceID: workspace.id,
                 providerID: providerID,
                 name: name,
@@ -91,7 +87,7 @@ final class ServiceSessionLifecycle: SessionLifecycleManaging {
         }
     }
 
-    private func launchOrResumeDefaultSessionWithoutProviderModule(
+    private func launchOrResumeDefaultSharedSession(
         workspaceID: UUID,
         providerID: ProviderID,
         workspace: Workspace
@@ -125,7 +121,7 @@ final class ServiceSessionLifecycle: SessionLifecycleManaging {
         return try await launchFreshSession(session, workspace: workspace, adapter: adapter, executable: executable)
     }
 
-    private func createNamedSessionWithoutProviderModule(
+    private func createNamedSharedSession(
         workspaceID: UUID,
         providerID: ProviderID,
         name: String?,

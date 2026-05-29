@@ -633,10 +633,10 @@ private struct RecordingOpenProviderModule: ProviderModule {
 
     func openSession(
         _ request: ProviderModuleOpenSessionRequest,
-        openFallback: @escaping () async throws -> Session
-    ) async throws -> Session? {
+        actions: ProviderModuleOpenSessionActions
+    ) async throws -> Session {
         tracker.requests.append(.init(request: request))
-        return try await openFallback()
+        return try await actions.executeSharedOpen()
     }
 }
 
