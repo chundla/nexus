@@ -1185,7 +1185,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 hostValidationEvaluator: hostValidationEvaluator,
                 workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
                 sessionRuntimeManager: sessionRuntimeManager,
-                providerAdapters: providerAdapters
+                providerAdapters: providerAdapters,
+                providerModuleRegistry: ServiceSessionProviderRegistry.providerModules(providerAdapters: providerAdapters)
             )
         )
         self.sessionLifecycle = sessionLifecycle

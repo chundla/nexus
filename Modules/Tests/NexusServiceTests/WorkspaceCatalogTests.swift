@@ -23,6 +23,50 @@ struct WorkspaceCatalogTests {
         #expect(persistedSession.failureMessage == "Session interrupted because the background service restarted. Relaunch to create a new live runtime.")
     }
 
+    @Test func workspaceOverviewUsesProviderModuleRegistryForPiCatalogReads() async throws {
+        let fixture = try WorkspaceCatalogFixture(
+            providerModuleRegistry: ProviderModuleRegistry(
+                modules: [
+                    .pi: StubProviderModule(
+                        providerID: .pi,
+                        health: ProviderHealthSummary(
+                            state: .misconfigured,
+                            summary: "Pi catalog reads now come from the Provider Module",
+                            launchability: .notLaunchable
+                        ),
+                        capabilities: ProviderCapabilities(
+                            launchDefaultSession: ProviderCapability(
+                                action: .launchDefaultSession,
+                                isSupported: false,
+                                isEnabled: false,
+                                disabledReason: "Module-owned launch gating"
+                            ),
+                            createNamedSession: ProviderCapability(
+                                action: .createNamedSession,
+                                isSupported: false,
+                                isEnabled: false,
+                                disabledReason: "Module-owned named-session gating"
+                            )
+                        ),
+                        prelaunchPrimarySurface: .terminal
+                    )
+                ]
+            )
+        )
+
+        let overview = try await fixture.catalog.workspaceOverview(workspaceID: fixture.workspace.id)
+        let detail = try await fixture.catalog.providerDetail(workspaceID: fixture.workspace.id, providerID: .pi)
+        let piCard = try #require(overview.providerCards.first(where: { $0.provider.id == .pi }))
+
+        #expect(piCard.health.summary == "Pi catalog reads now come from the Provider Module")
+        #expect(piCard.capabilities.launchDefaultSession.disabledReason == "Module-owned launch gating")
+        #expect(piCard.capabilities.createNamedSession.disabledReason == "Module-owned named-session gating")
+        #expect(piCard.prelaunchPrimarySurface == .terminal)
+        #expect(detail.health == piCard.health)
+        #expect(detail.capabilities == piCard.capabilities)
+        #expect(detail.prelaunchPrimarySurface == piCard.prelaunchPrimarySurface)
+    }
+
     @Test func workspaceOverviewsPreserveInputOrder() async throws {
         let fixture = try WorkspaceCatalogFixture()
         let secondWorkspace = try fixture.metadataStore.createLocalWorkspace(
@@ -47,7 +91,7 @@ private struct WorkspaceCatalogFixture {
     let workspace: Workspace
     let secondWorkspaceFolder: URL
 
-    init() throws {
+    init(providerModuleRegistry: ProviderModuleRegistry? = nil) throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("WorkspaceCatalogTests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -72,6 +116,7 @@ private struct WorkspaceCatalogFixture {
         self.group = group
         self.workspace = workspace
         self.secondWorkspaceFolder = secondWorkspaceFolder
+        let providerAdapters = ServiceSessionProviderRegistry.providerAdapters()
         self.catalog = WorkspaceCatalog(
             dependencies: WorkspaceCatalogDependencies(
                 metadataStore: metadataStore,
@@ -80,9 +125,56 @@ private struct WorkspaceCatalogFixture {
                 hostValidationEvaluator: UnusedHostValidationEvaluator(),
                 workspaceAvailabilityEvaluator: UnusedWorkspaceAvailabilityEvaluator(),
                 sessionRuntimeManager: InMemorySessionRuntimeManager(),
-                providerAdapters: ServiceSessionProviderRegistry.providerAdapters()
+                providerAdapters: providerAdapters,
+                providerModuleRegistry: providerModuleRegistry ?? ServiceSessionProviderRegistry.providerModules(providerAdapters: providerAdapters)
             )
         )
+    }
+}
+
+private struct StubProviderModule: ProviderModule {
+    let provider: Provider
+    let health: ProviderHealthSummary
+    let capabilities: ProviderCapabilities
+    let prelaunchPrimarySurface: SessionSurface
+
+    init(
+        providerID: ProviderID,
+        health: ProviderHealthSummary,
+        capabilities: ProviderCapabilities,
+        prelaunchPrimarySurface: SessionSurface
+    ) {
+        self.provider = Provider(id: providerID)
+        self.health = health
+        self.capabilities = capabilities
+        self.prelaunchPrimarySurface = prelaunchPrimarySurface
+    }
+
+    func providerHealthSummary(
+        for workspace: Workspace,
+        remoteContext: RemoteWorkspaceHealthContext?,
+        providerHealthEvaluator: any ProviderHealthEvaluating
+    ) async -> ProviderHealthSummary {
+        health
+    }
+
+    func providerCapabilities(
+        in workspace: Workspace,
+        health: ProviderHealthSummary,
+        defaultSession: Session?
+    ) -> ProviderCapabilities {
+        capabilities
+    }
+
+    func prelaunchPrimarySurface(in workspace: Workspace) -> SessionSurface {
+        prelaunchPrimarySurface
+    }
+
+    func reusesRemoteHealthSnapshot(
+        _ snapshot: ProviderHealthSummary,
+        remoteContext: RemoteWorkspaceHealthContext?
+    ) -> Bool {
+        false
     }
 }
 

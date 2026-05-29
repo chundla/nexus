@@ -87,6 +87,20 @@ enum ServiceSessionProviderRegistry {
         return defaults.merging(overrides) { _, override in override }
     }
 
+    static func providerModules(
+        providerAdapters: [ProviderID: ServiceProviderAdapter]
+    ) -> ProviderModuleRegistry {
+        var modules: [ProviderID: any ProviderModule] = providerAdapters.reduce(into: [:]) { partialResult, entry in
+            partialResult[entry.key] = entry.value
+        }
+
+        if let piAdapter = providerAdapters[.pi] {
+            modules[.pi] = PiProviderModule(adapter: piAdapter)
+        }
+
+        return ProviderModuleRegistry(modules: modules)
+    }
+
     static func localProtocolNativeRuntimeFactories(
         piTransportFactory: @escaping PiRPCSessionRuntime.TransportFactory,
         codexTransportFactory: @escaping CodexAppServerRuntime.TransportFactory,

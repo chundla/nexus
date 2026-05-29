@@ -12,6 +12,10 @@ _Avoid_: project, repo
 A supported coding CLI integration that can be used inside a Workspace.
 _Avoid_: tool, backend
 
+**Provider Module**:
+The Background Service module that owns one Provider's Provider Health, Provider Capability rules, primary Session Surface, launch/relaunch behavior, and Session Record continuation behavior.
+_Avoid_: provider service, registry entry, launch helper
+
 **Session**:
 An app-owned provider-managed workstream for one Provider in one Workspace.
 _Avoid_: process, tab, terminal

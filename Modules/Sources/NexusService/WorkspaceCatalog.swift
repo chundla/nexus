@@ -16,6 +16,7 @@ struct WorkspaceCatalogDependencies {
     let workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating
     let sessionRuntimeManager: any SessionRuntimeManaging
     let providerAdapters: [ProviderID: ServiceProviderAdapter]
+    let providerModuleRegistry: ProviderModuleRegistry
 }
 
 final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
@@ -41,14 +42,15 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
 
         var providerCards: [WorkspaceProviderCard] = []
         for providerID in ProviderID.allCases {
+            let providerModule = providerModule(for: providerID)
             let health = try await providerHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
             let defaultSession = try dependencies.sessionRecordStore.defaultSession(workspaceID: workspaceID, providerID: providerID)
             providerCards.append(
                 WorkspaceProviderCard(
                     provider: Provider(id: providerID),
                     health: health,
-                    capabilities: providerCapabilities(for: providerID, workspace: workspace, health: health, defaultSession: defaultSession),
-                    prelaunchPrimarySurface: providerAdapter(for: providerID).primarySurface(in: workspace),
+                    capabilities: providerModule.providerCapabilities(in: workspace, health: health, defaultSession: defaultSession),
+                    prelaunchPrimarySurface: providerModule.prelaunchPrimarySurface(in: workspace),
                     defaultSession: try defaultSessionSummary(for: workspace, providerID: providerID),
                     alternateSessionCount: try dependencies.sessionRecordStore.listSessions(workspaceID: workspaceID, providerID: providerID)
                         .filter { $0.isDefault == false }
@@ -73,6 +75,7 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
                 workspaceAvailability: $0.workspaceAvailability
             )
         }
+        let providerModule = providerModule(for: providerID)
         let sessions = try dependencies.sessionRecordStore.listSessions(workspaceID: workspaceID, providerID: providerID)
             .map(reconcileSessionRuntimeState)
         let health = try await providerHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
@@ -82,8 +85,8 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
             workspace: workspace,
             provider: Provider(id: providerID),
             health: health,
-            capabilities: providerCapabilities(for: providerID, workspace: workspace, health: health, defaultSession: defaultSession),
-            prelaunchPrimarySurface: providerAdapter(for: providerID).primarySurface(in: workspace),
+            capabilities: providerModule.providerCapabilities(in: workspace, health: health, defaultSession: defaultSession),
+            prelaunchPrimarySurface: providerModule.prelaunchPrimarySurface(in: workspace),
             defaultSession: defaultSession,
             alternateSessions: sessions.filter { $0.isDefault == false && $0.state != .failed },
             failedSessions: sessions.filter { $0.isDefault == false && $0.state == .failed }
@@ -157,10 +160,10 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
         remoteContext: RemoteWorkspaceHealthContext?,
         preferFreshRemoteCheck: Bool = false
     ) async throws -> ProviderHealthSummary {
-        let adapter = providerAdapter(for: providerID)
+        let providerModule = providerModule(for: providerID)
 
         guard workspace.kind == .remote else {
-            return await adapter.healthSummary(
+            return await providerModule.providerHealthSummary(
                 for: workspace,
                 remoteContext: remoteContext,
                 providerHealthEvaluator: dependencies.providerHealthEvaluator
@@ -169,11 +172,11 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
 
         if preferFreshRemoteCheck == false,
            let snapshot = try dependencies.metadataStore.providerHealth(workspaceID: workspace.id, providerID: providerID),
-           adapter.shouldReuseRemoteHealthSnapshot(snapshot, remoteContext) {
+           providerModule.reusesRemoteHealthSnapshot(snapshot, remoteContext: remoteContext) {
             return snapshot
         }
 
-        let evaluated = await adapter.healthSummary(
+        let evaluated = await providerModule.providerHealthSummary(
             for: workspace,
             remoteContext: remoteContext,
             providerHealthEvaluator: dependencies.providerHealthEvaluator
@@ -234,67 +237,8 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
         )
     }
 
-    private func providerCapabilities(
-        for providerID: ProviderID,
-        workspace: Workspace,
-        health: ProviderHealthSummary,
-        defaultSession: Session?
-    ) -> ProviderCapabilities {
-        let adapter = providerAdapter(for: providerID)
-        let supportsDefaultSessionLaunch = adapter.supportsDefaultSessionLaunch(in: workspace)
-        let supportsNamedSessions = adapter.supportsNamedSessions(in: workspace)
-        let canLaunchDefaultSession = supportsDefaultSessionLaunch && (defaultSession != nil || health.launchability == .launchable)
-        let canCreateNamedSession = supportsNamedSessions && health.launchability == .launchable
-
-        return ProviderCapabilities(
-            launchDefaultSession: ProviderCapability(
-                action: .launchDefaultSession,
-                isSupported: supportsDefaultSessionLaunch,
-                isEnabled: canLaunchDefaultSession,
-                disabledReason: providerCapabilityDisabledReason(
-                    action: .launchDefaultSession,
-                    provider: adapter.provider,
-                    isSupported: supportsDefaultSessionLaunch,
-                    health: health,
-                    isEnabled: canLaunchDefaultSession
-                )
-            ),
-            createNamedSession: ProviderCapability(
-                action: .createNamedSession,
-                isSupported: supportsNamedSessions,
-                isEnabled: canCreateNamedSession,
-                disabledReason: providerCapabilityDisabledReason(
-                    action: .createNamedSession,
-                    provider: adapter.provider,
-                    isSupported: supportsNamedSessions,
-                    health: health,
-                    isEnabled: canCreateNamedSession
-                )
-            )
-        )
-    }
-
-    private func providerCapabilityDisabledReason(
-        action: ProviderCapability.Action,
-        provider: Provider,
-        isSupported: Bool,
-        health: ProviderHealthSummary,
-        isEnabled: Bool
-    ) -> String? {
-        guard isEnabled == false else {
-            return nil
-        }
-
-        guard isSupported else {
-            switch action {
-            case .launchDefaultSession:
-                return "\(provider.displayName) cannot launch a Default Session on this Workspace yet."
-            case .createNamedSession:
-                return "\(provider.displayName) cannot create Named Sessions on this Workspace yet."
-            }
-        }
-
-        return health.summary
+    private func providerModule(for providerID: ProviderID) -> any ProviderModule {
+        dependencies.providerModuleRegistry.module(for: providerID)
     }
 
     private func defaultSessionSummary(for workspace: Workspace, providerID: ProviderID) throws -> ProviderDefaultSessionSummary {
