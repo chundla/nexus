@@ -5,6 +5,23 @@ import NexusDomain
 import Testing
 
 struct ServiceSessionLifecycleScenariosTests {
+    @Test func launchOrResumeSessionReusesPersistedSessionRecord() async throws {
+        let fixture = try ServiceSessionLifecycleFixture()
+        let existingSession = try fixture.store.createDefaultSession(
+            workspaceID: fixture.workspace.id,
+            providerID: .claude,
+            state: .ready,
+            failureMessage: nil
+        )
+        let lifecycle = fixture.makeLifecycle()
+
+        let resumedSession = try await lifecycle.launchOrResumeSession(sessionID: existingSession.id)
+
+        #expect(resumedSession.id == existingSession.id)
+        #expect(fixture.tracker.resumedSessions.map { $0.0.id } == [existingSession.id])
+        #expect(fixture.tracker.freshLaunches.isEmpty)
+    }
+
     @Test func launchOrResumeDefaultSessionReusesExistingDefaultSessionLane() async throws {
         let fixture = try ServiceSessionLifecycleFixture()
         let existingSession = try fixture.store.createDefaultSession(

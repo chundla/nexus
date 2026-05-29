@@ -41,6 +41,40 @@ struct NexusServiceSessionLifecycleDelegationTests {
         ])
     }
 
+    @Test func launchOrResumeSessionDelegatesToSessionLifecycleModule() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
+
+        let spy = SessionLifecycleSpy()
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(),
+            sessionLifecycle: spy
+        )
+        let group = try service.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try service.createLocalWorkspace(
+            name: "Local Claude",
+            folderPath: workspaceFolder.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+        let expectedSession = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        spy.relaunchSessionResult = expectedSession
+
+        let session = try service.launchOrResumeSession(sessionID: expectedSession.id)
+
+        #expect(session == expectedSession)
+        #expect(spy.relaunchSessionCalls == [expectedSession.id])
+    }
+
     @Test func createNamedSessionDelegatesToSessionLifecycleModule() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)
@@ -98,6 +132,13 @@ private final class SessionLifecycleSpy: SessionLifecycleManaging, @unchecked Se
         isDefault: true,
         state: .ready
     )
+    var relaunchSessionResult = Session(
+        id: UUID(),
+        workspaceID: UUID(),
+        providerID: .claude,
+        isDefault: true,
+        state: .ready
+    )
     var namedSessionResult = Session(
         id: UUID(),
         workspaceID: UUID(),
@@ -107,11 +148,17 @@ private final class SessionLifecycleSpy: SessionLifecycleManaging, @unchecked Se
         state: .ready
     )
     private(set) var defaultSessionCalls: [Call] = []
+    private(set) var relaunchSessionCalls: [UUID] = []
     private(set) var namedSessionCalls: [NamedCall] = []
 
     func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) async throws -> Session {
         defaultSessionCalls.append(.init(workspaceID: workspaceID, providerID: providerID))
         return defaultSessionResult
+    }
+
+    func launchOrResumeSession(sessionID: UUID) async throws -> Session {
+        relaunchSessionCalls.append(sessionID)
+        return relaunchSessionResult
     }
 
     func createNamedSession(workspaceID: UUID, providerID: ProviderID, name: String?) async throws -> Session {

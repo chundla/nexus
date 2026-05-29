@@ -20,6 +20,14 @@ final class ServiceSessionLifecycle: SessionLifecycleManaging {
         self.dependencies = dependencies
     }
 
+    func launchOrResumeSession(sessionID: UUID) async throws -> Session {
+        guard let session = try dependencies.sessionRecordStore.session(id: sessionID) else {
+            throw NexusMetadataStoreError.sessionNotFound
+        }
+        let workspace = try requiredWorkspace(id: session.workspaceID)
+        return try await dependencies.launchOrResumePersistedSession(session, workspace)
+    }
+
     func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) async throws -> Session {
         let workspace = try requiredWorkspace(id: workspaceID)
         let adapter = dependencies.providerAdapter(providerID)

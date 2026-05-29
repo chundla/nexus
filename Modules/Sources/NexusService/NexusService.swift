@@ -1162,6 +1162,7 @@ struct RemoteRuntimeRecoveryFailureContext {
 }
 
 protocol SessionLifecycleManaging: AnyObject {
+    func launchOrResumeSession(sessionID: UUID) async throws -> Session
     func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) async throws -> Session
     func createNamedSession(workspaceID: UUID, providerID: ProviderID, name: String?) async throws -> Session
 }
@@ -2019,14 +2020,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     func launchOrResumeSession(sessionID: UUID) async throws -> Session {
-        guard let session = try sessionRecordStore.session(id: sessionID) else {
-            throw NexusMetadataStoreError.sessionNotFound
-        }
-        guard let workspace = try metadataStore.workspace(id: session.workspaceID) else {
-            throw NexusMetadataStoreError.workspaceNotFound
-        }
-
-        return try await launchOrResumeSession(session, workspace: workspace)
+        try await sessionLifecycle.launchOrResumeSession(sessionID: sessionID)
     }
 
     func createNamedSession(workspaceID: UUID, providerID: ProviderID, name: String?) throws -> Session {
