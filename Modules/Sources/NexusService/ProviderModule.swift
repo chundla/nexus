@@ -27,6 +27,20 @@ enum ProviderModuleOpenSessionRequest {
     }
 }
 
+struct ProviderModulePersistedSessionLaunchActions {
+    let attemptRemoteRuntimeRecovery: () async throws -> Session
+    let remoteRuntimeRecoveryFailureContext: (Error) throws -> RemoteRuntimeRecoveryFailureContext
+    let persistRemoteRecoveryFailure: (RemoteRuntimeRecoveryFailureContext) throws -> Session
+    let attemptLaunch: (_ forceFreshRemoteRuntime: Bool, _ sessionRecordAdapterMetadataSource: SessionRecordAdapterMetadataLaunchSource) async throws -> Session
+    let persistLaunchFailure: (Error) throws -> Session
+    let resolvedSessionRecordAdapterMetadata: (SessionRecordAdapterMetadataLaunchSource) throws -> SessionRecordAdapterMetadata?
+}
+
+struct ProviderModulePersistedSessionLaunchRequest {
+    let execution: PersistedSessionLaunchExecution
+    let actions: ProviderModulePersistedSessionLaunchActions
+}
+
 protocol ProviderModule {
     var provider: Provider { get }
 
@@ -53,12 +67,24 @@ protocol ProviderModule {
         _ request: ProviderModuleOpenSessionRequest,
         openFallback: @escaping () async throws -> Session
     ) async throws -> Session?
+
+    func launchPersistedSession(
+        _ request: ProviderModulePersistedSessionLaunchRequest,
+        executeFallback: @escaping () async throws -> Session
+    ) async throws -> Session?
 }
 
 extension ProviderModule {
     func openSession(
         _ request: ProviderModuleOpenSessionRequest,
         openFallback: @escaping () async throws -> Session
+    ) async throws -> Session? {
+        nil
+    }
+
+    func launchPersistedSession(
+        _ request: ProviderModulePersistedSessionLaunchRequest,
+        executeFallback: @escaping () async throws -> Session
     ) async throws -> Session? {
         nil
     }
@@ -248,6 +274,82 @@ struct PiProviderModule: ProviderModule {
         openFallback: @escaping () async throws -> Session
     ) async throws -> Session? {
         try await openFallback()
+    }
+
+    func launchPersistedSession(
+        _ request: ProviderModulePersistedSessionLaunchRequest,
+        executeFallback: @escaping () async throws -> Session
+    ) async throws -> Session? {
+        guard request.execution.workspace.kind == .remote else {
+            return nil
+        }
+
+        switch request.execution.mode {
+        case .recoverRemoteRuntime:
+            return try await recoverRemotePersistedSession(request)
+        case let .launch(forceFreshRemoteRuntime):
+            guard forceFreshRemoteRuntime else {
+                return nil
+            }
+
+            return try await launchFreshRemotePersistedSession(
+                request,
+                sessionRecordAdapterMetadataSource: request.execution.sessionRecordAdapterMetadataSource
+            )
+        }
+    }
+
+    private func recoverRemotePersistedSession(
+        _ request: ProviderModulePersistedSessionLaunchRequest
+    ) async throws -> Session {
+        do {
+            return try await request.actions.attemptRemoteRuntimeRecovery()
+        } catch {
+            let failureContext = try request.actions.remoteRuntimeRecoveryFailureContext(error)
+            if failureContext.isMissingRemoteRuntime {
+                return try await launchFreshRemotePersistedSession(
+                    request,
+                    sessionRecordAdapterMetadataSource: request.execution.sessionRecordAdapterMetadataSource
+                )
+            }
+
+            return try request.actions.persistRemoteRecoveryFailure(failureContext)
+        }
+    }
+
+    private func launchFreshRemotePersistedSession(
+        _ request: ProviderModulePersistedSessionLaunchRequest,
+        sessionRecordAdapterMetadataSource: SessionRecordAdapterMetadataLaunchSource
+    ) async throws -> Session {
+        do {
+            return try await request.actions.attemptLaunch(true, sessionRecordAdapterMetadataSource)
+        } catch {
+            if try shouldRetryFreshRemotePersistedPiLaunchWithoutContinuity(
+                error,
+                metadata: request.actions.resolvedSessionRecordAdapterMetadata(sessionRecordAdapterMetadataSource)
+            ) {
+                return try await launchFreshRemotePersistedSession(
+                    request,
+                    sessionRecordAdapterMetadataSource: .explicit(nil)
+                )
+            }
+
+            return try request.actions.persistLaunchFailure(error)
+        }
+    }
+
+    private func shouldRetryFreshRemotePersistedPiLaunchWithoutContinuity(
+        _ error: Error,
+        metadata: SessionRecordAdapterMetadata?
+    ) throws -> Bool {
+        guard metadata?.piSessionLinkage != nil else {
+            return false
+        }
+
+        let normalized = error.localizedDescription.lowercased()
+        return normalized.contains("invalid pi session")
+            || normalized.contains("invalid session")
+            || normalized.contains("session not found")
     }
 }
 

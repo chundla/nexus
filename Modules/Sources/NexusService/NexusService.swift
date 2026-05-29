@@ -1147,6 +1147,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     private let workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating
     private let sessionRuntimeManager: any SessionRuntimeManaging
     private let workspaceCatalog: WorkspaceCatalog
+    private let providerModuleRegistry: ProviderModuleRegistry
     private var sessionLifecycle: (any SessionLifecycleManaging)!
     private var sessionInteraction: (any SessionInteractionManaging)!
     private let remoteAccessRuntime: RemoteAccessRuntime
@@ -1177,7 +1178,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         self.hostValidationEvaluator = hostValidationEvaluator
         self.workspaceAvailabilityEvaluator = workspaceAvailabilityEvaluator
         self.sessionRuntimeManager = sessionRuntimeManager
-        let providerModuleRegistry = ServiceSessionProviderRegistry.providerModules(providerAdapters: providerAdapters)
+        self.providerModuleRegistry = ServiceSessionProviderRegistry.providerModules(providerAdapters: providerAdapters)
         self.workspaceCatalog = WorkspaceCatalog(
             dependencies: WorkspaceCatalogDependencies(
                 metadataStore: metadataStore,
@@ -1187,7 +1188,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
                 sessionRuntimeManager: sessionRuntimeManager,
                 providerAdapters: providerAdapters,
-                providerModuleRegistry: providerModuleRegistry
+                providerModuleRegistry: self.providerModuleRegistry
             )
         )
         self.sessionLifecycle = sessionLifecycle
@@ -1205,8 +1206,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 providerAdapter: { [unowned self] providerID in
                     self.providerAdapter(for: providerID)
                 },
-                providerModule: { providerID in
-                    providerModuleRegistry.module(for: providerID)
+                providerModule: { [unowned self] providerID in
+                    self.providerModuleRegistry.module(for: providerID)
                 },
                 remoteWorkspaceHealthContext: { [unowned self] workspace in
                     try self.workspaceCatalog.remoteWorkspaceHealthContext(for: workspace, refreshHostValidation: true)
@@ -2014,6 +2015,64 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     private func executePersistedSessionLaunch(_ execution: PersistedSessionLaunchExecution) async throws -> Session {
+        let fallback = { [self] in
+            try await self.executePersistedSessionLaunchWithoutProviderModule(execution)
+        }
+
+        let request = ProviderModulePersistedSessionLaunchRequest(
+            execution: execution,
+            actions: ProviderModulePersistedSessionLaunchActions(
+                attemptRemoteRuntimeRecovery: { [self] in
+                    try await self.attemptRemoteSessionRecovery(
+                        execution.session,
+                        workspace: execution.workspace,
+                        launchSnapshot: execution.launchSnapshot
+                    )
+                },
+                remoteRuntimeRecoveryFailureContext: { [self] error in
+                    try self.remoteRuntimeRecoveryFailureContext(
+                        for: error,
+                        session: execution.session,
+                        workspace: execution.workspace
+                    )
+                },
+                persistRemoteRecoveryFailure: { [self] failureContext in
+                    try self.persistRemoteRuntimeRecoveryFailure(
+                        for: execution.session,
+                        failureContext: failureContext
+                    )
+                },
+                attemptLaunch: { [self] forceFreshRemoteRuntime, sessionRecordAdapterMetadataSource in
+                    try await self.attemptSessionLaunch(
+                        execution.session,
+                        workspace: execution.workspace,
+                        launchSnapshot: execution.launchSnapshot,
+                        forceFreshRemoteRuntime: forceFreshRemoteRuntime,
+                        sessionRecordAdapterMetadataSource: sessionRecordAdapterMetadataSource
+                    )
+                },
+                persistLaunchFailure: { [self] error in
+                    try self.persistLaunchFailure(for: execution.session, error: error)
+                },
+                resolvedSessionRecordAdapterMetadata: { [self] source in
+                    try self.resolvedSessionRecordAdapterMetadata(for: execution.session, source: source)
+                }
+            )
+        )
+
+        if let session = try await providerModuleRegistry.module(for: execution.session.providerID).launchPersistedSession(
+            request,
+            executeFallback: fallback
+        ) {
+            return session
+        }
+
+        return try await fallback()
+    }
+
+    private func executePersistedSessionLaunchWithoutProviderModule(
+        _ execution: PersistedSessionLaunchExecution
+    ) async throws -> Session {
         switch execution.mode {
         case .recoverRemoteRuntime:
             return try await recoverRemoteSession(
@@ -2064,26 +2123,11 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             : try sessionRecordStore.updateSession(id: session.id, state: .ready, failureMessage: nil)
 
         do {
-            try await sessionRuntimeManager.launchOrResume(
-                session: readySession,
+            return try await attemptRemoteSessionRecovery(
+                readySession,
                 workspace: workspace,
-                launchConfiguration: try runtimeLaunchConfiguration(
-                    for: readySession,
-                    workspace: workspace,
-                    launchSnapshot: launchSnapshot,
-                    forceFreshRemoteRuntime: false,
-                    remoteRuntimeLaunchMode: .attachExisting
-                )
+                launchSnapshot: launchSnapshot
             )
-            try persistRuntimeLinkageIfNeeded(for: readySession)
-            let terminalSize = try sessionRecordStore.sessionTerminalSize(id: readySession.id)
-            let screen = try sessionRuntimeManager.resize(
-                session: readySession,
-                columns: terminalSize.columns,
-                rows: terminalSize.rows
-            )
-            try persistPrimarySurfaceIfNeeded(for: readySession, primarySurface: screen.primarySurface)
-            return readySession
         } catch {
             let failureContext = try remoteRuntimeRecoveryFailureContext(for: error, session: readySession, workspace: workspace)
             if failureContext.isMissingRemoteRuntime {
@@ -2095,13 +2139,51 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 )
             }
 
-            let failure = providerAdapter(for: readySession.providerID).remoteRuntimeRecoveryFailure(for: failureContext)
-            return try sessionRecordStore.updateSession(
-                id: readySession.id,
-                state: failure.state,
-                failureMessage: failure.message
-            )
+            return try persistRemoteRuntimeRecoveryFailure(for: readySession, failureContext: failureContext)
         }
+    }
+
+    private func attemptRemoteSessionRecovery(
+        _ session: Session,
+        workspace: Workspace,
+        launchSnapshot: LaunchSnapshot
+    ) async throws -> Session {
+        let readySession = session.state == .ready && session.failureMessage == nil
+            ? session
+            : try sessionRecordStore.updateSession(id: session.id, state: .ready, failureMessage: nil)
+
+        try await sessionRuntimeManager.launchOrResume(
+            session: readySession,
+            workspace: workspace,
+            launchConfiguration: try runtimeLaunchConfiguration(
+                for: readySession,
+                workspace: workspace,
+                launchSnapshot: launchSnapshot,
+                forceFreshRemoteRuntime: false,
+                remoteRuntimeLaunchMode: .attachExisting
+            )
+        )
+        try persistRuntimeLinkageIfNeeded(for: readySession)
+        let terminalSize = try sessionRecordStore.sessionTerminalSize(id: readySession.id)
+        let screen = try sessionRuntimeManager.resize(
+            session: readySession,
+            columns: terminalSize.columns,
+            rows: terminalSize.rows
+        )
+        try persistPrimarySurfaceIfNeeded(for: readySession, primarySurface: screen.primarySurface)
+        return readySession
+    }
+
+    private func persistRemoteRuntimeRecoveryFailure(
+        for session: Session,
+        failureContext: RemoteRuntimeRecoveryFailureContext
+    ) throws -> Session {
+        let failure = providerAdapter(for: session.providerID).remoteRuntimeRecoveryFailure(for: failureContext)
+        return try sessionRecordStore.updateSession(
+            id: session.id,
+            state: failure.state,
+            failureMessage: failure.message
+        )
     }
 
     private func launchSession(
@@ -2112,76 +2194,54 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         sessionRecordAdapterMetadataSource: SessionRecordAdapterMetadataLaunchSource = .stored
     ) async throws -> Session {
         do {
-            try await sessionRuntimeManager.launchOrResume(
-                session: session,
+            return try await attemptSessionLaunch(
+                session,
                 workspace: workspace,
-                launchConfiguration: try runtimeLaunchConfiguration(
-                    for: session,
-                    workspace: workspace,
-                    launchSnapshot: launchSnapshot,
-                    forceFreshRemoteRuntime: forceFreshRemoteRuntime,
-                    sessionRecordAdapterMetadataSource: sessionRecordAdapterMetadataSource,
-                    remoteRuntimeLaunchMode: .launchNew
-                )
-            )
-            try persistRuntimeLinkageIfNeeded(for: session)
-            let terminalSize = try sessionRecordStore.sessionTerminalSize(id: session.id)
-            let screen = try sessionRuntimeManager.resize(
-                session: session,
-                columns: terminalSize.columns,
-                rows: terminalSize.rows
-            )
-            try persistPrimarySurfaceIfNeeded(for: session, primarySurface: screen.primarySurface)
-            return session
-        } catch {
-            if try shouldRetryFreshPiLaunchWithoutPersistedLinkage(
-                for: session,
-                workspace: workspace,
+                launchSnapshot: launchSnapshot,
                 forceFreshRemoteRuntime: forceFreshRemoteRuntime,
-                sessionRecordAdapterMetadataSource: sessionRecordAdapterMetadataSource,
-                error: error
-            ) {
-                return try await launchSession(
-                    session,
-                    workspace: workspace,
-                    launchSnapshot: launchSnapshot,
-                    forceFreshRemoteRuntime: true,
-                    sessionRecordAdapterMetadataSource: .explicit(nil)
-                )
-            }
-
-            return try sessionRecordStore.updateSession(
-                id: session.id,
-                state: .failed,
-                failureMessage: error.localizedDescription
+                sessionRecordAdapterMetadataSource: sessionRecordAdapterMetadataSource
             )
+        } catch {
+            return try persistLaunchFailure(for: session, error: error)
         }
     }
 
-    private func shouldRetryFreshPiLaunchWithoutPersistedLinkage(
-        for session: Session,
+    private func attemptSessionLaunch(
+        _ session: Session,
         workspace: Workspace,
-        forceFreshRemoteRuntime: Bool,
-        sessionRecordAdapterMetadataSource: SessionRecordAdapterMetadataLaunchSource,
-        error: Error
-    ) throws -> Bool {
-        guard session.providerID == .pi,
-              workspace.kind == .remote,
-              forceFreshRemoteRuntime else {
-            return false
-        }
+        launchSnapshot: LaunchSnapshot,
+        forceFreshRemoteRuntime: Bool = false,
+        sessionRecordAdapterMetadataSource: SessionRecordAdapterMetadataLaunchSource = .stored
+    ) async throws -> Session {
+        try await sessionRuntimeManager.launchOrResume(
+            session: session,
+            workspace: workspace,
+            launchConfiguration: try runtimeLaunchConfiguration(
+                for: session,
+                workspace: workspace,
+                launchSnapshot: launchSnapshot,
+                forceFreshRemoteRuntime: forceFreshRemoteRuntime,
+                sessionRecordAdapterMetadataSource: sessionRecordAdapterMetadataSource,
+                remoteRuntimeLaunchMode: .launchNew
+            )
+        )
+        try persistRuntimeLinkageIfNeeded(for: session)
+        let terminalSize = try sessionRecordStore.sessionTerminalSize(id: session.id)
+        let screen = try sessionRuntimeManager.resize(
+            session: session,
+            columns: terminalSize.columns,
+            rows: terminalSize.rows
+        )
+        try persistPrimarySurfaceIfNeeded(for: session, primarySurface: screen.primarySurface)
+        return session
+    }
 
-        guard let metadata = try resolvedSessionRecordAdapterMetadata(
-            for: session,
-            source: sessionRecordAdapterMetadataSource
-        ), metadata.piSessionLinkage != nil else {
-            return false
-        }
-
-        let normalized = error.localizedDescription.lowercased()
-        return normalized.contains("invalid pi session")
-            || normalized.contains("invalid session")
-            || normalized.contains("session not found")
+    private func persistLaunchFailure(for session: Session, error: Error) throws -> Session {
+        try sessionRecordStore.updateSession(
+            id: session.id,
+            state: .failed,
+            failureMessage: error.localizedDescription
+        )
     }
 
     private func resolvedSessionRecordAdapterMetadata(
