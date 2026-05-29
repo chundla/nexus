@@ -190,18 +190,20 @@ struct ServiceSessionLifecycleScenariosTests {
                 workspace: { try store.workspace(id: $0) },
                 sessionRecordStore: TrackingSessionRecordStore(metadataStore: store),
                 providerModule: { providerID in
-                    ServiceProviderAdapter(
-                        providerID: providerID,
-                        supportsDefaultSessionLaunch: true,
-                        supportsNamedSessions: true,
-                        healthSummaryEvaluator: { _, _, _ in
-                            ProviderHealthSummary(
-                                state: .available,
-                                summary: "Ready",
-                                resolvedExecutable: "/tmp/pi",
-                                launchability: .launchable
-                            )
-                        }
+                    GenericProviderModule(
+                        adapter: ServiceProviderAdapter(
+                            providerID: providerID,
+                            supportsDefaultSessionLaunch: true,
+                            supportsNamedSessions: true,
+                            healthSummaryEvaluator: { _, _, _ in
+                                ProviderHealthSummary(
+                                    state: .available,
+                                    summary: "Ready",
+                                    resolvedExecutable: "/tmp/pi",
+                                    launchability: .launchable
+                                )
+                            }
+                        )
                     )
                 },
                 remoteWorkspaceHealthContext: { _ in Optional<RemoteWorkspaceHealthContext>.none },
@@ -319,11 +321,13 @@ struct ServiceSessionLifecycleScenariosTests {
                 workspace: { try fixture.store.workspace(id: $0) },
                 sessionRecordStore: sessionRecordStore,
                 providerModule: { providerID in
-                    ServiceProviderAdapter(
-                        providerID: providerID,
-                        supportsDefaultSessionLaunch: true,
-                        supportsNamedSessions: true,
-                        healthSummaryEvaluator: { _, _, _ in fixture.health }
+                    GenericProviderModule(
+                        adapter: ServiceProviderAdapter(
+                            providerID: providerID,
+                            supportsDefaultSessionLaunch: true,
+                            supportsNamedSessions: true,
+                            healthSummaryEvaluator: { _, _, _ in fixture.health }
+                        )
                     )
                 },
                 remoteWorkspaceHealthContext: { _ in Optional<RemoteWorkspaceHealthContext>.none },
@@ -494,12 +498,14 @@ private struct ServiceSessionLifecycleFixture {
     let tracker = SessionLifecycleTracker()
     let health: ProviderHealthSummary
 
-    private func adapter(for providerID: ProviderID) -> ServiceProviderAdapter {
-        ServiceProviderAdapter(
-            providerID: providerID,
-            supportsDefaultSessionLaunch: true,
-            supportsNamedSessions: true,
-            healthSummaryEvaluator: { _, _, _ in health }
+    private func adapter(for providerID: ProviderID) -> GenericProviderModule {
+        GenericProviderModule(
+            adapter: ServiceProviderAdapter(
+                providerID: providerID,
+                supportsDefaultSessionLaunch: true,
+                supportsNamedSessions: true,
+                healthSummaryEvaluator: { _, _, _ in health }
+            )
         )
     }
 

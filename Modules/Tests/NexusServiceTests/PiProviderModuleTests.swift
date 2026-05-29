@@ -6,13 +6,15 @@ import Testing
 
 struct PiProviderModuleTests {
     @Test func genericProviderModuleUsesSharedFreshOpenAndPersistedRelaunchPlan() async throws {
-        let module = ServiceProviderAdapter(
-            providerID: .claude,
-            supportsDefaultSessionLaunch: true,
-            supportsNamedSessions: true,
-            healthSummaryEvaluator: { _, _, _ in
-                ProviderHealthSummary(state: .available, summary: "Ready", resolvedExecutable: "/tmp/fake-claude", launchability: .launchable)
-            }
+        let module = GenericProviderModule(
+            adapter: ServiceProviderAdapter(
+                providerID: .claude,
+                supportsDefaultSessionLaunch: true,
+                supportsNamedSessions: true,
+                healthSummaryEvaluator: { _, _, _ in
+                    ProviderHealthSummary(state: .available, summary: "Ready", resolvedExecutable: "/tmp/fake-claude", launchability: .launchable)
+                }
+            )
         )
         let workspace = Workspace(
             id: UUID(),
@@ -323,7 +325,7 @@ struct PiProviderModuleTests {
         #expect(piModule.prelaunchPrimarySurface(in: workspace) == .structuredActivityFeed)
         #expect(claudeModule.prelaunchPrimarySurface(in: workspace) == .terminal)
         #expect(piModule.reusesRemoteHealthSnapshot(checkedSnapshot, remoteContext: remoteContext))
-        #expect(claudeModule.reusesRemoteHealthSnapshot(checkedSnapshot, remoteContext: remoteContext) == false)
+        #expect(claudeModule.reusesRemoteHealthSnapshot(checkedSnapshot, remoteContext: remoteContext))
     }
 
     @Test func piProviderModuleOwnsFreshOpenPlanningForLocalAndRemotePiSessions() async throws {

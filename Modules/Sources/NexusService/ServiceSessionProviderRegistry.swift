@@ -87,9 +87,7 @@ enum ServiceSessionProviderRegistry {
     static func providerModules(
         providerAdapters: [ProviderID: ServiceProviderAdapter]
     ) -> ProviderModuleRegistry {
-        var modules: [ProviderID: any ProviderModule] = providerAdapters.reduce(into: [:]) { partialResult, entry in
-            partialResult[entry.key] = entry.value
-        }
+        var modules: [ProviderID: any ProviderModule] = [:]
 
         if providerAdapters[.claude] != nil {
             modules[.claude] = ClaudeProviderModule()
