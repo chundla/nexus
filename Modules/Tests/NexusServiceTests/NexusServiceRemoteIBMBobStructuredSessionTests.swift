@@ -109,6 +109,79 @@ struct NexusServiceRemoteIBMBobStructuredSessionTests {
         #expect(transportHarness.launches().isEmpty)
     }
 
+    @Test func remoteIBMBobFailedFirstPromptBecomesInspectableFailedDefaultSessionRecord() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let transportHarness = RemoteIBMBobTransportHarness(turns: [
+            .init(stdoutLines: [], stderrLines: ["Remote Bob auth failed"], terminationStatus: 1)
+        ])
+        let service = try makeRemoteIBMBobService(rootURL: rootURL, transportHarness: transportHarness)
+
+        let group = try service.createWorkspaceGroup(name: "Remote")
+        let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
+        _ = try service.validateHost(hostID: host.id)
+        let workspace = try service.createRemoteWorkspace(
+            name: "Remote Bob",
+            hostID: host.id,
+            remotePath: "/srv/bob",
+            primaryGroupID: group.id
+        )
+
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
+        let responseScreen = try service.sendSessionInput(sessionID: session.id, text: "ship it")
+        let failedSession = try service.getSessionRecord(sessionID: session.id)
+        let failedScreen = try service.getSessionScreen(sessionID: session.id)
+        let overview = try service.getWorkspaceOverview(workspaceID: workspace.id)
+        let providerCard = try #require(overview.providerCards.first(where: { $0.provider.id == .ibmBob }))
+
+        #expect(responseScreen.session.state == .failed)
+        #expect(failedSession.id == session.id)
+        #expect(failedSession.state == .failed)
+        #expect(failedSession.failureMessage == "Remote Bob auth failed")
+        #expect(failedScreen.activityItems.map(\.text) == [
+            "IBM Bob Session ready. Send a prompt to start IBM Bob.",
+            "You: ship it",
+            "Remote Bob auth failed"
+        ])
+        #expect(providerCard.defaultSession.state == .failed)
+        #expect(providerCard.defaultSession.actionTitle == "Relaunch")
+    }
+
+    @Test func remoteIBMBobRelaunchReturnsFailedSessionRecordToReadyWithoutReplayingPrompt() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let transportHarness = RemoteIBMBobTransportHarness(turns: [
+            .init(stdoutLines: [], stderrLines: ["Remote Bob auth failed"], terminationStatus: 1)
+        ])
+        let service = try makeRemoteIBMBobService(rootURL: rootURL, transportHarness: transportHarness)
+
+        let group = try service.createWorkspaceGroup(name: "Remote")
+        let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
+        _ = try service.validateHost(hostID: host.id)
+        let workspace = try service.createRemoteWorkspace(
+            name: "Remote Bob",
+            hostID: host.id,
+            remotePath: "/srv/bob",
+            primaryGroupID: group.id
+        )
+
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
+        _ = try service.sendSessionInput(sessionID: session.id, text: "ship it")
+
+        let relaunchedSession = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
+        let relaunchedScreen = try service.getSessionScreen(sessionID: session.id)
+
+        #expect(relaunchedSession.id == session.id)
+        #expect(relaunchedSession.state == .ready)
+        #expect(relaunchedScreen.session.state == .ready)
+        #expect(relaunchedScreen.activityItems.map(\.text) == ["IBM Bob Session ready. Send a prompt to start IBM Bob."])
+        #expect(transportHarness.launches().count == 1)
+    }
+
     @Test func remoteIBMBobDefaultPromptRunsOnHostThroughTmuxAndReturnsToReadyWithPersistedHistory() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)
@@ -206,6 +279,70 @@ struct NexusServiceRemoteIBMBobStructuredSessionTests {
             "Second reply",
             "Second turn complete"
         ])
+    }
+
+    @Test func remoteIBMBobFallsBackToFreshConversationWhenStoredContinuityIsInvalid() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let transportHarness = RemoteIBMBobTransportHarness(turns: [
+            .init(stdoutLines: [
+                #"{"type":"status","text":"Bob turn started","session_id":"bob-session-1"}"#,
+                #"{"type":"message","text":"First reply"}"#,
+                #"{"type":"completion","text":"First turn complete"}"#
+            ]),
+            .init(stdoutLines: [], stderrLines: ["Invalid Bob session identifier"], terminationStatus: 1),
+            .init(stdoutLines: [
+                #"{"type":"status","text":"Fresh Bob turn started","session_id":"bob-session-2"}"#,
+                #"{"type":"message","text":"Recovered reply"}"#,
+                #"{"type":"completion","text":"Recovered turn complete"}"#
+            ])
+        ])
+        let service = try makeRemoteIBMBobService(rootURL: rootURL, transportHarness: transportHarness)
+
+        let group = try service.createWorkspaceGroup(name: "Remote")
+        let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
+        _ = try service.validateHost(hostID: host.id)
+        let workspace = try service.createRemoteWorkspace(
+            name: "Remote Bob",
+            hostID: host.id,
+            remotePath: "/srv/bob",
+            primaryGroupID: group.id
+        )
+
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
+        _ = try service.sendSessionInput(sessionID: session.id, text: "first")
+        let recoveredResponse = try service.sendSessionInput(sessionID: session.id, text: "second")
+        let metadataStore = try NexusMetadataStore(storeURL: service.storeURL)
+        let metadata = try metadataStore.sessionRecordAdapterMetadata(sessionID: session.id)
+        let launches = transportHarness.launches()
+        let failedResumeLaunch = try #require(launches.dropFirst().first)
+        let fallbackLaunch = try #require(launches.last)
+        let failedResumeCommand = try #require(failedResumeLaunch.arguments.last)
+        let fallbackCommand = try #require(fallbackLaunch.arguments.last)
+
+        #expect(launches.count == 3)
+        #expect(failedResumeCommand.contains("--resume"))
+        #expect(failedResumeCommand.contains("bob-session-1"))
+        #expect(fallbackCommand.contains("--resume") == false)
+        #expect(metadata?.ibmBobSessionLinkage?.sessionID == "bob-session-2")
+        #expect(metadata?.ibmBobPersistedActivityItems?.suffix(5).map(\.text) == [
+            "You: second",
+            "Stored IBM Bob continuity was unavailable. Started a fresh Bob conversation on this Session.",
+            "Fresh Bob turn started",
+            "Recovered reply",
+            "Recovered turn complete"
+        ])
+        #expect(recoveredResponse.activityItems.suffix(5).map(\.kind) == [.message, .status, .status, .message, .completion])
+        #expect(recoveredResponse.activityItems.suffix(5).map(\.text) == [
+            "You: second",
+            "Stored IBM Bob continuity was unavailable. Started a fresh Bob conversation on this Session.",
+            "Fresh Bob turn started",
+            "Recovered reply",
+            "Recovered turn complete"
+        ])
+        #expect(recoveredResponse.activityItems.map(\.text).contains(where: { $0.contains("bob-session-") }) == false)
     }
 
     @Test func remoteIBMBobDefaultAndNamedSessionsResumeOnlyTheirOwnStoredContinuity() throws {

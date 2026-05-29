@@ -630,6 +630,20 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
                         sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.ibmBobSessionLinkage,
                         terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
                         unexpectedTerminationState: .interrupted,
+                        unexpectedTerminationStateEvaluator: { status, errorText in
+                            let normalized = errorText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                            if status == 255
+                                || normalized.contains("could not resolve hostname")
+                                || normalized.contains("operation timed out")
+                                || normalized.contains("connection refused")
+                                || normalized.contains("no route to host")
+                                || normalized.contains("connection closed by remote host")
+                                || normalized.contains("broken pipe")
+                                || normalized.contains("network is unreachable") {
+                                return .interrupted
+                            }
+                            return .failed
+                        },
                         transportFactory: { executable, arguments, workingDirectory in
                             try resolvedIBMBobTransportFactory(
                                 "/usr/bin/ssh",

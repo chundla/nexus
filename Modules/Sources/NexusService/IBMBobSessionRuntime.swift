@@ -30,7 +30,7 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
     private let executable: String
     private let workingDirectory: String
     private let terminationStatusMessageBuilder: (Int32) -> String
-    private let unexpectedTerminationState: Session.State
+    private let unexpectedTerminationStateEvaluator: (Int32, String) -> Session.State
     private let transportFactory: TransportFactory
     private let lock = NSLock()
     private var sessionLinkage: IBMBobSessionLinkage?
@@ -53,6 +53,7 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
         sessionLinkage: IBMBobSessionLinkage? = nil,
         terminationStatusMessageBuilder: @escaping (Int32) -> String,
         unexpectedTerminationState: Session.State = .failed,
+        unexpectedTerminationStateEvaluator: ((Int32, String) -> Session.State)? = nil,
         transportFactory: @escaping TransportFactory = { executable, arguments, workingDirectory in
             try ProcessIBMBobTransport(
                 executable: executable,
@@ -65,7 +66,7 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
         self.workingDirectory = workingDirectory
         self.sessionLinkage = sessionLinkage.map { IBMBobSessionLinkage(sessionID: $0.sessionID) }
         self.terminationStatusMessageBuilder = terminationStatusMessageBuilder
-        self.unexpectedTerminationState = unexpectedTerminationState
+        self.unexpectedTerminationStateEvaluator = unexpectedTerminationStateEvaluator ?? { _, _ in unexpectedTerminationState }
         self.transportFactory = transportFactory
         let restoredActivityItems = sessionLinkage?.persistedActivityItems ?? []
         self.activityItems = restoredActivityItems.isEmpty ? Self.defaultActivityItems : restoredActivityItems
@@ -283,7 +284,7 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
                 )
             )
         } else if shouldAppendError {
-            runtimeState = unexpectedTerminationState
+            runtimeState = unexpectedTerminationStateEvaluator(status, errorText)
             activityItems.append(SessionActivityItem(kind: .error, text: errorText))
         } else {
             runtimeState = .ready
