@@ -5,7 +5,7 @@ import NexusDomain
 import Testing
 
 struct PiProviderModuleTests {
-    @Test func piProviderModuleOwnsLocalOpenSessionSeamButLeavesRemoteOpenToSharedFallback() async throws {
+    @Test func piProviderModuleOwnsOpenSessionSeamForLocalAndRemotePiSessions() async throws {
         let module = PiProviderModule(
             adapter: ServiceProviderAdapter(
                 providerID: .pi,
@@ -32,11 +32,34 @@ struct PiProviderModuleTests {
             remoteHostID: UUID()
         )
         let fallbackCounter = FallbackCounter()
-        let fallbackSession = Session(
+        let localDefaultSession = Session(
             id: UUID(),
             workspaceID: localWorkspace.id,
             providerID: .pi,
             isDefault: true,
+            state: .ready
+        )
+        let remoteDefaultSession = Session(
+            id: UUID(),
+            workspaceID: remoteWorkspace.id,
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let remoteNamedSession = Session(
+            id: UUID(),
+            workspaceID: remoteWorkspace.id,
+            providerID: .pi,
+            name: "Review",
+            isDefault: false,
+            state: .ready
+        )
+        let persistedRemoteSession = Session(
+            id: UUID(),
+            workspaceID: remoteWorkspace.id,
+            providerID: .pi,
+            name: "Persisted",
+            isDefault: false,
             state: .ready
         )
 
@@ -44,20 +67,36 @@ struct PiProviderModuleTests {
             .launchOrResumeDefaultSession(workspace: localWorkspace, providerID: .pi),
             openFallback: {
                 fallbackCounter.value += 1
-                return fallbackSession
+                return localDefaultSession
             }
         )
-        let remoteOpen = try await module.openSession(
+        let remoteDefaultOpen = try await module.openSession(
             .launchOrResumeDefaultSession(workspace: remoteWorkspace, providerID: .pi),
             openFallback: {
                 fallbackCounter.value += 1
-                return fallbackSession
+                return remoteDefaultSession
+            }
+        )
+        let remoteNamedOpen = try await module.openSession(
+            .createNamedSession(workspace: remoteWorkspace, providerID: .pi, name: remoteNamedSession.name),
+            openFallback: {
+                fallbackCounter.value += 1
+                return remoteNamedSession
+            }
+        )
+        let remotePersistedOpen = try await module.openSession(
+            .launchOrResumePersistedSession(persistedRemoteSession, workspace: remoteWorkspace),
+            openFallback: {
+                fallbackCounter.value += 1
+                return persistedRemoteSession
             }
         )
 
-        #expect(localOpen == fallbackSession)
-        #expect(remoteOpen == nil)
-        #expect(fallbackCounter.value == 1)
+        #expect(localOpen == localDefaultSession)
+        #expect(remoteDefaultOpen == remoteDefaultSession)
+        #expect(remoteNamedOpen == remoteNamedSession)
+        #expect(remotePersistedOpen == persistedRemoteSession)
+        #expect(fallbackCounter.value == 4)
     }
 
     @Test func piProviderModulePreservesPiCatalogReadBehavior() async {

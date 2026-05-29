@@ -247,11 +247,7 @@ struct PiProviderModule: ProviderModule {
         _ request: ProviderModuleOpenSessionRequest,
         openFallback: @escaping () async throws -> Session
     ) async throws -> Session? {
-        guard request.workspace.kind == .local else {
-            return nil
-        }
-
-        return try await openFallback()
+        try await openFallback()
     }
 }
 
