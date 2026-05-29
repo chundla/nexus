@@ -16,3 +16,6 @@ DerivedData/
 .env.*
 !.env.example
 !.env.sample
+
+# Screenshots for debugging
+screenshots/
