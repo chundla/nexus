@@ -50,6 +50,59 @@ struct ServiceSessionInteractionScenariosTests {
         service.cancelSessionScreenObservation(observationID: start.observationID)
     }
 
+    @Test func macStructuredSessionInputAndApprovalDecisionsReturnUpdatedSessionScreen() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
+
+        let launcher = StructuredControllerRuntimeLauncher()
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: StubProviderHealthEvaluator(
+                summariesByProvider: [
+                    .pi: ProviderHealthSummary(
+                        state: .available,
+                        summary: "Ready",
+                        resolvedExecutable: "/tmp/pi",
+                        launchability: .launchable
+                    )
+                ]
+            ),
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+        )
+        let group = try service.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try service.createLocalWorkspace(
+            name: "Local Pi",
+            folderPath: workspaceFolder.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+        let session = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+
+        let pendingScreen = try await service.sendSessionInput(sessionID: session.id, text: "deploy")
+        let approvalRequest = try #require(pendingScreen.approvalRequests.first)
+        let approvedScreen = try await service.respondToApprovalRequest(
+            sessionID: session.id,
+            approvalRequestID: approvalRequest.id,
+            decision: .approve
+        )
+
+        #expect(pendingScreen.primarySurface == .structuredActivityFeed)
+        #expect(pendingScreen.controller == .mac)
+        #expect(pendingScreen.activityItems.map(\.text) == [
+            "Pi ready",
+            "You: deploy",
+            "Approval Request: Deploy?"
+        ])
+        #expect(approvedScreen.controller == .mac)
+        #expect(approvedScreen.approvalRequests.first?.state == .approved)
+        #expect(approvedScreen.activityItems.suffix(2).map(\.text) == [
+            "Approved: Deploy?",
+            "Pi: Deployment approved"
+        ])
+    }
+
     @Test func remoteControllerGatesStructuredSessionInputAndApprovalDecisions() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)

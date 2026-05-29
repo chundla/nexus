@@ -5,6 +5,12 @@ import NexusIPC
 
 protocol SessionInteractionManaging: AnyObject {
     func getSessionScreen(sessionID: UUID) throws -> SessionScreen
+    func sendSessionInput(sessionID: UUID, text: String) async throws -> SessionScreen
+    func respondToApprovalRequest(
+        sessionID: UUID,
+        approvalRequestID: UUID,
+        decision: ApprovalRequestDecision
+    ) async throws -> SessionScreen
     func observeSessionScreen(
         observationID: UUID,
         sessionID: UUID,
@@ -36,6 +42,7 @@ struct ServiceSessionInteractionDependencies {
     let normalizedSessionScreen: (SessionScreen) -> SessionScreen
     let addUpdateObserver: (UUID, Session, @escaping @Sendable () -> Void) -> Void
     let removeUpdateObserver: (UUID) -> Void
+    let claimMacController: (Session) throws -> SessionScreen
     let isRemoteController: (UUID, UUID) -> Bool
     let sendInput: (String, Session) throws -> SessionScreen
     let sendText: (String, Session) throws -> SessionScreen
@@ -110,6 +117,22 @@ final class ServiceSessionInteraction: SessionInteractionManaging, @unchecked Se
         dependencies.removeUpdateObserver(observationID)
     }
 
+    func sendSessionInput(sessionID: UUID, text: String) async throws -> SessionScreen {
+        let resolvedSession = try await readyMacControlledSession(sessionID: sessionID)
+        return dependencies.normalizedSessionScreen(try dependencies.sendInput(text, resolvedSession))
+    }
+
+    func respondToApprovalRequest(
+        sessionID: UUID,
+        approvalRequestID: UUID,
+        decision: ApprovalRequestDecision
+    ) async throws -> SessionScreen {
+        let resolvedSession = try await readyMacControlledSession(sessionID: sessionID)
+        return dependencies.normalizedSessionScreen(
+            try dependencies.respondToApprovalRequest(approvalRequestID, decision, resolvedSession)
+        )
+    }
+
     func sendRemoteSessionInput(sessionID: UUID, pairedDeviceID: UUID, text: String) async throws -> SessionScreen {
         let resolvedSession = try await readyRemoteControlledSession(
             sessionID: sessionID,
@@ -160,11 +183,25 @@ final class ServiceSessionInteraction: SessionInteractionManaging, @unchecked Se
         return dependencies.stabilizedScreenAfterTerminalInput(resolvedSession, currentScreen, responseScreen)
     }
 
+    private func readyMacControlledSession(sessionID: UUID) async throws -> Session {
+        let resolvedSession = try await readyInteractiveSession(sessionID: sessionID)
+        _ = try dependencies.claimMacController(resolvedSession)
+        return resolvedSession
+    }
+
     private func readyRemoteControlledSession(
         sessionID: UUID,
         pairedDeviceID: UUID,
         controllerError: NexusSessionControlError = .remoteControllerRequired
     ) async throws -> Session {
+        let resolvedSession = try await readyInteractiveSession(sessionID: sessionID)
+        guard dependencies.isRemoteController(resolvedSession.id, pairedDeviceID) else {
+            throw controllerError
+        }
+        return resolvedSession
+    }
+
+    private func readyInteractiveSession(sessionID: UUID) async throws -> Session {
         guard let session = try dependencies.sessionRecord(sessionID) else {
             throw NexusMetadataStoreError.sessionNotFound
         }
@@ -172,9 +209,6 @@ final class ServiceSessionInteraction: SessionInteractionManaging, @unchecked Se
         let resolvedSession = try await dependencies.interactiveReadySession(session)
         guard resolvedSession.state == .ready else {
             throw NexusMetadataStoreError.sessionNotReady
-        }
-        guard dependencies.isRemoteController(resolvedSession.id, pairedDeviceID) else {
-            throw controllerError
         }
         return resolvedSession
     }

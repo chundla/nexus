@@ -1401,6 +1401,9 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 removeUpdateObserver: { [unowned self] in
                     self.sessionRuntimeManager.removeUpdateObserver(id: $0)
                 },
+                claimMacController: { [unowned self] in
+                    try self.claimMacController(for: $0)
+                },
                 isRemoteController: { [unowned self] sessionID, pairedDeviceID in
                     self.sessionControllerRegistry.isRemoteController(sessionID: sessionID, pairedDeviceID: pairedDeviceID)
                 },
@@ -2115,17 +2118,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     func sendSessionInput(sessionID: UUID, text: String) async throws -> SessionScreen {
-        guard let session = try sessionRecordStore.session(id: sessionID) else {
-            throw NexusMetadataStoreError.sessionNotFound
-        }
-
-        let resolvedSession = try await interactiveReadySession(for: session)
-        guard resolvedSession.state == .ready else {
-            throw NexusMetadataStoreError.sessionNotReady
-        }
-
-        _ = try claimMacController(for: resolvedSession)
-        return normalizedSessionScreen(try sessionRuntimeManager.sendInput(text, to: resolvedSession))
+        try await sessionInteraction.sendSessionInput(sessionID: sessionID, text: text)
     }
 
     func sendSessionText(sessionID: UUID, text: String) throws -> SessionScreen {
@@ -2205,22 +2198,10 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         approvalRequestID: UUID,
         decision: ApprovalRequestDecision
     ) async throws -> SessionScreen {
-        guard let session = try sessionRecordStore.session(id: sessionID) else {
-            throw NexusMetadataStoreError.sessionNotFound
-        }
-
-        let resolvedSession = try await interactiveReadySession(for: session)
-        guard resolvedSession.state == .ready else {
-            throw NexusMetadataStoreError.sessionNotReady
-        }
-
-        _ = try claimMacController(for: resolvedSession)
-        return normalizedSessionScreen(
-            try sessionRuntimeManager.respondToApprovalRequest(
-                approvalRequestID,
-                decision: decision,
-                to: resolvedSession
-            )
+        try await sessionInteraction.respondToApprovalRequest(
+            sessionID: sessionID,
+            approvalRequestID: approvalRequestID,
+            decision: decision
         )
     }
 

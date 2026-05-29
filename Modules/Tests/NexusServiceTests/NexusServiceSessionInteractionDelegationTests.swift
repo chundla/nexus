@@ -87,6 +87,47 @@ struct NexusServiceSessionInteractionDelegationTests {
         ])
     }
 
+    @Test func sendSessionInputDelegatesToSessionInteractionModule() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
+
+        let spy = SessionInteractionSpy()
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(),
+            sessionInteraction: spy
+        )
+        let group = try service.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try service.createLocalWorkspace(
+            name: "Local Pi",
+            folderPath: workspaceFolder.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+        let sessionID = UUID()
+        let expectedScreen = SessionScreen(
+            session: Session(
+                id: sessionID,
+                workspaceID: workspace.id,
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            ),
+            primarySurface: .structuredActivityFeed,
+            transcript: "updated"
+        )
+        spy.sendSessionInputResult = expectedScreen
+
+        let screen = try await service.sendSessionInput(sessionID: sessionID, text: "hello")
+
+        #expect(screen == expectedScreen)
+        #expect(spy.sendSessionInputCalls == [
+            .init(sessionID: sessionID, text: "hello")
+        ])
+    }
+
     @Test func sendRemoteSessionInputDelegatesToSessionInteractionModule() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)
@@ -129,6 +170,52 @@ struct NexusServiceSessionInteractionDelegationTests {
         #expect(screen == expectedScreen)
         #expect(spy.sendRemoteSessionInputCalls == [
             .init(sessionID: sessionID, pairedDeviceID: pairedDeviceID, text: "hello")
+        ])
+    }
+
+    @Test func respondToApprovalRequestDelegatesToSessionInteractionModule() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
+
+        let spy = SessionInteractionSpy()
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(),
+            sessionInteraction: spy
+        )
+        let group = try service.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try service.createLocalWorkspace(
+            name: "Local Pi",
+            folderPath: workspaceFolder.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+        let sessionID = UUID()
+        let approvalRequestID = UUID()
+        let expectedScreen = SessionScreen(
+            session: Session(
+                id: sessionID,
+                workspaceID: workspace.id,
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            ),
+            primarySurface: .structuredActivityFeed,
+            transcript: "approved"
+        )
+        spy.respondToApprovalRequestResult = expectedScreen
+
+        let screen = try await service.respondToApprovalRequest(
+            sessionID: sessionID,
+            approvalRequestID: approvalRequestID,
+            decision: .approve
+        )
+
+        #expect(screen == expectedScreen)
+        #expect(spy.respondToApprovalRequestCalls == [
+            .init(sessionID: sessionID, approvalRequestID: approvalRequestID, decision: .approve)
         ])
     }
 
@@ -286,10 +373,21 @@ private final class SessionInteractionSpy: SessionInteractionManaging, @unchecke
         let sessionID: UUID
     }
 
+    struct SessionInputCall: Equatable {
+        let sessionID: UUID
+        let text: String
+    }
+
     struct RemoteInputCall: Equatable {
         let sessionID: UUID
         let pairedDeviceID: UUID
         let text: String
+    }
+
+    struct ApprovalCall: Equatable {
+        let sessionID: UUID
+        let approvalRequestID: UUID
+        let decision: ApprovalRequestDecision
     }
 
     struct RemoteApprovalCall: Equatable {
@@ -314,6 +412,18 @@ private final class SessionInteractionSpy: SessionInteractionManaging, @unchecke
         )
     )
     private(set) var observeSessionScreenCalls: [ObserveCall] = []
+    var sendSessionInputResult = SessionScreen(
+        session: Session(id: UUID(), workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready),
+        primarySurface: .structuredActivityFeed,
+        transcript: ""
+    )
+    private(set) var sendSessionInputCalls: [SessionInputCall] = []
+    var respondToApprovalRequestResult = SessionScreen(
+        session: Session(id: UUID(), workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready),
+        primarySurface: .structuredActivityFeed,
+        transcript: ""
+    )
+    private(set) var respondToApprovalRequestCalls: [ApprovalCall] = []
     var sendRemoteSessionInputResult = SessionScreen(
         session: Session(id: UUID(), workspaceID: UUID(), providerID: .claude, isDefault: true, state: .ready),
         transcript: ""
@@ -351,6 +461,22 @@ private final class SessionInteractionSpy: SessionInteractionManaging, @unchecke
     }
 
     func cancelSessionScreenObservation(observationID: UUID) {}
+
+    func sendSessionInput(sessionID: UUID, text: String) async throws -> SessionScreen {
+        sendSessionInputCalls.append(.init(sessionID: sessionID, text: text))
+        return sendSessionInputResult
+    }
+
+    func respondToApprovalRequest(
+        sessionID: UUID,
+        approvalRequestID: UUID,
+        decision: ApprovalRequestDecision
+    ) async throws -> SessionScreen {
+        respondToApprovalRequestCalls.append(
+            .init(sessionID: sessionID, approvalRequestID: approvalRequestID, decision: decision)
+        )
+        return respondToApprovalRequestResult
+    }
 
     func sendRemoteSessionInput(sessionID: UUID, pairedDeviceID: UUID, text: String) async throws -> SessionScreen {
         sendRemoteSessionInputCalls.append(
