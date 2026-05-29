@@ -56,15 +56,7 @@ struct ServiceSessionLifecycleScenariosTests {
             )
         )
         let lifecycle = fixture.makeLifecycle(
-            providerModule: PiProviderModule(
-                adapter: ServiceProviderAdapter(
-                    providerID: .pi,
-                    supportsDefaultSessionLaunch: true,
-                    supportsNamedSessions: true,
-                    healthSummaryEvaluator: { _, _, _ in fixture.health },
-                    primarySurfaceEvaluator: { _ in .terminal }
-                )
-            )
+            providerModule: PiProviderModule()
         )
 
         let session = try await lifecycle.launchOrResumeDefaultSession(
@@ -91,15 +83,7 @@ struct ServiceSessionLifecycleScenariosTests {
             )
         )
         let lifecycle = fixture.makeLifecycle(
-            providerModule: PiProviderModule(
-                adapter: ServiceProviderAdapter(
-                    providerID: .pi,
-                    supportsDefaultSessionLaunch: true,
-                    supportsNamedSessions: true,
-                    healthSummaryEvaluator: { _, _, _ in fixture.health },
-                    primarySurfaceEvaluator: { _ in .terminal }
-                )
-            )
+            providerModule: PiProviderModule()
         )
 
         let session = try await lifecycle.createNamedSession(

@@ -81,17 +81,83 @@ struct PiProviderModuleTests {
         ) == false)
     }
 
-    @Test func piProviderModulePlansRemoteRecoveryAndFreshRemoteRelaunchBehindProviderModuleSeam() {
-        let module = PiProviderModule(
-            adapter: ServiceProviderAdapter(
-                providerID: .pi,
-                supportsDefaultSessionLaunch: true,
-                supportsNamedSessions: true,
-                healthSummaryEvaluator: { _, _, _ in
-                    ProviderHealthSummary(state: .available, summary: "Ready", resolvedExecutable: "/tmp/fake-pi", launchability: .launchable)
-                }
+    @Test func piProviderModuleOwnsPiLaunchSupportInsteadOfDelegatingToAdapter() {
+        let module = PiProviderModule()
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Local Pi",
+            kind: .local,
+            folderPath: "/tmp/local-pi",
+            primaryGroupID: UUID()
+        )
+
+        #expect(module.supportsDefaultSessionLaunch(in: workspace))
+        #expect(module.supportsNamedSessions(in: workspace))
+    }
+
+    @Test func piProviderModuleHealthUsesProviderHealthEvaluatorInsteadOfAdapter() async {
+        let module = PiProviderModule()
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Local Pi",
+            kind: .local,
+            folderPath: "/tmp/local-pi",
+            primaryGroupID: UUID()
+        )
+        let providerHealthEvaluator = RecordingPiProviderHealthEvaluator(
+            summary: ProviderHealthSummary(
+                state: .available,
+                summary: "Pi health from evaluator",
+                resolvedExecutable: "/tmp/fake-pi",
+                launchability: .launchable
             )
         )
+
+        let health = await module.providerHealthSummary(
+            for: workspace,
+            remoteContext: nil,
+            providerHealthEvaluator: providerHealthEvaluator
+        )
+
+        #expect(health.summary == "Pi health from evaluator")
+        #expect(providerHealthEvaluator.requests == [
+            .init(providerID: .pi, workspaceID: workspace.id)
+        ])
+    }
+
+    @Test func piProviderModuleOwnsRemoteHealthSnapshotReusePolicyInsteadOfDelegatingToAdapter() {
+        let module = PiProviderModule()
+        let workspaceID = UUID()
+        let hostID = UUID()
+
+        let shouldReuse = module.reusesRemoteHealthSnapshot(
+            ProviderHealthSummary(
+                state: .available,
+                summary: "Pi ready",
+                checkedAt: Date()
+            ),
+            remoteContext: RemoteWorkspaceHealthContext(
+                host: NexusDomain.Host(id: hostID, name: "Build Server", sshTarget: "build-box"),
+                hostValidation: HostValidationSnapshot(
+                    hostID: hostID,
+                    state: .available,
+                    summary: "Host is available",
+                    checkedAt: Date()
+                ),
+                workspaceAvailability: WorkspaceAvailabilitySnapshot(
+                    workspaceID: workspaceID,
+                    state: .available,
+                    summary: "Workspace is available",
+                    checkedAt: Date()
+                )
+            )
+        )
+
+        #expect(shouldReuse)
+    }
+
+    @Test func piProviderModulePlansRemoteRecoveryAndFreshRemoteRelaunchBehindProviderModuleSeam() {
+        let module = PiProviderModule()
         let localWorkspace = Workspace(
             id: UUID(),
             name: "Local Pi",
@@ -211,29 +277,44 @@ struct PiProviderModuleTests {
                 ),
                 .pi: ServiceProviderAdapter(
                     providerID: .pi,
-                    supportsDefaultSessionLaunch: true,
-                    supportsNamedSessions: true,
+                    supportsDefaultSessionLaunch: false,
+                    supportsNamedSessions: false,
                     healthSummaryEvaluator: { _, _, _ in
-                        ProviderHealthSummary(
-                            state: .available,
-                            summary: "Pi ready",
-                            resolvedExecutable: "/tmp/fake-pi",
-                            launchability: .launchable
-                        )
+                        ProviderHealthSummary(state: .misconfigured, summary: "Adapter health should be ignored")
                     },
                     primarySurfaceEvaluator: { _ in .terminal },
-                    shouldReuseRemoteHealthSnapshot: { snapshot, _ in
-                        snapshot.summary == "reuse me"
-                    }
+                    shouldReuseRemoteHealthSnapshot: { _, _ in false }
                 )
             ]
         )
+        let workspaceID = UUID()
+        let hostID = UUID()
         let workspace = Workspace(
-            id: UUID(),
+            id: workspaceID,
             name: "Local Workspace",
             kind: .local,
             folderPath: "/tmp/workspace",
             primaryGroupID: UUID()
+        )
+        let remoteContext = RemoteWorkspaceHealthContext(
+            host: NexusDomain.Host(id: hostID, name: "Build Server", sshTarget: "build-box"),
+            hostValidation: HostValidationSnapshot(
+                hostID: hostID,
+                state: .available,
+                summary: "Host is available",
+                checkedAt: Date()
+            ),
+            workspaceAvailability: WorkspaceAvailabilitySnapshot(
+                workspaceID: workspaceID,
+                state: .available,
+                summary: "Workspace is available",
+                checkedAt: Date()
+            )
+        )
+        let checkedSnapshot = ProviderHealthSummary(
+            state: .available,
+            summary: "reuse me",
+            checkedAt: Date()
         )
 
         let piModule = registry.module(for: .pi)
@@ -241,21 +322,12 @@ struct PiProviderModuleTests {
 
         #expect(piModule.prelaunchPrimarySurface(in: workspace) == .structuredActivityFeed)
         #expect(claudeModule.prelaunchPrimarySurface(in: workspace) == .terminal)
-        #expect(piModule.reusesRemoteHealthSnapshot(ProviderHealthSummary(state: .available, summary: "reuse me"), remoteContext: nil))
-        #expect(claudeModule.reusesRemoteHealthSnapshot(ProviderHealthSummary(state: .available, summary: "reuse me"), remoteContext: nil) == false)
+        #expect(piModule.reusesRemoteHealthSnapshot(checkedSnapshot, remoteContext: remoteContext))
+        #expect(claudeModule.reusesRemoteHealthSnapshot(checkedSnapshot, remoteContext: remoteContext) == false)
     }
 
     @Test func piProviderModuleOwnsFreshOpenPlanningForLocalAndRemotePiSessions() async throws {
-        let module = PiProviderModule(
-            adapter: ServiceProviderAdapter(
-                providerID: .pi,
-                supportsDefaultSessionLaunch: true,
-                supportsNamedSessions: true,
-                healthSummaryEvaluator: { _, _, _ in
-                    ProviderHealthSummary(state: .available, summary: "Ready", resolvedExecutable: "/tmp/fake-pi", launchability: .launchable)
-                }
-            )
-        )
+        let module = PiProviderModule()
         let localWorkspace = Workspace(
             id: UUID(),
             name: "Local Pi",
@@ -324,16 +396,7 @@ struct PiProviderModuleTests {
     }
 
     @Test func piProviderModuleRetriesFreshRemotePersistedRelaunchWithoutContinuityOnlyForRejectedPiLinkage() throws {
-        let module = PiProviderModule(
-            adapter: ServiceProviderAdapter(
-                providerID: .pi,
-                supportsDefaultSessionLaunch: true,
-                supportsNamedSessions: true,
-                healthSummaryEvaluator: { _, _, _ in
-                    ProviderHealthSummary(state: .available, summary: "Ready", resolvedExecutable: "/tmp/fake-pi", launchability: .launchable)
-                }
-            )
-        )
+        let module = PiProviderModule()
         let linkageMetadata = PiSessionLinkage(
             piSessionID: "pi-session-1",
             sessionFile: "/tmp/pi-session-1.jsonl"
@@ -379,45 +442,58 @@ struct PiProviderModuleTests {
     }
 
     @Test func piProviderModulePreservesPiCatalogReadBehavior() async {
-        let module = PiProviderModule(
-            adapter: ServiceProviderAdapter(
-                providerID: .pi,
-                supportsDefaultSessionLaunch: true,
-                supportsNamedSessions: true,
-                healthSummaryEvaluator: { _, _, _ in
-                    ProviderHealthSummary(
-                        state: .available,
-                        summary: "Pi module health",
-                        resolvedExecutable: "/tmp/fake-pi",
-                        launchability: .launchable
-                    )
-                },
-                primarySurfaceEvaluator: { _ in .terminal },
-                shouldReuseRemoteHealthSnapshot: { snapshot, _ in
-                    snapshot.summary == "reuse me"
-                }
-            )
-        )
+        let module = PiProviderModule()
+        let workspaceID = UUID()
+        let hostID = UUID()
         let workspace = Workspace(
-            id: UUID(),
+            id: workspaceID,
             name: "Local Pi",
             kind: .local,
             folderPath: "/tmp/local-pi",
             primaryGroupID: UUID()
         )
+        let providerHealthEvaluator = RecordingPiProviderHealthEvaluator(
+            summary: ProviderHealthSummary(
+                state: .available,
+                summary: "Pi module health",
+                resolvedExecutable: "/tmp/fake-pi",
+                launchability: .launchable
+            )
+        )
+        let remoteContext = RemoteWorkspaceHealthContext(
+            host: NexusDomain.Host(id: hostID, name: "Build Server", sshTarget: "build-box"),
+            hostValidation: HostValidationSnapshot(
+                hostID: hostID,
+                state: .available,
+                summary: "Host is available",
+                checkedAt: Date()
+            ),
+            workspaceAvailability: WorkspaceAvailabilitySnapshot(
+                workspaceID: workspaceID,
+                state: .available,
+                summary: "Workspace is available",
+                checkedAt: Date()
+            )
+        )
 
         let health = await module.providerHealthSummary(
             for: workspace,
             remoteContext: nil,
-            providerHealthEvaluator: UnusedPiProviderHealthEvaluator()
+            providerHealthEvaluator: providerHealthEvaluator
         )
         let capabilities = module.providerCapabilities(in: workspace, health: health, defaultSession: nil)
 
         #expect(health.summary == "Pi module health")
+        #expect(providerHealthEvaluator.requests == [
+            .init(providerID: .pi, workspaceID: workspace.id)
+        ])
         #expect(capabilities.launchDefaultSession.isEnabled)
         #expect(capabilities.createNamedSession.isEnabled)
         #expect(module.prelaunchPrimarySurface(in: workspace) == .structuredActivityFeed)
-        #expect(module.reusesRemoteHealthSnapshot(ProviderHealthSummary(state: .available, summary: "reuse me"), remoteContext: nil))
+        #expect(module.reusesRemoteHealthSnapshot(
+            ProviderHealthSummary(state: .available, summary: "reuse me", checkedAt: Date()),
+            remoteContext: remoteContext
+        ))
     }
 }
 
@@ -443,15 +519,27 @@ private final class FreshOpenActionTracker: @unchecked Sendable {
     var healthRequests: [SessionRequest] = []
 }
 
-private struct UnusedPiProviderHealthEvaluator: ProviderHealthEvaluating {
+private final class RecordingPiProviderHealthEvaluator: @unchecked Sendable, ProviderHealthEvaluating {
+    struct Request: Equatable {
+        let providerID: ProviderID
+        let workspaceID: UUID
+    }
+
+    let summary: ProviderHealthSummary
+    private(set) var requests: [Request] = []
+
+    init(summary: ProviderHealthSummary) {
+        self.summary = summary
+    }
+
     func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> [WorkspaceProviderCard] {
-        Issue.record("PiProviderModule should use its adapter-owned health summary evaluator in direct module tests")
-        return []
+        []
     }
 
     func healthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> ProviderHealthSummary {
-        Issue.record("PiProviderModule should use its adapter-owned health summary evaluator in direct module tests")
-        return ProviderHealthSummary(state: .notChecked, summary: "unused")
+        requests.append(.init(providerID: providerID, workspaceID: workspace.id))
+        return summary
     }
 }
+
 #endif

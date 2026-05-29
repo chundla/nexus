@@ -2,7 +2,7 @@
 import Foundation
 import NexusDomain
 
-private func shouldReuseRemoteCLIHealthSnapshot(
+func shouldReuseRemoteCLIHealthSnapshot(
     _ snapshot: ProviderHealthSummary,
     remoteContext: RemoteWorkspaceHealthContext?
 ) -> Bool {
@@ -68,15 +68,12 @@ enum ServiceSessionProviderRegistry {
             ),
             .pi: ServiceProviderAdapter(
                 providerID: .pi,
-                supportsDefaultSessionLaunch: true,
-                supportsNamedSessions: true,
+                supportsDefaultSessionLaunch: false,
+                supportsNamedSessions: false,
                 healthSummaryEvaluator: { workspace, remoteContext, providerHealthEvaluator in
                     await providerHealthEvaluator.healthSummary(for: .pi, workspace: workspace, remoteContext: remoteContext)
                 },
-                primarySurfaceEvaluator: { _ in .structuredActivityFeed },
-                shouldReuseRemoteHealthSnapshot: { snapshot, remoteContext in
-                    shouldReuseRemoteCLIHealthSnapshot(snapshot, remoteContext: remoteContext)
-                }
+                primarySurfaceEvaluator: { _ in .structuredActivityFeed }
             )
         ]
 
@@ -94,8 +91,8 @@ enum ServiceSessionProviderRegistry {
             partialResult[entry.key] = entry.value
         }
 
-        if let piAdapter = providerAdapters[.pi] {
-            modules[.pi] = PiProviderModule(adapter: piAdapter)
+        if providerAdapters[.pi] != nil {
+            modules[.pi] = PiProviderModule()
         }
 
         return ProviderModuleRegistry(modules: modules)

@@ -5,36 +5,14 @@ import NexusDomain
 struct PiProviderModule: ProviderModule {
     let provider = Provider(id: .pi)
 
-    private let healthSummaryEvaluator: (Workspace, RemoteWorkspaceHealthContext?, any ProviderHealthEvaluating) async -> ProviderHealthSummary
-    private let defaultSessionLaunchSupportEvaluator: (Workspace) -> Bool
-    private let namedSessionSupportEvaluator: (Workspace) -> Bool
-    private let remoteHealthSnapshotReuseEvaluator: (ProviderHealthSummary, RemoteWorkspaceHealthContext?) -> Bool
-
-    init(adapter: ServiceProviderAdapter) {
-        self.healthSummaryEvaluator = { workspace, remoteContext, providerHealthEvaluator in
-            await adapter.healthSummary(
-                for: workspace,
-                remoteContext: remoteContext,
-                providerHealthEvaluator: providerHealthEvaluator
-            )
-        }
-        self.defaultSessionLaunchSupportEvaluator = { workspace in
-            adapter.supportsDefaultSessionLaunch(in: workspace)
-        }
-        self.namedSessionSupportEvaluator = { workspace in
-            adapter.supportsNamedSessions(in: workspace)
-        }
-        self.remoteHealthSnapshotReuseEvaluator = { snapshot, remoteContext in
-            adapter.shouldReuseRemoteHealthSnapshot(snapshot, remoteContext)
-        }
-    }
+    init() {}
 
     func supportsDefaultSessionLaunch(in workspace: Workspace) -> Bool {
-        defaultSessionLaunchSupportEvaluator(workspace)
+        true
     }
 
     func supportsNamedSessions(in workspace: Workspace) -> Bool {
-        namedSessionSupportEvaluator(workspace)
+        true
     }
 
     func providerHealthSummary(
@@ -42,7 +20,7 @@ struct PiProviderModule: ProviderModule {
         remoteContext: RemoteWorkspaceHealthContext?,
         providerHealthEvaluator: any ProviderHealthEvaluating
     ) async -> ProviderHealthSummary {
-        await healthSummaryEvaluator(workspace, remoteContext, providerHealthEvaluator)
+        await providerHealthEvaluator.healthSummary(for: .pi, workspace: workspace, remoteContext: remoteContext)
     }
 
     func providerCapabilities(
@@ -67,7 +45,7 @@ struct PiProviderModule: ProviderModule {
         _ snapshot: ProviderHealthSummary,
         remoteContext: RemoteWorkspaceHealthContext?
     ) -> Bool {
-        remoteHealthSnapshotReuseEvaluator(snapshot, remoteContext)
+        shouldReuseRemoteCLIHealthSnapshot(snapshot, remoteContext: remoteContext)
     }
 
     func planPersistedSessionRelaunch(
