@@ -37,3 +37,5 @@ Initial set:
 29. Session surface is explicit, and client support is separate from Provider Capability
 30. Provider-native continuation linkage lives on the Session Record, not the Launch Snapshot
 31. Remote protocol-native Sessions use a service-owned SSH stdio bridge with tmux durability
+32. Local structured Sessions may be ready without a continuously attached provider runtime
+33. Some remote structured Sessions may be ready without a continuously attached live runtime
