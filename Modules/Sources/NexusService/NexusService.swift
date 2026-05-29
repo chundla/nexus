@@ -1049,46 +1049,18 @@ struct ServiceProviderAdapter {
         self.primarySurfaceEvaluator = primarySurfaceEvaluator ?? { _ in .terminal }
         self.healthSummaryEvaluator = healthSummaryEvaluator
         self.initialTranscriptBuilder = initialTranscriptBuilder ?? { workspace, remoteHost, launchMode in
-            if let remoteHost {
-                switch launchMode {
-                case .launchNew:
-                    return "Connecting to \(workspace.name) on \(remoteHost.name) with \(provider.displayName)…\n"
-                case .attachExisting:
-                    return "Reconnecting to \(workspace.name) on \(remoteHost.name) with \(provider.displayName)…\n"
-                }
-            }
-
-            return "Launching \(workspace.name) with \(provider.displayName)…\n"
+            providerModuleDefaultInitialTranscript(
+                provider: provider,
+                workspace: workspace,
+                remoteHost: remoteHost,
+                launchMode: launchMode
+            )
         }
         self.terminationStatusMessageBuilder = terminationStatusMessageBuilder ?? { status in
-            "\n[\(provider.displayName) exited with status \(status)]\n"
+            providerModuleDefaultTerminationStatusMessage(provider: provider, status: status)
         }
         self.remoteRuntimeRecoveryFailureEvaluator = remoteRuntimeRecoveryFailureEvaluator ?? { context in
-            if context.isMissingRemoteRuntime {
-                return (
-                    state: .failed,
-                    message: "Known remote runtime '\(context.runtimeIdentifier)' is no longer available on \(context.hostName). Relaunch to create a new remote runtime."
-                )
-            }
-
-            if context.normalizedDetail.contains("could not resolve hostname")
-                || context.normalizedDetail.contains("operation timed out")
-                || context.normalizedDetail.contains("connection refused")
-                || context.normalizedDetail.contains("no route to host")
-                || context.normalizedDetail.contains("connection closed by remote host")
-                || context.normalizedDetail.contains("permission denied") {
-                let suffix = context.detail.isEmpty ? "" : " \(context.detail)"
-                return (
-                    state: .interrupted,
-                    message: "Could not reach \(context.hostName) to recover remote runtime '\(context.runtimeIdentifier)'.\(suffix)"
-                )
-            }
-
-            let suffix = context.detail.isEmpty ? "" : " \(context.detail)"
-            return (
-                state: .interrupted,
-                message: "Could not recover remote runtime '\(context.runtimeIdentifier)' on \(context.hostName).\(suffix)"
-            )
+            providerModuleDefaultRemoteRuntimeRecoveryFailure(for: context)
         }
         self.shouldReuseRemoteHealthSnapshot = shouldReuseRemoteHealthSnapshot
     }
@@ -1152,7 +1124,6 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     private var sessionInteraction: (any SessionInteractionManaging)!
     private let remoteAccessRuntime: RemoteAccessRuntime
     private let ibmBobNativeSessionCleaner: any IBMBobNativeSessionCleaning
-    private let providerAdapters: [ProviderID: ServiceProviderAdapter]
     private let sessionControllerRegistry = SessionControllerRegistry()
 
     private init(
@@ -1187,7 +1158,6 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 hostValidationEvaluator: hostValidationEvaluator,
                 workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
                 sessionRuntimeManager: sessionRuntimeManager,
-                providerAdapters: providerAdapters,
                 providerModuleRegistry: self.providerModuleRegistry
             )
         )
@@ -1195,7 +1165,6 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         self.sessionInteraction = sessionInteraction
         self.remoteAccessRuntime = remoteAccessRuntime
         self.ibmBobNativeSessionCleaner = ibmBobNativeSessionCleaner
-        self.providerAdapters = providerAdapters
         super.init()
         self.sessionLifecycle = sessionLifecycle ?? ServiceSessionLifecycle(
             dependencies: ServiceSessionLifecycleDependencies(
@@ -1578,17 +1547,6 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
 
     func getProviderDetail(workspaceID: UUID, providerID: ProviderID) async throws -> ProviderDetail {
         try await workspaceCatalog.providerDetail(workspaceID: workspaceID, providerID: providerID)
-    }
-
-    private func providerAdapter(for providerID: ProviderID) -> ServiceProviderAdapter {
-        providerAdapters[providerID] ?? ServiceProviderAdapter(
-            providerID: providerID,
-            supportsDefaultSessionLaunch: false,
-            supportsNamedSessions: false,
-            healthSummaryEvaluator: { workspace, remoteContext, providerHealthEvaluator in
-                await providerHealthEvaluator.healthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
-            }
-        )
     }
 
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: UUID?) throws -> Workspace {
@@ -2217,7 +2175,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         for session: Session,
         failureContext: RemoteRuntimeRecoveryFailureContext
     ) throws -> Session {
-        let failure = providerAdapter(for: session.providerID).remoteRuntimeRecoveryFailure(for: failureContext)
+        let failure = providerModuleRegistry.module(for: session.providerID).remoteRuntimeRecoveryFailure(for: failureContext)
         return try sessionRecordStore.updateSession(
             id: session.id,
             state: failure.state,
@@ -2383,7 +2341,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         session: Session,
         workspace: Workspace
     ) throws -> (state: Session.State, message: String) {
-        providerAdapter(for: session.providerID).remoteRuntimeRecoveryFailure(
+        providerModuleRegistry.module(for: session.providerID).remoteRuntimeRecoveryFailure(
             for: try remoteRuntimeRecoveryFailureContext(for: error, session: session, workspace: workspace)
         )
     }
@@ -2412,7 +2370,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         sessionRecordAdapterMetadataSource: SessionRecordAdapterMetadataLaunchSource = .stored,
         remoteRuntimeLaunchMode: RemoteRuntimeLaunchMode
     ) throws -> SessionRuntimeLaunchConfiguration {
-        let adapter = providerAdapter(for: session.providerID)
+        let providerModule = providerModuleRegistry.module(for: session.providerID)
         let remoteHost: NexusDomain.Host?
         let resolvedRemoteRuntimeIdentifier: String?
         if workspace.kind == .remote {
@@ -2437,13 +2395,13 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 for: session,
                 source: sessionRecordAdapterMetadataSource
             ),
-            initialTranscript: adapter.initialTranscript(
+            initialTranscript: providerModule.initialTranscript(
                 for: workspace,
                 remoteHost: remoteHost,
                 launchMode: remoteRuntimeLaunchMode
             ),
             terminationStatusMessageBuilder: { status in
-                adapter.terminationStatusMessage(for: status)
+                providerModule.terminationStatusMessage(for: status)
             }
         )
     }
@@ -2487,7 +2445,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             return .terminal
         }
 
-        return providerAdapter(for: session.providerID).primarySurface(in: resolvedWorkspace)
+        return providerModuleRegistry.module(for: session.providerID).prelaunchPrimarySurface(in: resolvedWorkspace)
     }
 
     private func persistedStructuredActivityItems(for session: Session) throws -> [SessionActivityItem]? {

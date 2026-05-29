@@ -67,6 +67,40 @@ struct WorkspaceCatalogTests {
         #expect(detail.prelaunchPrimarySurface == piCard.prelaunchPrimarySurface)
     }
 
+    @Test func providerDetailUsesProviderModuleSurfaceWhenPersistedPiSessionHasNoLaunchSnapshot() async throws {
+        let fixture = try WorkspaceCatalogFixture(
+            providerAdapters: ServiceSessionProviderRegistry.providerAdapters(overrides: [
+                .pi: ServiceProviderAdapter(
+                    providerID: .pi,
+                    supportsDefaultSessionLaunch: false,
+                    supportsNamedSessions: false,
+                    healthSummaryEvaluator: { _, _, _ in
+                        ProviderHealthSummary(
+                            state: .available,
+                            summary: "Ready",
+                            resolvedExecutable: "/tmp/fake-pi",
+                            launchability: .launchable
+                        )
+                    },
+                    primarySurfaceEvaluator: { _ in .terminal }
+                )
+            ])
+        )
+        let session = try fixture.sessionRecordStore.createDefaultSession(
+            workspaceID: fixture.workspace.id,
+            providerID: .pi,
+            state: .ready,
+            failureMessage: nil
+        )
+
+        let detail = try await fixture.catalog.providerDetail(workspaceID: fixture.workspace.id, providerID: .pi)
+        let persistedSession = try #require(try fixture.sessionRecordStore.session(id: session.id))
+
+        #expect(detail.defaultSession?.state == .interrupted)
+        #expect(persistedSession.state == .interrupted)
+        #expect(persistedSession.failureMessage == structuredInterruptedSessionFailureMessage(for: .pi))
+    }
+
     @Test func workspaceOverviewsPreserveInputOrder() async throws {
         let fixture = try WorkspaceCatalogFixture()
         let secondWorkspace = try fixture.metadataStore.createLocalWorkspace(
@@ -91,7 +125,10 @@ private struct WorkspaceCatalogFixture {
     let workspace: Workspace
     let secondWorkspaceFolder: URL
 
-    init(providerModuleRegistry: ProviderModuleRegistry? = nil) throws {
+    init(
+        providerModuleRegistry: ProviderModuleRegistry? = nil,
+        providerAdapters: [ProviderID: ServiceProviderAdapter]? = nil
+    ) throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("WorkspaceCatalogTests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -111,12 +148,12 @@ private struct WorkspaceCatalogFixture {
             primaryGroupID: group.id
         )
 
+        let providerAdapters = providerAdapters ?? ServiceSessionProviderRegistry.providerAdapters()
         self.metadataStore = metadataStore
         self.sessionRecordStore = sessionRecordStore
         self.group = group
         self.workspace = workspace
         self.secondWorkspaceFolder = secondWorkspaceFolder
-        let providerAdapters = ServiceSessionProviderRegistry.providerAdapters()
         self.catalog = WorkspaceCatalog(
             dependencies: WorkspaceCatalogDependencies(
                 metadataStore: metadataStore,
@@ -125,7 +162,6 @@ private struct WorkspaceCatalogFixture {
                 hostValidationEvaluator: UnusedHostValidationEvaluator(),
                 workspaceAvailabilityEvaluator: UnusedWorkspaceAvailabilityEvaluator(),
                 sessionRuntimeManager: InMemorySessionRuntimeManager(),
-                providerAdapters: providerAdapters,
                 providerModuleRegistry: providerModuleRegistry ?? ServiceSessionProviderRegistry.providerModules(providerAdapters: providerAdapters)
             )
         )

@@ -15,7 +15,6 @@ struct WorkspaceCatalogDependencies {
     let hostValidationEvaluator: any HostValidationEvaluating
     let workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating
     let sessionRuntimeManager: any SessionRuntimeManaging
-    let providerAdapters: [ProviderID: ServiceProviderAdapter]
     let providerModuleRegistry: ProviderModuleRegistry
 }
 
@@ -226,17 +225,6 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
         return try dependencies.sessionRecordStore.sessionRecordAdapterMetadata(sessionID: session.id)?.ibmBobTurnInProgress != true
     }
 
-    private func providerAdapter(for providerID: ProviderID) -> ServiceProviderAdapter {
-        dependencies.providerAdapters[providerID] ?? ServiceProviderAdapter(
-            providerID: providerID,
-            supportsDefaultSessionLaunch: false,
-            supportsNamedSessions: false,
-            healthSummaryEvaluator: { workspace, remoteContext, providerHealthEvaluator in
-                await providerHealthEvaluator.healthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
-            }
-        )
-    }
-
     private func providerModule(for providerID: ProviderID) -> any ProviderModule {
         dependencies.providerModuleRegistry.module(for: providerID)
     }
@@ -345,7 +333,7 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
             return .terminal
         }
 
-        return providerAdapter(for: session.providerID).primarySurface(in: resolvedWorkspace)
+        return providerModule(for: session.providerID).prelaunchPrimarySurface(in: resolvedWorkspace)
     }
 
     private func stopRequiresActiveIBMBobTurn(_ session: Session, workspace: Workspace? = nil) throws -> Bool {

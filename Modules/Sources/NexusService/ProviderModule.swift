@@ -65,6 +65,18 @@ protocol ProviderModule {
 
     func prelaunchPrimarySurface(in workspace: Workspace) -> SessionSurface
 
+    func initialTranscript(
+        for workspace: Workspace,
+        remoteHost: NexusDomain.Host?,
+        launchMode: RemoteRuntimeLaunchMode
+    ) -> String
+
+    func terminationStatusMessage(for status: Int32) -> String
+
+    func remoteRuntimeRecoveryFailure(
+        for context: RemoteRuntimeRecoveryFailureContext
+    ) -> (state: Session.State, message: String)
+
     func reusesRemoteHealthSnapshot(
         _ snapshot: ProviderHealthSummary,
         remoteContext: RemoteWorkspaceHealthContext?
@@ -91,6 +103,29 @@ extension ProviderModule {
         actions: ProviderModuleFreshSessionOpenActions
     ) async throws -> ProviderModuleFreshSessionOpenResult {
         try await executeSharedFreshSessionOpen(request, actions: actions)
+    }
+
+    func initialTranscript(
+        for workspace: Workspace,
+        remoteHost: NexusDomain.Host?,
+        launchMode: RemoteRuntimeLaunchMode
+    ) -> String {
+        providerModuleDefaultInitialTranscript(
+            provider: provider,
+            workspace: workspace,
+            remoteHost: remoteHost,
+            launchMode: launchMode
+        )
+    }
+
+    func terminationStatusMessage(for status: Int32) -> String {
+        providerModuleDefaultTerminationStatusMessage(provider: provider, status: status)
+    }
+
+    func remoteRuntimeRecoveryFailure(
+        for context: RemoteRuntimeRecoveryFailureContext
+    ) -> (state: Session.State, message: String) {
+        providerModuleDefaultRemoteRuntimeRecoveryFailure(for: context)
     }
 
     func planPersistedSessionRelaunch(
@@ -216,6 +251,58 @@ func providerCapabilityDisabledReason(
 
 func providerHealthFailureMessage(from health: ProviderHealthSummary) -> String {
     health.diagnostics.first(where: { $0.severity == .error })?.message ?? health.summary
+}
+
+func providerModuleDefaultInitialTranscript(
+    provider: Provider,
+    workspace: Workspace,
+    remoteHost: NexusDomain.Host?,
+    launchMode: RemoteRuntimeLaunchMode
+) -> String {
+    if let remoteHost {
+        switch launchMode {
+        case .launchNew:
+            return "Connecting to \(workspace.name) on \(remoteHost.name) with \(provider.displayName)…\n"
+        case .attachExisting:
+            return "Reconnecting to \(workspace.name) on \(remoteHost.name) with \(provider.displayName)…\n"
+        }
+    }
+
+    return "Launching \(workspace.name) with \(provider.displayName)…\n"
+}
+
+func providerModuleDefaultTerminationStatusMessage(provider: Provider, status: Int32) -> String {
+    "\n[\(provider.displayName) exited with status \(status)]\n"
+}
+
+func providerModuleDefaultRemoteRuntimeRecoveryFailure(
+    for context: RemoteRuntimeRecoveryFailureContext
+) -> (state: Session.State, message: String) {
+    if context.isMissingRemoteRuntime {
+        return (
+            state: .failed,
+            message: "Known remote runtime '\(context.runtimeIdentifier)' is no longer available on \(context.hostName). Relaunch to create a new remote runtime."
+        )
+    }
+
+    if context.normalizedDetail.contains("could not resolve hostname")
+        || context.normalizedDetail.contains("operation timed out")
+        || context.normalizedDetail.contains("connection refused")
+        || context.normalizedDetail.contains("no route to host")
+        || context.normalizedDetail.contains("connection closed by remote host")
+        || context.normalizedDetail.contains("permission denied") {
+        let suffix = context.detail.isEmpty ? "" : " \(context.detail)"
+        return (
+            state: .interrupted,
+            message: "Could not reach \(context.hostName) to recover remote runtime '\(context.runtimeIdentifier)'.\(suffix)"
+        )
+    }
+
+    let suffix = context.detail.isEmpty ? "" : " \(context.detail)"
+    return (
+        state: .interrupted,
+        message: "Could not recover remote runtime '\(context.runtimeIdentifier)' on \(context.hostName).\(suffix)"
+    )
 }
 
 private struct UnsupportedProviderModule: ProviderModule {
