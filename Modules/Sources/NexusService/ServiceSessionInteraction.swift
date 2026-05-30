@@ -11,6 +11,11 @@ protocol SessionInteractionManaging: AnyObject {
         approvalRequestID: UUID,
         decision: ApprovalRequestDecision
     ) async throws -> SessionScreen
+    func respondToExtensionDialog(
+        sessionID: UUID,
+        dialogID: String,
+        response: SessionExtensionUIDialogResponse
+    ) async throws -> SessionScreen
     func observeSessionScreen(
         observationID: UUID,
         sessionID: UUID,
@@ -32,6 +37,19 @@ protocol SessionInteractionManaging: AnyObject {
     ) async throws -> SessionScreen
 }
 
+extension SessionInteractionManaging {
+    func respondToExtensionDialog(
+        sessionID: UUID,
+        dialogID: String,
+        response: SessionExtensionUIDialogResponse
+    ) async throws -> SessionScreen {
+        _ = sessionID
+        _ = dialogID
+        _ = response
+        throw NexusSessionExtensionUIError.extensionDialogsUnavailable
+    }
+}
+
 struct ServiceSessionInteractionDependencies {
     let sessionRecord: (UUID) throws -> Session?
     let reconcileSessionRuntimeState: (Session) throws -> Session
@@ -48,6 +66,7 @@ struct ServiceSessionInteractionDependencies {
     let sendText: (String, Session) throws -> SessionScreen
     let sendInputKey: (SessionInputKey, Bool, Session) throws -> SessionScreen
     let respondToApprovalRequest: (UUID, ApprovalRequestDecision, Session) throws -> SessionScreen
+    let respondToExtensionDialog: (String, SessionExtensionUIDialogResponse, Session) throws -> SessionScreen
     let stabilizedScreenAfterTerminalInput: (Session, SessionScreen, SessionScreen) -> SessionScreen
 }
 
@@ -130,6 +149,17 @@ final class ServiceSessionInteraction: SessionInteractionManaging, @unchecked Se
         let resolvedSession = try await readyMacControlledSession(sessionID: sessionID)
         return dependencies.normalizedSessionScreen(
             try dependencies.respondToApprovalRequest(approvalRequestID, decision, resolvedSession)
+        )
+    }
+
+    func respondToExtensionDialog(
+        sessionID: UUID,
+        dialogID: String,
+        response: SessionExtensionUIDialogResponse
+    ) async throws -> SessionScreen {
+        let resolvedSession = try await readyMacControlledSession(sessionID: sessionID)
+        return dependencies.normalizedSessionScreen(
+            try dependencies.respondToExtensionDialog(dialogID, response, resolvedSession)
         )
     }
 

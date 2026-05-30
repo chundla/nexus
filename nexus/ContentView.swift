@@ -22,7 +22,6 @@ struct ContentView: View {
     @State private var isShowingWorkspaceGroupPicker = false
     @State private var terminalViewportSize: CGSize = .zero
     @State private var terminalFocusToken = UUID()
-    @State private var structuredSessionPrompt = ""
     @State private var presentedError: PresentedError?
     @FocusState private var isStructuredSessionPromptFocused: Bool
 
@@ -904,7 +903,7 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onChange(of: sessionID) { _, _ in
-            structuredSessionPrompt = ""
+            appModel.focusedStructuredSessionDraft = ""
         }
     }
 
@@ -1517,11 +1516,24 @@ struct ContentView: View {
         let presentation = StructuredSessionPresentation(
             screen: screen,
             hasWriterAuthority: true,
-            draft: structuredSessionPrompt,
+            draft: appModel.focusedStructuredSessionDraft,
             isPerformingAction: screen.isAgentTurnInProgress
         )
+        let extensionUI = screen.extensionUI
+        let aboveEditorWidgets = extensionUI?.widgets.filter { $0.placement == .aboveEditor } ?? []
+        let belowEditorWidgets = extensionUI?.widgets.filter { $0.placement == .belowEditor } ?? []
 
         VStack(spacing: 0) {
+            if let extensionUI, extensionUI.pendingDialogs.isEmpty == false {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(extensionUI.pendingDialogs) { dialog in
+                        structuredSessionExtensionDialogView(dialog)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, 14)
+            }
+
             if presentation.feed.pendingApprovalRequests.isEmpty == false {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(presentation.feed.pendingApprovalRequests) { request in
@@ -1530,6 +1542,13 @@ struct ContentView: View {
                 }
                 .padding(.horizontal, 14)
                 .padding(.top, 14)
+            }
+
+            if let extensionUI,
+               extensionUI.title != nil || extensionUI.statuses.isEmpty == false || extensionUI.notifications.isEmpty == false {
+                structuredSessionExtensionSummaryView(extensionUI)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 14)
             }
 
             ScrollViewReader { proxy in
@@ -1576,6 +1595,11 @@ struct ContentView: View {
                         proxy.scrollTo("conversation-bottom", anchor: .bottom)
                     }
                 }
+                .onChange(of: extensionUI?.pendingDialogs.count ?? 0) { _, _ in
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        proxy.scrollTo("conversation-bottom", anchor: .bottom)
+                    }
+                }
             }
 
             if isReady {
@@ -1584,8 +1608,12 @@ struct ContentView: View {
                         macStructuredSessionSlashCommandMenu(presentation.slashCommandMenu)
                     }
 
+                    if aboveEditorWidgets.isEmpty == false {
+                        structuredSessionExtensionWidgetsView(aboveEditorWidgets)
+                    }
+
                     HStack(spacing: 8) {
-                        TextField(presentation.composer.placeholder, text: $structuredSessionPrompt, axis: .vertical)
+                        TextField(presentation.composer.placeholder, text: $appModel.focusedStructuredSessionDraft, axis: .vertical)
                             .focused($isStructuredSessionPromptFocused)
                             .font(NexusMacTheme.bodyFont(13))
                             .textFieldStyle(.plain)
@@ -1603,6 +1631,10 @@ struct ContentView: View {
                                     .stroke(NexusMacTheme.softLine, lineWidth: 1)
                             }
                     }
+
+                    if belowEditorWidgets.isEmpty == false {
+                        structuredSessionExtensionWidgetsView(belowEditorWidgets)
+                    }
                 }
                 .padding(14)
                 .background(Color.white.opacity(0.02))
@@ -1618,7 +1650,7 @@ struct ContentView: View {
             LazyVStack(alignment: .leading, spacing: 4) {
                 ForEach(menu.commands) { command in
                     Button {
-                        structuredSessionPrompt = menu.applying(command, to: structuredSessionPrompt)
+                        appModel.focusedStructuredSessionDraft = menu.applying(command, to: appModel.focusedStructuredSessionDraft)
                         isStructuredSessionPromptFocused = true
                     } label: {
                         HStack(alignment: .top, spacing: 12) {
@@ -1829,6 +1861,98 @@ struct ContentView: View {
         .nexusPanel(tint: NexusMacTheme.gold, radius: 16)
     }
 
+    private func structuredSessionExtensionDialogView(_ dialog: SessionExtensionUIDialog) -> some View {
+        StructuredSessionExtensionDialogCard(dialog: dialog) { response in
+            respondToStructuredSessionExtensionDialog(dialog.id, response: response)
+        }
+    }
+
+    private func structuredSessionExtensionSummaryView(_ extensionUI: SessionExtensionUIState) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let title = extensionUI.title, title.isEmpty == false {
+                Text(title)
+                    .font(NexusMacTheme.bodyFont(14).weight(.semibold))
+                    .foregroundStyle(.white)
+            }
+
+            if extensionUI.statuses.isEmpty == false {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Status")
+                        .font(NexusMacTheme.bodyFont(11, relativeTo: .caption).weight(.semibold))
+                        .foregroundStyle(NexusMacTheme.mutedText)
+
+                    ForEach(extensionUI.statuses) { status in
+                        Text(status.text)
+                            .font(NexusMacTheme.bodyFont(12))
+                            .foregroundStyle(.white.opacity(0.92))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.white.opacity(0.05), in: Capsule())
+                    }
+                }
+            }
+
+            if extensionUI.notifications.isEmpty == false {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Notifications")
+                        .font(NexusMacTheme.bodyFont(11, relativeTo: .caption).weight(.semibold))
+                        .foregroundStyle(NexusMacTheme.mutedText)
+
+                    ForEach(extensionUI.notifications.suffix(5)) { notification in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(notification.kind.rawValue.capitalized)
+                                .font(NexusMacTheme.bodyFont(10, relativeTo: .caption).weight(.semibold))
+                                .foregroundStyle(structuredSessionExtensionNotificationColor(notification.kind))
+                            Text(notification.message)
+                                .font(NexusMacTheme.bodyFont(12))
+                                .foregroundStyle(.white.opacity(0.92))
+                                .textSelection(.enabled)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .nexusPanel(tint: NexusMacTheme.teal, radius: 16)
+    }
+
+    private func structuredSessionExtensionWidgetsView(_ widgets: [SessionExtensionUIWidget]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(widgets) { widget in
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(widget.key)
+                        .font(NexusMacTheme.bodyFont(10, relativeTo: .caption).weight(.semibold))
+                        .foregroundStyle(NexusMacTheme.mutedText)
+                    ForEach(Array(widget.lines.enumerated()), id: \.offset) { _, line in
+                        Text(line)
+                            .font(NexusMacTheme.bodyFont(12))
+                            .foregroundStyle(.white.opacity(0.92))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+        }
+    }
+
+    private func structuredSessionExtensionNotificationColor(_ kind: SessionExtensionUINotificationKind) -> Color {
+        switch kind {
+        case .info:
+            NexusMacTheme.teal
+        case .warning:
+            NexusMacTheme.gold
+        case .error:
+            NexusMacTheme.coral
+        }
+    }
+
     private func structuredSessionActivityColor(for emphasis: StructuredSessionActivityEmphasis) -> Color {
         switch emphasis {
         case .neutral:
@@ -1843,7 +1967,7 @@ struct ContentView: View {
     }
 
     private func sendStructuredSessionPrompt() {
-        let prompt = structuredSessionPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prompt = appModel.focusedStructuredSessionDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard prompt.isEmpty == false else {
             return
         }
@@ -1851,7 +1975,7 @@ struct ContentView: View {
         Task { @MainActor in
             do {
                 try await appModel.sendInputToFocusedSession(prompt)
-                structuredSessionPrompt = ""
+                appModel.focusedStructuredSessionDraft = ""
             } catch {
                 presentedError = PresentedError(message: error.localizedDescription)
             }
@@ -1862,6 +1986,16 @@ struct ContentView: View {
         Task { @MainActor in
             do {
                 try await appModel.respondToFocusedSessionApprovalRequest(approvalRequestID, decision: decision)
+            } catch {
+                presentedError = PresentedError(message: error.localizedDescription)
+            }
+        }
+    }
+
+    private func respondToStructuredSessionExtensionDialog(_ dialogID: String, response: SessionExtensionUIDialogResponse) {
+        Task { @MainActor in
+            do {
+                try await appModel.respondToFocusedSessionExtensionDialog(dialogID, response: response)
             } catch {
                 presentedError = PresentedError(message: error.localizedDescription)
             }
@@ -2276,6 +2410,122 @@ struct TerminalViewportLayout {
 private struct TerminalLineSegment {
     var text: String
     let style: TerminalStyle
+}
+
+private struct StructuredSessionExtensionDialogCard: View {
+    let dialog: SessionExtensionUIDialog
+    let onRespond: (SessionExtensionUIDialogResponse) -> Void
+
+    @State private var selectedOption: String
+    @State private var textValue: String
+
+    init(dialog: SessionExtensionUIDialog, onRespond: @escaping (SessionExtensionUIDialogResponse) -> Void) {
+        self.dialog = dialog
+        self.onRespond = onRespond
+        _selectedOption = State(initialValue: dialog.options.first ?? "")
+        _textValue = State(initialValue: dialog.prefill ?? "")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Extension UI", systemImage: "puzzlepiece.extension.fill")
+                .font(NexusMacTheme.bodyFont(12, relativeTo: .headline).weight(.semibold))
+                .foregroundStyle(NexusMacTheme.teal)
+
+            Text(dialog.title)
+                .font(NexusMacTheme.bodyFont(14).weight(.semibold))
+                .foregroundStyle(.white)
+
+            if let message = dialog.message, message.isEmpty == false {
+                Text(message)
+                    .font(NexusMacTheme.bodyFont(13))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .textSelection(.enabled)
+            }
+
+            switch dialog.kind {
+            case .select:
+                Picker("Options", selection: $selectedOption) {
+                    ForEach(dialog.options, id: \.self) { option in
+                        Text(option).tag(option)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                HStack(spacing: 8) {
+                    Button("Cancel") {
+                        onRespond(.cancelled)
+                    }
+                    .buttonStyle(NexusSecondaryButtonStyle())
+
+                    Button("Select") {
+                        onRespond(.value(selectedOption))
+                    }
+                    .buttonStyle(NexusAccentButtonStyle())
+                    .disabled(selectedOption.isEmpty)
+                }
+            case .confirm:
+                HStack(spacing: 8) {
+                    Button("Cancel") {
+                        onRespond(.confirmed(false))
+                    }
+                    .buttonStyle(NexusSecondaryButtonStyle())
+
+                    Button("Confirm") {
+                        onRespond(.confirmed(true))
+                    }
+                    .buttonStyle(NexusAccentButtonStyle())
+                }
+            case .input:
+                TextField(dialog.placeholder ?? dialog.title, text: $textValue, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(1 ... 4)
+
+                HStack(spacing: 8) {
+                    Button("Cancel") {
+                        onRespond(.cancelled)
+                    }
+                    .buttonStyle(NexusSecondaryButtonStyle())
+
+                    Button("Submit") {
+                        onRespond(.value(textValue))
+                    }
+                    .buttonStyle(NexusAccentButtonStyle())
+                }
+            case .editor:
+                TextEditor(text: $textValue)
+                    .font(NexusMacTheme.bodyFont(13))
+                    .frame(minHeight: 140)
+                    .padding(8)
+                    .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(NexusMacTheme.softLine, lineWidth: 1)
+                    }
+
+                HStack(spacing: 8) {
+                    Button("Cancel") {
+                        onRespond(.cancelled)
+                    }
+                    .buttonStyle(NexusSecondaryButtonStyle())
+
+                    Button("Submit") {
+                        onRespond(.value(textValue))
+                    }
+                    .buttonStyle(NexusAccentButtonStyle())
+                }
+            }
+
+            if let timeoutMilliseconds = dialog.timeoutMilliseconds {
+                Text("Auto-cancels after \(timeoutMilliseconds / 1000)s")
+                    .font(NexusMacTheme.bodyFont(11, relativeTo: .caption))
+                    .foregroundStyle(NexusMacTheme.mutedText)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .nexusPanel(tint: NexusMacTheme.teal, radius: 16)
+    }
 }
 
 private enum SidebarMode: String, CaseIterable, Identifiable {

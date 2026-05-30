@@ -25,6 +25,7 @@ enum PiRPCSessionRuntimeError: LocalizedError {
     case startupFailed(String)
     case busy
     case approvalRequestNotFound
+    case extensionDialogNotFound
 
     var errorDescription: String? {
         switch self {
@@ -36,6 +37,8 @@ enum PiRPCSessionRuntimeError: LocalizedError {
             return "Pi is already handling a prompt. Wait for the current turn to finish before sending another one."
         case .approvalRequestNotFound:
             return "Approval Request was not found for this Session."
+        case .extensionDialogNotFound:
+            return "Extension UI dialog was not found for this Session."
         }
     }
 }
@@ -73,6 +76,12 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     private var draft = ""
     private var activityItems: [SessionActivityItem] = []
     private var approvalRequests: [SessionApprovalRequest] = []
+    private var pendingExtensionDialogs: [SessionExtensionUIDialog] = []
+    private var extensionNotifications: [SessionExtensionUINotification] = []
+    private var extensionStatuses: [SessionExtensionUIStatus] = []
+    private var extensionWidgets: [SessionExtensionUIWidget] = []
+    private var extensionTitle: String?
+    private var extensionEditorText: String?
     private var providerEvents: [SessionProviderEvent] = []
     private var nextProviderEventSequence = 0
     private var providerSlashCommands: [SessionSlashCommand]?
@@ -234,6 +243,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             terminalRows: terminalRows,
             activityItems: activityItems,
             approvalRequests: approvalRequests,
+            extensionUI: extensionUIStateLocked(),
             slashCommands: mergedSlashCommandsLocked(),
             providerEvents: providerEvents,
             isAgentTurnInProgress: isStreaming
@@ -323,6 +333,32 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
                 "decision": decision.rawValue
             ])
         )
+    }
+
+    func respondToExtensionDialog(_ dialogID: String, response: SessionExtensionUIDialogResponse) throws {
+        lock.lock()
+        guard pendingExtensionDialogs.contains(where: { $0.id == dialogID }) else {
+            lock.unlock()
+            throw PiRPCSessionRuntimeError.extensionDialogNotFound
+        }
+
+        pendingExtensionDialogs.removeAll { $0.id == dialogID }
+        lock.unlock()
+        notifyChange()
+
+        var payload: [String: Any] = [
+            "type": "extension_ui_response",
+            "id": dialogID
+        ]
+        if let confirmed = response.confirmed {
+            payload["confirmed"] = confirmed
+        } else if response.cancelled {
+            payload["cancelled"] = true
+        } else {
+            payload["value"] = response.value ?? ""
+        }
+
+        try transport.sendLine(Self.jsonLine(payload))
     }
 
     func resize(columns: Int, rows: Int) throws {
@@ -505,8 +541,8 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             notifyChange()
         case "message_update":
             handleMessageUpdate(object)
-        case "approval_request":
-            handleApprovalRequest(object)
+        case "extension_ui_request":
+            handleExtensionUIRequest(object)
         case "tool_execution_start":
             handleToolExecutionStart(object)
         case "tool_execution_update":
@@ -570,21 +606,122 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         return .unknown
     }
 
-    private func handleApprovalRequest(_ object: [String: Any]) {
-        guard let rawID = string(for: "id", in: object),
-              let id = UUID(uuidString: rawID) else {
+    private func handleExtensionUIRequest(_ object: [String: Any]) {
+        guard let dialogID = string(for: "id", in: object),
+              let method = string(for: "method", in: object) else {
             return
         }
 
-        let title = string(for: "title", in: object) ?? "Approval Request"
-        let text = string(for: "text", in: object) ?? title
-
+        let shouldNotify: Bool
         lock.lock()
-        approvalRequests.removeAll { $0.id == id }
-        approvalRequests.append(SessionApprovalRequest(id: id, title: title, text: text, state: .pending))
-        appendActivityItemLocked(SessionActivityItem(kind: .approvalRequest, text: "Approval Request: \(title)"))
+        switch method {
+        case "select":
+            let title = string(for: "title", in: object) ?? "Select"
+            let options = object["options"] as? [String] ?? []
+            upsertExtensionDialogLocked(
+                SessionExtensionUIDialog(
+                    id: dialogID,
+                    kind: .select,
+                    title: title,
+                    options: options,
+                    timeoutMilliseconds: int(for: "timeout", in: object)
+                )
+            )
+            shouldNotify = true
+        case "confirm":
+            let title = string(for: "title", in: object) ?? "Confirm"
+            upsertExtensionDialogLocked(
+                SessionExtensionUIDialog(
+                    id: dialogID,
+                    kind: .confirm,
+                    title: title,
+                    message: string(for: "message", in: object),
+                    timeoutMilliseconds: int(for: "timeout", in: object)
+                )
+            )
+            shouldNotify = true
+        case "input":
+            let title = string(for: "title", in: object) ?? "Input"
+            upsertExtensionDialogLocked(
+                SessionExtensionUIDialog(
+                    id: dialogID,
+                    kind: .input,
+                    title: title,
+                    placeholder: string(for: "placeholder", in: object),
+                    timeoutMilliseconds: int(for: "timeout", in: object)
+                )
+            )
+            shouldNotify = true
+        case "editor":
+            let title = string(for: "title", in: object) ?? "Editor"
+            upsertExtensionDialogLocked(
+                SessionExtensionUIDialog(
+                    id: dialogID,
+                    kind: .editor,
+                    title: title,
+                    prefill: string(for: "prefill", in: object)
+                )
+            )
+            shouldNotify = true
+        case "notify":
+            if let message = string(for: "message", in: object) {
+                extensionNotifications.append(
+                    SessionExtensionUINotification(
+                        kind: SessionExtensionUINotificationKind(rawValue: string(for: "notifyType", in: object) ?? "info") ?? .info,
+                        message: message
+                    )
+                )
+                if extensionNotifications.count > 20 {
+                    extensionNotifications.removeFirst(extensionNotifications.count - 20)
+                }
+                shouldNotify = true
+            } else {
+                shouldNotify = false
+            }
+        case "setStatus":
+            if let key = string(for: "statusKey", in: object) {
+                if let text = object["statusText"] as? String {
+                    upsertExtensionStatusLocked(SessionExtensionUIStatus(key: key, text: text))
+                } else {
+                    extensionStatuses.removeAll { $0.key == key }
+                }
+                shouldNotify = true
+            } else {
+                shouldNotify = false
+            }
+        case "setWidget":
+            if let key = string(for: "widgetKey", in: object) {
+                if let lines = object["widgetLines"] as? [String] {
+                    upsertExtensionWidgetLocked(
+                        SessionExtensionUIWidget(
+                            key: key,
+                            lines: lines,
+                            placement: SessionExtensionUIWidgetPlacement(
+                                rawValue: string(for: "widgetPlacement", in: object) ?? "aboveEditor"
+                            ) ?? .aboveEditor
+                        )
+                    )
+                } else {
+                    extensionWidgets.removeAll { $0.key == key }
+                }
+                shouldNotify = true
+            } else {
+                shouldNotify = false
+            }
+        case "setTitle":
+            extensionTitle = string(for: "title", in: object)
+            shouldNotify = true
+        case "set_editor_text":
+            extensionEditorText = string(for: "text", in: object) ?? ""
+            shouldNotify = true
+        default:
+            shouldNotify = false
+        }
         lock.unlock()
-        notifyChange()
+
+        if shouldNotify {
+            notifyChange()
+        }
     }
 
     private func handleMessageUpdate(_ object: [String: Any]) {
@@ -1258,6 +1395,39 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         return String(text.prefix(limit)) + "…"
     }
 
+    private func extensionUIStateLocked() -> SessionExtensionUIState? {
+        let state = SessionExtensionUIState(
+            title: extensionTitle,
+            pendingDialogs: pendingExtensionDialogs,
+            notifications: extensionNotifications,
+            statuses: extensionStatuses,
+            widgets: extensionWidgets,
+            editorText: extensionEditorText
+        )
+        let hasContent = state.title != nil
+            || state.pendingDialogs.isEmpty == false
+            || state.notifications.isEmpty == false
+            || state.statuses.isEmpty == false
+            || state.widgets.isEmpty == false
+            || state.editorText != nil
+        return hasContent ? state : nil
+    }
+
+    private func upsertExtensionDialogLocked(_ dialog: SessionExtensionUIDialog) {
+        pendingExtensionDialogs.removeAll { $0.id == dialog.id }
+        pendingExtensionDialogs.append(dialog)
+    }
+
+    private func upsertExtensionStatusLocked(_ status: SessionExtensionUIStatus) {
+        extensionStatuses.removeAll { $0.key == status.key }
+        extensionStatuses.append(status)
+    }
+
+    private func upsertExtensionWidgetLocked(_ widget: SessionExtensionUIWidget) {
+        extensionWidgets.removeAll { $0.key == widget.key }
+        extensionWidgets.append(widget)
+    }
+
     private func appendActivityItemLocked(_ item: SessionActivityItem) {
         let trimmedText = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmedText.isEmpty == false else {
@@ -1308,6 +1478,10 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
 
     private func bool(for key: String, in object: [String: Any]) -> Bool? {
         object[key] as? Bool
+    }
+
+    private func int(for key: String, in object: [String: Any]) -> Int? {
+        object[key] as? Int
     }
 
     private func notifyChange() {

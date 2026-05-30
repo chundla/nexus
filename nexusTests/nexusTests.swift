@@ -7813,6 +7813,102 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelRespondsToFocusedSessionExtensionDialogThroughServiceClient() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let dialog = SessionExtensionUIDialog(
+            id: "dialog-1",
+            kind: .confirm,
+            title: "Deploy to production?",
+            message: "Pi wants to run deploy --prod."
+        )
+        let initialScreen = SessionScreen(
+            session: session,
+            transcript: "> deploy",
+            extensionUI: SessionExtensionUIState(pendingDialogs: [dialog])
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []),
+            session: session,
+            screen: initialScreen
+        )
+        let model = NexusAppModel(client: client)
+        model.focusedSessionScreen = initialScreen
+
+        try await model.respondToFocusedSessionExtensionDialog(dialog.id, response: .confirmed(true))
+
+        #expect(client.respondedExtensionDialogs.count == 1)
+        #expect(client.respondedExtensionDialogs[0].sessionID == session.id)
+        #expect(client.respondedExtensionDialogs[0].dialogID == dialog.id)
+        #expect(client.respondedExtensionDialogs[0].response == .confirmed(true))
+        #expect(model.focusedSessionScreen?.extensionUI?.pendingDialogs.isEmpty == true)
+    }
+
+    @MainActor
+    @Test func appModelAppliesExtensionEditorTextToFocusedStructuredDraftWithoutClobberingIdenticalLaterUpdates() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let initialScreen = SessionScreen(session: session, transcript: "")
+        let client = TrackingServiceClient(
+            workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []),
+            session: session,
+            screen: initialScreen
+        )
+        let model = NexusAppModel(client: client)
+
+        try await model.focusSession(sessionID: session.id)
+        await client.emitObservedScreen(
+            SessionScreen(
+                session: session,
+                transcript: "",
+                extensionUI: SessionExtensionUIState(editorText: "This text was set by the rpc-demo extension.")
+            )
+        )
+        await Task.yield()
+
+        #expect(model.focusedStructuredSessionDraft == "This text was set by the rpc-demo extension.")
+
+        model.focusedStructuredSessionDraft = "User edits"
+        await client.emitObservedScreen(
+            SessionScreen(
+                session: session,
+                transcript: "",
+                activityItems: [SessionActivityItem(kind: .status, text: "Still connected")],
+                extensionUI: SessionExtensionUIState(editorText: "This text was set by the rpc-demo extension.")
+            )
+        )
+        await Task.yield()
+
+        #expect(model.focusedStructuredSessionDraft == "User edits")
+    }
+
+    @MainActor
     @Test func appModelResizeFocusedSessionUpdatesTerminalDimensions() async throws {
         let workspaceFolderURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -8681,6 +8777,7 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
     var providerDetailRequestCount = 0
     var recordedNavigationTargets: [NavigationTarget] = []
     var respondedApprovalRequests: [(sessionID: UUID, approvalRequestID: UUID, decision: ApprovalRequestDecision)] = []
+    var respondedExtensionDialogs: [(sessionID: UUID, dialogID: String, response: SessionExtensionUIDialogResponse)] = []
     var observedScreenHandlerCount: Int {
         observedScreenHandlers.count
     }
@@ -9104,6 +9201,13 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
         }
     }
 
+    func emitObservedScreen(_ screen: SessionScreen) {
+        screenValue = screen
+        for handler in observedScreenHandlers.values {
+            handler(screen)
+        }
+    }
+
     func sendSessionInput(sessionID: UUID, text: String) async throws -> SessionScreen {
         screenValue = SessionScreen(session: sessionValue, transcript: screenValue.transcript + "\n> \(text)")
         return screenValue
@@ -9145,7 +9249,34 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
                     text: "\(decision == .approve ? "Approved" : "Denied"): \(screenValue.approvalRequests.first(where: { $0.id == approvalRequestID })?.title ?? "Approval Request")"
                 )
             ],
-            approvalRequests: updatedApprovalRequests
+            approvalRequests: updatedApprovalRequests,
+            extensionUI: screenValue.extensionUI
+        )
+        return screenValue
+    }
+
+    func respondToExtensionDialog(sessionID: UUID, dialogID: String, response: SessionExtensionUIDialogResponse) async throws -> SessionScreen {
+        respondedExtensionDialogs.append((sessionID: sessionID, dialogID: dialogID, response: response))
+        let updatedDialogs = screenValue.extensionUI?.pendingDialogs.filter { $0.id != dialogID } ?? []
+        let extensionUI = screenValue.extensionUI.map {
+            SessionExtensionUIState(
+                title: $0.title,
+                pendingDialogs: updatedDialogs,
+                notifications: $0.notifications,
+                statuses: $0.statuses,
+                widgets: $0.widgets,
+                editorText: $0.editorText
+            )
+        }
+        screenValue = SessionScreen(
+            session: sessionValue,
+            controller: screenValue.controller,
+            transcript: screenValue.transcript,
+            terminalColumns: screenValue.terminalColumns,
+            terminalRows: screenValue.terminalRows,
+            activityItems: screenValue.activityItems,
+            approvalRequests: screenValue.approvalRequests,
+            extensionUI: extensionUI
         )
         return screenValue
     }

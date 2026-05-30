@@ -38,7 +38,17 @@ protocol SessionRuntimeManaging: AnyObject {
     func sendText(_ text: String, to session: Session) throws -> SessionScreen
     func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool, to session: Session) throws -> SessionScreen
     func respondToApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision, to session: Session) throws -> SessionScreen
+    func respondToExtensionDialog(_ dialogID: String, response: SessionExtensionUIDialogResponse, to session: Session) throws -> SessionScreen
     func resize(session: Session, columns: Int, rows: Int) throws -> SessionScreen
+}
+
+extension SessionRuntimeManaging {
+    func respondToExtensionDialog(_ dialogID: String, response: SessionExtensionUIDialogResponse, to session: Session) throws -> SessionScreen {
+        _ = dialogID
+        _ = response
+        _ = session
+        throw NexusSessionExtensionUIError.extensionDialogsUnavailable
+    }
 }
 
 enum RemoteRuntimeLaunchMode {
@@ -99,7 +109,16 @@ protocol SessionRuntime: AnyObject {
     func sendText(_ text: String) throws
     func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool) throws
     func respondToApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision) throws
+    func respondToExtensionDialog(_ dialogID: String, response: SessionExtensionUIDialogResponse) throws
     func resize(columns: Int, rows: Int) throws
+}
+
+extension SessionRuntime {
+    func respondToExtensionDialog(_ dialogID: String, response: SessionExtensionUIDialogResponse) throws {
+        _ = dialogID
+        _ = response
+        throw NexusSessionExtensionUIError.extensionDialogsUnavailable
+    }
 }
 
 final class SessionControllerRegistry: @unchecked Sendable {
@@ -184,6 +203,17 @@ enum NexusSessionApprovalError: LocalizedError {
         switch self {
         case .approvalRequestsUnavailable:
             "This Session does not have app-native approval requests."
+        }
+    }
+}
+
+enum NexusSessionExtensionUIError: LocalizedError {
+    case extensionDialogsUnavailable
+
+    var errorDescription: String? {
+        switch self {
+        case .extensionDialogsUnavailable:
+            "This Session does not have app-native Extension UI dialogs."
         }
     }
 }
@@ -344,6 +374,18 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Se
         }
 
         try runtime.respondToApprovalRequest(approvalRequestID, decision: decision)
+        return runtime.sessionScreen(for: session)
+    }
+
+    func respondToExtensionDialog(_ dialogID: String, response: SessionExtensionUIDialogResponse, to session: Session) throws -> SessionScreen {
+        let runtime = try withLock {
+            guard let runtime = runtimes[session.id] else {
+                throw NexusMetadataStoreError.sessionNotFound
+            }
+            return runtime
+        }
+
+        try runtime.respondToExtensionDialog(dialogID, response: response)
         return runtime.sessionScreen(for: session)
     }
 
@@ -1386,6 +1428,9 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 respondToApprovalRequest: { [unowned self] in
                     try self.sessionRuntimeManager.respondToApprovalRequest($0, decision: $1, to: $2)
                 },
+                respondToExtensionDialog: { [unowned self] in
+                    try self.sessionRuntimeManager.respondToExtensionDialog($0, response: $1, to: $2)
+                },
                 stabilizedScreenAfterTerminalInput: { [unowned self] in
                     self.stabilizedScreenAfterTerminalInput(for: $0, screenBeforeInput: $1, immediateResponseScreen: $2)
                 }
@@ -1907,6 +1952,32 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             sessionID: sessionID,
             approvalRequestID: approvalRequestID,
             decision: decision
+        )
+    }
+
+    func respondToExtensionDialog(
+        sessionID: UUID,
+        dialogID: String,
+        response: SessionExtensionUIDialogResponse
+    ) throws -> SessionScreen {
+        try AsyncOperationSupport.blocking {
+            try await self.respondToExtensionDialog(
+                sessionID: sessionID,
+                dialogID: dialogID,
+                response: response
+            )
+        }
+    }
+
+    func respondToExtensionDialog(
+        sessionID: UUID,
+        dialogID: String,
+        response: SessionExtensionUIDialogResponse
+    ) async throws -> SessionScreen {
+        try await sessionInteraction.respondToExtensionDialog(
+            sessionID: sessionID,
+            dialogID: dialogID,
+            response: response
         )
     }
 
@@ -2811,6 +2882,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             terminalRows: screen.terminalRows,
             activityItems: screen.activityItems,
             approvalRequests: screen.approvalRequests,
+            extensionUI: screen.extensionUI,
             slashCommands: screen.slashCommands,
             isAgentTurnInProgress: screen.isAgentTurnInProgress,
             visibleLines: renderState.visibleLines,
@@ -3980,6 +4052,20 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol, @unchecked Senda
                     sessionID: self.resolveUUID(sessionID),
                     approvalRequestID: self.resolveUUID(approvalRequestID),
                     decision: resolvedDecision
+                )
+            },
+            reply: reply
+        )
+    }
+
+    func respondToExtensionDialog(sessionID: String, dialogID: String, responsePayload: Data, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(
+            with: { [self] in
+                let response = try JSONDecoder().decode(SessionExtensionUIDialogResponse.self, from: responsePayload)
+                return try await self.service.respondToExtensionDialog(
+                    sessionID: self.resolveUUID(sessionID),
+                    dialogID: dialogID,
+                    response: response
                 )
             },
             reply: reply

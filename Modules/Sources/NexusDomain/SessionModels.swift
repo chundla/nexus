@@ -216,6 +216,140 @@ public struct SessionApprovalRequest: Codable, Equatable, Identifiable, Sendable
     }
 }
 
+public enum SessionExtensionUIDialogKind: String, Codable, CaseIterable, Sendable {
+    case select
+    case confirm
+    case input
+    case editor
+}
+
+public struct SessionExtensionUIDialog: Codable, Equatable, Identifiable, Sendable {
+    public let id: String
+    public let kind: SessionExtensionUIDialogKind
+    public let title: String
+    public let message: String?
+    public let options: [String]
+    public let placeholder: String?
+    public let prefill: String?
+    public let timeoutMilliseconds: Int?
+
+    public init(
+        id: String,
+        kind: SessionExtensionUIDialogKind,
+        title: String,
+        message: String? = nil,
+        options: [String] = [],
+        placeholder: String? = nil,
+        prefill: String? = nil,
+        timeoutMilliseconds: Int? = nil
+    ) {
+        self.id = id
+        self.kind = kind
+        self.title = title
+        self.message = message
+        self.options = options
+        self.placeholder = placeholder
+        self.prefill = prefill
+        self.timeoutMilliseconds = timeoutMilliseconds
+    }
+}
+
+public enum SessionExtensionUINotificationKind: String, Codable, Sendable {
+    case info
+    case warning
+    case error
+}
+
+public struct SessionExtensionUINotification: Codable, Equatable, Identifiable, Sendable {
+    public let id: UUID
+    public let kind: SessionExtensionUINotificationKind
+    public let message: String
+
+    public init(id: UUID = UUID(), kind: SessionExtensionUINotificationKind, message: String) {
+        self.id = id
+        self.kind = kind
+        self.message = message
+    }
+}
+
+public struct SessionExtensionUIStatus: Codable, Equatable, Identifiable, Sendable {
+    public let key: String
+    public let text: String
+
+    public var id: String { key }
+
+    public init(key: String, text: String) {
+        self.key = key
+        self.text = text
+    }
+}
+
+public enum SessionExtensionUIWidgetPlacement: String, Codable, Equatable, Sendable {
+    case aboveEditor
+    case belowEditor
+}
+
+public struct SessionExtensionUIWidget: Codable, Equatable, Identifiable, Sendable {
+    public let key: String
+    public let lines: [String]
+    public let placement: SessionExtensionUIWidgetPlacement
+
+    public var id: String { key }
+
+    public init(key: String, lines: [String], placement: SessionExtensionUIWidgetPlacement = .aboveEditor) {
+        self.key = key
+        self.lines = lines
+        self.placement = placement
+    }
+}
+
+public struct SessionExtensionUIState: Codable, Equatable, Sendable {
+    public let title: String?
+    public let pendingDialogs: [SessionExtensionUIDialog]
+    public let notifications: [SessionExtensionUINotification]
+    public let statuses: [SessionExtensionUIStatus]
+    public let widgets: [SessionExtensionUIWidget]
+    public let editorText: String?
+
+    public init(
+        title: String? = nil,
+        pendingDialogs: [SessionExtensionUIDialog] = [],
+        notifications: [SessionExtensionUINotification] = [],
+        statuses: [SessionExtensionUIStatus] = [],
+        widgets: [SessionExtensionUIWidget] = [],
+        editorText: String? = nil
+    ) {
+        self.title = title
+        self.pendingDialogs = pendingDialogs
+        self.notifications = notifications
+        self.statuses = statuses
+        self.widgets = widgets
+        self.editorText = editorText
+    }
+}
+
+public struct SessionExtensionUIDialogResponse: Codable, Equatable, Sendable {
+    public let value: String?
+    public let confirmed: Bool?
+    public let cancelled: Bool
+
+    public init(value: String? = nil, confirmed: Bool? = nil, cancelled: Bool = false) {
+        self.value = value
+        self.confirmed = confirmed
+        self.cancelled = cancelled
+    }
+
+    public static func value(_ value: String) -> SessionExtensionUIDialogResponse {
+        SessionExtensionUIDialogResponse(value: value)
+    }
+
+    public static func confirmed(_ confirmed: Bool) -> SessionExtensionUIDialogResponse {
+        SessionExtensionUIDialogResponse(confirmed: confirmed)
+    }
+
+    public static let cancelled = SessionExtensionUIDialogResponse(cancelled: true)
+}
+
 public enum SessionSlashCommandSource: String, Codable, Equatable, Sendable {
     case builtIn
     case `extension`
@@ -311,6 +445,7 @@ public struct SessionScreen: Codable, Equatable, Sendable {
     public let terminalRows: Int
     public let activityItems: [SessionActivityItem]
     public let approvalRequests: [SessionApprovalRequest]
+    public let extensionUI: SessionExtensionUIState?
     public let slashCommands: [SessionSlashCommand]?
     public let providerEvents: [SessionProviderEvent]
     public let isAgentTurnInProgress: Bool
@@ -329,6 +464,7 @@ public struct SessionScreen: Codable, Equatable, Sendable {
         terminalRows: Int = 24,
         activityItems: [SessionActivityItem] = [],
         approvalRequests: [SessionApprovalRequest] = [],
+        extensionUI: SessionExtensionUIState? = nil,
         slashCommands: [SessionSlashCommand]? = nil,
         providerEvents: [SessionProviderEvent] = [],
         isAgentTurnInProgress: Bool = false,
@@ -353,6 +489,7 @@ public struct SessionScreen: Codable, Equatable, Sendable {
         self.terminalRows = terminalRows
         self.activityItems = activityItems
         self.approvalRequests = approvalRequests
+        self.extensionUI = extensionUI
         self.slashCommands = slashCommands
         self.providerEvents = providerEvents
         self.isAgentTurnInProgress = isAgentTurnInProgress
@@ -361,6 +498,45 @@ public struct SessionScreen: Codable, Equatable, Sendable {
         self.cursorRow = cursorRow ?? viewport.cursorRow
         self.cursorColumn = cursorColumn ?? viewport.cursorColumn
         self.cursorVisible = cursorVisible
+    }
+
+    public init(
+        session: Session,
+        primarySurface: SessionSurface = .terminal,
+        controller: SessionController = .mac,
+        transcript: String,
+        terminalColumns: Int = 80,
+        terminalRows: Int = 24,
+        activityItems: [SessionActivityItem] = [],
+        approvalRequests: [SessionApprovalRequest] = [],
+        extensionUI: SessionExtensionUIState? = nil,
+        slashCommands: [SessionSlashCommand]? = nil,
+        isAgentTurnInProgress: Bool = false,
+        visibleLines: [String]? = nil,
+        styledVisibleLines: [TerminalLine]? = nil,
+        cursorRow: Int? = nil,
+        cursorColumn: Int? = nil,
+        cursorVisible: Bool = true
+    ) {
+        self.init(
+            session: session,
+            primarySurface: primarySurface,
+            controller: controller,
+            transcript: transcript,
+            terminalColumns: terminalColumns,
+            terminalRows: terminalRows,
+            activityItems: activityItems,
+            approvalRequests: approvalRequests,
+            extensionUI: extensionUI,
+            slashCommands: slashCommands,
+            providerEvents: [],
+            isAgentTurnInProgress: isAgentTurnInProgress,
+            visibleLines: visibleLines,
+            styledVisibleLines: styledVisibleLines,
+            cursorRow: cursorRow,
+            cursorColumn: cursorColumn,
+            cursorVisible: cursorVisible
+        )
     }
 
     public init(
@@ -389,6 +565,7 @@ public struct SessionScreen: Codable, Equatable, Sendable {
             terminalRows: terminalRows,
             activityItems: activityItems,
             approvalRequests: approvalRequests,
+            extensionUI: nil,
             slashCommands: slashCommands,
             providerEvents: [],
             isAgentTurnInProgress: isAgentTurnInProgress,

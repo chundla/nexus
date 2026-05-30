@@ -61,6 +61,7 @@ public protocol SessionScreenObservation: Sendable {
     func sendSessionText(sessionID: String, text: String, reply: @escaping (Data?, NSString?) -> Void)
     func sendSessionInputKey(sessionID: String, key: String, reply: @escaping (Data?, NSString?) -> Void)
     func respondToApprovalRequest(sessionID: String, approvalRequestID: String, decision: String, reply: @escaping (Data?, NSString?) -> Void)
+    func respondToExtensionDialog(sessionID: String, dialogID: String, responsePayload: Data, reply: @escaping (Data?, NSString?) -> Void)
     func resizeSession(sessionID: String, columns: Int, rows: Int, reply: @escaping (Data?, NSString?) -> Void)
     func takeRemoteSessionControl(sessionID: String, pairedDeviceID: String, columns: Int, rows: Int, reply: @escaping (Data?, NSString?) -> Void)
     func releaseRemoteSessionControl(sessionID: String, pairedDeviceID: String, reply: @escaping (Data?, NSString?) -> Void)
@@ -110,6 +111,7 @@ public protocol NexusServiceClient: Sendable {
     func sendSessionText(sessionID: UUID, text: String) async throws -> SessionScreen
     func sendSessionInputKey(sessionID: UUID, key: SessionInputKey) async throws -> SessionScreen
     func respondToApprovalRequest(sessionID: UUID, approvalRequestID: UUID, decision: ApprovalRequestDecision) async throws -> SessionScreen
+    func respondToExtensionDialog(sessionID: UUID, dialogID: String, response: SessionExtensionUIDialogResponse) async throws -> SessionScreen
     func resizeSession(sessionID: UUID, columns: Int, rows: Int) async throws -> SessionScreen
     func takeRemoteSessionControl(sessionID: UUID, pairedDeviceID: UUID, columns: Int, rows: Int) async throws -> SessionScreen
     func releaseRemoteSessionControl(sessionID: UUID, pairedDeviceID: UUID) async throws -> SessionScreen
@@ -117,6 +119,19 @@ public protocol NexusServiceClient: Sendable {
     func respondToRemoteApprovalRequest(sessionID: UUID, pairedDeviceID: UUID, approvalRequestID: UUID, decision: ApprovalRequestDecision) async throws -> SessionScreen
     func sendRemoteSessionText(sessionID: UUID, pairedDeviceID: UUID, text: String) async throws -> SessionScreen
     func sendRemoteSessionInputKey(sessionID: UUID, pairedDeviceID: UUID, key: SessionInputKey) async throws -> SessionScreen
+}
+
+public extension NexusServiceClient {
+    func respondToExtensionDialog(sessionID: UUID, dialogID: String, response: SessionExtensionUIDialogResponse) async throws -> SessionScreen {
+        _ = sessionID
+        _ = dialogID
+        _ = response
+        throw NSError(
+            domain: "NexusIPC",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "This client does not support Extension UI dialogs."]
+        )
+    }
 }
 
 public typealias NexusServiceStatusClient = NexusServiceClient
@@ -434,6 +449,22 @@ public final class NexusIPCClient: NexusServiceClient, @unchecked Sendable {
                 sessionID: sessionID.uuidString,
                 approvalRequestID: approvalRequestID.uuidString,
                 decision: decision.rawValue,
+                reply: reply
+            )
+        }
+    }
+
+    nonisolated public func respondToExtensionDialog(
+        sessionID: UUID,
+        dialogID: String,
+        response: SessionExtensionUIDialogResponse
+    ) async throws -> SessionScreen {
+        let payload = try JSONEncoder().encode(response)
+        return try await requestDecodable { proxy, reply in
+            proxy.respondToExtensionDialog(
+                sessionID: sessionID.uuidString,
+                dialogID: dialogID,
+                responsePayload: payload,
                 reply: reply
             )
         }

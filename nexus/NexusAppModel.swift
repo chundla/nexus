@@ -46,6 +46,7 @@ final class NexusAppModel {
     var remoteAccessState: RemoteAccessState?
     var pairedDevices: [PairedDevice] = []
     var focusedSessionScreen: SessionScreen?
+    var focusedStructuredSessionDraft = ""
     let remotePairingEndpoint: RemotePairingEndpoint?
 
     private let client: any NexusServiceClient
@@ -139,6 +140,7 @@ final class NexusAppModel {
             remoteAccessState = nil
             pairedDevices = []
             focusedSessionScreen = nil
+            focusedStructuredSessionDraft = ""
             serviceErrorMessage = error.localizedDescription
         }
     }
@@ -341,6 +343,7 @@ final class NexusAppModel {
         let session = focusedSessionScreen?.session
         await stopFocusingSession()
         focusedSessionScreen = nil
+        focusedStructuredSessionDraft = ""
         return session
     }
 
@@ -405,6 +408,19 @@ final class NexusAppModel {
             sessionID: sessionID,
             approvalRequestID: approvalRequestID,
             decision: decision
+        )
+        focusedSessionScreen = screen
+    }
+
+    func respondToFocusedSessionExtensionDialog(_ dialogID: String, response: SessionExtensionUIDialogResponse) async throws {
+        guard let sessionID = focusedSessionScreen?.session.id else {
+            return
+        }
+
+        let screen = try await client.respondToExtensionDialog(
+            sessionID: sessionID,
+            dialogID: dialogID,
+            response: response
         )
         focusedSessionScreen = screen
     }
@@ -585,10 +601,14 @@ final class NexusAppModel {
     }
 
     private func applyFocusedSessionScreen(_ screen: SessionScreen) async throws {
-        let previousState = focusedSessionScreen?.session.id == screen.session.id
-            ? focusedSessionScreen?.session.state
-            : nil
+        let previousScreen = focusedSessionScreen?.session.id == screen.session.id ? focusedSessionScreen : nil
+        let previousState = previousScreen?.session.state
         focusedSessionScreen = screen
+
+        if previousScreen?.extensionUI?.editorText != screen.extensionUI?.editorText,
+           let editorText = screen.extensionUI?.editorText {
+            focusedStructuredSessionDraft = editorText
+        }
 
         if let previousState, previousState != screen.session.state {
             try await refreshWorkspaceOverview(for: screen.session.workspaceID)

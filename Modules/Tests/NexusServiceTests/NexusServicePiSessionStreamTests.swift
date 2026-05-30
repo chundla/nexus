@@ -881,13 +881,13 @@ struct NexusServicePiSessionStreamTests {
         ])
     }
 
-    @Test func localPiSessionScreenShowsPendingApprovalRequestInSharedSessionStream() throws {
+    @Test func localPiSessionScreenShowsPendingExtensionDialogInSharedSessionState() throws {
         let runtime = try PiRPCSessionRuntime(
             executable: "/tmp/fake-pi",
             workingDirectory: "/tmp",
             terminationStatusMessageBuilder: { _ in "" },
             transportFactory: { _, _, _ in
-                ApprovalRequestTestPiRPCTransport()
+                ExtensionDialogTestPiRPCTransport()
             }
         )
 
@@ -903,23 +903,26 @@ struct NexusServicePiSessionStreamTests {
         try runtime.sendInputKey(.enter, applicationCursorMode: false)
         let screen = runtime.sessionScreen(for: session)
 
-        #expect(screen.activityItems.map(\.kind) == [.status, .message, .approvalRequest])
+        #expect(screen.activityItems.map(\.kind) == [.status, .message])
         #expect(screen.activityItems.map(\.text) == [
             "Pi shared Session stream connected",
-            "You: deploy",
-            "Approval Request: Deploy to production?"
+            "You: deploy"
         ])
-        #expect(screen.approvalRequests == [
-            SessionApprovalRequest(
-                id: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
-                title: "Deploy to production?",
-                text: "Pi wants to run deploy --prod.",
-                state: .pending
-            )
-        ])
+        #expect(screen.approvalRequests.isEmpty)
+        #expect(screen.extensionUI == SessionExtensionUIState(
+            pendingDialogs: [
+                SessionExtensionUIDialog(
+                    id: "11111111-1111-1111-1111-111111111111",
+                    kind: .confirm,
+                    title: "Deploy to production?",
+                    message: "Pi wants to run deploy --prod.",
+                    timeoutMilliseconds: 5000
+                )
+            ]
+        ))
     }
 
-    @Test func localPiApprovalDecisionContinuesSessionWithoutChangingProviderHealth() throws {
+    @Test func localPiExtensionDialogResponseContinuesSessionWithoutChangingProviderHealth() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -927,7 +930,7 @@ struct NexusServicePiSessionStreamTests {
         try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
 
         let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
-            ApprovalRequestTestPiRPCTransport()
+            ExtensionDialogTestPiRPCTransport()
         })
 
         let service = try NexusService.bootstrapForTests(
@@ -952,41 +955,30 @@ struct NexusServicePiSessionStreamTests {
 
         let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
         let pendingScreen = try service.sendSessionInput(sessionID: session.id, text: "deploy")
-        let approvalRequest = try #require(pendingScreen.approvalRequests.first)
+        let dialog = try #require(pendingScreen.extensionUI?.pendingDialogs.first)
 
-        let approvedScreen = try service.respondToApprovalRequest(
+        let approvedScreen = try service.respondToExtensionDialog(
             sessionID: session.id,
-            approvalRequestID: approvalRequest.id,
-            decision: .approve
+            dialogID: dialog.id,
+            response: .confirmed(true)
         )
         let providerDetail = try service.getProviderDetail(workspaceID: workspace.id, providerID: .pi)
 
-        #expect(approvedScreen.activityItems.suffix(3).map(\.text) == [
-            "Approval Request: Deploy to production?",
-            "Approved: Deploy to production?",
-            "Pi: Deployment approved"
-        ])
-        #expect(approvedScreen.approvalRequests == [
-            SessionApprovalRequest(
-                id: approvalRequest.id,
-                title: "Deploy to production?",
-                text: "Pi wants to run deploy --prod.",
-                state: .approved
-            )
-        ])
+        #expect(pendingScreen.extensionUI?.pendingDialogs == [dialog])
+        #expect(approvedScreen.extensionUI == nil || approvedScreen.extensionUI?.pendingDialogs.isEmpty == true)
+        #expect(approvedScreen.activityItems.suffix(1).map(\.text) == ["Pi: Deployment approved"])
         #expect(approvedScreen.transcript == "> deploy\nDeployment approved")
         #expect(providerDetail.health.state == .available)
         #expect(providerDetail.health.summary == "Pi 0.9.0 is available")
     }
 
-    @Test func localPiDeniedApprovalRequestKeepsDeniedDecisionInSharedSessionState() throws {
+    @Test func localPiRuntimeRespondsToSelectInputAndEditorExtensionDialogs() throws {
+        let transport = ExtensionDialogTestPiRPCTransport()
         let runtime = try PiRPCSessionRuntime(
             executable: "/tmp/fake-pi",
             workingDirectory: "/tmp",
             terminationStatusMessageBuilder: { _ in "" },
-            transportFactory: { _, _, _ in
-                ApprovalRequestTestPiRPCTransport()
-            }
+            transportFactory: { _, _, _ in transport }
         )
 
         let session = Session(
@@ -997,24 +989,75 @@ struct NexusServicePiSessionStreamTests {
             state: .ready
         )
 
-        try runtime.sendInput("deploy")
-        let approvalRequest = try #require(runtime.sessionScreen(for: session).approvalRequests.first)
-        try runtime.respondToApprovalRequest(approvalRequest.id, decision: .deny)
-        let deniedScreen = runtime.sessionScreen(for: session)
+        try runtime.sendInput("pick-color")
+        let selectDialog = try #require(runtime.sessionScreen(for: session).extensionUI?.pendingDialogs.first)
+        try runtime.respondToExtensionDialog(selectDialog.id, response: .value("Green"))
+        #expect(runtime.sessionScreen(for: session).transcript == "> pick-color\nSelected: Green")
 
-        #expect(deniedScreen.activityItems.suffix(3).map(\.text) == [
-            "Approval Request: Deploy to production?",
-            "Denied: Deploy to production?",
-            "Pi: Deployment denied"
-        ])
-        #expect(deniedScreen.approvalRequests == [
-            SessionApprovalRequest(
-                id: approvalRequest.id,
-                title: approvalRequest.title,
-                text: approvalRequest.text,
-                state: .denied
-            )
-        ])
+        try runtime.sendInput("input-name")
+        let inputDialog = try #require(runtime.sessionScreen(for: session).extensionUI?.pendingDialogs.first)
+        try runtime.respondToExtensionDialog(inputDialog.id, response: .value("Nexus"))
+        #expect(runtime.sessionScreen(for: session).transcript == "> pick-color\nSelected: Green\n> input-name\nInput: Nexus")
+
+        try runtime.sendInput("edit-notes")
+        let editorDialog = try #require(runtime.sessionScreen(for: session).extensionUI?.pendingDialogs.first)
+        try runtime.respondToExtensionDialog(editorDialog.id, response: .value("Line 1\nLine 2"))
+        #expect(runtime.sessionScreen(for: session).transcript == "> pick-color\nSelected: Green\n> input-name\nInput: Nexus\n> edit-notes\nEditor: Line 1\nLine 2")
+        #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"extension_ui_response\"") && $0.contains("\"value\":\"Green\"") }))
+        #expect(transport.sentLines.contains(where: { $0.contains("\"value\":\"Nexus\"") }))
+        #expect(transport.sentLines.contains(where: { $0.contains("\"value\":\"Line 1\\nLine 2\"") }))
+    }
+
+    @Test func localPiFireAndForgetExtensionUIUpdatesAppearOnObservedSessionScreen() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
+
+        let transport = FireAndForgetExtensionUITestPiRPCTransport()
+        let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in transport })
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthFacts(
+                executableResolver: PiStreamStubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
+                commandRunner: PiStreamStubCommandRunner(results: [
+                    .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
+                    .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                ]),
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+            ),
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+        )
+
+        let group = try service.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try service.createLocalWorkspace(
+            name: "Local Pi",
+            folderPath: workspaceFolder.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+        let session = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+        let sink = SessionScreenSink()
+        _ = try service.observeSessionScreen(observationID: UUID(), sessionID: session.id) { screen in
+            Task {
+                await sink.record(screen)
+            }
+        }
+        _ = await sink.nextScreen()
+
+        transport.emitFireAndForgetUpdates()
+
+        let observedScreen = try #require(await sink.nextScreen())
+        let finalScreen = try service.getSessionScreen(sessionID: session.id)
+
+        #expect(observedScreen.extensionUI != nil)
+        #expect(finalScreen.extensionUI?.title == "Pi Demo")
+        #expect(finalScreen.extensionUI?.notifications.count == 1)
+        #expect(finalScreen.extensionUI?.notifications.first?.kind == .info)
+        #expect(finalScreen.extensionUI?.notifications.first?.message == "Editor prefilled")
+        #expect(finalScreen.extensionUI?.statuses == [SessionExtensionUIStatus(key: "rpc-demo", text: "Turn ready")])
+        #expect(finalScreen.extensionUI?.widgets == [SessionExtensionUIWidget(key: "rpc-demo", lines: ["Ready.", "Waiting for input"], placement: .belowEditor)])
+        #expect(finalScreen.extensionUI?.editorText == "This text was set by the rpc-demo extension.")
     }
 }
 
@@ -1295,7 +1338,154 @@ private final class PromptEventPiRPCTransport: PiRPCTransporting, @unchecked Sen
     }
 }
 
-private final class ApprovalRequestTestPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
+private actor SessionScreenSink {
+    private var screens: [SessionScreen] = []
+
+    func record(_ screen: SessionScreen) {
+        screens.append(screen)
+    }
+
+    func nextScreen(timeoutNanoseconds: UInt64 = 1_000_000_000) async -> SessionScreen? {
+        let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
+        while DispatchTime.now().uptimeNanoseconds < deadline {
+            if let screen = screens.first {
+                screens.removeFirst()
+                return screen
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        return nil
+    }
+}
+
+private final class ExtensionDialogTestPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
+    private var stdoutLineHandler: (@Sendable (String) -> Void)?
+    private var terminationHandler: (@Sendable (Int32) -> Void)?
+    private(set) var sentLines: [String] = []
+    private var pendingPrompt: String?
+
+    func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
+        stdoutLineHandler = handler
+    }
+
+    func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?) {
+        terminationHandler = handler
+    }
+
+    func start() throws {}
+
+    func sendLine(_ line: String) throws {
+        sentLines.append(line)
+        guard let data = line.data(using: .utf8),
+              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = object["type"] as? String else {
+            return
+        }
+
+        switch type {
+        case "get_state":
+            emit([
+                "id": object["id"] as? String ?? "state",
+                "type": "response",
+                "command": "get_state",
+                "success": true,
+                "data": ["sessionId": "pi-session-1"]
+            ])
+        case "prompt":
+            let prompt = object["message"] as? String ?? ""
+            pendingPrompt = prompt
+            emit([
+                "type": "response",
+                "command": "prompt",
+                "success": true
+            ])
+            switch prompt {
+            case "deploy":
+                emit([
+                    "type": "extension_ui_request",
+                    "id": "11111111-1111-1111-1111-111111111111",
+                    "method": "confirm",
+                    "title": "Deploy to production?",
+                    "message": "Pi wants to run deploy --prod.",
+                    "timeout": 5000
+                ])
+            case "pick-color":
+                emit([
+                    "type": "extension_ui_request",
+                    "id": "select-dialog",
+                    "method": "select",
+                    "title": "Pick a color",
+                    "options": ["Red", "Green", "Blue"]
+                ])
+            case "input-name":
+                emit([
+                    "type": "extension_ui_request",
+                    "id": "input-dialog",
+                    "method": "input",
+                    "title": "Enter a name",
+                    "placeholder": "Type a name"
+                ])
+            case "edit-notes":
+                emit([
+                    "type": "extension_ui_request",
+                    "id": "editor-dialog",
+                    "method": "editor",
+                    "title": "Edit notes",
+                    "prefill": "Line 1"
+                ])
+            default:
+                emitTurnEnd(text: prompt)
+            }
+        case "extension_ui_response":
+            let responseText: String
+            switch pendingPrompt {
+            case "deploy":
+                let confirmed = object["confirmed"] as? Bool ?? false
+                responseText = confirmed ? "Deployment approved" : "Deployment denied"
+            case "pick-color":
+                responseText = "Selected: \(object["value"] as? String ?? "")"
+            case "input-name":
+                responseText = "Input: \(object["value"] as? String ?? "")"
+            case "edit-notes":
+                responseText = "Editor: \(object["value"] as? String ?? "")"
+            default:
+                responseText = "Cancelled"
+            }
+            pendingPrompt = nil
+            emitTurnEnd(text: responseText)
+        default:
+            return
+        }
+    }
+
+    func terminate() throws {
+        terminationHandler?(0)
+    }
+
+    private func emitTurnEnd(text: String) {
+        emit([
+            "type": "turn_end",
+            "message": [
+                "content": [
+                    [
+                        "type": "text",
+                        "text": text
+                    ]
+                ]
+            ]
+        ])
+    }
+
+    private func emit(_ object: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: object),
+              let line = String(data: data, encoding: .utf8) else {
+            return
+        }
+        stdoutLineHandler?(line)
+    }
+}
+
+private final class FireAndForgetExtensionUITestPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
     private var stdoutLineHandler: (@Sendable (String) -> Void)?
     private var terminationHandler: (@Sendable (Int32) -> Void)?
 
@@ -1316,50 +1506,56 @@ private final class ApprovalRequestTestPiRPCTransport: PiRPCTransporting, @unche
             return
         }
 
-        switch type {
-        case "get_state":
+        if type == "get_state" {
             emit([
                 "id": object["id"] as? String ?? "state",
                 "type": "response",
                 "command": "get_state",
                 "success": true,
-                "data": [
-                    "sessionId": "pi-session-1"
-                ]
+                "data": ["sessionId": "pi-session-1"]
             ])
-        case "prompt":
-            emit([
-                "type": "response",
-                "command": "prompt",
-                "success": true
-            ])
-            emit([
-                "type": "approval_request",
-                "id": "11111111-1111-1111-1111-111111111111",
-                "title": "Deploy to production?",
-                "text": "Pi wants to run deploy --prod."
-            ])
-        case "approval_response":
-            let decision = object["decision"] as? String ?? "deny"
-            let responseText = decision == "approve" ? "Deployment approved" : "Deployment denied"
-            emit([
-                "type": "turn_end",
-                "message": [
-                    "content": [
-                        [
-                            "type": "text",
-                            "text": responseText
-                        ]
-                    ]
-                ]
-            ])
-        default:
-            return
         }
     }
 
     func terminate() throws {
         terminationHandler?(0)
+    }
+
+    func emitFireAndForgetUpdates() {
+        emit([
+            "type": "extension_ui_request",
+            "id": "notify-1",
+            "method": "notify",
+            "message": "Editor prefilled",
+            "notifyType": "info"
+        ])
+        emit([
+            "type": "extension_ui_request",
+            "id": "status-1",
+            "method": "setStatus",
+            "statusKey": "rpc-demo",
+            "statusText": "Turn ready"
+        ])
+        emit([
+            "type": "extension_ui_request",
+            "id": "widget-1",
+            "method": "setWidget",
+            "widgetKey": "rpc-demo",
+            "widgetLines": ["Ready.", "Waiting for input"],
+            "widgetPlacement": "belowEditor"
+        ])
+        emit([
+            "type": "extension_ui_request",
+            "id": "title-1",
+            "method": "setTitle",
+            "title": "Pi Demo"
+        ])
+        emit([
+            "type": "extension_ui_request",
+            "id": "editor-text-1",
+            "method": "set_editor_text",
+            "text": "This text was set by the rpc-demo extension."
+        ])
     }
 
     private func emit(_ object: [String: Any]) {

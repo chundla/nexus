@@ -70,61 +70,6 @@ struct NexusServiceRemotePiStructuredSessionTests {
         #expect(screen.transcript == "> hello\nRemote hello")
     }
 
-    @Test func remotePiApprovalRequestsAndDecisionsFlowThroughSharedServiceContract() throws {
-        let rootURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("NexusServiceTests", isDirectory: true)
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-
-        let transportHarness = RemotePiTransportHarness()
-        let service = try makeRemotePiService(rootURL: rootURL, transportHarness: transportHarness)
-
-        let group = try service.createWorkspaceGroup(name: "Remote")
-        let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
-        _ = try service.validateHost(hostID: host.id)
-        let workspace = try service.createRemoteWorkspace(
-            name: "Remote Pi",
-            hostID: host.id,
-            remotePath: "/srv/api",
-            primaryGroupID: group.id
-        )
-
-        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
-        let pendingScreen = try service.sendSessionInput(sessionID: session.id, text: "deploy")
-        let approvalRequest = try #require(pendingScreen.approvalRequests.first)
-        let approvedScreen = try service.respondToApprovalRequest(
-            sessionID: session.id,
-            approvalRequestID: approvalRequest.id,
-            decision: .approve
-        )
-
-        #expect(pendingScreen.activityItems.suffix(2).map(\.text) == [
-            "You: deploy",
-            "Approval Request: Deploy to production?"
-        ])
-        #expect(pendingScreen.approvalRequests == [
-            SessionApprovalRequest(
-                id: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
-                title: "Deploy to production?",
-                text: "Pi wants to run deploy --prod.",
-                state: .pending
-            )
-        ])
-        #expect(approvedScreen.activityItems.suffix(3).map(\.text) == [
-            "Approval Request: Deploy to production?",
-            "Approved: Deploy to production?",
-            "Pi: Deployment approved"
-        ])
-        #expect(approvedScreen.approvalRequests == [
-            SessionApprovalRequest(
-                id: approvalRequest.id,
-                title: approvalRequest.title,
-                text: approvalRequest.text,
-                state: .approved
-            )
-        ])
-        #expect(approvedScreen.transcript == "> deploy\nDeployment approved")
-    }
-
     @Test func remoteControllerCanSendStructuredPromptToRemotePiThroughGenericRemoteSessionInputAPI() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)
@@ -166,56 +111,6 @@ struct NexusServiceRemotePiStructuredSessionTests {
             "Pi: Remote hello"
         ])
         #expect(promptedScreen.transcript == "> hello\nRemote hello")
-    }
-
-    @Test func remoteControllerCanRespondToRemotePiApprovalRequestThroughGenericDecisionAPI() throws {
-        let rootURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("NexusServiceTests", isDirectory: true)
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-
-        let transportHarness = RemotePiTransportHarness()
-        let service = try makeRemotePiService(rootURL: rootURL, transportHarness: transportHarness)
-
-        let group = try service.createWorkspaceGroup(name: "Remote")
-        let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
-        _ = try service.validateHost(hostID: host.id)
-        let workspace = try service.createRemoteWorkspace(
-            name: "Remote Pi",
-            hostID: host.id,
-            remotePath: "/srv/api",
-            primaryGroupID: group.id
-        )
-
-        let pairedDeviceID = UUID()
-        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
-        _ = try service.takeRemoteSessionControl(
-            sessionID: session.id,
-            pairedDeviceID: pairedDeviceID,
-            columns: 44,
-            rows: 12
-        )
-        let pendingScreen = try service.sendRemoteSessionInput(
-            sessionID: session.id,
-            pairedDeviceID: pairedDeviceID,
-            text: "deploy"
-        )
-        let approvalRequest = try #require(pendingScreen.approvalRequests.first)
-        let approvedScreen = try service.respondToRemoteApprovalRequest(
-            sessionID: session.id,
-            pairedDeviceID: pairedDeviceID,
-            approvalRequestID: approvalRequest.id,
-            decision: .approve
-        )
-
-        #expect(approvedScreen.primarySurface == .structuredActivityFeed)
-        #expect(approvedScreen.controller == .pairedDevice(pairedDeviceID))
-        #expect(approvedScreen.activityItems.suffix(3).map(\.text) == [
-            "Approval Request: Deploy to production?",
-            "Approved: Deploy to production?",
-            "Pi: Deployment approved"
-        ])
-        #expect(approvedScreen.approvalRequests.first?.state == .approved)
-        #expect(approvedScreen.transcript == "> deploy\nDeployment approved")
     }
 
     @Test func restartedRemotePiDefaultSessionStaysInterruptedUntilExplicitResumeRecoversExistingRuntime() throws {
@@ -818,10 +713,11 @@ private final class RemotePiTransport: PiRPCTransporting, @unchecked Sendable {
 
             if prompt == "deploy" {
                 emit([
-                    "type": "approval_request",
+                    "type": "extension_ui_request",
                     "id": "11111111-1111-1111-1111-111111111111",
+                    "method": "confirm",
                     "title": "Deploy to production?",
-                    "text": "Pi wants to run deploy --prod."
+                    "message": "Pi wants to run deploy --prod."
                 ])
                 return
             }
@@ -845,9 +741,9 @@ private final class RemotePiTransport: PiRPCTransporting, @unchecked Sendable {
                     ]
                 ]
             ])
-        case "approval_response":
-            let decision = object["decision"] as? String ?? "deny"
-            let responseText = decision == "approve" ? "Deployment approved" : "Deployment denied"
+        case "extension_ui_response":
+            let confirmed = object["confirmed"] as? Bool ?? false
+            let responseText = confirmed ? "Deployment approved" : "Deployment denied"
             emit([
                 "type": "turn_end",
                 "message": [
