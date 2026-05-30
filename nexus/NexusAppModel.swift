@@ -100,20 +100,31 @@ final class NexusAppModel {
             let loadedRemoteAccessState = try await remoteAccessState
             let loadedPairedDevices = try await pairedDevices
 
-            let loadedWorkspaceOverviewList = try await client.getWorkspaceOverviews(workspaceIDs: loadedWorkspaces.map(\.id))
-            let loadedWorkspaceOverviews = Dictionary(uniqueKeysWithValues: loadedWorkspaceOverviewList.map { ($0.workspace.id, $0) })
-
+            let currentWorkspaceIDs = Set(loadedWorkspaces.map(\.id))
             self.serviceStatus = loadedServiceStatus
             self.workspaceGroups = loadedWorkspaceGroups
             self.workspaces = loadedWorkspaces
             syncHosts(loadedHosts)
-            self.workspaceOverviews = loadedWorkspaceOverviews
-            scheduleStaleWorkspaceOverviewRefreshes(for: loadedWorkspaceOverviewList)
-            self.providerDetails = [:]
+            workspaceOverviews = workspaceOverviews.filter { currentWorkspaceIDs.contains($0.key) }
+            providerDetails = providerDetails.filter { currentWorkspaceIDs.contains($0.key.workspaceID) }
+            cancelStaleWorkspaceOverviewRefreshTasks(excluding: currentWorkspaceIDs)
             self.recentNavigation = loadedRecentNavigation
             self.remoteAccessState = loadedRemoteAccessState
             self.pairedDevices = loadedPairedDevices
             self.serviceErrorMessage = nil
+
+            let client = self.client
+            try await withThrowingTaskGroup(of: WorkspaceOverview.self) { group in
+                for workspaceID in loadedWorkspaces.map(\.id) {
+                    group.addTask {
+                        try await client.getWorkspaceOverview(workspaceID: workspaceID)
+                    }
+                }
+
+                for try await overview in group {
+                    applyWorkspaceOverview(overview)
+                }
+            }
         } catch {
             await stopFocusingSession()
             cancelStaleWorkspaceOverviewRefreshTasks()
@@ -497,36 +508,46 @@ final class NexusAppModel {
     }
 
     private func refreshWorkspaceOverview(for workspaceID: UUID) async throws {
-        let overview = try await client.getWorkspaceOverview(workspaceID: workspaceID)
-        workspaceOverviews[workspaceID] = overview
-        scheduleStaleWorkspaceOverviewRefreshes(for: [overview])
+        let overview = try await client.refreshWorkspaceOverview(workspaceID: workspaceID)
+        applyWorkspaceOverview(overview)
     }
 
-    private func scheduleStaleWorkspaceOverviewRefreshes(for overviews: [WorkspaceOverview]) {
-        let staleWorkspaceIDs = Set(overviews.filter(\.usesStaleBrowseFacts).map(\.workspace.id))
+    private func applyWorkspaceOverview(_ overview: WorkspaceOverview) {
+        workspaceOverviews[overview.workspace.id] = overview
+        syncStaleWorkspaceOverviewRefreshTask(for: overview)
+    }
 
-        for (workspaceID, task) in staleWorkspaceOverviewRefreshTasks where staleWorkspaceIDs.contains(workspaceID) == false {
-            task.cancel()
+    private func syncStaleWorkspaceOverviewRefreshTask(for overview: WorkspaceOverview) {
+        let workspaceID = overview.workspace.id
+
+        guard overview.usesStaleBrowseFacts else {
+            staleWorkspaceOverviewRefreshTasks[workspaceID]?.cancel()
             staleWorkspaceOverviewRefreshTasks.removeValue(forKey: workspaceID)
+            return
         }
 
-        for workspaceID in staleWorkspaceIDs {
-            guard staleWorkspaceOverviewRefreshTasks[workspaceID] == nil else {
-                continue
+        guard staleWorkspaceOverviewRefreshTasks[workspaceID] == nil else {
+            return
+        }
+
+        staleWorkspaceOverviewRefreshTasks[workspaceID] = Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+            defer { staleWorkspaceOverviewRefreshTasks.removeValue(forKey: workspaceID) }
+
+            guard let refreshedOverview = try? await client.refreshWorkspaceOverview(workspaceID: workspaceID) else {
+                return
             }
 
-            staleWorkspaceOverviewRefreshTasks[workspaceID] = Task { @MainActor [weak self] in
-                guard let self else {
-                    return
-                }
-                defer { staleWorkspaceOverviewRefreshTasks.removeValue(forKey: workspaceID) }
+            applyWorkspaceOverview(refreshedOverview)
+        }
+    }
 
-                guard let refreshedOverview = try? await client.refreshWorkspaceOverview(workspaceID: workspaceID) else {
-                    return
-                }
-
-                workspaceOverviews[workspaceID] = refreshedOverview
-            }
+    private func cancelStaleWorkspaceOverviewRefreshTasks(excluding workspaceIDs: Set<UUID>) {
+        for (workspaceID, task) in staleWorkspaceOverviewRefreshTasks where workspaceIDs.contains(workspaceID) == false {
+            task.cancel()
+            staleWorkspaceOverviewRefreshTasks.removeValue(forKey: workspaceID)
         }
     }
 

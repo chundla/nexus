@@ -6202,7 +6202,116 @@ struct nexusTests {
     }
 
     @MainActor
-    @Test func appModelRefreshUsesBatchWorkspaceOverviewRequest() async throws {
+    @Test func appModelRefreshPublishesWorkspacesBeforeWorkspaceOverviewsFinishLoading() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let firstWorkspace = Workspace(
+            id: UUID(),
+            name: "Alpha",
+            kind: .local,
+            folderPath: "/tmp/alpha",
+            primaryGroupID: group.id
+        )
+        let secondWorkspace = Workspace(
+            id: UUID(),
+            name: "Beta",
+            kind: .local,
+            folderPath: "/tmp/beta",
+            primaryGroupID: group.id
+        )
+        let firstOverview = WorkspaceOverview(
+            workspace: firstWorkspace,
+            providerCards: [
+                WorkspaceProviderCard(
+                    provider: Provider(id: .claude),
+                    health: ProviderHealthSummary(state: .available, summary: "Alpha Claude available"),
+                    defaultSession: ProviderDefaultSessionSummary(
+                        state: .notCreated,
+                        summary: "No default session yet",
+                        actionTitle: "Launch"
+                    )
+                )
+            ]
+        )
+        let secondOverview = WorkspaceOverview(
+            workspace: secondWorkspace,
+            providerCards: [
+                WorkspaceProviderCard(
+                    provider: Provider(id: .pi),
+                    health: ProviderHealthSummary(state: .available, summary: "Beta Pi available"),
+                    defaultSession: ProviderDefaultSessionSummary(
+                        state: .notCreated,
+                        summary: "No default session yet",
+                        actionTitle: "Launch"
+                    )
+                )
+            ]
+        )
+        let overviewsByID = [
+            firstWorkspace.id: firstOverview,
+            secondWorkspace.id: secondOverview
+        ]
+        let loader = ControlledWorkspaceOverviewLoader(modeByWorkspaceID: [
+            firstWorkspace.id: .suspended,
+            secondWorkspace.id: .suspended
+        ])
+        let session = Session(
+            id: UUID(),
+            workspaceID: firstWorkspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: firstOverview,
+            session: session,
+            screen: SessionScreen(session: session, transcript: "Claude ready"),
+            workspaces: [firstWorkspace, secondWorkspace],
+            workspaceGroups: [group],
+            workspaceOverviewsByID: overviewsByID,
+            workspaceOverviewLoader: { workspaceID in
+                try await loader.load(workspaceID: workspaceID, overview: overviewsByID[workspaceID]!)
+            }
+        )
+        let model = NexusAppModel(client: client)
+
+        let refreshTask = Task {
+            await model.refresh()
+        }
+
+        try await waitUntil {
+            loader.requestedWorkspaceIDs().count == 2
+        }
+
+        #expect(model.workspaces.map(\.id) == [firstWorkspace.id, secondWorkspace.id])
+        #expect(model.workspaceOverview(for: firstWorkspace.id) == nil)
+        #expect(model.workspaceOverview(for: secondWorkspace.id) == nil)
+        #expect(client.providerDetailRequestCount == 0)
+
+        loader.resume(workspaceID: firstWorkspace.id, with: firstOverview)
+
+        let firstOverviewDeadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while model.workspaceOverview(for: firstWorkspace.id) == nil {
+            guard ContinuousClock.now < firstOverviewDeadline else {
+                Issue.record("Timed out waiting for the first Workspace Overview")
+                break
+            }
+
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+
+        #expect(model.workspaceOverview(for: firstWorkspace.id)?.providerCards.first?.health.summary == "Alpha Claude available")
+        #expect(model.workspaceOverview(for: secondWorkspace.id) == nil)
+        #expect(client.providerDetailRequestCount == 0)
+
+        loader.resume(workspaceID: secondWorkspace.id, with: secondOverview)
+        await refreshTask.value
+
+        #expect(model.workspaceOverview(for: secondWorkspace.id)?.providerCards.first?.health.summary == "Beta Pi available")
+        #expect(client.providerDetailRequestCount == 0)
+    }
+
+    @MainActor
+    @Test func appModelRefreshKeepsLoadedWorkspaceOverviewUntilReplacementArrives() async throws {
         let group = WorkspaceGroup(id: UUID(), name: "Group")
         let workspace = Workspace(
             id: UUID(),
@@ -6211,6 +6320,36 @@ struct nexusTests {
             folderPath: "/tmp/workspace",
             primaryGroupID: group.id
         )
+        let initialOverview = WorkspaceOverview(
+            workspace: workspace,
+            providerCards: [
+                WorkspaceProviderCard(
+                    provider: Provider(id: .claude),
+                    health: ProviderHealthSummary(state: .available, summary: "Initial Claude health"),
+                    defaultSession: ProviderDefaultSessionSummary(
+                        state: .notCreated,
+                        summary: "No default session yet",
+                        actionTitle: "Launch"
+                    )
+                )
+            ]
+        )
+        let refreshedOverview = WorkspaceOverview(
+            workspace: workspace,
+            providerCards: [
+                WorkspaceProviderCard(
+                    provider: Provider(id: .claude),
+                    health: ProviderHealthSummary(state: .available, summary: "Refreshed Claude health"),
+                    defaultSession: ProviderDefaultSessionSummary(
+                        state: .notCreated,
+                        summary: "No default session yet",
+                        actionTitle: "Launch"
+                    )
+                )
+            ]
+        )
+        let overviewStore = MutableWorkspaceOverviewStore(overviewsByID: [workspace.id: initialOverview])
+        let loader = ControlledWorkspaceOverviewLoader()
         let session = Session(
             id: UUID(),
             workspaceID: workspace.id,
@@ -6219,16 +6358,38 @@ struct nexusTests {
             state: .ready
         )
         let client = TrackingServiceClient(
-            workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []),
+            workspaceOverview: initialOverview,
             session: session,
-            screen: SessionScreen(session: session, transcript: "Claude ready")
+            screen: SessionScreen(session: session, transcript: "Claude ready"),
+            workspaces: [workspace],
+            workspaceGroups: [group],
+            workspaceOverviewsByID: [workspace.id: initialOverview],
+            workspaceOverviewLoader: { workspaceID in
+                try await loader.load(workspaceID: workspaceID, overview: overviewStore.overview(for: workspaceID))
+            }
         )
         let model = NexusAppModel(client: client)
 
         await model.refresh()
+        #expect(model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary == "Initial Claude health")
 
-        #expect(client.workspaceOverviewBatchRequestCount == 1)
-        #expect(client.workspaceOverviewRequestCount == 0)
+        overviewStore.setOverview(refreshedOverview, for: workspace.id)
+        loader.setMode(.suspended, for: workspace.id)
+
+        let refreshTask = Task {
+            await model.refresh()
+        }
+
+        try await waitUntil {
+            loader.requestedWorkspaceIDs().count == 2
+        }
+
+        #expect(model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary == "Initial Claude health")
+
+        loader.resume(workspaceID: workspace.id, with: refreshedOverview)
+        await refreshTask.value
+
+        #expect(model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary == "Refreshed Claude health")
     }
 
     @MainActor
@@ -8651,23 +8812,123 @@ private final class StubSessionRuntimeManager: SessionRuntimeManaging {
     }
 }
 
+private final class ControlledWorkspaceOverviewLoader: @unchecked Sendable {
+    enum Mode {
+        case immediate
+        case suspended
+    }
+
+    private let lock = NSLock()
+    private var modeByWorkspaceID: [UUID: Mode]
+    private var requestedWorkspaceIDsValue: [UUID] = []
+    private var continuations: [UUID: CheckedContinuation<WorkspaceOverview, Error>] = [:]
+
+    init(modeByWorkspaceID: [UUID: Mode] = [:]) {
+        self.modeByWorkspaceID = modeByWorkspaceID
+    }
+
+    func setMode(_ mode: Mode, for workspaceID: UUID) {
+        lock.lock()
+        modeByWorkspaceID[workspaceID] = mode
+        lock.unlock()
+    }
+
+    func requestedWorkspaceIDs() -> [UUID] {
+        lock.lock()
+        let workspaceIDs = requestedWorkspaceIDsValue
+        lock.unlock()
+        return workspaceIDs
+    }
+
+    func load(workspaceID: UUID, overview: WorkspaceOverview) async throws -> WorkspaceOverview {
+        switch appendRequestedWorkspaceID(workspaceID) {
+        case .immediate:
+            return overview
+        case .suspended:
+            return try await withCheckedThrowingContinuation { continuation in
+                storeContinuation(continuation, for: workspaceID)
+            }
+        }
+    }
+@@
+    func resume(workspaceID: UUID, with overview: WorkspaceOverview) {
+        lock.lock()
+        let continuation = continuations.removeValue(forKey: workspaceID)
+        lock.unlock()
+        continuation?.resume(returning: overview)
+    }
++
++    private func appendRequestedWorkspaceID(_ workspaceID: UUID) -> Mode {
++        lock.lock()
++        defer { lock.unlock() }
++        requestedWorkspaceIDsValue.append(workspaceID)
++        return modeByWorkspaceID[workspaceID, default: .immediate]
++    }
++
++    private func storeContinuation(
++        _ continuation: CheckedContinuation<WorkspaceOverview, Error>,
++        for workspaceID: UUID
++    ) {
++        lock.lock()
++        continuations[workspaceID] = continuation
++        lock.unlock()
++    }
+ }
+
+    func resume(workspaceID: UUID, with overview: WorkspaceOverview) {
+        lock.lock()
+        let continuation = continuations.removeValue(forKey: workspaceID)
+        lock.unlock()
+        continuation?.resume(returning: overview)
+    }
+}
+
+private final class MutableWorkspaceOverviewStore: @unchecked Sendable {
+    private let lock = NSLock()
+    private var overviewsByID: [UUID: WorkspaceOverview]
+
+    init(overviewsByID: [UUID: WorkspaceOverview]) {
+        self.overviewsByID = overviewsByID
+    }
+
+    func overview(for workspaceID: UUID) -> WorkspaceOverview {
+        lock.lock()
+        let overview = overviewsByID[workspaceID]!
+        lock.unlock()
+        return overview
+    }
+
+    func setOverview(_ overview: WorkspaceOverview, for workspaceID: UUID) {
+        lock.lock()
+        overviewsByID[workspaceID] = overview
+        lock.unlock()
+    }
+}
+
 private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendable {
     private var workspaceOverviewValue: WorkspaceOverview
+    private var workspaceOverviewValuesByID: [UUID: WorkspaceOverview]
     private var refreshedWorkspaceOverviewValue: WorkspaceOverview?
+    private var refreshedWorkspaceOverviewValuesByID: [UUID: WorkspaceOverview]
     private var providerDetailValue: ProviderDetail
     private var sessionValue: Session
     private var screenValue: SessionScreen
+    private var workspaceGroupsValue: [WorkspaceGroup]
+    private var workspacesValue: [Workspace]
     private var hostsValue: [NexusDomain.Host]
     private var hostDetailsValue: [UUID: HostDetail]
     private var recentNavigationValue: [NavigationItem]
     private var searchResultsValue: [NavigationItem]
     private var remoteAccessStateValue: RemoteAccessState
     private var pairedDevicesValue: [PairedDevice]
+    private let workspaceOverviewLoader: (@Sendable (UUID) async throws -> WorkspaceOverview)?
+    private let workspaceOverviewBatchLoader: (@Sendable ([UUID]) async throws -> [WorkspaceOverview])?
     private var observedScreenHandlers: [UUID: @Sendable (SessionScreen) -> Void] = [:]
 
     var workspaceOverviewRequestCount = 0
     var workspaceOverviewBatchRequestCount = 0
     var refreshWorkspaceOverviewRequestCount = 0
+    var providerDetailRequestCount = 0
     var recordedNavigationTargets: [NavigationTarget] = []
     var respondedApprovalRequests: [(sessionID: UUID, approvalRequestID: UUID, decision: ApprovalRequestDecision)] = []
     var observedScreenHandlerCount: Int {
@@ -8680,6 +8941,11 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
         session: Session,
         screen: SessionScreen,
         providerDetail: ProviderDetail? = nil,
+        workspaces: [Workspace]? = nil,
+        workspaceGroups: [WorkspaceGroup]? = nil,
+        workspaceOverviewsByID: [UUID: WorkspaceOverview]? = nil,
+        workspaceOverviewLoader: (@Sendable (UUID) async throws -> WorkspaceOverview)? = nil,
+        workspaceOverviewBatchLoader: (@Sendable ([UUID]) async throws -> [WorkspaceOverview])? = nil,
         hosts: [NexusDomain.Host] = [],
         hostDetails: [UUID: HostDetail] = [:],
         recentNavigation: [NavigationItem] = [],
@@ -8687,12 +8953,17 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
         remoteAccessState: RemoteAccessState = RemoteAccessState(isEnabled: false, activePairing: nil),
         pairedDevices: [PairedDevice] = []
     ) {
+        let allWorkspaceOverviews = workspaceOverviewsByID ?? [workspaceOverview.workspace.id: workspaceOverview]
+        let detailWorkspaceOverview = allWorkspaceOverviews[session.workspaceID] ?? workspaceOverview
+
         self.workspaceOverviewValue = workspaceOverview
+        self.workspaceOverviewValuesByID = allWorkspaceOverviews
         self.refreshedWorkspaceOverviewValue = refreshedWorkspaceOverview
+        self.refreshedWorkspaceOverviewValuesByID = refreshedWorkspaceOverview.map { [$0.workspace.id: $0] } ?? [:]
         self.providerDetailValue = providerDetail ?? ProviderDetail(
-            workspace: workspaceOverview.workspace,
+            workspace: detailWorkspaceOverview.workspace,
             provider: Provider(id: session.providerID),
-            health: workspaceOverview.providerCards.first(where: { $0.provider.id == session.providerID })?.health
+            health: detailWorkspaceOverview.providerCards.first(where: { $0.provider.id == session.providerID })?.health
                 ?? ProviderHealthSummary(state: .notChecked, summary: "Not checked"),
             defaultSession: session.isDefault ? session : nil,
             alternateSessions: session.isDefault ? [] : [session],
@@ -8700,12 +8971,16 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
         )
         self.sessionValue = session
         self.screenValue = screen
+        self.workspaceGroupsValue = workspaceGroups ?? [WorkspaceGroup(id: workspaceOverview.workspace.primaryGroupID, name: "Group")]
+        self.workspacesValue = workspaces ?? [workspaceOverview.workspace]
         self.hostsValue = hosts
         self.hostDetailsValue = hostDetails
         self.recentNavigationValue = recentNavigation
         self.searchResultsValue = searchResults
         self.remoteAccessStateValue = remoteAccessState
         self.pairedDevicesValue = pairedDevices
+        self.workspaceOverviewLoader = workspaceOverviewLoader
+        self.workspaceOverviewBatchLoader = workspaceOverviewBatchLoader
     }
 
     func getServiceStatus() async throws -> NexusServiceStatus {
@@ -8713,7 +8988,7 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
     }
 
     func listWorkspaceGroups() async throws -> [WorkspaceGroup] {
-        [WorkspaceGroup(id: workspaceOverviewValue.workspace.primaryGroupID, name: "Group")]
+        workspaceGroupsValue
     }
 
     func createWorkspaceGroup(name: String) async throws -> WorkspaceGroup {
@@ -8721,7 +8996,7 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
     }
 
     func listWorkspaces() async throws -> [Workspace] {
-        [workspaceOverviewValue.workspace]
+        workspacesValue
     }
 
     func listHosts() async throws -> [NexusDomain.Host] {
@@ -8876,31 +9151,61 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
 
     func getWorkspaceOverview(workspaceID: UUID) async throws -> WorkspaceOverview {
         workspaceOverviewRequestCount += 1
-        return workspaceOverviewValue
+
+        if let workspaceOverviewLoader {
+            let overview = try await workspaceOverviewLoader(workspaceID)
+            workspaceOverviewValuesByID[workspaceID] = overview
+            if workspaceOverviewValue.workspace.id == workspaceID {
+                workspaceOverviewValue = overview
+            }
+            return overview
+        }
+
+        return workspaceOverviewValuesByID[workspaceID] ?? workspaceOverviewValue
     }
 
     func getWorkspaceOverviews(workspaceIDs: [UUID]) async throws -> [WorkspaceOverview] {
         workspaceOverviewBatchRequestCount += 1
-        return workspaceIDs.map { _ in workspaceOverviewValue }
+
+        if let workspaceOverviewBatchLoader {
+            return try await workspaceOverviewBatchLoader(workspaceIDs)
+        }
+
+        if let workspaceOverviewLoader {
+            var overviews: [WorkspaceOverview] = []
+            for workspaceID in workspaceIDs {
+                overviews.append(try await workspaceOverviewLoader(workspaceID))
+            }
+            return overviews
+        }
+
+        return workspaceIDs.map { workspaceOverviewValuesByID[$0] ?? workspaceOverviewValue }
     }
 
     func refreshWorkspaceOverview(workspaceID: UUID) async throws -> WorkspaceOverview {
         refreshWorkspaceOverviewRequestCount += 1
-        let refreshed = refreshedWorkspaceOverviewValue ?? workspaceOverviewValue
-        workspaceOverviewValue = refreshed
+        let refreshed = refreshedWorkspaceOverviewValuesByID[workspaceID]
+            ?? refreshedWorkspaceOverviewValue
+            ?? workspaceOverviewValuesByID[workspaceID]
+            ?? workspaceOverviewValue
+        workspaceOverviewValuesByID[workspaceID] = refreshed
+        if workspaceOverviewValue.workspace.id == workspaceID {
+            workspaceOverviewValue = refreshed
+        }
         return refreshed
     }
 
     func getProviderDetail(workspaceID: UUID, providerID: ProviderID) async throws -> ProviderDetail {
-        providerDetailValue
+        providerDetailRequestCount += 1
+        return providerDetailValue
     }
 
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: UUID?) async throws -> Workspace {
-        workspaceOverviewValue.workspace
+        workspacesValue.first ?? workspaceOverviewValue.workspace
     }
 
     func createRemoteWorkspace(name: String?, hostID: UUID, remotePath: String, primaryGroupID: UUID?) async throws -> Workspace {
-        workspaceOverviewValue.workspace
+        workspacesValue.first ?? workspaceOverviewValue.workspace
     }
 
     func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) async throws -> Session {
@@ -8966,6 +9271,7 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
                 providerCards: providerCards,
                 remoteTarget: workspaceOverviewValue.remoteTarget
             )
+            workspaceOverviewValuesByID[workspaceOverviewValue.workspace.id] = workspaceOverviewValue
         }
         return namedSession
     }
@@ -9020,6 +9326,7 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
                 providerCards: providerCards,
                 remoteTarget: workspaceOverviewValue.remoteTarget
             )
+            workspaceOverviewValuesByID[workspaceOverviewValue.workspace.id] = workspaceOverviewValue
         }
         return true
     }
