@@ -550,13 +550,14 @@ struct PiProviderModuleTests {
             ]
         ))
         #expect(providerHealthEvaluator.remoteProbeRequests.isEmpty)
+        #expect(providerHealthEvaluator.remoteReadinessRequests.isEmpty)
         #expect(providerHealthEvaluator.legacyRequests.isEmpty)
         #expect(catalogRead.capabilities.launchDefaultSession.isEnabled == false)
         #expect(catalogRead.capabilities.launchDefaultSession.disabledReason == "Provider Health is blocked by Host Validation")
         #expect(catalogRead.prelaunchPrimarySurface == .structuredActivityFeed)
     }
 
-    @Test func piProviderModuleDerivesRemoteProbeBackedCatalogReadFromSharedPiProbeFacts() async throws {
+    @Test func piProviderModuleDerivesRemoteCatalogReadFromRawPiProbeFacts() async throws {
         let module = PiProviderModule()
         let workspaceID = UUID()
         let hostID = UUID()
@@ -570,18 +571,8 @@ struct PiProviderModuleTests {
         )
         let providerHealthEvaluator = RecordingPiHealthFactProvider(
             localProbeResult: .ready(executable: "/tmp/unused", version: nil, diagnostics: []),
-            remoteProbeResult: .authenticationUncertain(
-                executable: "/home/tester/.local/bin/pi",
-                version: "1.2.3",
-                diagnostics: [
-                    ProviderHealthDiagnostic(
-                        severity: .info,
-                        code: "remoteProbe",
-                        message: "Validated remote Pi launch prerequisites on Build Server for /srv/api."
-                    )
-                ],
-                message: "Pi auth readiness could not be confirmed."
-            )
+            remoteExecutableFacts: .sshLaunchFailed("direct remote probe should stay unused"),
+            remoteReadinessResult: .authenticationUncertain("Pi auth readiness could not be confirmed.")
         )
         let remoteContext = RemoteWorkspaceHealthContext(
             host: NexusDomain.Host(id: hostID, name: "Build Server", sshTarget: "build-box"),
@@ -596,6 +587,18 @@ struct PiProviderModuleTests {
                 state: .available,
                 summary: "Workspace is available",
                 checkedAt: Date()
+            ),
+            probeFacts: RemoteWorkspaceProbeFacts(
+                tmuxAvailable: true,
+                workspacePath: .available,
+                providerFacts: [
+                    .pi: RemoteProviderProbeFacts(
+                        executable: "/home/tester/.local/bin/pi",
+                        version: "1.2.3",
+                        resolutionDetail: nil,
+                        probeDetail: nil
+                    )
+                ]
             )
         )
 
@@ -635,11 +638,81 @@ struct PiProviderModuleTests {
                 )
             ]
         ))
-        #expect(providerHealthEvaluator.remoteProbeRequests == [workspace.id])
+        #expect(providerHealthEvaluator.remoteProbeRequests.isEmpty)
+        #expect(providerHealthEvaluator.remoteReadinessRequests == [
+            .init(workspaceID: workspace.id, hostID: hostID, executable: "/home/tester/.local/bin/pi")
+        ])
         #expect(providerHealthEvaluator.legacyRequests.isEmpty)
         #expect(catalogRead.capabilities.launchDefaultSession.isEnabled)
         #expect(catalogRead.capabilities.createNamedSession.isEnabled)
         #expect(catalogRead.prelaunchPrimarySurface == .structuredActivityFeed)
+    }
+
+    @Test func piProviderModuleClassifiesRemoteRawProbeFactsWithoutSharedRemoteHealthAdapter() async {
+        let module = PiProviderModule()
+        let workspaceID = UUID()
+        let hostID = UUID()
+        let workspace = Workspace(
+            id: workspaceID,
+            name: "Remote Pi",
+            kind: .remote,
+            folderPath: "/srv/api",
+            primaryGroupID: UUID(),
+            remoteHostID: hostID
+        )
+        let providerHealthEvaluator = RecordingPiHealthFactProvider(
+            localProbeResult: .ready(executable: "/tmp/unused", version: nil, diagnostics: []),
+            remoteExecutableFacts: .sshLaunchFailed("direct remote probe should stay unused")
+        )
+        let remoteContext = RemoteWorkspaceHealthContext(
+            host: NexusDomain.Host(id: hostID, name: "Build Server", sshTarget: "build-box"),
+            hostValidation: HostValidationSnapshot(
+                hostID: hostID,
+                state: .available,
+                summary: "Host is available",
+                checkedAt: Date()
+            ),
+            workspaceAvailability: WorkspaceAvailabilitySnapshot(
+                workspaceID: workspaceID,
+                state: .available,
+                summary: "Workspace is available",
+                checkedAt: Date()
+            ),
+            probeFacts: RemoteWorkspaceProbeFacts(
+                tmuxAvailable: true,
+                workspacePath: .available,
+                providerFacts: [
+                    .pi: RemoteProviderProbeFacts(
+                        executable: nil,
+                        version: nil,
+                        resolutionDetail: "NEXUS_REMOTE_PI_NOT_FOUND",
+                        probeDetail: nil
+                    )
+                ]
+            )
+        )
+
+        let health = await module.providerHealthSummary(
+            for: workspace,
+            remoteContext: remoteContext,
+            providerHealthEvaluator: providerHealthEvaluator
+        )
+
+        #expect(health == ProviderHealthSummary(
+            state: .unavailable,
+            summary: "Pi is unavailable on the Remote Workspace",
+            launchability: .notLaunchable,
+            diagnostics: [
+                ProviderHealthDiagnostic(
+                    severity: .error,
+                    code: "remoteExecutableNotFound",
+                    message: "Pi executable was not found in the remote shell environments Nexus checked."
+                )
+            ]
+        ))
+        #expect(providerHealthEvaluator.remoteProbeRequests.isEmpty)
+        #expect(providerHealthEvaluator.remoteReadinessRequests.isEmpty)
+        #expect(providerHealthEvaluator.legacyRequests.isEmpty)
     }
 
     @Test func piProviderModulePreservesPiCatalogReadBehavior() async {
@@ -855,18 +928,28 @@ private final class RecordingPiProviderHealthFacts: @unchecked Sendable, Provide
 }
 
 private final class RecordingPiHealthFactProvider: @unchecked Sendable, ProviderHealthEvaluating, CLIProviderHealthFactProviding, PiProviderHealthFactProviding {
+    struct RemoteReadinessRequest: Equatable {
+        let workspaceID: UUID
+        let hostID: UUID
+        let executable: String
+    }
+
     let localProbeResult: LocalCLIHealthProbeResult
-    let remoteProbeResult: RemotePiHealthProbeResult
+    let remoteExecutableFacts: RemotePiExecutableProbeResult
+    let remoteReadinessResult: RemotePiReadinessProbeResult
     private(set) var localProbeRequests: [UUID] = []
     private(set) var remoteProbeRequests: [UUID] = []
+    private(set) var remoteReadinessRequests: [RemoteReadinessRequest] = []
     private(set) var legacyRequests: [UUID] = []
 
     init(
         localProbeResult: LocalCLIHealthProbeResult,
-        remoteProbeResult: RemotePiHealthProbeResult = .sshResolutionLaunchFailed("unexpected")
+        remoteExecutableFacts: RemotePiExecutableProbeResult = .sshLaunchFailed("unexpected"),
+        remoteReadinessResult: RemotePiReadinessProbeResult = .ready
     ) {
         self.localProbeResult = localProbeResult
-        self.remoteProbeResult = remoteProbeResult
+        self.remoteExecutableFacts = remoteExecutableFacts
+        self.remoteReadinessResult = remoteReadinessResult
     }
 
     func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> [WorkspaceProviderCard] {
@@ -892,9 +975,18 @@ private final class RecordingPiHealthFactProvider: @unchecked Sendable, Provider
         return .sshLaunchFailed("unexpected")
     }
 
-    func remotePiHealthProbe(workspace: Workspace, host: NexusDomain.Host) async -> RemotePiHealthProbeResult {
+    func remotePiExecutableFacts(workspace: Workspace, host: NexusDomain.Host) async -> RemotePiExecutableProbeResult {
         remoteProbeRequests.append(workspace.id)
-        return remoteProbeResult
+        return remoteExecutableFacts
+    }
+
+    func probeRemotePiReadiness(
+        workspace: Workspace,
+        host: NexusDomain.Host,
+        executable: String
+    ) async -> RemotePiReadinessProbeResult {
+        remoteReadinessRequests.append(.init(workspaceID: workspace.id, hostID: host.id, executable: executable))
+        return remoteReadinessResult
     }
 }
 

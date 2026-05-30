@@ -98,23 +98,16 @@ enum RemoteCodexReadinessProbeResult: Sendable, Equatable {
     case failed(String)
 }
 
-enum RemotePiHealthProbeResult: Sendable, Equatable {
-    case sshResolutionLaunchFailed(String)
-    case resolutionProbeFailed(String)
-    case resolutionReturnedNoExecutable
-    case readinessProbeFailed(executable: String, version: String?, detail: String)
-    case authenticationRequired(executable: String, version: String?, message: String)
-    case authenticationUncertain(
-        executable: String,
-        version: String?,
-        diagnostics: [ProviderHealthDiagnostic],
-        message: String?
-    )
-    case ready(
-        executable: String,
-        version: String?,
-        diagnostics: [ProviderHealthDiagnostic]
-    )
+enum RemotePiExecutableProbeResult: Sendable, Equatable {
+    case sshLaunchFailed(String)
+    case facts(RemoteProviderProbeFacts)
+}
+
+enum RemotePiReadinessProbeResult: Sendable, Equatable {
+    case ready
+    case authenticationRequired(String)
+    case authenticationUncertain(String?)
+    case failed(String)
 }
 
 enum LocalIBMBobPassiveProbeResult: Sendable, Equatable {
@@ -162,7 +155,8 @@ protocol CodexProviderHealthFactProviding: Sendable {
 }
 
 protocol PiProviderHealthFactProviding: Sendable {
-    func remotePiHealthProbe(workspace: Workspace, host: NexusDomain.Host) async -> RemotePiHealthProbeResult
+    func remotePiExecutableFacts(workspace: Workspace, host: NexusDomain.Host) async -> RemotePiExecutableProbeResult
+    func probeRemotePiReadiness(workspace: Workspace, host: NexusDomain.Host, executable: String) async -> RemotePiReadinessProbeResult
 }
 
 protocol IBMBobProviderHealthFactProviding: Sendable {
@@ -178,14 +172,6 @@ protocol SharedRemoteCLIProviderHealthFactProviding: Sendable {
         host: NexusDomain.Host,
         probeFacts: RemoteWorkspaceProbeFacts
     ) async -> RemoteCLIHealthProbeResult
-}
-
-protocol SharedRemotePiProviderHealthFactProviding: Sendable {
-    func remotePiHealthProbe(
-        workspace: Workspace,
-        host: NexusDomain.Host,
-        probeFacts: RemoteWorkspaceProbeFacts
-    ) async -> RemotePiHealthProbeResult
 }
 
 protocol SharedRemoteIBMBobProviderHealthFactProviding: Sendable {
@@ -242,7 +228,7 @@ extension ProviderHealthEvaluating {
     }
 }
 
-struct ProviderHealthFacts: ProviderHealthEvaluating, CLIProviderHealthFactProviding, CodexProviderHealthFactProviding, PiProviderHealthFactProviding, IBMBobProviderHealthFactProviding, SharedRemoteCLIProviderHealthFactProviding, SharedRemotePiProviderHealthFactProviding, SharedRemoteIBMBobProviderHealthFactProviding, @unchecked Sendable {
+struct ProviderHealthFacts: ProviderHealthEvaluating, CLIProviderHealthFactProviding, CodexProviderHealthFactProviding, PiProviderHealthFactProviding, IBMBobProviderHealthFactProviding, SharedRemoteCLIProviderHealthFactProviding, SharedRemoteIBMBobProviderHealthFactProviding, @unchecked Sendable {
     let executableResolver: any ProviderExecutableResolving
     let commandRunner: any ProviderCommandRunning
     let localShellCommandBuilder: LocalShellCommandBuilder
@@ -429,47 +415,7 @@ struct ProviderHealthFacts: ProviderHealthEvaluating, CLIProviderHealthFactProvi
         }
     }
 
-    func remotePiHealthProbe(workspace: Workspace, host: NexusDomain.Host, probeFacts: RemoteWorkspaceProbeFacts) async -> RemotePiHealthProbeResult {
-        let fact = probeFacts.providerFacts[.pi]
-        if let resolutionDetail = fact?.resolutionDetail {
-            return .resolutionProbeFailed(resolutionDetail)
-        }
-        guard let executable = fact?.executable else {
-            return .resolutionReturnedNoExecutable
-        }
-        let version = fact?.version
-        let diagnostics = [
-            ProviderHealthDiagnostic(
-                severity: .info,
-                code: "remoteProbe",
-                message: "Validated remote Pi launch prerequisites on \(host.name) for \(workspace.folderPath)."
-            )
-        ]
-
-        do {
-            switch try await remotePiReadinessProbe.probe(host: host, executable: executable, workingDirectory: workspace.folderPath) {
-            case .ready:
-                return .ready(executable: executable, version: version, diagnostics: diagnostics)
-            case let .authenticationRequired(message):
-                return .authenticationRequired(executable: executable, version: version, message: message)
-            case let .authenticationUncertain(message):
-                return .authenticationUncertain(
-                    executable: executable,
-                    version: version,
-                    diagnostics: diagnostics,
-                    message: message
-                )
-            }
-        } catch {
-            return .readinessProbeFailed(
-                executable: executable,
-                version: version,
-                detail: error.localizedDescription
-            )
-        }
-    }
-
-    func remotePiHealthProbe(workspace: Workspace, host: NexusDomain.Host) async -> RemotePiHealthProbeResult {
+    func remotePiExecutableFacts(workspace: Workspace, host: NexusDomain.Host) async -> RemotePiExecutableProbeResult {
         let result: ProviderCommandResult
         do {
             result = try commandRunner.run(
@@ -478,11 +424,18 @@ struct ProviderHealthFacts: ProviderHealthEvaluating, CLIProviderHealthFactProvi
                 currentDirectoryURL: nil
             )
         } catch {
-            return .sshResolutionLaunchFailed(error.localizedDescription)
+            return .sshLaunchFailed(error.localizedDescription)
         }
 
         guard result.exitStatus == 0 else {
-            return .resolutionProbeFailed(firstDiagnosticLine(stdout: result.stdout, stderr: result.stderr))
+            return .facts(
+                RemoteProviderProbeFacts(
+                    executable: nil,
+                    version: nil,
+                    resolutionDetail: firstDiagnosticLine(stdout: result.stdout, stderr: result.stderr),
+                    probeDetail: nil
+                )
+            )
         }
 
         let outputLines = result.stdout
@@ -490,38 +443,33 @@ struct ProviderHealthFacts: ProviderHealthEvaluating, CLIProviderHealthFactProvi
             .map(String.init)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { $0.isEmpty == false }
-        guard let executable = outputLines.first else {
-            return .resolutionReturnedNoExecutable
-        }
-        let version = outputLines.dropFirst().first
-        let diagnostics = [
-            ProviderHealthDiagnostic(
-                severity: .info,
-                code: "remoteProbe",
-                message: "Validated remote Pi launch prerequisites on \(host.name) for \(workspace.folderPath)."
-            )
-        ]
 
+        return .facts(
+            RemoteProviderProbeFacts(
+                executable: outputLines.first,
+                version: outputLines.dropFirst().first,
+                resolutionDetail: nil,
+                probeDetail: nil
+            )
+        )
+    }
+
+    func probeRemotePiReadiness(
+        workspace: Workspace,
+        host: NexusDomain.Host,
+        executable: String
+    ) async -> RemotePiReadinessProbeResult {
         do {
             switch try await remotePiReadinessProbe.probe(host: host, executable: executable, workingDirectory: workspace.folderPath) {
             case .ready:
-                return .ready(executable: executable, version: version, diagnostics: diagnostics)
+                return .ready
             case let .authenticationRequired(message):
-                return .authenticationRequired(executable: executable, version: version, message: message)
+                return .authenticationRequired(message)
             case let .authenticationUncertain(message):
-                return .authenticationUncertain(
-                    executable: executable,
-                    version: version,
-                    diagnostics: diagnostics,
-                    message: message
-                )
+                return .authenticationUncertain(message)
             }
         } catch {
-            return .readinessProbeFailed(
-                executable: executable,
-                version: version,
-                detail: error.localizedDescription
-            )
+            return .failed(error.localizedDescription)
         }
     }
 

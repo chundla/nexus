@@ -284,33 +284,30 @@ private extension PiProviderModule {
             )
         }
 
-        let remoteProbeResult: RemotePiHealthProbeResult
-        if let probeFacts = remoteContext?.probeFacts,
-           let sharedHealthFacts = healthFacts as? any SharedRemotePiProviderHealthFactProviding {
-            remoteProbeResult = await sharedHealthFacts.remotePiHealthProbe(
-                workspace: workspace,
-                host: host,
-                probeFacts: probeFacts
-            )
+        let probeFact: RemoteProviderProbeFacts
+        if let sharedProbeFact = remoteContext?.probeFacts?.providerFacts[.pi] {
+            probeFact = sharedProbeFact
         } else {
-            remoteProbeResult = await healthFacts.remotePiHealthProbe(workspace: workspace, host: host)
+            switch await healthFacts.remotePiExecutableFacts(workspace: workspace, host: host) {
+            case let .sshLaunchFailed(message):
+                return ProviderHealthSummary(
+                    state: .unavailable,
+                    summary: "Remote Pi health check failed before the SSH probe completed",
+                    launchability: .notLaunchable,
+                    diagnostics: [
+                        ProviderHealthDiagnostic(
+                            severity: .error,
+                            code: "sshLaunchFailed",
+                            message: message
+                        )
+                    ]
+                )
+            case let .facts(facts):
+                probeFact = facts
+            }
         }
 
-        switch remoteProbeResult {
-        case let .sshResolutionLaunchFailed(message):
-            return ProviderHealthSummary(
-                state: .unavailable,
-                summary: "Remote Pi health check failed before the SSH probe completed",
-                launchability: .notLaunchable,
-                diagnostics: [
-                    ProviderHealthDiagnostic(
-                        severity: .error,
-                        code: "sshLaunchFailed",
-                        message: message
-                    )
-                ]
-            )
-        case let .resolutionProbeFailed(detail):
+        if let detail = probeFact.resolutionDetail ?? probeFact.probeDetail {
             let classification = classifyRemoteProbeFailure(detail: detail)
             return ProviderHealthSummary(
                 state: classification.state,
@@ -324,7 +321,9 @@ private extension PiProviderModule {
                     )
                 ]
             )
-        case .resolutionReturnedNoExecutable:
+        }
+
+        guard let executable = probeFact.executable else {
             return ProviderHealthSummary(
                 state: .misconfigured,
                 summary: "Pi executable resolution returned no executable path",
@@ -337,12 +336,23 @@ private extension PiProviderModule {
                     )
                 ]
             )
-        case let .readinessProbeFailed(executable, version, detail):
+        }
+
+        var diagnostics = [
+            ProviderHealthDiagnostic(
+                severity: .info,
+                code: "remoteProbe",
+                message: "Validated remote Pi launch prerequisites on \(host.name) for \(workspace.folderPath)."
+            )
+        ]
+
+        switch await healthFacts.probeRemotePiReadiness(workspace: workspace, host: host, executable: executable) {
+        case let .failed(detail):
             return ProviderHealthSummary(
                 state: .misconfigured,
                 summary: "Pi is installed but failed the remote protocol-native readiness probe",
                 resolvedExecutable: executable,
-                version: version,
+                version: probeFact.version,
                 launchability: .notLaunchable,
                 diagnostics: [
                     ProviderHealthDiagnostic(
@@ -352,12 +362,12 @@ private extension PiProviderModule {
                     )
                 ]
             )
-        case let .authenticationRequired(executable, version, message):
+        case let .authenticationRequired(message):
             return ProviderHealthSummary(
                 state: .unavailable,
                 summary: "Pi requires authentication on the Remote Workspace",
                 resolvedExecutable: executable,
-                version: version,
+                version: probeFact.version,
                 launchability: .notLaunchable,
                 diagnostics: [
                     ProviderHealthDiagnostic(
@@ -367,10 +377,9 @@ private extension PiProviderModule {
                     )
                 ]
             )
-        case let .authenticationUncertain(executable, version, diagnostics, message):
-            var finalDiagnostics = diagnostics
+        case let .authenticationUncertain(message):
             if let message, message.isEmpty == false {
-                finalDiagnostics.append(
+                diagnostics.append(
                     ProviderHealthDiagnostic(
                         severity: .warning,
                         code: "remoteAuthUncertain",
@@ -380,18 +389,18 @@ private extension PiProviderModule {
             }
             return ProviderHealthSummary(
                 state: .available,
-                summary: version.map { "Pi \($0) is available" } ?? "Pi is available",
+                summary: probeFact.version.map { "Pi \($0) is available" } ?? "Pi is available",
                 resolvedExecutable: executable,
-                version: version,
+                version: probeFact.version,
                 launchability: .launchable,
-                diagnostics: finalDiagnostics
+                diagnostics: diagnostics
             )
-        case let .ready(executable, version, diagnostics):
+        case .ready:
             return ProviderHealthSummary(
                 state: .available,
-                summary: version.map { "Pi \($0) is available" } ?? "Pi is available",
+                summary: probeFact.version.map { "Pi \($0) is available" } ?? "Pi is available",
                 resolvedExecutable: executable,
-                version: version,
+                version: probeFact.version,
                 launchability: .launchable,
                 diagnostics: diagnostics
             )
