@@ -237,6 +237,30 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func focusedStructuredSessionPresentationAppliesSlashCommandSelectionsThroughTheSharedMenuSeam() throws {
+        let screen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .codex,
+                isDefault: true,
+                state: .ready
+            ),
+            primarySurface: .structuredActivityFeed,
+            transcript: ""
+        )
+        let presentation = structuredSessionPresentation(
+            for: screen,
+            isController: true,
+            draft: "  /go",
+            isPerformingAction: false
+        )
+        let command = try #require(presentation.slashCommandMenu.commands.first)
+
+        #expect(presentation.slashCommandMenu.applying(command, to: "  /go") == "  /goal ")
+    }
+
+    @MainActor
     @Test func remoteSessionSurfacePresentationSupportsExistingStructuredCodexSessionsOnIPhone() {
         let screen = SessionScreen(
             session: Session(

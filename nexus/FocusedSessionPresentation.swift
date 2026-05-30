@@ -90,6 +90,13 @@ struct StructuredSessionSlashCommand: Identifiable, Equatable {
 struct StructuredSessionSlashCommandMenuPresentation: Equatable {
     let isVisible: Bool
     let commands: [StructuredSessionSlashCommand]
+
+    func applying(_ command: StructuredSessionSlashCommand, to draft: String) -> String {
+        NexusSessionPresentation.StructuredSessionSlashCommandMenuPresentation(
+            isVisible: isVisible,
+            commands: commands.map(mapStructuredSessionSlashCommand)
+        ).applying(mapStructuredSessionSlashCommand(command), to: draft)
+    }
 }
 
 func focusedSessionSurface(for screen: SessionScreen) -> FocusedSessionSurface {
@@ -190,28 +197,6 @@ func structuredSessionConversationPresentation(
     )
 }
 
-func structuredSessionSlashCommandMenuPresentation(
-    for draft: String,
-    screen: SessionScreen
-) -> StructuredSessionSlashCommandMenuPresentation {
-    mapStructuredSessionSlashCommandMenuPresentation(
-        NexusSessionPresentation.structuredSessionSlashCommandMenuPresentation(for: draft, screen: screen)
-    )
-}
-
-func applyStructuredSessionSlashCommand(_ command: StructuredSessionSlashCommand, to draft: String) -> String {
-    NexusSessionPresentation.applyStructuredSessionSlashCommand(
-        NexusSessionPresentation.StructuredSessionSlashCommand(
-            matchText: command.matchText,
-            displayText: command.displayText,
-            insertionText: command.insertionText,
-            summary: command.summary,
-            acceptsArguments: command.acceptsArguments,
-            suggestionQueryPrefix: command.suggestionQueryPrefix
-        ),
-        to: draft
-    )
-}
 
 private func mapStructuredSessionActivityRow(
     _ row: NexusSessionPresentation.StructuredSessionActivityRow
@@ -352,6 +337,19 @@ private func mapStructuredSessionSlashCommand(
     _ command: NexusSessionPresentation.StructuredSessionSlashCommand
 ) -> StructuredSessionSlashCommand {
     StructuredSessionSlashCommand(
+        matchText: command.matchText,
+        displayText: command.displayText,
+        insertionText: command.insertionText,
+        summary: command.summary,
+        acceptsArguments: command.acceptsArguments,
+        suggestionQueryPrefix: command.suggestionQueryPrefix
+    )
+}
+
+private func mapStructuredSessionSlashCommand(
+    _ command: StructuredSessionSlashCommand
+) -> NexusSessionPresentation.StructuredSessionSlashCommand {
+    NexusSessionPresentation.StructuredSessionSlashCommand(
         matchText: command.matchText,
         displayText: command.displayText,
         insertionText: command.insertionText,

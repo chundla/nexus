@@ -148,6 +148,10 @@ public struct StructuredSessionSlashCommandMenuPresentation: Equatable {
         self.isVisible = isVisible
         self.commands = commands
     }
+
+    public func applying(_ command: StructuredSessionSlashCommand, to draft: String) -> String {
+        applyStructuredSessionSlashCommand(command, to: draft)
+    }
 }
 
 public struct StructuredSessionPresentation: Equatable {

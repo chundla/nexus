@@ -1694,7 +1694,7 @@ private struct RemoteSessionScreenView: View {
             VStack(spacing: 8) {
                 if presentation.composer.isEnabled {
                     if presentation.slashCommandMenu.isVisible {
-                        iosStructuredSessionSlashCommandMenu(presentation.slashCommandMenu.commands)
+                        iosStructuredSessionSlashCommandMenu(presentation.slashCommandMenu)
                     }
 
                     HStack(alignment: .bottom, spacing: 10) {
@@ -1759,12 +1759,12 @@ private struct RemoteSessionScreenView: View {
     }
 
     @ViewBuilder
-    private func iosStructuredSessionSlashCommandMenu(_ commands: [StructuredSessionSlashCommand]) -> some View {
+    private func iosStructuredSessionSlashCommandMenu(_ menu: StructuredSessionSlashCommandMenuPresentation) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 6) {
-                ForEach(commands) { command in
+                ForEach(menu.commands) { command in
                     Button {
-                        structuredPrompt = applyStructuredSessionSlashCommand(command, to: structuredPrompt)
+                        structuredPrompt = menu.applying(command, to: structuredPrompt)
                         isStructuredPromptFocused = true
                     } label: {
                         VStack(alignment: .leading, spacing: 4) {

@@ -411,6 +411,23 @@ struct StructuredSessionPresentationTests {
         #expect(applyStructuredSessionSlashCommand(command, to: "/api") == "/api-endpoint ")
     }
 
+    @Test func structuredSessionSlashCommandMenuAppliesSelectedCommandThroughSharedMenuPolicy() throws {
+        let screen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .codex,
+                isDefault: true,
+                state: .ready
+            ),
+            transcript: ""
+        )
+        let menu = structuredSessionSlashCommandMenuPresentation(for: "  /go", screen: screen)
+        let command = try #require(menu.commands.first)
+
+        #expect(menu.applying(command, to: "  /go") == "  /goal ")
+    }
+
     @Test func applyStructuredSessionSlashCommandReplacesSlashDraftWhilePreservingLeadingWhitespace() {
         let command = StructuredSessionSlashCommand(
             matchText: "goal",

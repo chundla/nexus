@@ -1580,7 +1580,7 @@ struct ContentView: View {
             if isReady {
                 VStack(alignment: .leading, spacing: 8) {
                     if presentation.slashCommandMenu.isVisible {
-                        macStructuredSessionSlashCommandMenu(presentation.slashCommandMenu.commands)
+                        macStructuredSessionSlashCommandMenu(presentation.slashCommandMenu)
                     }
 
                     HStack(spacing: 8) {
@@ -1612,12 +1612,12 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func macStructuredSessionSlashCommandMenu(_ commands: [StructuredSessionSlashCommand]) -> some View {
+    private func macStructuredSessionSlashCommandMenu(_ menu: StructuredSessionSlashCommandMenuPresentation) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 4) {
-                ForEach(commands) { command in
+                ForEach(menu.commands) { command in
                     Button {
-                        structuredSessionPrompt = applyStructuredSessionSlashCommand(command, to: structuredSessionPrompt)
+                        structuredSessionPrompt = menu.applying(command, to: structuredSessionPrompt)
                         isStructuredSessionPromptFocused = true
                     } label: {
                         HStack(alignment: .top, spacing: 12) {
