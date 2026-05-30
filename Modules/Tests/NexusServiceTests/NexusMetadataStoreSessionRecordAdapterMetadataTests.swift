@@ -34,27 +34,55 @@ struct NexusMetadataStoreSessionRecordAdapterMetadataTests {
             resolvedWorkingDirectory: workspace.folderPath
         )
 
-        try store.saveSessionRecordAdapterMetadata(
-            sessionID: session.id,
-            metadata: SessionRecordAdapterMetadata(
-                providerID: .pi,
-                values: [
-                    "piSessionID": "pi-session-1",
-                    "sessionFile": "/tmp/pi-session-1.jsonl"
+        let metadata = try #require(
+            SessionRecordAdapterMetadata.pi(
+                linkage: PiSessionLinkage(
+                    piSessionID: "pi-session-1",
+                    sessionFile: "/tmp/pi-session-1.jsonl"
+                ),
+                activityItems: [
+                    SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"),
+                    SessionActivityItem(kind: .message, text: "You: deploy")
+                ],
+                approvalRequests: [
+                    SessionApprovalRequest(
+                        id: UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!,
+                        title: "Approve deploy",
+                        text: "Pi wants to deploy.",
+                        state: .pending
+                    )
+                ],
+                extensionUIState: SessionExtensionUIState(
+                    pendingDialogs: [
+                        SessionExtensionUIDialog(
+                            id: "deploy-dialog",
+                            kind: .confirm,
+                            title: "Deploy to production?"
+                        )
+                    ]
+                ),
+                providerEvents: [
+                    SessionProviderEvent(
+                        sequence: 0,
+                        providerID: .pi,
+                        type: "extension_ui_request",
+                        family: .unknown,
+                        rawPayload: "{\"type\":\"extension_ui_request\"}"
+                    )
                 ]
             )
         )
+        try store.saveSessionRecordAdapterMetadata(sessionID: session.id, metadata: metadata)
+
+        let storedMetadata = try #require(try store.sessionRecordAdapterMetadata(sessionID: session.id))
 
         #expect(try store.launchSnapshot(sessionID: session.id) == launchSnapshot)
-        #expect(
-            try store.sessionRecordAdapterMetadata(sessionID: session.id) == SessionRecordAdapterMetadata(
-                providerID: .pi,
-                values: [
-                    "piSessionID": "pi-session-1",
-                    "sessionFile": "/tmp/pi-session-1.jsonl"
-                ]
-            )
-        )
+        #expect(storedMetadata == metadata)
+        #expect(storedMetadata.piSessionLinkage?.piSessionID == "pi-session-1")
+        #expect(storedMetadata.piPersistedActivityItems?.map(\.text) == ["Pi shared Session stream connected", "You: deploy"])
+        #expect(storedMetadata.piPersistedApprovalRequests?.map(\.title) == ["Approve deploy"])
+        #expect(storedMetadata.piPersistedExtensionUIState?.pendingDialogs.map(\.title) == ["Deploy to production?"])
+        #expect(storedMetadata.piPersistedProviderEvents?.map(\.type) == ["extension_ui_request"])
     }
 
     @Test func reopeningStoreMigratesLegacyPiSessionLinkageIntoGenericSessionRecordMetadata() throws {

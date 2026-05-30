@@ -458,6 +458,55 @@ struct NexusServiceRemotePiStructuredSessionTests {
         #expect(resumedScreen.transcript == "> again\nRemote again")
     }
 
+    @Test func restartedRemotePiPendingExtensionDialogSurvivesReconnectWithProviderEvents() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let transportHarness = RemotePiTransportHarness()
+        func makeService() throws -> NexusService {
+            try makeRemotePiService(rootURL: rootURL, transportHarness: transportHarness)
+        }
+
+        let service = try makeService()
+        let group = try service.createWorkspaceGroup(name: "Remote")
+        let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: nil)
+        _ = try service.validateHost(hostID: host.id)
+        let workspace = try service.createRemoteWorkspace(
+            name: "Remote Pi",
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+        let pendingScreen = try service.sendSessionInput(sessionID: session.id, text: "deploy")
+        let pendingDialog = try #require(pendingScreen.extensionUI?.pendingDialogs.first)
+
+        let restartedService = try makeService()
+        let interruptedScreen = try restartedService.getSessionScreen(sessionID: session.id)
+        let resumedSession = try restartedService.launchOrResumeSession(sessionID: session.id)
+        let resumedScreen = try restartedService.getSessionScreen(sessionID: resumedSession.id)
+        let approvedScreen = try restartedService.respondToExtensionDialog(
+            sessionID: resumedSession.id,
+            dialogID: pendingDialog.id,
+            response: .confirmed(true)
+        )
+
+        #expect(interruptedScreen.extensionUI?.pendingDialogs == [pendingDialog])
+        #expect(interruptedScreen.providerEvents.contains(where: {
+            $0.type == "extension_ui_request" && $0.rawPayload.contains("Deploy to production?")
+        }))
+        #expect(resumedSession.id == session.id)
+        #expect(resumedScreen.extensionUI?.pendingDialogs == [pendingDialog])
+        #expect(resumedScreen.providerEvents.contains(where: {
+            $0.type == "extension_ui_request" && $0.rawPayload.contains("Deploy to production?")
+        }))
+        #expect(approvedScreen.extensionUI == nil || approvedScreen.extensionUI?.pendingDialogs.isEmpty == true)
+        #expect(approvedScreen.activityItems.suffix(1).map(\.text) == ["Pi: Deployment approved"])
+        #expect(approvedScreen.transcript == "> deploy\nDeployment approved")
+    }
+
     @Test func remotePiBridgeLossLeavesInterruptedInspectableSessionUntilExplicitResume() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)

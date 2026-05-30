@@ -1260,11 +1260,11 @@ struct NexusServicePiSessionStreamTests {
         #expect(restartedNamedSession.failureMessage == expectedMessage)
         #expect(interruptedDefaultScreen.session.state == .interrupted)
         #expect(interruptedDefaultScreen.transcript == expectedMessage)
-        #expect(interruptedDefaultScreen.activityItems.map(\.kind) == [.error])
-        #expect(interruptedDefaultScreen.activityItems.map(\.text) == [expectedMessage])
+        #expect(interruptedDefaultScreen.activityItems.map(\.kind) == [.status, .error])
+        #expect(interruptedDefaultScreen.activityItems.map(\.text) == ["Pi shared Session stream connected", expectedMessage])
         #expect(interruptedNamedScreen.session.state == .interrupted)
-        #expect(interruptedNamedScreen.activityItems.map(\.kind) == [.error])
-        #expect(interruptedNamedScreen.activityItems.map(\.text) == [expectedMessage])
+        #expect(interruptedNamedScreen.activityItems.map(\.kind) == [.status, .error])
+        #expect(interruptedNamedScreen.activityItems.map(\.text) == ["Pi shared Session stream connected", expectedMessage])
     }
 
     @Test func localPiNamedSessionCanBeStoppedRelaunchedAndDeletedWhilePreservingConversationLinkage() throws {

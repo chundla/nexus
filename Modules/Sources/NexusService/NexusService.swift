@@ -745,6 +745,7 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
             executable: launchConfiguration.executable,
             workingDirectory: launchConfiguration.workingDirectory,
             sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.piSessionLinkage,
+            restoredMetadata: launchConfiguration.sessionRecordAdapterMetadata,
             terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
             transportFactory: piTransportFactory
         )
@@ -777,6 +778,7 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
             executable: "/usr/bin/ssh",
             workingDirectory: launchConfiguration.workingDirectory,
             sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.piSessionLinkage,
+            restoredMetadata: launchConfiguration.sessionRecordAdapterMetadata,
             terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
             unexpectedTerminationState: .interrupted,
             unexpectedTerminationMessageBuilder: { _ in
@@ -2988,7 +2990,10 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                     transcript: transcript,
                     primarySurface: primarySurface,
                     persistedActivityItems: persistedActivityItems
-                )
+                ),
+                approvalRequests: try persistedApprovalRequests(for: session),
+                extensionUI: try persistedExtensionUIState(for: session),
+                providerEvents: try persistedProviderEvents(for: session)
             )
         )
     }
@@ -3011,7 +3016,20 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     private func persistedStructuredActivityItems(for session: Session) throws -> [SessionActivityItem]? {
-        try sessionRecordStore.sessionRecordAdapterMetadata(sessionID: session.id)?.ibmBobPersistedActivityItems
+        let metadata = try sessionRecordStore.sessionRecordAdapterMetadata(sessionID: session.id)
+        return metadata?.piPersistedActivityItems ?? metadata?.ibmBobPersistedActivityItems
+    }
+
+    private func persistedApprovalRequests(for session: Session) throws -> [SessionApprovalRequest] {
+        try sessionRecordStore.sessionRecordAdapterMetadata(sessionID: session.id)?.piPersistedApprovalRequests ?? []
+    }
+
+    private func persistedExtensionUIState(for session: Session) throws -> SessionExtensionUIState? {
+        try sessionRecordStore.sessionRecordAdapterMetadata(sessionID: session.id)?.piPersistedExtensionUIState
+    }
+
+    private func persistedProviderEvents(for session: Session) throws -> [SessionProviderEvent] {
+        try sessionRecordStore.sessionRecordAdapterMetadata(sessionID: session.id)?.piPersistedProviderEvents ?? []
     }
 
     private func staticSessionTranscript(
@@ -3049,7 +3067,16 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         }
 
         if let persistedActivityItems, persistedActivityItems.isEmpty == false {
-            return persistedActivityItems
+            switch session.state {
+            case .failed, .interrupted:
+                let errorItem = SessionActivityItem(kind: .error, text: transcript)
+                if persistedActivityItems.last == errorItem {
+                    return persistedActivityItems
+                }
+                return persistedActivityItems + [errorItem]
+            case .ready, .exited:
+                return persistedActivityItems
+            }
         }
 
         guard transcript.isEmpty == false else {
@@ -3197,6 +3224,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             approvalRequests: screen.approvalRequests,
             extensionUI: screen.extensionUI,
             slashCommands: screen.slashCommands,
+            providerEvents: screen.providerEvents,
             isAgentTurnInProgress: screen.isAgentTurnInProgress,
             visibleLines: renderState.visibleLines,
             styledVisibleLines: renderState.styledVisibleLines,

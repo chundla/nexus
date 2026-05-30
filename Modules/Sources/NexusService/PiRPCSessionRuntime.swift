@@ -55,7 +55,13 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     var sessionRecordAdapterMetadata: SessionRecordAdapterMetadata? {
         lock.lock()
         defer { lock.unlock() }
-        return sessionLinkage?.sessionRecordAdapterMetadata
+        return SessionRecordAdapterMetadata.pi(
+            linkage: sessionLinkage,
+            activityItems: activityItems,
+            approvalRequests: approvalRequests,
+            extensionUIState: extensionUIStateLocked(),
+            providerEvents: providerEvents
+        )
     }
 
     func consumeSessionTransition() -> SessionRuntimeSessionTransition? {
@@ -136,6 +142,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         executable: String,
         workingDirectory: String,
         sessionLinkage: PiSessionLinkage? = nil,
+        restoredMetadata: SessionRecordAdapterMetadata? = nil,
         terminationStatusMessageBuilder: @escaping (Int32) -> String,
         unexpectedTerminationState: Session.State = .exited,
         unexpectedTerminationMessageBuilder: ((Int32) -> String)? = nil,
@@ -152,6 +159,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             executable: executable,
             workingDirectory: workingDirectory,
             sessionLinkage: sessionLinkage,
+            restoredMetadata: restoredMetadata,
             terminationStatusMessageBuilder: terminationStatusMessageBuilder,
             unexpectedTerminationState: unexpectedTerminationState,
             unexpectedTerminationMessageBuilder: unexpectedTerminationMessageBuilder,
@@ -166,6 +174,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         executable: String,
         workingDirectory: String,
         sessionLinkage: PiSessionLinkage? = nil,
+        restoredMetadata: SessionRecordAdapterMetadata? = nil,
         terminationStatusMessageBuilder: @escaping (Int32) -> String,
         unexpectedTerminationState: Session.State = .exited,
         unexpectedTerminationMessageBuilder: ((Int32) -> String)? = nil,
@@ -182,6 +191,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             executable: executable,
             workingDirectory: workingDirectory,
             sessionLinkage: sessionLinkage,
+            restoredMetadata: restoredMetadata,
             terminationStatusMessageBuilder: terminationStatusMessageBuilder,
             unexpectedTerminationState: unexpectedTerminationState,
             unexpectedTerminationMessageBuilder: unexpectedTerminationMessageBuilder,
@@ -196,6 +206,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         executable: String,
         workingDirectory: String,
         sessionLinkage: PiSessionLinkage?,
+        restoredMetadata: SessionRecordAdapterMetadata?,
         terminationStatusMessageBuilder: @escaping (Int32) -> String,
         unexpectedTerminationState: Session.State,
         unexpectedTerminationMessageBuilder: ((Int32) -> String)?,
@@ -207,8 +218,29 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         self.terminationStatusMessageBuilder = terminationStatusMessageBuilder
         self.unexpectedTerminationState = unexpectedTerminationState
         self.unexpectedTerminationMessageBuilder = unexpectedTerminationMessageBuilder ?? terminationStatusMessageBuilder
-        self.sessionLinkage = sessionLinkage
-        self.transport = try transportFactory(executable, Self.transportArguments(sessionLinkage: sessionLinkage), workingDirectory)
+        self.sessionLinkage = sessionLinkage ?? restoredMetadata?.piSessionLinkage
+        self.transport = try transportFactory(executable, Self.transportArguments(sessionLinkage: self.sessionLinkage), workingDirectory)
+        restorePersistedState(from: restoredMetadata)
+    }
+
+    private func restorePersistedState(from metadata: SessionRecordAdapterMetadata?) {
+        guard let metadata, metadata.providerID == .pi else {
+            return
+        }
+
+        activityItems = metadata.piPersistedActivityItems ?? []
+        transcriptEntries = Self.transcriptEntries(from: activityItems)
+        approvalRequests = metadata.piPersistedApprovalRequests ?? []
+        if let extensionUIState = metadata.piPersistedExtensionUIState {
+            extensionTitle = extensionUIState.title
+            pendingExtensionDialogs = extensionUIState.pendingDialogs
+            extensionNotifications = extensionUIState.notifications
+            extensionStatuses = extensionUIState.statuses
+            extensionWidgets = extensionUIState.widgets
+            extensionEditorText = extensionUIState.editorText
+        }
+        providerEvents = metadata.piPersistedProviderEvents ?? []
+        nextProviderEventSequence = (providerEvents.last?.sequence ?? -1) + 1
     }
 
     private func completeStartup() async throws {
@@ -1153,8 +1185,11 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
                 lock.lock()
                 updateSessionLinkageLocked(from: response)
                 updateCurrentStateLocked(from: response)
-                appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"))
-                if let currentModelStatus = currentModelStatusTextLocked() {
+                if activityItems.isEmpty {
+                    appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"))
+                }
+                if let currentModelStatus = currentModelStatusTextLocked(),
+                   activityItems.contains(where: { $0.kind == .status && $0.text == currentModelStatus }) == false {
                     appendActivityItemLocked(SessionActivityItem(kind: .status, text: currentModelStatus))
                 }
                 lock.unlock()
@@ -1847,6 +1882,18 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             lines.append("> \(draft)")
         }
         return lines.joined(separator: "\n")
+    }
+
+    private static func transcriptEntries(from activityItems: [SessionActivityItem]) -> [String] {
+        activityItems.compactMap { item in
+            guard item.kind == .message else {
+                return nil
+            }
+            if item.text.hasPrefix("You: ") {
+                return "> \(item.text.dropFirst(5))"
+            }
+            return item.text.hasPrefix("Pi: ") ? String(item.text.dropFirst(4)) : item.text
+        }
     }
 
     private func handleGetStateResponse(_ response: [String: Any], requestID: String?) {
