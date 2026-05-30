@@ -4,6 +4,8 @@
 
 Issues are tracked in GitHub Issues for this repo. See `docs/agents/issue-tracker.md`.
 
+- When creating or editing GitHub issue bodies from shell heredocs, use a single-quoted heredoc delimiter (for example `<<'EOF'`) so backticks and other Markdown syntax are not evaluated by the shell.
+
 ### Triage labels
 
 Use the default triage label vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
