@@ -95,6 +95,24 @@ public struct StructuredSessionApprovalRequestPresentation: Equatable {
     }
 }
 
+public enum StructuredSessionConversationRole: Equatable {
+    case user
+    case assistant(label: String)
+    case command
+    case error
+    case system
+}
+
+public struct StructuredSessionConversationPresentation: Equatable {
+    public let role: StructuredSessionConversationRole
+    public let text: String
+
+    public init(role: StructuredSessionConversationRole, text: String) {
+        self.role = role
+        self.text = text
+    }
+}
+
 public struct StructuredSessionSlashCommand: Identifiable, Equatable {
     public let matchText: String
     public let displayText: String
@@ -233,6 +251,32 @@ public func structuredSessionApprovalRequestPresentation(
         actionsAreEnabled: hasWriterAuthority,
         disabledReason: hasWriterAuthority ? nil : "Take Controller to respond to Approval Requests from this iPhone."
     )
+}
+
+public func structuredSessionConversationPresentation(
+    for row: StructuredSessionActivityRow,
+    screen: SessionScreen
+) -> StructuredSessionConversationPresentation {
+    if row.title == "Message", let split = structuredSessionConversationPrefixSplit(for: row.text) {
+        if split.label.caseInsensitiveCompare("you") == .orderedSame {
+            return StructuredSessionConversationPresentation(role: .user, text: split.body)
+        }
+        return StructuredSessionConversationPresentation(role: .assistant(label: split.label), text: split.body)
+    }
+
+    let role: StructuredSessionConversationRole
+    switch row.title {
+    case "Command", "Diff":
+        role = .command
+    case "Error":
+        role = .error
+    case "Message":
+        role = .assistant(label: screen.session.providerID.displayName)
+    default:
+        role = .system
+    }
+
+    return StructuredSessionConversationPresentation(role: role, text: row.text)
 }
 
 public func structuredSessionSlashCommandMenuPresentation(
@@ -384,6 +428,19 @@ private func structuredSessionSlashCommandSummaryFallback(for command: SessionSl
     case .skill:
         return "Skill command"
     }
+}
+
+private func structuredSessionConversationPrefixSplit(for text: String) -> (label: String, body: String)? {
+    guard let separatorRange = text.range(of: ": ") else {
+        return nil
+    }
+
+    let label = String(text[..<separatorRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+    let body = String(text[separatorRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+    guard label.isEmpty == false, body.isEmpty == false, label.count <= 24 else {
+        return nil
+    }
+    return (label, body)
 }
 
 private struct StructuredSessionSlashCommandContext {

@@ -123,6 +123,54 @@ struct StructuredSessionPresentationTests {
         ))
     }
 
+    @Test func structuredSessionConversationPresentationClassifiesSharedMessageRowsAndFallsBackToProviderLabel() {
+        let screen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .codex,
+                isDefault: true,
+                state: .ready
+            ),
+            primarySurface: .structuredActivityFeed,
+            transcript: ""
+        )
+        let userRow = StructuredSessionActivityRow(
+            id: UUID(),
+            title: "Message",
+            systemImage: "message",
+            text: "You: Ship it",
+            emphasis: .accent
+        )
+        let assistantRow = StructuredSessionActivityRow(
+            id: UUID(),
+            title: "Message",
+            systemImage: "message",
+            text: "Planner: Check git status",
+            emphasis: .accent
+        )
+        let fallbackRow = StructuredSessionActivityRow(
+            id: UUID(),
+            title: "Message",
+            systemImage: "message",
+            text: "Still working",
+            emphasis: .accent
+        )
+
+        #expect(structuredSessionConversationPresentation(for: userRow, screen: screen) == StructuredSessionConversationPresentation(
+            role: .user,
+            text: "Ship it"
+        ))
+        #expect(structuredSessionConversationPresentation(for: assistantRow, screen: screen) == StructuredSessionConversationPresentation(
+            role: .assistant(label: "Planner"),
+            text: "Check git status"
+        ))
+        #expect(structuredSessionConversationPresentation(for: fallbackRow, screen: screen) == StructuredSessionConversationPresentation(
+            role: .assistant(label: "Codex"),
+            text: "Still working"
+        ))
+    }
+
     @Test func structuredSessionFeedPresentationShowsThinkingIndicatorWhileAgentTurnIsInProgress() {
         let session = Session(
             id: UUID(),

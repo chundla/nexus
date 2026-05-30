@@ -39,6 +39,14 @@ struct StructuredSessionFeedPresentation: Equatable {
     let thinkingIndicator: StructuredSessionThinkingIndicator?
 }
 
+struct StructuredSessionPresentation: Equatable {
+    let feed: StructuredSessionFeedPresentation
+    let composer: StructuredSessionComposerPresentation
+    let sendAffordance: StructuredSessionComposerSendAffordance
+    let approvalRequest: StructuredSessionApprovalRequestPresentation
+    let slashCommandMenu: StructuredSessionSlashCommandMenuPresentation
+}
+
 struct StructuredSessionComposerPresentation: Equatable {
     let placeholder: String
     let isEnabled: Bool
@@ -53,6 +61,19 @@ struct StructuredSessionComposerSendAffordance: Equatable {
 struct StructuredSessionApprovalRequestPresentation: Equatable {
     let actionsAreEnabled: Bool
     let disabledReason: String?
+}
+
+enum StructuredSessionConversationRole: Equatable {
+    case user
+    case assistant(label: String)
+    case command
+    case error
+    case system
+}
+
+struct StructuredSessionConversationPresentation: Equatable {
+    let role: StructuredSessionConversationRole
+    let text: String
 }
 
 struct StructuredSessionSlashCommand: Identifiable, Equatable {
@@ -86,6 +107,22 @@ func structuredSessionActivityRows(for screen: SessionScreen) -> [StructuredSess
 
 func structuredSessionFeedPresentation(for screen: SessionScreen) -> StructuredSessionFeedPresentation {
     mapStructuredSessionFeedPresentation(NexusSessionPresentation.structuredSessionFeedPresentation(for: screen))
+}
+
+func structuredSessionPresentation(
+    for screen: SessionScreen,
+    isController: Bool,
+    draft: String,
+    isPerformingAction: Bool
+) -> StructuredSessionPresentation {
+    mapStructuredSessionPresentation(
+        NexusSessionPresentation.StructuredSessionPresentation(
+            screen: screen,
+            hasWriterAuthority: isController,
+            draft: draft,
+            isPerformingAction: isPerformingAction
+        )
+    )
 }
 
 func structuredSessionPresentationCopy(for screen: SessionScreen) -> StructuredSessionPresentationCopy {
@@ -132,6 +169,24 @@ func structuredSessionComposerSendAffordance(
 func structuredSessionApprovalRequestPresentation(isController: Bool) -> StructuredSessionApprovalRequestPresentation {
     mapStructuredSessionApprovalRequestPresentation(
         NexusSessionPresentation.structuredSessionApprovalRequestPresentation(hasWriterAuthority: isController)
+    )
+}
+
+func structuredSessionConversationPresentation(
+    for row: StructuredSessionActivityRow,
+    screen: SessionScreen
+) -> StructuredSessionConversationPresentation {
+    mapStructuredSessionConversationPresentation(
+        NexusSessionPresentation.structuredSessionConversationPresentation(
+            for: NexusSessionPresentation.StructuredSessionActivityRow(
+                id: row.id,
+                title: row.title,
+                systemImage: row.systemImage,
+                text: row.text,
+                emphasis: mapStructuredSessionActivityEmphasis(row.emphasis)
+            ),
+            screen: screen
+        )
     )
 }
 
@@ -183,6 +238,33 @@ private func mapStructuredSessionActivityEmphasis(
     case .success:
         .success
     }
+}
+
+private func mapStructuredSessionActivityEmphasis(
+    _ emphasis: StructuredSessionActivityEmphasis
+) -> NexusSessionPresentation.StructuredSessionActivityEmphasis {
+    switch emphasis {
+    case .neutral:
+        .neutral
+    case .accent:
+        .accent
+    case .critical:
+        .critical
+    case .success:
+        .success
+    }
+}
+
+private func mapStructuredSessionPresentation(
+    _ presentation: NexusSessionPresentation.StructuredSessionPresentation
+) -> StructuredSessionPresentation {
+    StructuredSessionPresentation(
+        feed: mapStructuredSessionFeedPresentation(presentation.feed),
+        composer: mapStructuredSessionComposerPresentation(presentation.composer),
+        sendAffordance: mapStructuredSessionComposerSendAffordance(presentation.sendAffordance),
+        approvalRequest: mapStructuredSessionApprovalRequestPresentation(presentation.approvalRequest),
+        slashCommandMenu: mapStructuredSessionSlashCommandMenuPresentation(presentation.slashCommandMenu)
+    )
 }
 
 private func mapStructuredSessionPresentationCopy(
@@ -238,6 +320,32 @@ private func mapStructuredSessionApprovalRequestPresentation(
         actionsAreEnabled: presentation.actionsAreEnabled,
         disabledReason: presentation.disabledReason
     )
+}
+
+private func mapStructuredSessionConversationPresentation(
+    _ presentation: NexusSessionPresentation.StructuredSessionConversationPresentation
+) -> StructuredSessionConversationPresentation {
+    StructuredSessionConversationPresentation(
+        role: mapStructuredSessionConversationRole(presentation.role),
+        text: presentation.text
+    )
+}
+
+private func mapStructuredSessionConversationRole(
+    _ role: NexusSessionPresentation.StructuredSessionConversationRole
+) -> StructuredSessionConversationRole {
+    switch role {
+    case .user:
+        .user
+    case .assistant(let label):
+        .assistant(label: label)
+    case .command:
+        .command
+    case .error:
+        .error
+    case .system:
+        .system
+    }
 }
 
 private func mapStructuredSessionSlashCommand(

@@ -1513,13 +1513,18 @@ struct ContentView: View {
 
     @ViewBuilder
     private func structuredSessionFeed(screen: SessionScreen, isReady: Bool) -> some View {
-        let presentation = structuredSessionFeedPresentation(for: screen)
+        let presentation = structuredSessionPresentation(
+            for: screen,
+            isController: true,
+            draft: structuredSessionPrompt,
+            isPerformingAction: screen.isAgentTurnInProgress
+        )
 
         VStack(spacing: 0) {
-            if presentation.pendingApprovalRequests.isEmpty == false {
+            if presentation.feed.pendingApprovalRequests.isEmpty == false {
                 VStack(alignment: .leading, spacing: 8) {
-                    ForEach(presentation.pendingApprovalRequests) { request in
-                        structuredSessionApprovalRequestView(request)
+                    ForEach(presentation.feed.pendingApprovalRequests) { request in
+                        structuredSessionApprovalRequestView(request, presentation: presentation.approvalRequest)
                     }
                 }
                 .padding(.horizontal, 14)
@@ -1528,21 +1533,21 @@ struct ContentView: View {
 
             ScrollViewReader { proxy in
                 ScrollView {
-                    if presentation.activityRows.isEmpty {
+                    if presentation.feed.activityRows.isEmpty {
                         ContentUnavailableView(
-                            presentation.copy.emptyStateTitle,
+                            presentation.feed.copy.emptyStateTitle,
                             systemImage: "message",
-                            description: Text(presentation.copy.emptyStateDescription)
+                            description: Text(presentation.feed.copy.emptyStateDescription)
                         )
                         .frame(maxWidth: .infinity, minHeight: 220)
                     } else {
                         LazyVStack(spacing: 8) {
-                            ForEach(presentation.activityRows) { row in
-                                structuredSessionActivityRowView(row, providerName: screen.session.providerID.displayName)
+                            ForEach(presentation.feed.activityRows) { row in
+                                structuredSessionActivityRowView(row, screen: screen)
                                     .id(row.id)
                             }
 
-                            if let thinkingIndicator = presentation.thinkingIndicator {
+                            if let thinkingIndicator = presentation.feed.thinkingIndicator {
                                 structuredSessionThinkingIndicatorView(thinkingIndicator)
                             }
 
@@ -1560,12 +1565,12 @@ struct ContentView: View {
                         proxy.scrollTo("conversation-bottom", anchor: .bottom)
                     }
                 }
-                .onChange(of: presentation.activityRows.count) { _, _ in
+                .onChange(of: presentation.feed.activityRows.count) { _, _ in
                     withAnimation(.easeOut(duration: 0.18)) {
                         proxy.scrollTo("conversation-bottom", anchor: .bottom)
                     }
                 }
-                .onChange(of: presentation.pendingApprovalRequests.count) { _, _ in
+                .onChange(of: presentation.feed.pendingApprovalRequests.count) { _, _ in
                     withAnimation(.easeOut(duration: 0.18)) {
                         proxy.scrollTo("conversation-bottom", anchor: .bottom)
                     }
@@ -1573,24 +1578,19 @@ struct ContentView: View {
             }
 
             if isReady {
-                let slashCommands = structuredSessionSlashCommandMenuPresentation(
-                    for: structuredSessionPrompt,
-                    screen: screen
-                )
-
                 VStack(alignment: .leading, spacing: 8) {
-                    if slashCommands.isVisible {
-                        macStructuredSessionSlashCommandMenu(slashCommands.commands)
+                    if presentation.slashCommandMenu.isVisible {
+                        macStructuredSessionSlashCommandMenu(presentation.slashCommandMenu.commands)
                     }
 
                     HStack(spacing: 8) {
-                        TextField(presentation.copy.composerPlaceholder, text: $structuredSessionPrompt, axis: .vertical)
+                        TextField(presentation.composer.placeholder, text: $structuredSessionPrompt, axis: .vertical)
                             .focused($isStructuredSessionPromptFocused)
                             .font(NexusMacTheme.bodyFont(13))
                             .textFieldStyle(.plain)
                             .lineLimit(1 ... 4)
                             .submitLabel(.send)
-                            .disabled(screen.isAgentTurnInProgress)
+                            .disabled(presentation.composer.isEnabled == false || screen.isAgentTurnInProgress)
                             .onSubmit {
                                 sendStructuredSessionPrompt()
                             }
@@ -1661,17 +1661,16 @@ struct ContentView: View {
         }
     }
 
-    private func structuredSessionActivityRowView(_ row: StructuredSessionActivityRow, providerName: String) -> some View {
+    private func structuredSessionActivityRowView(_ row: StructuredSessionActivityRow, screen: SessionScreen) -> some View {
         let accent = structuredSessionActivityColor(for: row.emphasis)
-        let role = structuredConversationRole(for: row, providerName: providerName)
-        let messageText = structuredConversationText(for: row)
+        let conversation = structuredSessionConversationPresentation(for: row, screen: screen)
 
-        switch role {
+        switch conversation.role {
         case .user:
             return AnyView(
                 HStack {
                     Spacer(minLength: 120)
-                    Text(messageText)
+                    Text(conversation.text)
                         .font(NexusMacTheme.bodyFont(13))
                         .foregroundStyle(.white)
                         .textSelection(.enabled)
@@ -1689,7 +1688,7 @@ struct ContentView: View {
                         Text(label)
                             .font(NexusMacTheme.bodyFont(10, relativeTo: .caption).weight(.medium))
                             .foregroundStyle(NexusMacTheme.mutedText)
-                        Text(messageText)
+                        Text(conversation.text)
                             .font(NexusMacTheme.bodyFont(13))
                             .foregroundStyle(.white.opacity(0.94))
                             .textSelection(.enabled)
@@ -1713,7 +1712,7 @@ struct ContentView: View {
                         Label(row.title, systemImage: row.systemImage)
                             .font(NexusMacTheme.monoFont(10, relativeTo: .caption))
                             .foregroundStyle(accent)
-                        Text(messageText)
+                        Text(conversation.text)
                             .font(NexusMacTheme.monoFont(11, relativeTo: .callout))
                             .foregroundStyle(.white.opacity(0.92))
                             .textSelection(.enabled)
@@ -1736,7 +1735,7 @@ struct ContentView: View {
                         Label("Error", systemImage: row.systemImage)
                             .font(NexusMacTheme.bodyFont(11, relativeTo: .caption).weight(.semibold))
                             .foregroundStyle(accent)
-                        Text(messageText)
+                        Text(conversation.text)
                             .font(NexusMacTheme.bodyFont(13))
                             .foregroundStyle(.white.opacity(0.94))
                             .textSelection(.enabled)
@@ -1756,7 +1755,7 @@ struct ContentView: View {
             return AnyView(
                 HStack {
                     Spacer()
-                    Label(messageText, systemImage: row.systemImage)
+                    Label(conversation.text, systemImage: row.systemImage)
                         .font(NexusMacTheme.bodyFont(11, relativeTo: .caption))
                         .foregroundStyle(NexusMacTheme.mutedText)
                         .padding(.horizontal, 10)
@@ -1786,7 +1785,10 @@ struct ContentView: View {
         }
     }
 
-    private func structuredSessionApprovalRequestView(_ request: SessionApprovalRequest) -> some View {
+    private func structuredSessionApprovalRequestView(
+        _ request: SessionApprovalRequest,
+        presentation: StructuredSessionApprovalRequestPresentation
+    ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Approval Request", systemImage: "hand.raised.fill")
                 .font(NexusMacTheme.bodyFont(12, relativeTo: .headline).weight(.semibold))
@@ -1813,6 +1815,13 @@ struct ContentView: View {
                 }
                 .buttonStyle(NexusAccentButtonStyle())
             }
+            .disabled(presentation.actionsAreEnabled == false)
+
+            if presentation.actionsAreEnabled == false, let disabledReason = presentation.disabledReason {
+                Text(disabledReason)
+                    .font(NexusMacTheme.bodyFont(11, relativeTo: .caption))
+                    .foregroundStyle(NexusMacTheme.mutedText)
+            }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1830,46 +1839,6 @@ struct ContentView: View {
         case .success:
             NexusMacTheme.teal
         }
-    }
-
-    private func structuredConversationRole(for row: StructuredSessionActivityRow, providerName: String) -> StructuredConversationRole {
-        if row.title == "Message", let split = structuredConversationPrefixSplit(for: row.text) {
-            if split.label.caseInsensitiveCompare("you") == .orderedSame {
-                return .user
-            }
-            return .assistant(label: split.label)
-        }
-
-        switch row.title {
-        case "Command", "Diff":
-            return .command
-        case "Error":
-            return .error
-        case "Message":
-            return .assistant(label: providerName)
-        default:
-            return .system
-        }
-    }
-
-    private func structuredConversationText(for row: StructuredSessionActivityRow) -> String {
-        if row.title == "Message", let split = structuredConversationPrefixSplit(for: row.text) {
-            return split.body
-        }
-        return row.text
-    }
-
-    private func structuredConversationPrefixSplit(for text: String) -> (label: String, body: String)? {
-        guard let separatorRange = text.range(of: ": ") else {
-            return nil
-        }
-
-        let label = String(text[..<separatorRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
-        let body = String(text[separatorRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard label.isEmpty == false, body.isEmpty == false, label.count <= 24 else {
-            return nil
-        }
-        return (label, body)
     }
 
     private func sendStructuredSessionPrompt() {
@@ -2322,14 +2291,6 @@ private enum SidebarMode: String, CaseIterable, Identifiable {
             "Groups"
         }
     }
-}
-
-private enum StructuredConversationRole {
-    case user
-    case assistant(label: String)
-    case command
-    case error
-    case system
 }
 
 private enum SidebarSelection: Hashable {
