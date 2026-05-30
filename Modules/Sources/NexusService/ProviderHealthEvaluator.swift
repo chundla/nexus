@@ -73,6 +73,40 @@ enum RemoteCLIHealthProbeResult: Sendable, Equatable {
     )
 }
 
+enum LocalCodexHealthProbeResult: Sendable, Equatable {
+    case executableNotFound(ProviderExecutableResolution)
+    case readinessProbeFailed(
+        executable: String,
+        version: String?,
+        diagnostics: [ProviderHealthDiagnostic],
+        detail: String
+    )
+    case ready(
+        executable: String,
+        version: String?,
+        diagnostics: [ProviderHealthDiagnostic]
+    )
+}
+
+enum RemoteCodexHealthProbeResult: Sendable, Equatable {
+    case sshResolutionLaunchFailed(String)
+    case resolutionProbeFailed(String)
+    case resolutionReturnedNoExecutable
+    case readinessProbeFailed(executable: String, version: String?, detail: String)
+    case authenticationRequired(executable: String, version: String?, message: String)
+    case authenticationUncertain(
+        executable: String,
+        version: String?,
+        diagnostics: [ProviderHealthDiagnostic],
+        message: String?
+    )
+    case ready(
+        executable: String,
+        version: String?,
+        diagnostics: [ProviderHealthDiagnostic]
+    )
+}
+
 enum LocalIBMBobPassiveProbeResult: Sendable, Equatable {
     case executableNotFound(ProviderExecutableResolution)
     case passiveProbeLaunchFailed(
@@ -108,6 +142,11 @@ enum RemoteIBMBobPassiveProbeResult: Sendable, Equatable {
 protocol CLIProviderHealthFactProviding: Sendable {
     func localCLIHealthProbe(commandName: String, providerName: String, workspace: Workspace) async -> LocalCLIHealthProbeResult
     func remoteCLIHealthProbe(commandName: String, providerName: String, workspace: Workspace, host: NexusDomain.Host) async -> RemoteCLIHealthProbeResult
+}
+
+protocol CodexProviderHealthFactProviding: Sendable {
+    func localCodexHealthProbe(workspace: Workspace) async -> LocalCodexHealthProbeResult
+    func remoteCodexHealthProbe(workspace: Workspace, host: NexusDomain.Host) async -> RemoteCodexHealthProbeResult
 }
 
 protocol IBMBobProviderHealthFactProviding: Sendable {
@@ -147,7 +186,7 @@ extension ProviderHealthEvaluating {
     }
 }
 
-struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactProviding, IBMBobProviderHealthFactProviding, @unchecked Sendable {
+struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactProviding, CodexProviderHealthFactProviding, IBMBobProviderHealthFactProviding, @unchecked Sendable {
     let executableResolver: any ProviderExecutableResolving
     let commandRunner: any ProviderCommandRunning
     let localShellCommandBuilder: LocalShellCommandBuilder
@@ -198,10 +237,11 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactP
                 providerHealthEvaluator: self
             )
         case .codex:
-            if workspace.kind == .remote {
-                return await remoteHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
-            }
-            return await localCodexHealthSummary(workspace: workspace)
+            return await CodexProviderModule().providerHealthSummary(
+                for: workspace,
+                remoteContext: remoteContext,
+                providerHealthEvaluator: self
+            )
         case .pi:
             if workspace.kind == .remote {
                 return await remoteHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
@@ -245,7 +285,11 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactP
         case .claude:
             return await remoteCLIHealthSummary(commandName: "claude", providerName: "Claude", workspace: workspace, host: remoteContext.host)
         case .codex:
-            return await remoteCodexHealthSummary(workspace: workspace, host: remoteContext.host)
+            return await CodexProviderModule().providerHealthSummary(
+                for: workspace,
+                remoteContext: remoteContext,
+                providerHealthEvaluator: self
+            )
         case .pi:
             return await remotePiHealthSummary(workspace: workspace, host: remoteContext.host)
         case .ibmBob:
@@ -417,7 +461,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactP
         }
     }
 
-    private func remoteCodexHealthSummary(workspace: Workspace, host: NexusDomain.Host) async -> ProviderHealthSummary {
+    func remoteCodexHealthProbe(workspace: Workspace, host: NexusDomain.Host) async -> RemoteCodexHealthProbeResult {
         let result: ProviderCommandResult
         do {
             result = try commandRunner.run(
@@ -426,39 +470,11 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactP
                 currentDirectoryURL: nil
             )
         } catch {
-            return ProviderHealthSummary(
-                state: .unavailable,
-                summary: "Remote Codex health check failed before the SSH probe completed",
-                launchability: .notLaunchable,
-                diagnostics: [
-                    ProviderHealthDiagnostic(
-                        severity: .error,
-                        code: "sshLaunchFailed",
-                        message: error.localizedDescription
-                    )
-                ]
-            )
+            return .sshResolutionLaunchFailed(error.localizedDescription)
         }
 
         guard result.exitStatus == 0 else {
-            let detail = firstDiagnosticLine(stdout: result.stdout, stderr: result.stderr)
-            let classification = classifyRemoteCLIProbeFailure(
-                detail: detail,
-                providerName: "Codex",
-                notFoundMarker: remoteExecutableNotFoundMarker(commandName: "codex")
-            )
-            return ProviderHealthSummary(
-                state: classification.state,
-                summary: classification.summary,
-                launchability: .notLaunchable,
-                diagnostics: [
-                    ProviderHealthDiagnostic(
-                        severity: .error,
-                        code: classification.code,
-                        message: classification.message ?? (detail.isEmpty ? classification.summary : detail)
-                    )
-                ]
-            )
+            return .resolutionProbeFailed(firstDiagnosticLine(stdout: result.stdout, stderr: result.stderr))
         }
 
         let outputLines = result.stdout
@@ -467,93 +483,36 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactP
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { $0.isEmpty == false }
         guard let executable = outputLines.first else {
-            return ProviderHealthSummary(
-                state: .misconfigured,
-                summary: "Codex executable resolution returned no executable path",
-                launchability: .notLaunchable,
-                diagnostics: [
-                    ProviderHealthDiagnostic(
-                        severity: .error,
-                        code: "remoteExecutableResolutionFailed",
-                        message: "The remote Codex executable resolution probe did not return an executable path."
-                    )
-                ]
-            )
+            return .resolutionReturnedNoExecutable
         }
         let version = outputLines.dropFirst().first
+        let diagnostics = [
+            ProviderHealthDiagnostic(
+                severity: .info,
+                code: "remoteProbe",
+                message: "Validated remote Codex launch prerequisites on \(host.name) for \(workspace.folderPath)."
+            )
+        ]
 
         do {
             switch try await remoteCodexReadinessProbe.probe(host: host, executable: executable, workingDirectory: workspace.folderPath) {
             case .ready:
-                return ProviderHealthSummary(
-                    state: .available,
-                    summary: version.map { "Codex \($0) is available" } ?? "Codex is available",
-                    resolvedExecutable: executable,
-                    version: version,
-                    launchability: .launchable,
-                    diagnostics: [
-                        ProviderHealthDiagnostic(
-                            severity: .info,
-                            code: "remoteProbe",
-                            message: "Validated remote Codex launch prerequisites on \(host.name) for \(workspace.folderPath)."
-                        )
-                    ]
-                )
+                return .ready(executable: executable, version: version, diagnostics: diagnostics)
             case let .authenticationRequired(message):
-                return ProviderHealthSummary(
-                    state: .unavailable,
-                    summary: "Codex requires authentication on the Remote Workspace",
-                    resolvedExecutable: executable,
-                    version: version,
-                    launchability: .notLaunchable,
-                    diagnostics: [
-                        ProviderHealthDiagnostic(
-                            severity: .error,
-                            code: "remoteAuthRequired",
-                            message: message
-                        )
-                    ]
-                )
+                return .authenticationRequired(executable: executable, version: version, message: message)
             case let .authenticationUncertain(message):
-                var diagnostics = [
-                    ProviderHealthDiagnostic(
-                        severity: .info,
-                        code: "remoteProbe",
-                        message: "Validated remote Codex launch prerequisites on \(host.name) for \(workspace.folderPath)."
-                    )
-                ]
-                if let message, message.isEmpty == false {
-                    diagnostics.append(
-                        ProviderHealthDiagnostic(
-                            severity: .warning,
-                            code: "remoteAuthUncertain",
-                            message: message
-                        )
-                    )
-                }
-                return ProviderHealthSummary(
-                    state: .available,
-                    summary: version.map { "Codex \($0) is available" } ?? "Codex is available",
-                    resolvedExecutable: executable,
+                return .authenticationUncertain(
+                    executable: executable,
                     version: version,
-                    launchability: .launchable,
-                    diagnostics: diagnostics
+                    diagnostics: diagnostics,
+                    message: message
                 )
             }
         } catch {
-            return ProviderHealthSummary(
-                state: .misconfigured,
-                summary: "Codex is installed but failed the remote protocol-native readiness probe",
-                resolvedExecutable: executable,
+            return .readinessProbeFailed(
+                executable: executable,
                 version: version,
-                launchability: .notLaunchable,
-                diagnostics: [
-                    ProviderHealthDiagnostic(
-                        severity: .error,
-                        code: "remoteLaunchProbeFailed",
-                        message: error.localizedDescription
-                    )
-                ]
+                detail: error.localizedDescription
             )
         }
     }
@@ -750,36 +709,10 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactP
         )
     }
 
-    private func localCodexHealthSummary(workspace: Workspace) async -> ProviderHealthSummary {
+    func localCodexHealthProbe(workspace: Workspace) async -> LocalCodexHealthProbeResult {
         let resolution = resolvedLocalExecutable(named: "codex")
         guard let executable = resolution.resolvedExecutable else {
-            return ProviderHealthSummary(
-                state: .unavailable,
-                summary: "Codex executable was not found",
-                launchability: .notLaunchable,
-                diagnostics: [
-                    ProviderHealthDiagnostic(
-                        severity: .error,
-                        code: "executableNotFound",
-                        message: "Codex executable was not found in the service search paths."
-                    ),
-                    ProviderHealthDiagnostic(
-                        severity: .info,
-                        code: "searchedDirectories",
-                        message: "Searched directories: \(resolution.searchedDirectories.joined(separator: ", "))"
-                    ),
-                    ProviderHealthDiagnostic(
-                        severity: .info,
-                        code: "homeDirectories",
-                        message: "Resolved home directories: \(resolution.homeDirectories.joined(separator: ", "))"
-                    ),
-                    ProviderHealthDiagnostic(
-                        severity: .info,
-                        code: "pathEnvironment",
-                        message: "PATH: \(resolution.pathEnvironment ?? "<unset>")"
-                    )
-                ]
-            )
+            return .executableNotFound(resolution)
         }
 
         var diagnostics: [ProviderHealthDiagnostic] = []
@@ -788,30 +721,15 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactP
         do {
             try await codexReadinessProbe.probe(executable: executable, workingDirectory: workspace.folderPath)
         } catch {
-            return ProviderHealthSummary(
-                state: .misconfigured,
-                summary: "Codex is installed but failed the protocol-native readiness probe",
-                resolvedExecutable: executable,
+            return .readinessProbeFailed(
+                executable: executable,
                 version: version,
-                launchability: .notLaunchable,
-                diagnostics: diagnostics + [
-                    ProviderHealthDiagnostic(
-                        severity: .error,
-                        code: "launchProbeFailed",
-                        message: error.localizedDescription
-                    )
-                ]
+                diagnostics: diagnostics,
+                detail: error.localizedDescription
             )
         }
 
-        return ProviderHealthSummary(
-            state: .available,
-            summary: version.map { "Codex \($0) is available" } ?? "Codex is available",
-            resolvedExecutable: executable,
-            version: version,
-            launchability: .launchable,
-            diagnostics: diagnostics
-        )
+        return .ready(executable: executable, version: version, diagnostics: diagnostics)
     }
 
     func localIBMBobPassiveProbe(workspace: Workspace) async -> LocalIBMBobPassiveProbeResult {

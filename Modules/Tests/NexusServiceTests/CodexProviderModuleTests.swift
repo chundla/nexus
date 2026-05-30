@@ -143,6 +143,219 @@ struct CodexProviderModuleTests {
         ])
     }
 
+    @Test func codexProviderModuleDerivesLocalCatalogReadFromSharedCodexProbeFacts() async throws {
+        let module = CodexProviderModule()
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Local Codex",
+            kind: .local,
+            folderPath: "/tmp/local-codex",
+            primaryGroupID: UUID()
+        )
+        let providerHealthEvaluator = RecordingCodexHealthFactProvider(
+            localProbeResult: .ready(
+                executable: "/tmp/fake-codex",
+                version: "1.2.3",
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .warning,
+                        code: "versionUnavailable",
+                        message: "Version came from the shared probe"
+                    )
+                ]
+            )
+        )
+
+        let catalogRead = try await module.readCatalog(
+            ProviderModuleCatalogReadRequest(
+                workspace: workspace,
+                remoteContext: nil,
+                defaultSession: nil
+            ),
+            actions: ProviderModuleCatalogReadActions(
+                providerHealthSummary: {
+                    await module.providerHealthSummary(
+                        for: workspace,
+                        remoteContext: nil,
+                        providerHealthEvaluator: providerHealthEvaluator
+                    )
+                }
+            )
+        )
+
+        #expect(catalogRead.health == ProviderHealthSummary(
+            state: .available,
+            summary: "Codex 1.2.3 is available",
+            resolvedExecutable: "/tmp/fake-codex",
+            version: "1.2.3",
+            launchability: .launchable,
+            diagnostics: [
+                ProviderHealthDiagnostic(
+                    severity: .warning,
+                    code: "versionUnavailable",
+                    message: "Version came from the shared probe"
+                )
+            ]
+        ))
+        #expect(providerHealthEvaluator.localProbeRequests == [workspace.id])
+        #expect(providerHealthEvaluator.legacyRequests.isEmpty)
+        #expect(catalogRead.capabilities.launchDefaultSession.isEnabled)
+        #expect(catalogRead.capabilities.createNamedSession.isEnabled)
+        #expect(catalogRead.prelaunchPrimarySurface == .structuredActivityFeed)
+    }
+
+    @Test func codexProviderModuleDerivesRemoteBlockedCatalogReadFromPrerequisiteFacts() async throws {
+        let module = CodexProviderModule()
+        let workspaceID = UUID()
+        let hostID = UUID()
+        let workspace = Workspace(
+            id: workspaceID,
+            name: "Remote Codex",
+            kind: .remote,
+            folderPath: "/srv/api",
+            primaryGroupID: UUID(),
+            remoteHostID: hostID
+        )
+        let providerHealthEvaluator = RecordingCodexHealthFactProvider(
+            localProbeResult: .ready(executable: "/tmp/unused", version: nil, diagnostics: [])
+        )
+        let remoteContext = RemoteWorkspaceHealthContext(
+            host: NexusDomain.Host(id: hostID, name: "Build Server", sshTarget: "build-box"),
+            hostValidation: HostValidationSnapshot(
+                hostID: hostID,
+                state: .unavailable,
+                summary: "SSH authentication failed",
+                checkedAt: Date()
+            ),
+            workspaceAvailability: WorkspaceAvailabilitySnapshot(
+                workspaceID: workspaceID,
+                state: .available,
+                summary: "Workspace is available",
+                checkedAt: Date()
+            )
+        )
+
+        let catalogRead = try await module.readCatalog(
+            ProviderModuleCatalogReadRequest(
+                workspace: workspace,
+                remoteContext: remoteContext,
+                defaultSession: nil
+            ),
+            actions: ProviderModuleCatalogReadActions(
+                providerHealthSummary: {
+                    await module.providerHealthSummary(
+                        for: workspace,
+                        remoteContext: remoteContext,
+                        providerHealthEvaluator: providerHealthEvaluator
+                    )
+                }
+            )
+        )
+
+        #expect(catalogRead.health == ProviderHealthSummary(
+            state: .blocked,
+            summary: "Provider Health is blocked by Host Validation",
+            diagnostics: [
+                ProviderHealthDiagnostic(
+                    severity: .warning,
+                    code: "hostValidationBlocked",
+                    message: "Provider Health for Codex is blocked by Host Validation: SSH authentication failed."
+                )
+            ]
+        ))
+        #expect(providerHealthEvaluator.remoteProbeRequests.isEmpty)
+        #expect(providerHealthEvaluator.legacyRequests.isEmpty)
+        #expect(catalogRead.capabilities.launchDefaultSession.isEnabled == false)
+        #expect(catalogRead.capabilities.launchDefaultSession.disabledReason == "Provider Health is blocked by Host Validation")
+        #expect(catalogRead.prelaunchPrimarySurface == .structuredActivityFeed)
+    }
+
+    @Test func codexProviderModuleDerivesRemoteProbeBackedCatalogReadFromSharedCodexProbeFacts() async throws {
+        let module = CodexProviderModule()
+        let workspaceID = UUID()
+        let hostID = UUID()
+        let workspace = Workspace(
+            id: workspaceID,
+            name: "Remote Codex",
+            kind: .remote,
+            folderPath: "/srv/api",
+            primaryGroupID: UUID(),
+            remoteHostID: hostID
+        )
+        let providerHealthEvaluator = RecordingCodexHealthFactProvider(
+            localProbeResult: .ready(executable: "/tmp/unused", version: nil, diagnostics: []),
+            remoteProbeResult: .authenticationUncertain(
+                executable: "/home/tester/.local/bin/codex",
+                version: "1.2.3",
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .info,
+                        code: "remoteProbe",
+                        message: "Validated remote Codex launch prerequisites on Build Server for /srv/api."
+                    )
+                ],
+                message: "Codex auth readiness could not be confirmed."
+            )
+        )
+        let remoteContext = RemoteWorkspaceHealthContext(
+            host: NexusDomain.Host(id: hostID, name: "Build Server", sshTarget: "build-box"),
+            hostValidation: HostValidationSnapshot(
+                hostID: hostID,
+                state: .available,
+                summary: "Host is available",
+                checkedAt: Date()
+            ),
+            workspaceAvailability: WorkspaceAvailabilitySnapshot(
+                workspaceID: workspaceID,
+                state: .available,
+                summary: "Workspace is available",
+                checkedAt: Date()
+            )
+        )
+
+        let catalogRead = try await module.readCatalog(
+            ProviderModuleCatalogReadRequest(
+                workspace: workspace,
+                remoteContext: remoteContext,
+                defaultSession: nil
+            ),
+            actions: ProviderModuleCatalogReadActions(
+                providerHealthSummary: {
+                    await module.providerHealthSummary(
+                        for: workspace,
+                        remoteContext: remoteContext,
+                        providerHealthEvaluator: providerHealthEvaluator
+                    )
+                }
+            )
+        )
+
+        #expect(catalogRead.health == ProviderHealthSummary(
+            state: .available,
+            summary: "Codex 1.2.3 is available",
+            resolvedExecutable: "/home/tester/.local/bin/codex",
+            version: "1.2.3",
+            launchability: .launchable,
+            diagnostics: [
+                ProviderHealthDiagnostic(
+                    severity: .info,
+                    code: "remoteProbe",
+                    message: "Validated remote Codex launch prerequisites on Build Server for /srv/api."
+                ),
+                ProviderHealthDiagnostic(
+                    severity: .warning,
+                    code: "remoteAuthUncertain",
+                    message: "Codex auth readiness could not be confirmed."
+                )
+            ]
+        ))
+        #expect(providerHealthEvaluator.remoteProbeRequests == [workspace.id])
+        #expect(providerHealthEvaluator.legacyRequests.isEmpty)
+        #expect(catalogRead.capabilities.launchDefaultSession.isEnabled)
+        #expect(catalogRead.capabilities.createNamedSession.isEnabled)
+        #expect(catalogRead.prelaunchPrimarySurface == .structuredActivityFeed)
+    }
+
     @Test func codexProviderModulePreservesCodexCatalogReadBehavior() async throws {
         let module = CodexProviderModule()
         let workspaceID = UUID()
@@ -437,6 +650,45 @@ private final class RecordingCodexProviderHealthEvaluator: @unchecked Sendable, 
     func healthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> ProviderHealthSummary {
         requests.append(.init(providerID: providerID, workspaceID: workspace.id))
         return summary
+    }
+}
+
+private final class RecordingCodexHealthFactProvider: @unchecked Sendable, ProviderHealthEvaluating, CodexProviderHealthFactProviding {
+    let localProbeResult: LocalCodexHealthProbeResult
+    let remoteProbeResult: RemoteCodexHealthProbeResult
+    private(set) var localProbeRequests: [UUID] = []
+    private(set) var remoteProbeRequests: [UUID] = []
+    private(set) var legacyRequests: [UUID] = []
+
+    init(
+        localProbeResult: LocalCodexHealthProbeResult,
+        remoteProbeResult: RemoteCodexHealthProbeResult = .sshResolutionLaunchFailed("unexpected")
+    ) {
+        self.localProbeResult = localProbeResult
+        self.remoteProbeResult = remoteProbeResult
+    }
+
+    func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> [WorkspaceProviderCard] {
+        []
+    }
+
+    func healthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> ProviderHealthSummary {
+        legacyRequests.append(workspace.id)
+        return ProviderHealthSummary(
+            state: .misconfigured,
+            summary: "legacy evaluator path should stay unused",
+            launchability: .notLaunchable
+        )
+    }
+
+    func localCodexHealthProbe(workspace: Workspace) async -> LocalCodexHealthProbeResult {
+        localProbeRequests.append(workspace.id)
+        return localProbeResult
+    }
+
+    func remoteCodexHealthProbe(workspace: Workspace, host: NexusDomain.Host) async -> RemoteCodexHealthProbeResult {
+        remoteProbeRequests.append(workspace.id)
+        return remoteProbeResult
     }
 }
 
