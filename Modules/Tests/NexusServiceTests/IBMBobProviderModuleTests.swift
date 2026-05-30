@@ -553,6 +553,41 @@ struct IBMBobProviderModuleTests {
             .relaunchPersisted(sessionID: session.id)
         ])
     }
+
+    @Test func ibmBobProviderModuleRoutesStoredContinuityCleanupThroughDeleteSessionRecordSeam() {
+        let module = IBMBobProviderModule()
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .ibmBob,
+            isDefault: true,
+            state: .ready
+        )
+        let workspace = Workspace(
+            id: session.workspaceID,
+            name: "Local IBM Bob",
+            kind: .local,
+            folderPath: "/tmp/local-ibm-bob",
+            primaryGroupID: UUID()
+        )
+        let tracker = StoredContinuityCleanupTracker()
+
+        module.prepareDeleteSessionRecord(
+            ProviderModuleDeleteSessionRecordRequest(
+                session: session,
+                workspace: workspace,
+                host: nil,
+                sessionRecordAdapterMetadata: .ibmBob(sessionID: "bob-session-123")
+            ),
+            actions: ProviderModuleDeleteSessionRecordActions(
+                deleteStoredContinuity: {
+                    tracker.invocationCount += 1
+                }
+            )
+        )
+
+        #expect(tracker.invocationCount == 1)
+    }
 }
 
 private enum IBMBobProviderModuleSessionTransitionRequestExpectation: Equatable {
@@ -574,6 +609,10 @@ private enum IBMBobProviderModuleSessionTransitionRequestExpectation: Equatable 
 
 private final class IBMBobProviderModuleSessionTransitionTracker: @unchecked Sendable {
     var requests: [IBMBobProviderModuleSessionTransitionRequestExpectation] = []
+}
+
+private final class StoredContinuityCleanupTracker: @unchecked Sendable {
+    var invocationCount = 0
 }
 
 private struct TrackingIBMBobSessionTransitionProviderModule: ProviderModule {

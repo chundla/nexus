@@ -149,6 +149,19 @@ struct IBMBobProviderModule: ProviderModule {
 
         return try await actions.makeLocalIBMBobRuntime()
     }
+
+    func prepareDeleteSessionRecord(
+        _ request: ProviderModuleDeleteSessionRecordRequest,
+        actions: ProviderModuleDeleteSessionRecordActions
+    ) {
+        let nativeSessionID = request.sessionRecordAdapterMetadata?.ibmBobSessionLinkage?.sessionID?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard nativeSessionID.isEmpty == false else {
+            return
+        }
+
+        actions.deleteStoredContinuity()
+    }
 }
 
 private extension IBMBobProviderModule {

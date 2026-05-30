@@ -1769,11 +1769,21 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         }
         let host = try workspace.remoteHostID.flatMap { try metadataStore.host(id: $0) }
         let sessionRecordAdapterMetadata = try sessionRecordStore.sessionRecordAdapterMetadata(sessionID: resolvedSession.id)
-        ibmBobNativeSessionCleaner.bestEffortDeleteStoredContinuity(
-            for: resolvedSession,
-            workspace: workspace,
-            host: host,
-            sessionRecordAdapterMetadata: sessionRecordAdapterMetadata
+        providerModuleRegistry.module(for: resolvedSession.providerID).prepareDeleteSessionRecord(
+            ProviderModuleDeleteSessionRecordRequest(
+                session: resolvedSession,
+                workspace: workspace,
+                host: host,
+                sessionRecordAdapterMetadata: sessionRecordAdapterMetadata
+            ),
+            actions: ProviderModuleDeleteSessionRecordActions { [ibmBobNativeSessionCleaner] in
+                ibmBobNativeSessionCleaner.bestEffortDeleteStoredContinuity(
+                    for: resolvedSession,
+                    workspace: workspace,
+                    host: host,
+                    sessionRecordAdapterMetadata: sessionRecordAdapterMetadata
+                )
+            }
         )
 
         sessionRuntimeManager.remove(session: resolvedSession)

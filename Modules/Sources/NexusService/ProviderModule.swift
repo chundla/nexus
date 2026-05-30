@@ -96,6 +96,17 @@ struct ProviderModuleRuntimeConstructionActions {
     let makeRemoteIBMBobRuntime: () async throws -> any SessionRuntime
 }
 
+struct ProviderModuleDeleteSessionRecordRequest {
+    let session: Session
+    let workspace: Workspace
+    let host: NexusDomain.Host?
+    let sessionRecordAdapterMetadata: SessionRecordAdapterMetadata?
+}
+
+struct ProviderModuleDeleteSessionRecordActions {
+    let deleteStoredContinuity: () -> Void
+}
+
 protocol ProviderModule {
     var provider: Provider { get }
 
@@ -187,6 +198,11 @@ protocol ProviderModule {
         launchConfiguration: SessionRuntimeLaunchConfiguration,
         actions: ProviderModuleRuntimeConstructionActions
     ) async throws -> (any SessionRuntime)?
+
+    func prepareDeleteSessionRecord(
+        _ request: ProviderModuleDeleteSessionRecordRequest,
+        actions: ProviderModuleDeleteSessionRecordActions
+    )
 }
 
 extension ProviderModule {
@@ -306,6 +322,11 @@ extension ProviderModule {
     ) async throws -> (any SessionRuntime)? {
         nil
     }
+
+    func prepareDeleteSessionRecord(
+        _ request: ProviderModuleDeleteSessionRecordRequest,
+        actions: ProviderModuleDeleteSessionRecordActions
+    ) {}
 
     func executeSharedFreshSessionOpen(
         _ request: ProviderModuleFreshSessionOpenRequest,

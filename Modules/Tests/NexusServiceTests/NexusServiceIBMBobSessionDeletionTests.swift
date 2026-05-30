@@ -210,12 +210,68 @@ struct NexusServiceIBMBobSessionDeletionTests {
         #expect(cleanupInvocation?.arguments.contains("build-box") == true)
         #expect(cleanupInvocation?.arguments.last?.contains("--delete-session") == true)
     }
+
+    @Test func deleteSessionRecordRoutesIBMBobStoredContinuityCleanupThroughProviderModule() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
+
+        let commandRunner = RecordingIBMBobDeletionCommandRunner(expectations: [
+            .init(
+                invocation: .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--version'"]),
+                result: .success(stdout: "3.4.5\n")
+            ),
+            .init(
+                invocation: .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--list-sessions'"]),
+                result: .success(stdout: "[]\n")
+            )
+        ])
+        let cleanupTracker = TrackingIBMBobNativeSessionCleaner()
+        let providerModuleTracker = IBMBobDeleteSessionRecordTracker()
+        let service = try makeIBMBobDeletionService(
+            rootURL: rootURL,
+            commandRunner: commandRunner,
+            turns: [
+                .init(stdoutLines: [
+                    #"{"type":"status","text":"Bob turn started","session_id":"bob-session-1"}"#,
+                    #"{"type":"message","text":"First reply"}"#,
+                    #"{"type":"completion","text":"First turn complete"}"#
+                ])
+            ],
+            providerModuleRegistry: ProviderModuleRegistry(
+                modules: [
+                    .ibmBob: DeleteTrackingIBMBobProviderModule(tracker: providerModuleTracker)
+                ]
+            ),
+            ibmBobNativeSessionCleaner: cleanupTracker
+        )
+
+        let group = try service.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try service.createLocalWorkspace(
+            name: "Local Bob",
+            folderPath: workspaceFolder.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
+        _ = try service.sendSessionInput(sessionID: session.id, text: "ship it")
+
+        let deleted = try service.deleteSessionRecord(sessionID: session.id)
+
+        #expect(deleted)
+        #expect(providerModuleTracker.requests == [session.id])
+        #expect(cleanupTracker.requests == [session.id])
+    }
 }
 
 private func makeIBMBobDeletionService(
     rootURL: URL,
     commandRunner: RecordingIBMBobDeletionCommandRunner,
-    turns: [IBMBobDeletionTransportHarness.Turn]
+    turns: [IBMBobDeletionTransportHarness.Turn],
+    providerModuleRegistry: ProviderModuleRegistry? = nil,
+    ibmBobNativeSessionCleaner: (any IBMBobNativeSessionCleaning)? = nil
 ) throws -> NexusService {
     let transportHarness = IBMBobDeletionTransportHarness(turns: turns)
     let launcher = ProcessSessionRuntimeLauncher(ibmBobTransportFactory: { executable, arguments, workingDirectory in
@@ -225,6 +281,12 @@ private func makeIBMBobDeletionService(
             workingDirectory: workingDirectory
         )
     })
+    let resolvedNativeSessionCleaner = ibmBobNativeSessionCleaner ?? IBMBobNativeSessionCleaner(
+        executableResolver: IBMBobDeletionStubExecutableResolver(executables: ["bob": "/tmp/fake-bob"]),
+        commandRunner: commandRunner,
+        localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+    )
+
     return try NexusService.bootstrapForTests(
         rootURL: rootURL,
         providerHealthEvaluator: ProviderHealthFacts(
@@ -233,11 +295,8 @@ private func makeIBMBobDeletionService(
             localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
         ),
         sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher),
-        ibmBobNativeSessionCleaner: IBMBobNativeSessionCleaner(
-            executableResolver: IBMBobDeletionStubExecutableResolver(executables: ["bob": "/tmp/fake-bob"]),
-            commandRunner: commandRunner,
-            localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
-        )
+        providerModuleRegistry: providerModuleRegistry,
+        ibmBobNativeSessionCleaner: resolvedNativeSessionCleaner
     )
 }
 
@@ -355,6 +414,111 @@ private final class RecordingIBMBobDeletionCommandRunner: ProviderCommandRunning
         case let .success(stdout, stderr, exitStatus):
             return ProviderCommandResult(exitStatus: exitStatus, stdout: stdout, stderr: stderr)
         }
+    }
+}
+
+private final class IBMBobDeleteSessionRecordTracker: @unchecked Sendable {
+    var requests: [UUID] = []
+}
+
+private final class TrackingIBMBobNativeSessionCleaner: IBMBobNativeSessionCleaning, @unchecked Sendable {
+    var requests: [UUID] = []
+
+    func bestEffortDeleteStoredContinuity(
+        for session: Session,
+        workspace: Workspace,
+        host: NexusDomain.Host?,
+        sessionRecordAdapterMetadata: SessionRecordAdapterMetadata?
+    ) {
+        requests.append(session.id)
+    }
+}
+
+private struct DeleteTrackingIBMBobProviderModule: ProviderModule {
+    private let module = IBMBobProviderModule()
+    let tracker: IBMBobDeleteSessionRecordTracker
+
+    var provider: Provider { module.provider }
+
+    func supportsDefaultSessionLaunch(in workspace: Workspace) -> Bool {
+        module.supportsDefaultSessionLaunch(in: workspace)
+    }
+
+    func supportsNamedSessions(in workspace: Workspace) -> Bool {
+        module.supportsNamedSessions(in: workspace)
+    }
+
+    func providerHealthSummary(
+        for workspace: Workspace,
+        remoteContext: RemoteWorkspaceHealthContext?,
+        providerHealthEvaluator: any ProviderHealthEvaluating
+    ) async -> ProviderHealthSummary {
+        await module.providerHealthSummary(
+            for: workspace,
+            remoteContext: remoteContext,
+            providerHealthEvaluator: providerHealthEvaluator
+        )
+    }
+
+    func providerCapabilities(
+        in workspace: Workspace,
+        health: ProviderHealthSummary,
+        defaultSession: Session?
+    ) -> ProviderCapabilities {
+        module.providerCapabilities(in: workspace, health: health, defaultSession: defaultSession)
+    }
+
+    func prelaunchPrimarySurface(in workspace: Workspace) -> SessionSurface {
+        module.prelaunchPrimarySurface(in: workspace)
+    }
+
+    func reusesRemoteHealthSnapshot(
+        _ snapshot: ProviderHealthSummary,
+        remoteContext: RemoteWorkspaceHealthContext?
+    ) -> Bool {
+        module.reusesRemoteHealthSnapshot(snapshot, remoteContext: remoteContext)
+    }
+
+    func planSessionTransition(
+        _ request: ProviderModuleSessionTransitionRequest
+    ) async throws -> ProviderModuleSessionTransitionPlan {
+        try await module.planSessionTransition(request)
+    }
+
+    func sessionMayRemainReadyWithoutRuntime(
+        _ session: Session,
+        workspace: Workspace?,
+        persistedPrimarySurface: SessionSurface,
+        storedMetadata: SessionRecordAdapterMetadata?
+    ) -> Bool {
+        module.sessionMayRemainReadyWithoutRuntime(
+            session,
+            workspace: workspace,
+            persistedPrimarySurface: persistedPrimarySurface,
+            storedMetadata: storedMetadata
+        )
+    }
+
+    func constructRuntime(
+        for session: Session,
+        workspace: Workspace,
+        launchConfiguration: SessionRuntimeLaunchConfiguration,
+        actions: ProviderModuleRuntimeConstructionActions
+    ) async throws -> (any SessionRuntime)? {
+        try await module.constructRuntime(
+            for: session,
+            workspace: workspace,
+            launchConfiguration: launchConfiguration,
+            actions: actions
+        )
+    }
+
+    func prepareDeleteSessionRecord(
+        _ request: ProviderModuleDeleteSessionRecordRequest,
+        actions: ProviderModuleDeleteSessionRecordActions
+    ) {
+        tracker.requests.append(request.session.id)
+        module.prepareDeleteSessionRecord(request, actions: actions)
     }
 }
 
