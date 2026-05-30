@@ -2019,16 +2019,30 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             return resolvedSession
         }
 
-        guard sessionRuntimeManager.hasRuntime(for: resolvedSession) == false else {
+        guard sessionRuntimeManager.hasRuntime(for: resolvedSession) == false,
+              let workspace = try metadataStore.workspace(id: resolvedSession.workspaceID) else {
             return resolvedSession
         }
 
-        guard let workspace = try metadataStore.workspace(id: resolvedSession.workspaceID),
-              try sessionMayRemainReadyWithoutRuntime(resolvedSession, workspace: workspace) else {
-            return resolvedSession
+        let providerModule = providerModuleRegistry.module(for: resolvedSession.providerID)
+        let transitionPlan = try await providerModule.planSessionTransition(
+            .bootstrapReadyWithoutRuntime(
+                ProviderModuleReadyWithoutRuntimeBootstrapRequest(
+                    session: resolvedSession,
+                    workspace: workspace,
+                    persistedPrimarySurface: try persistedPrimarySurface(for: resolvedSession, workspace: workspace),
+                    storedMetadata: try sessionRecordStore.sessionRecordAdapterMetadata(sessionID: resolvedSession.id)
+                )
+            )
+        )
+        guard case let .bootstrapReadyWithoutRuntime(plan) = transitionPlan else {
+            fatalError("Interactive ready bootstrap must produce a bootstrapReadyWithoutRuntime transition plan.")
         }
 
-        _ = try await sessionLifecycle.launchOrResumeSession(sessionID: resolvedSession.id)
+        if case .relaunchPersistedSession = plan {
+            _ = try await sessionLifecycle.launchOrResumeSession(sessionID: resolvedSession.id)
+        }
+
         return resolvedSession
     }
 

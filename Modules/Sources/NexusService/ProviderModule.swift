@@ -60,14 +60,28 @@ struct ProviderModulePersistedSessionRelaunchRequest {
     let execution: PersistedSessionLaunchExecution
 }
 
+struct ProviderModuleReadyWithoutRuntimeBootstrapRequest {
+    let session: Session
+    let workspace: Workspace
+    let persistedPrimarySurface: SessionSurface
+    let storedMetadata: SessionRecordAdapterMetadata?
+}
+
+enum ProviderModuleReadyWithoutRuntimeBootstrapPlan: Equatable {
+    case noBootstrap
+    case relaunchPersistedSession
+}
+
 enum ProviderModuleSessionTransitionRequest {
     case openFresh(ProviderModuleFreshSessionOpenRequest, ProviderModuleFreshSessionOpenActions)
     case relaunchPersisted(ProviderModulePersistedSessionRelaunchRequest)
+    case bootstrapReadyWithoutRuntime(ProviderModuleReadyWithoutRuntimeBootstrapRequest)
 }
 
 enum ProviderModuleSessionTransitionPlan: Equatable {
     case openFresh(ProviderModuleFreshSessionOpenResult)
     case relaunchPersisted(ProviderModulePersistedSessionRelaunchPlan)
+    case bootstrapReadyWithoutRuntime(ProviderModuleReadyWithoutRuntimeBootstrapPlan)
 }
 
 struct ProviderModuleRuntimeConstructionActions {
@@ -133,6 +147,10 @@ protocol ProviderModule {
         _ request: ProviderModulePersistedSessionRelaunchRequest
     ) -> ProviderModulePersistedSessionRelaunchPlan
 
+    func planReadyWithoutRuntimeBootstrap(
+        _ request: ProviderModuleReadyWithoutRuntimeBootstrapRequest
+    ) -> ProviderModuleReadyWithoutRuntimeBootstrapPlan
+
     func persistedSessionRelaunchMetadataSource(
         for session: Session,
         storedMetadata: SessionRecordAdapterMetadata?
@@ -183,6 +201,8 @@ extension ProviderModule {
             return .openFresh(try await openFreshSession(freshRequest, actions: actions))
         case let .relaunchPersisted(relaunchRequest):
             return .relaunchPersisted(planPersistedSessionRelaunch(relaunchRequest))
+        case let .bootstrapReadyWithoutRuntime(bootstrapRequest):
+            return .bootstrapReadyWithoutRuntime(planReadyWithoutRuntimeBootstrap(bootstrapRequest))
         }
     }
 
@@ -220,6 +240,17 @@ extension ProviderModule {
         _ request: ProviderModulePersistedSessionRelaunchRequest
     ) -> ProviderModulePersistedSessionRelaunchPlan {
         .sharedLaunch
+    }
+
+    func planReadyWithoutRuntimeBootstrap(
+        _ request: ProviderModuleReadyWithoutRuntimeBootstrapRequest
+    ) -> ProviderModuleReadyWithoutRuntimeBootstrapPlan {
+        sessionMayRemainReadyWithoutRuntime(
+            request.session,
+            workspace: request.workspace,
+            persistedPrimarySurface: request.persistedPrimarySurface,
+            storedMetadata: request.storedMetadata
+        ) ? .relaunchPersistedSession : .noBootstrap
     }
 
     func persistedSessionRelaunchMetadataSource(

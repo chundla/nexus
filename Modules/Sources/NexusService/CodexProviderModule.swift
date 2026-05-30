@@ -72,6 +72,8 @@ struct CodexProviderModule: ProviderModule {
             return .openFresh(try await executeSharedFreshSessionOpen(freshRequest, actions: actions))
         case let .relaunchPersisted(relaunchRequest):
             return .relaunchPersisted(planPersistedSessionRelaunch(relaunchRequest))
+        case let .bootstrapReadyWithoutRuntime(bootstrapRequest):
+            return .bootstrapReadyWithoutRuntime(planReadyWithoutRuntimeBootstrap(bootstrapRequest))
         }
     }
 

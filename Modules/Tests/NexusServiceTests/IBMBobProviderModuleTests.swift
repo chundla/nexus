@@ -305,9 +305,50 @@ struct IBMBobProviderModuleTests {
 
         #expect(tracker.requests == [.localProtocolNative])
     }
+
+    @Test func readyWithoutRuntimeIBMBobInteractionBootstrapsThroughProviderModuleSessionTransitionPlan() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("IBMBobProviderModuleTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
+
+        let initialService = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ReadyIBMBobProviderHealthEvaluator(),
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: RecordingStaticIBMBobRuntimeLauncher())
+        )
+        let group = try initialService.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try initialService.createLocalWorkspace(
+            name: "Local IBM Bob",
+            folderPath: workspaceFolder.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+        let session = try await initialService.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
+
+        let tracker = IBMBobProviderModuleSessionTransitionTracker()
+        let relaunchedService = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ReadyIBMBobProviderHealthEvaluator(),
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: RecordingStaticIBMBobRuntimeLauncher()),
+            providerModuleRegistry: ProviderModuleRegistry(
+                modules: [
+                    .ibmBob: InteractionTrackingIBMBobSessionTransitionProviderModule(tracker: tracker)
+                ]
+            )
+        )
+
+        _ = try await relaunchedService.sendSessionInput(sessionID: session.id, text: "ship it")
+
+        #expect(tracker.requests == [
+            .bootstrapReadyWithoutRuntime(sessionID: session.id),
+            .relaunchPersisted(sessionID: session.id)
+        ])
+    }
 }
 
 private enum IBMBobProviderModuleSessionTransitionRequestExpectation: Equatable {
+    case bootstrapReadyWithoutRuntime(sessionID: UUID)
     case relaunchPersisted(sessionID: UUID)
 
     init(request: ProviderModuleSessionTransitionRequest) {
@@ -317,6 +358,8 @@ private enum IBMBobProviderModuleSessionTransitionRequestExpectation: Equatable 
             self = .relaunchPersisted(sessionID: UUID())
         case let .relaunchPersisted(relaunchRequest):
             self = .relaunchPersisted(sessionID: relaunchRequest.execution.session.id)
+        case let .bootstrapReadyWithoutRuntime(bootstrapRequest):
+            self = .bootstrapReadyWithoutRuntime(sessionID: bootstrapRequest.session.id)
         }
     }
 }
@@ -369,7 +412,16 @@ private struct TrackingIBMBobSessionTransitionProviderModule: ProviderModule {
         _ request: ProviderModuleSessionTransitionRequest
     ) async throws -> ProviderModuleSessionTransitionPlan {
         tracker.requests.append(.init(request: request))
-        return .relaunchPersisted(.sharedLaunch)
+        switch request {
+        case .openFresh:
+            Issue.record("Persisted relaunch test should not open a fresh Session")
+            return .openFresh(.failed("unexpected"))
+        case .relaunchPersisted:
+            return .relaunchPersisted(.sharedLaunch)
+        case .bootstrapReadyWithoutRuntime:
+            Issue.record("Persisted relaunch test should not bootstrap an interactive ready Session")
+            return .bootstrapReadyWithoutRuntime(.noBootstrap)
+        }
     }
 
     func planPersistedSessionRelaunch(
@@ -377,6 +429,101 @@ private struct TrackingIBMBobSessionTransitionProviderModule: ProviderModule {
     ) -> ProviderModulePersistedSessionRelaunchPlan {
         Issue.record("Persisted relaunch should route through planSessionTransition")
         return .sharedLaunch
+    }
+}
+
+private struct InteractionTrackingIBMBobSessionTransitionProviderModule: ProviderModule {
+    private let module = IBMBobProviderModule()
+    let tracker: IBMBobProviderModuleSessionTransitionTracker
+
+    var provider: Provider { module.provider }
+
+    func supportsDefaultSessionLaunch(in workspace: Workspace) -> Bool {
+        module.supportsDefaultSessionLaunch(in: workspace)
+    }
+
+    func supportsNamedSessions(in workspace: Workspace) -> Bool {
+        module.supportsNamedSessions(in: workspace)
+    }
+
+    func providerHealthSummary(
+        for workspace: Workspace,
+        remoteContext: RemoteWorkspaceHealthContext?,
+        providerHealthEvaluator: any ProviderHealthEvaluating
+    ) async -> ProviderHealthSummary {
+        await module.providerHealthSummary(
+            for: workspace,
+            remoteContext: remoteContext,
+            providerHealthEvaluator: providerHealthEvaluator
+        )
+    }
+
+    func providerCapabilities(
+        in workspace: Workspace,
+        health: ProviderHealthSummary,
+        defaultSession: Session?
+    ) -> ProviderCapabilities {
+        module.providerCapabilities(in: workspace, health: health, defaultSession: defaultSession)
+    }
+
+    func prelaunchPrimarySurface(in workspace: Workspace) -> SessionSurface {
+        module.prelaunchPrimarySurface(in: workspace)
+    }
+
+    func reusesRemoteHealthSnapshot(
+        _ snapshot: ProviderHealthSummary,
+        remoteContext: RemoteWorkspaceHealthContext?
+    ) -> Bool {
+        module.reusesRemoteHealthSnapshot(snapshot, remoteContext: remoteContext)
+    }
+
+    func planSessionTransition(
+        _ request: ProviderModuleSessionTransitionRequest
+    ) async throws -> ProviderModuleSessionTransitionPlan {
+        tracker.requests.append(.init(request: request))
+        switch request {
+        case let .openFresh(freshRequest, actions):
+            return .openFresh(try await module.openFreshSession(freshRequest, actions: actions))
+        case let .relaunchPersisted(relaunchRequest):
+            return .relaunchPersisted(module.planPersistedSessionRelaunch(relaunchRequest))
+        case let .bootstrapReadyWithoutRuntime(bootstrapRequest):
+            return .bootstrapReadyWithoutRuntime(module.planReadyWithoutRuntimeBootstrap(bootstrapRequest))
+        }
+    }
+
+    func planPersistedSessionRelaunch(
+        _ request: ProviderModulePersistedSessionRelaunchRequest
+    ) -> ProviderModulePersistedSessionRelaunchPlan {
+        Issue.record("Bootstrap interaction should route through planSessionTransition")
+        return module.planPersistedSessionRelaunch(request)
+    }
+
+    func sessionMayRemainReadyWithoutRuntime(
+        _ session: Session,
+        workspace: Workspace?,
+        persistedPrimarySurface: SessionSurface,
+        storedMetadata: SessionRecordAdapterMetadata?
+    ) -> Bool {
+        module.sessionMayRemainReadyWithoutRuntime(
+            session,
+            workspace: workspace,
+            persistedPrimarySurface: persistedPrimarySurface,
+            storedMetadata: storedMetadata
+        )
+    }
+
+    func constructRuntime(
+        for session: Session,
+        workspace: Workspace,
+        launchConfiguration: SessionRuntimeLaunchConfiguration,
+        actions: ProviderModuleRuntimeConstructionActions
+    ) async throws -> (any SessionRuntime)? {
+        try await module.constructRuntime(
+            for: session,
+            workspace: workspace,
+            launchConfiguration: launchConfiguration,
+            actions: actions
+        )
     }
 }
 

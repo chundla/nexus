@@ -351,6 +351,7 @@ private final class FreshOpenActionTracker: @unchecked Sendable {
 private enum ProviderModuleSessionTransitionRequestExpectation: Equatable {
     case openFresh
     case relaunchPersisted(sessionID: UUID)
+    case bootstrapReadyWithoutRuntime(sessionID: UUID)
 
     init(request: ProviderModuleSessionTransitionRequest) {
         switch request {
@@ -358,6 +359,8 @@ private enum ProviderModuleSessionTransitionRequestExpectation: Equatable {
             self = .openFresh
         case let .relaunchPersisted(relaunchRequest):
             self = .relaunchPersisted(sessionID: relaunchRequest.execution.session.id)
+        case let .bootstrapReadyWithoutRuntime(bootstrapRequest):
+            self = .bootstrapReadyWithoutRuntime(sessionID: bootstrapRequest.session.id)
         }
     }
 }
@@ -416,6 +419,8 @@ private struct TrackingClaudeSessionTransitionProviderModule: ProviderModule {
             return .openFresh(.failed("unexpected"))
         case .relaunchPersisted:
             return .relaunchPersisted(.sharedLaunch)
+        case let .bootstrapReadyWithoutRuntime(bootstrapRequest):
+            return .bootstrapReadyWithoutRuntime(planReadyWithoutRuntimeBootstrap(bootstrapRequest))
         }
     }
 
