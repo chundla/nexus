@@ -118,12 +118,16 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     private var pendingSetSteeringModesByRequestID: [String: String] = [:]
     private var pendingSetFollowUpModesByRequestID: [String: String] = [:]
     private var pendingSetSessionNamesByRequestID: [String: String] = [:]
+    private var pendingBashCommandsByRequestID: [String: String] = [:]
+    private var pendingExportHTMLPathsByRequestID: [String: String] = [:]
     private var pendingSessionTransitionStateRequestIDs: Set<String> = []
     private var nextSlashCommandsRequestSequence = 0
     private var nextAvailableModelsRequestSequence = 0
     private var nextSetThinkingRequestSequence = 0
     private var nextSetSteeringModeRequestSequence = 0
     private var nextSetFollowUpModeRequestSequence = 0
+    private var nextBashRequestSequence = 0
+    private var nextExportHTMLRequestSequence = 0
 
     convenience init(
         executable: String,
@@ -426,6 +430,36 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             return
         }
 
+        if trimmed == "/bash" || trimmed.hasPrefix("/bash ") {
+            try submitBashCommand(trimmed)
+            return
+        }
+
+        if trimmed == "/abort-bash" || trimmed == "/abort_bash" {
+            try submitAbortBashCommand()
+            return
+        }
+
+        if trimmed == "/export-html" || trimmed.hasPrefix("/export-html ") || trimmed == "/export_html" || trimmed.hasPrefix("/export_html ") {
+            try submitExportHTMLCommand(trimmed)
+            return
+        }
+
+        if trimmed == "/messages" || trimmed == "/get-messages" || trimmed == "/get_messages" {
+            try submitGetMessagesCommand(commandText: trimmed)
+            return
+        }
+
+        if trimmed == "/session-stats" || trimmed == "/session_stats" || trimmed == "/get-session-stats" || trimmed == "/get_session_stats" {
+            try submitGetSessionStatsCommand(commandText: trimmed)
+            return
+        }
+
+        if trimmed == "/last-assistant-text" || trimmed == "/last_assistant_text" || trimmed == "/get-last-assistant-text" || trimmed == "/get_last_assistant_text" {
+            try submitGetLastAssistantTextCommand(commandText: trimmed)
+            return
+        }
+
         if trimmed == "/steering-mode" || trimmed.hasPrefix("/steering-mode ") || trimmed == "/steering_mode" || trimmed.hasPrefix("/steering_mode ") {
             try submitSteeringModeCommand(trimmed)
             return
@@ -547,6 +581,117 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         try transport.sendLine(Self.jsonLine([
             "id": "nexus-pi-fork-messages-\(UUID().uuidString)",
             "type": "get_fork_messages"
+        ]))
+    }
+
+    private func submitBashCommand(_ commandText: String) throws {
+        let bashCommand = String(commandText.dropFirst("/bash".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard bashCommand.isEmpty == false else {
+            lock.lock()
+            draft = ""
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: "Usage: /bash <command>"))
+            lock.unlock()
+            notifyChange()
+            return
+        }
+
+        let requestID: String
+        lock.lock()
+        draft = ""
+        requestID = "nexus-pi-bash-\(nextBashRequestSequence)"
+        nextBashRequestSequence += 1
+        pendingBashCommandsByRequestID[requestID] = bashCommand
+        appendActivityItemLocked(SessionActivityItem(kind: .command, text: "/bash \(bashCommand)"))
+        appendActivityItemLocked(SessionActivityItem(kind: .progress, text: "Running Pi bash: \(bashCommand)"))
+        lock.unlock()
+        notifyChange()
+
+        try transport.sendLine(
+            Self.jsonLine([
+                "id": requestID,
+                "type": "bash",
+                "command": bashCommand
+            ])
+        )
+    }
+
+    private func submitAbortBashCommand() throws {
+        lock.lock()
+        draft = ""
+        appendActivityItemLocked(SessionActivityItem(kind: .command, text: "/abort-bash"))
+        lock.unlock()
+        notifyChange()
+
+        try transport.sendLine(Self.jsonLine(["type": "abort_bash"]))
+    }
+
+    private func submitExportHTMLCommand(_ commandText: String) throws {
+        let trimmed = commandText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let outputPath: String
+        if trimmed.hasPrefix("/export_html") {
+            outputPath = String(trimmed.dropFirst("/export_html".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            outputPath = String(trimmed.dropFirst("/export-html".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        let requestID: String
+        lock.lock()
+        draft = ""
+        requestID = "nexus-pi-export-html-\(nextExportHTMLRequestSequence)"
+        nextExportHTMLRequestSequence += 1
+        if outputPath.isEmpty == false {
+            pendingExportHTMLPathsByRequestID[requestID] = outputPath
+        }
+        appendActivityItemLocked(SessionActivityItem(kind: .command, text: outputPath.isEmpty ? "/export-html" : "/export-html \(outputPath)"))
+        lock.unlock()
+        notifyChange()
+
+        var payload: [String: Any] = [
+            "id": requestID,
+            "type": "export_html"
+        ]
+        if outputPath.isEmpty == false {
+            payload["outputPath"] = outputPath
+        }
+        try transport.sendLine(Self.jsonLine(payload))
+    }
+
+    private func submitGetMessagesCommand(commandText: String) throws {
+        lock.lock()
+        draft = ""
+        appendActivityItemLocked(SessionActivityItem(kind: .command, text: commandText))
+        lock.unlock()
+        notifyChange()
+
+        try transport.sendLine(Self.jsonLine([
+            "id": "nexus-pi-messages-\(UUID().uuidString)",
+            "type": "get_messages"
+        ]))
+    }
+
+    private func submitGetSessionStatsCommand(commandText: String) throws {
+        lock.lock()
+        draft = ""
+        appendActivityItemLocked(SessionActivityItem(kind: .command, text: commandText))
+        lock.unlock()
+        notifyChange()
+
+        try transport.sendLine(Self.jsonLine([
+            "id": "nexus-pi-session-stats-\(UUID().uuidString)",
+            "type": "get_session_stats"
+        ]))
+    }
+
+    private func submitGetLastAssistantTextCommand(commandText: String) throws {
+        lock.lock()
+        draft = ""
+        appendActivityItemLocked(SessionActivityItem(kind: .command, text: commandText))
+        lock.unlock()
+        notifyChange()
+
+        try transport.sendLine(Self.jsonLine([
+            "id": "nexus-pi-last-assistant-text-\(UUID().uuidString)",
+            "type": "get_last_assistant_text"
         ]))
     }
 
@@ -871,6 +1016,36 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
 
         if command == "get_fork_messages" {
             handleGetForkMessagesResponse(response)
+            return
+        }
+
+        if command == "bash" {
+            handleBashResponse(response, requestID: id)
+            return
+        }
+
+        if command == "abort_bash" {
+            handleAbortBashResponse(response)
+            return
+        }
+
+        if command == "export_html" {
+            handleExportHTMLResponse(response, requestID: id)
+            return
+        }
+
+        if command == "get_messages" {
+            handleGetMessagesResponse(response)
+            return
+        }
+
+        if command == "get_session_stats" {
+            handleGetSessionStatsResponse(response)
+            return
+        }
+
+        if command == "get_last_assistant_text" {
+            handleGetLastAssistantTextResponse(response)
             return
         }
 
@@ -1528,6 +1703,119 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         notifyChange()
     }
 
+    private func handleBashResponse(_ response: [String: Any], requestID: String?) {
+        lock.lock()
+        let requestedCommand = requestID.flatMap { pendingBashCommandsByRequestID.removeValue(forKey: $0) }
+
+        if bool(for: "success", in: response) == true {
+            let data = response["data"] as? [String: Any]
+            let output = trimmedString(for: "output", in: data ?? [:]) ?? ""
+            let exitCode = data?["exitCode"] as? Int ?? 0
+            let cancelled = bool(for: "cancelled", in: data ?? [:]) == true
+            let truncated = bool(for: "truncated", in: data ?? [:]) == true
+            let fullOutputPath = trimmedString(for: "fullOutputPath", in: data ?? [:])
+
+            if output.isEmpty == false {
+                appendActivityItemLocked(SessionActivityItem(kind: .message, text: "bash: \(output)"))
+            }
+
+            if cancelled {
+                appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi bash cancelled"))
+            } else {
+                var detail = "Pi bash completed with exit code \(exitCode) and will be included on the next prompt"
+                if truncated, let fullOutputPath {
+                    detail += " (full output: \(fullOutputPath))"
+                }
+                appendActivityItemLocked(SessionActivityItem(kind: .status, text: detail))
+            }
+        } else {
+            let detail = string(for: "error", in: response) ?? requestedCommand.map { "Pi failed to run bash: \($0)" } ?? "Pi failed to run bash."
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: detail))
+        }
+        lock.unlock()
+        notifyChange()
+    }
+
+    private func handleAbortBashResponse(_ response: [String: Any]) {
+        lock.lock()
+        if bool(for: "success", in: response) == true {
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Requested Pi bash cancellation"))
+        } else {
+            let detail = string(for: "error", in: response) ?? "Pi failed to cancel bash."
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: detail))
+        }
+        lock.unlock()
+        notifyChange()
+    }
+
+    private func handleExportHTMLResponse(_ response: [String: Any], requestID: String?) {
+        lock.lock()
+        let requestedPath = requestID.flatMap { pendingExportHTMLPathsByRequestID.removeValue(forKey: $0) }
+        if bool(for: "success", in: response) == true {
+            let responsePath = (response["data"] as? [String: Any]).flatMap { trimmedString(for: "path", in: $0) }
+            let resolvedPath = responsePath ?? requestedPath
+            let detail = resolvedPath.map { "Exported Pi Session HTML to \($0)" } ?? "Exported Pi Session HTML"
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: detail))
+        } else {
+            let detail = string(for: "error", in: response) ?? "Pi failed to export Session HTML."
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: detail))
+        }
+        lock.unlock()
+        notifyChange()
+    }
+
+    private func handleGetMessagesResponse(_ response: [String: Any]) {
+        lock.lock()
+        if bool(for: "success", in: response) == true,
+           let data = response["data"] as? [String: Any],
+           let messages = data["messages"] as? [[String: Any]] {
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi returned \(messages.count) message\(messages.count == 1 ? "" : "s")"))
+            for (index, message) in messages.enumerated() {
+                let summary = sessionMessageSummary(message, index: index + 1)
+                appendActivityItemLocked(SessionActivityItem(kind: .status, text: summary))
+            }
+        } else {
+            let detail = string(for: "error", in: response) ?? "Pi failed to load Session messages."
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: detail))
+        }
+        lock.unlock()
+        notifyChange()
+    }
+
+    private func handleGetSessionStatsResponse(_ response: [String: Any]) {
+        lock.lock()
+        if bool(for: "success", in: response) == true,
+           let data = response["data"] as? [String: Any] {
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: sessionStatsSummaryText(data)))
+            if let contextUsageText = sessionContextUsageText(data) {
+                appendActivityItemLocked(SessionActivityItem(kind: .status, text: contextUsageText))
+            }
+        } else {
+            let detail = string(for: "error", in: response) ?? "Pi failed to load Session stats."
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: detail))
+        }
+        lock.unlock()
+        notifyChange()
+    }
+
+    private func handleGetLastAssistantTextResponse(_ response: [String: Any]) {
+        lock.lock()
+        if bool(for: "success", in: response) == true,
+           let data = response["data"] as? [String: Any] {
+            let trimmedText = (data["text"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let trimmedText, trimmedText.isEmpty == false {
+                appendActivityItemLocked(SessionActivityItem(kind: .message, text: "Last Pi assistant message: \(trimmedText)"))
+            } else {
+                appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi has no assistant message yet"))
+            }
+        } else {
+            let detail = string(for: "error", in: response) ?? "Pi failed to load the last assistant message."
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: detail))
+        }
+        lock.unlock()
+        notifyChange()
+    }
+
     private func handleForkResponse(_ response: [String: Any]) {
         if bool(for: "success", in: response) == true {
             if let data = response["data"] as? [String: Any],
@@ -1918,6 +2206,55 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         ]
     }
 
+    private func rpcUtilitySlashCommandsLocked() -> [SessionSlashCommand] {
+        [
+            SessionSlashCommand(
+                name: "bash",
+                displayName: "bash <command>",
+                insertionText: "bash ",
+                suggestionQueryPrefix: "bash ",
+                description: "Run host-side bash and include the result on the next prompt.",
+                source: .builtIn
+            ),
+            SessionSlashCommand(
+                name: "abort-bash",
+                displayName: "abort-bash",
+                insertionText: "abort-bash",
+                description: "Cancel the currently running Pi bash command.",
+                source: .builtIn
+            ),
+            SessionSlashCommand(
+                name: "export-html",
+                displayName: "export-html [path]",
+                insertionText: "export-html ",
+                suggestionQueryPrefix: "export-html ",
+                description: "Export the current Pi Session to an HTML file.",
+                source: .builtIn
+            ),
+            SessionSlashCommand(
+                name: "messages",
+                displayName: "messages",
+                insertionText: "messages",
+                description: "List messages in the current Pi Session.",
+                source: .builtIn
+            ),
+            SessionSlashCommand(
+                name: "session-stats",
+                displayName: "session-stats",
+                insertionText: "session-stats",
+                description: "Show Pi Session token, tool, and context usage stats.",
+                source: .builtIn
+            ),
+            SessionSlashCommand(
+                name: "last-assistant-text",
+                displayName: "last-assistant-text",
+                insertionText: "last-assistant-text",
+                description: "Show the last assistant text from the Pi Session.",
+                source: .builtIn
+            )
+        ]
+    }
+
     private func handleSessionTransitionEvent(_ object: [String: Any]) {
         guard let linkage = sessionTransitionLinkage(from: object),
               let metadata = linkage.sessionRecordAdapterMetadata else {
@@ -1960,7 +2297,8 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             availableModelCommands,
             thinkingSlashCommandsLocked(),
             queueControlSlashCommandsLocked(),
-            sessionGraphSlashCommandsLocked()
+            sessionGraphSlashCommandsLocked(),
+            rpcUtilitySlashCommandsLocked()
         ])
         return merged.isEmpty ? nil : merged
     }
@@ -2120,6 +2458,34 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         return trimmedNextText == trimmedPreviousText ? "" : trimmedNextText
     }
 
+    private func sessionStatsSummaryText(_ data: [String: Any]) -> String {
+        let userMessages = intValue(data["userMessages"]) ?? 0
+        let assistantMessages = intValue(data["assistantMessages"]) ?? 0
+        let toolCalls = intValue(data["toolCalls"]) ?? 0
+        let toolResults = intValue(data["toolResults"]) ?? 0
+        let totalMessages = intValue(data["totalMessages"]) ?? 0
+        let cost = doubleValue(data["cost"]) ?? 0
+        return String(
+            format: "Pi Session stats — user: %d · assistant: %d · tool calls: %d · tool results: %d · total: %d · cost: $%.2f",
+            userMessages,
+            assistantMessages,
+            toolCalls,
+            toolResults,
+            totalMessages,
+            cost
+        )
+    }
+
+    private func sessionContextUsageText(_ data: [String: Any]) -> String? {
+        guard let contextUsage = data["contextUsage"] as? [String: Any],
+              let contextWindow = intValue(contextUsage["contextWindow"]) else {
+            return nil
+        }
+        let tokens = intValue(contextUsage["tokens"])
+        let percent = intValue(contextUsage["percent"])
+        return "Pi context usage — \(tokens.map(String.init) ?? "unknown") / \(contextWindow) tokens (\(percent.map { "\($0)%" } ?? "unknown"))"
+    }
+
     private func previewText(_ text: String, limit: Int) -> String {
         guard text.count > limit else {
             return text
@@ -2188,6 +2554,44 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             .joined()
     }
 
+    private func sessionMessageSummary(_ message: [String: Any], index: Int) -> String {
+        let role = trimmedString(for: "role", in: message) ?? "message"
+        let preview: String
+
+        switch role {
+        case "user":
+            preview = sessionMessageContentText(message["content"])
+        case "assistant", "toolResult":
+            preview = assistantText(from: message)
+        case "bashExecution":
+            preview = trimmedString(for: "command", in: message) ?? sessionMessageContentText(message["output"])
+        default:
+            preview = sessionMessageContentText(message["content"])
+        }
+
+        let resolvedPreview = preview.isEmpty ? "(no text)" : previewText(preview, limit: 120)
+        return "Message \(index) — \(role): \(resolvedPreview)"
+    }
+
+    private func sessionMessageContentText(_ value: Any?) -> String {
+        switch value {
+        case let string as String:
+            return string.trimmingCharacters(in: .whitespacesAndNewlines)
+        case let blocks as [[String: Any]]:
+            return blocks
+                .compactMap { block -> String? in
+                    guard string(for: "type", in: block) == "text" else {
+                        return nil
+                    }
+                    return string(for: "text", in: block)
+                }
+                .joined()
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        default:
+            return ""
+        }
+    }
+
     private func responseObject(from line: String) -> [String: Any]? {
         guard let data = line.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -2214,6 +2618,30 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
 
     private func int(for key: String, in object: [String: Any]) -> Int? {
         object[key] as? Int
+    }
+
+    private func intValue(_ value: Any?) -> Int? {
+        switch value {
+        case let int as Int:
+            return int
+        case let number as NSNumber:
+            return number.intValue
+        default:
+            return nil
+        }
+    }
+
+    private func doubleValue(_ value: Any?) -> Double? {
+        switch value {
+        case let double as Double:
+            return double
+        case let int as Int:
+            return Double(int)
+        case let number as NSNumber:
+            return number.doubleValue
+        default:
+            return nil
+        }
     }
 
     private func notifyChange() {

@@ -580,6 +580,32 @@ struct NexusServicePiSessionStreamTests {
         #expect(commandNames.contains("session-name"))
     }
 
+    @Test func localPiRuntimePublishesBashExportAndIntrospectionCommands() throws {
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in TestPiRPCTransport() }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        let commandNames = runtime.sessionScreen(for: session).slashCommands?.map(\.name) ?? []
+
+        #expect(commandNames.contains("bash"))
+        #expect(commandNames.contains("abort-bash"))
+        #expect(commandNames.contains("export-html"))
+        #expect(commandNames.contains("messages"))
+        #expect(commandNames.contains("session-stats"))
+        #expect(commandNames.contains("last-assistant-text"))
+    }
+
     @Test func localPiRuntimeAbortsActiveRunViaCommand() throws {
         let transport = QueueControlPiRPCTransport()
         let runtime = try PiRPCSessionRuntime(
@@ -610,6 +636,220 @@ struct NexusServicePiSessionStreamTests {
         ])
         #expect(screen.transcript == "> hello")
         #expect(screen.isAgentTurnInProgress == false)
+    }
+
+    @Test func localPiRuntimeRunsHostBashViaBuiltInCommand() throws {
+        let transport = TestPiRPCTransport(
+            bashResult: TestPiRPCBashResult(output: "total 48", exitCode: 0)
+        )
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("/bash ls -la")
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(transport.sentLines.contains(where: {
+            $0.contains("\"type\":\"bash\"") && $0.contains("\"command\":\"ls -la\"")
+        }))
+        #expect(screen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "/bash ls -la",
+            "Running Pi bash: ls -la",
+            "bash: total 48",
+            "Pi bash completed with exit code 0 and will be included on the next prompt"
+        ])
+        #expect(screen.activityItems.map(\.kind) == [.status, .command, .progress, .message, .status])
+        #expect(screen.transcript.isEmpty)
+    }
+
+    @Test func localPiRuntimeCancelsHostBashViaBuiltInCommand() throws {
+        let transport = AbortableBashPiRPCTransport()
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("/bash sleep 10")
+        try runtime.sendInput("/abort-bash")
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"abort_bash\"") }))
+        #expect(screen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "/bash sleep 10",
+            "Running Pi bash: sleep 10",
+            "/abort-bash",
+            "Requested Pi bash cancellation",
+            "Pi bash cancelled"
+        ])
+        #expect(screen.activityItems.map(\.kind) == [.status, .command, .progress, .command, .status, .status])
+    }
+
+    @Test func localPiRuntimeExportsSessionHtmlViaBuiltInCommand() throws {
+        let transport = TestPiRPCTransport(exportedHTMLPath: "/tmp/pi-session.html")
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("/export-html /tmp/pi-session.html")
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(transport.sentLines.contains(where: {
+            $0.contains("\"type\":\"export_html\"") && $0.contains("pi-session.html")
+        }))
+        #expect(screen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "/export-html /tmp/pi-session.html",
+            "Exported Pi Session HTML to /tmp/pi-session.html"
+        ])
+        #expect(screen.activityItems.map(\.kind) == [.status, .command, .status])
+    }
+
+    @Test func localPiRuntimeListsSessionMessagesViaBuiltInCommand() throws {
+        let transport = TestPiRPCTransport(messages: [
+            [
+                "role": "user",
+                "content": "Hello Pi"
+            ],
+            [
+                "role": "assistant",
+                "content": [[
+                    "type": "text",
+                    "text": "Hi there"
+                ]]
+            ]
+        ])
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("/messages")
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"get_messages\"") }))
+        #expect(screen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "/messages",
+            "Pi returned 2 messages",
+            "Message 1 — user: Hello Pi",
+            "Message 2 — assistant: Hi there"
+        ])
+        #expect(screen.activityItems.map(\.kind) == [.status, .command, .status, .status, .status])
+    }
+
+    @Test func localPiRuntimeShowsSessionStatsViaBuiltInCommand() throws {
+        let transport = TestPiRPCTransport(sessionStats: [
+            "userMessages": 5,
+            "assistantMessages": 4,
+            "toolCalls": 12,
+            "toolResults": 12,
+            "totalMessages": 21,
+            "cost": 0.45,
+            "contextUsage": [
+                "tokens": 60000,
+                "contextWindow": 200000,
+                "percent": 30
+            ]
+        ])
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("/session-stats")
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"get_session_stats\"") }))
+        #expect(screen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "/session-stats",
+            "Pi Session stats — user: 5 · assistant: 4 · tool calls: 12 · tool results: 12 · total: 21 · cost: $0.45",
+            "Pi context usage — 60000 / 200000 tokens (30%)"
+        ])
+        #expect(screen.activityItems.map(\.kind) == [.status, .command, .status, .status])
+    }
+
+    @Test func localPiRuntimeShowsLastAssistantTextViaBuiltInCommand() throws {
+        let transport = TestPiRPCTransport(lastAssistantText: "Summarized answer")
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("/last-assistant-text")
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"get_last_assistant_text\"") }))
+        #expect(screen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "/last-assistant-text",
+            "Last Pi assistant message: Summarized answer"
+        ])
+        #expect(screen.activityItems.map(\.kind) == [.status, .command, .message])
     }
 
     @Test func localPiDefaultSessionRelaunchKeepsPiConversationLinkageAcrossServiceRestart() throws {
@@ -1879,6 +2119,94 @@ private final class ExtensionDialogTestPiRPCTransport: PiRPCTransporting, @unche
     }
 }
 
+private final class AbortableBashPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
+    private var stdoutLineHandler: (@Sendable (String) -> Void)?
+    private var terminationHandler: (@Sendable (Int32) -> Void)?
+    private(set) var sentLines: [String] = []
+    private var pendingBashRequestID: String?
+
+    func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
+        stdoutLineHandler = handler
+    }
+
+    func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?) {
+        terminationHandler = handler
+    }
+
+    func start() throws {}
+
+    func sendLine(_ line: String) throws {
+        sentLines.append(line)
+        guard let data = line.data(using: .utf8),
+              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = object["type"] as? String else {
+            return
+        }
+
+        switch type {
+        case "get_state":
+            emit([
+                "id": object["id"] as? String ?? "state",
+                "type": "response",
+                "command": "get_state",
+                "success": true,
+                "data": ["sessionId": "pi-session-1"]
+            ])
+        case "get_commands":
+            emit([
+                "id": object["id"] as? String ?? "commands",
+                "type": "response",
+                "command": "get_commands",
+                "success": true,
+                "data": ["commands": []]
+            ])
+        case "get_available_models":
+            emit([
+                "id": object["id"] as? String ?? "available-models",
+                "type": "response",
+                "command": "get_available_models",
+                "success": true,
+                "data": ["models": []]
+            ])
+        case "bash":
+            pendingBashRequestID = object["id"] as? String
+        case "abort_bash":
+            emit([
+                "type": "response",
+                "command": "abort_bash",
+                "success": true
+            ])
+            emit([
+                "id": pendingBashRequestID ?? "bash",
+                "type": "response",
+                "command": "bash",
+                "success": true,
+                "data": [
+                    "output": "",
+                    "exitCode": 130,
+                    "cancelled": true,
+                    "truncated": false
+                ]
+            ])
+            pendingBashRequestID = nil
+        default:
+            return
+        }
+    }
+
+    func terminate() throws {
+        terminationHandler?(0)
+    }
+
+    private func emit(_ object: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: object),
+              let line = String(data: data, encoding: .utf8) else {
+            return
+        }
+        stdoutLineHandler?(line)
+    }
+}
+
 private final class FireAndForgetExtensionUITestPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
     private var stdoutLineHandler: (@Sendable (String) -> Void)?
     private var terminationHandler: (@Sendable (Int32) -> Void)?
@@ -2140,11 +2468,51 @@ private struct TestPiRPCForkMessage {
     }
 }
 
+private struct TestPiRPCBashResult {
+    let output: String
+    let exitCode: Int
+    let cancelled: Bool
+    let truncated: Bool
+    let fullOutputPath: String?
+
+    init(
+        output: String,
+        exitCode: Int,
+        cancelled: Bool = false,
+        truncated: Bool = false,
+        fullOutputPath: String? = nil
+    ) {
+        self.output = output
+        self.exitCode = exitCode
+        self.cancelled = cancelled
+        self.truncated = truncated
+        self.fullOutputPath = fullOutputPath
+    }
+
+    func responseObject() -> [String: Any] {
+        var object: [String: Any] = [
+            "output": output,
+            "exitCode": exitCode,
+            "cancelled": cancelled,
+            "truncated": truncated
+        ]
+        if let fullOutputPath {
+            object["fullOutputPath"] = fullOutputPath
+        }
+        return object
+    }
+}
+
 private final class TestPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
     private let promptResponseText: String
     private let slashCommands: [TestPiRPCCommand]
     private let availableModels: [TestPiRPCModel]
     private let forkMessages: [TestPiRPCForkMessage]
+    private let bashResult: TestPiRPCBashResult?
+    private let exportedHTMLPath: String?
+    private let messages: [[String: Any]]
+    private let sessionStats: [String: Any]?
+    private let lastAssistantText: String?
     private let stateModel: TestPiRPCModel?
     private let stateThinkingLevel: String?
     private(set) var sentLines: [String] = []
@@ -2156,6 +2524,11 @@ private final class TestPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
         slashCommands: [TestPiRPCCommand] = [],
         availableModels: [TestPiRPCModel] = [],
         forkMessages: [TestPiRPCForkMessage] = [],
+        bashResult: TestPiRPCBashResult? = nil,
+        exportedHTMLPath: String? = nil,
+        messages: [[String: Any]] = [],
+        sessionStats: [String: Any]? = nil,
+        lastAssistantText: String? = nil,
         stateModel: TestPiRPCModel? = nil,
         stateThinkingLevel: String? = nil
     ) {
@@ -2163,6 +2536,11 @@ private final class TestPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
         self.slashCommands = slashCommands
         self.availableModels = availableModels
         self.forkMessages = forkMessages
+        self.bashResult = bashResult
+        self.exportedHTMLPath = exportedHTMLPath
+        self.messages = messages
+        self.sessionStats = sessionStats
+        self.lastAssistantText = lastAssistantText
         self.stateModel = stateModel
         self.stateThinkingLevel = stateThinkingLevel
     }
@@ -2260,6 +2638,48 @@ private final class TestPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
                 "type": "response",
                 "command": "set_thinking_level",
                 "success": true
+            ])
+        case "bash":
+            emit([
+                "id": object["id"] as? String ?? "bash",
+                "type": "response",
+                "command": "bash",
+                "success": true,
+                "data": bashResult?.responseObject() ?? TestPiRPCBashResult(output: "", exitCode: 0).responseObject()
+            ])
+        case "export_html":
+            emit([
+                "id": object["id"] as? String ?? "export-html",
+                "type": "response",
+                "command": "export_html",
+                "success": true,
+                "data": [
+                    "path": exportedHTMLPath ?? (object["outputPath"] as? String ?? "/tmp/pi-session.html")
+                ]
+            ])
+        case "get_messages":
+            emit([
+                "id": object["id"] as? String ?? "messages",
+                "type": "response",
+                "command": "get_messages",
+                "success": true,
+                "data": ["messages": messages]
+            ])
+        case "get_session_stats":
+            emit([
+                "id": object["id"] as? String ?? "session-stats",
+                "type": "response",
+                "command": "get_session_stats",
+                "success": true,
+                "data": sessionStats ?? [:]
+            ])
+        case "get_last_assistant_text":
+            emit([
+                "id": object["id"] as? String ?? "last-assistant-text",
+                "type": "response",
+                "command": "get_last_assistant_text",
+                "success": true,
+                "data": ["text": lastAssistantText as Any]
             ])
         case "prompt":
             emit([
