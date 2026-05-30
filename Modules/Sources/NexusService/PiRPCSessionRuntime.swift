@@ -53,13 +53,16 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     private let unexpectedTerminationMessageBuilder: (Int32) -> String
     private let startupStateResponseID = "nexus-pi-startup-state"
     private let startupCommandsResponseID = "nexus-pi-startup-commands"
+    private let startupAvailableModelsResponseID = "nexus-pi-startup-available-models"
+    private let currentModelStatusPrefix = "Current Pi model:"
     private var runtimeState: Session.State = .ready
     private var transcriptEntries: [String] = []
     private var interruptedFailureMessage: String?
     private var draft = ""
     private var activityItems: [SessionActivityItem] = []
     private var approvalRequests: [SessionApprovalRequest] = []
-    private var slashCommands: [SessionSlashCommand]?
+    private var providerSlashCommands: [SessionSlashCommand]?
+    private var availableModelCommands: [SessionSlashCommand]?
     private var terminalColumns = 80
     private var terminalRows = 24
     private var sessionLinkage: PiSessionLinkage?
@@ -71,7 +74,10 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     private var toolNamesByCallID: [String: String] = [:]
     private var didRequestStop = false
     private var pendingSlashCommandsRequestID: String?
+    private var pendingAvailableModelsRequestID: String?
+    private var pendingSetModelTargetsByRequestID: [String: String] = [:]
     private var nextSlashCommandsRequestSequence = 0
+    private var nextAvailableModelsRequestSequence = 0
 
     convenience init(
         executable: String,
@@ -206,7 +212,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             terminalRows: terminalRows,
             activityItems: activityItems,
             approvalRequests: approvalRequests,
-            slashCommands: slashCommands,
+            slashCommands: mergedSlashCommandsLocked(),
             isAgentTurnInProgress: isStreaming
         )
     }
@@ -314,6 +320,11 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             return
         }
 
+        if trimmed == "/model" || trimmed.hasPrefix("/model ") {
+            try submitModelCommand(trimmed)
+            return
+        }
+
         lock.lock()
         guard isStreaming == false else {
             lock.unlock()
@@ -336,6 +347,41 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         )
     }
 
+    private func submitModelCommand(_ commandText: String) throws {
+        let target = String(commandText.dropFirst("/model".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let selection = parseModelSelection(target) else {
+            lock.lock()
+            draft = ""
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: "Usage: /model <provider>/<model>"))
+            lock.unlock()
+            notifyChange()
+            return
+        }
+
+        let requestID: String
+        lock.lock()
+        guard isStreaming == false else {
+            lock.unlock()
+            throw PiRPCSessionRuntimeError.busy
+        }
+        draft = ""
+        requestID = "nexus-pi-set-model-\(nextAvailableModelsRequestSequence)"
+        nextAvailableModelsRequestSequence += 1
+        pendingSetModelTargetsByRequestID[requestID] = selection.target
+        appendActivityItemLocked(SessionActivityItem(kind: .command, text: "/model \(selection.target)"))
+        lock.unlock()
+        notifyChange()
+
+        try transport.sendLine(
+            Self.jsonLine([
+                "id": requestID,
+                "type": "set_model",
+                "provider": selection.provider,
+                "modelId": selection.modelID
+            ])
+        )
+    }
+
     private func handleResponse(
         _ response: [String: Any],
         startupState: StartupState,
@@ -349,8 +395,12 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
                 lock.lock()
                 updateSessionLinkageLocked(from: response)
                 appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"))
+                if let currentModelStatus = currentModelStatusText(from: response) {
+                    appendActivityItemLocked(SessionActivityItem(kind: .status, text: currentModelStatus))
+                }
                 lock.unlock()
                 requestSlashCommands(preferredID: startupCommandsResponseID)
+                requestAvailableModels(preferredID: startupAvailableModelsResponseID)
                 startupWaiter.succeed()
             } else {
                 let errorMessage = string(for: "error", in: response) ?? "Pi RPC startup failed."
@@ -363,6 +413,16 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
 
         if command == "get_commands" {
             handleGetCommandsResponse(response, requestID: id)
+            return
+        }
+
+        if command == "get_available_models" {
+            handleAvailableModelsResponse(response, requestID: id)
+            return
+        }
+
+        if command == "set_model" {
+            handleSetModelResponse(response, requestID: id)
             return
         }
 
@@ -600,8 +660,8 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             pendingSlashCommandsRequestID = nil
         }
         if let nextSlashCommands {
-            shouldNotify = slashCommands != nextSlashCommands
-            slashCommands = nextSlashCommands
+            shouldNotify = providerSlashCommands != nextSlashCommands
+            providerSlashCommands = nextSlashCommands
         } else {
             shouldNotify = false
         }
@@ -610,6 +670,63 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         if shouldNotify {
             notifyChange()
         }
+    }
+
+    private func handleAvailableModelsResponse(_ response: [String: Any], requestID: String?) {
+        let nextModelCommands: [SessionSlashCommand]?
+        if bool(for: "success", in: response) == true {
+            nextModelCommands = parseAvailableModelCommands(from: response) ?? []
+        } else {
+            nextModelCommands = nil
+        }
+
+        let shouldNotify: Bool
+        lock.lock()
+        if requestID == pendingAvailableModelsRequestID {
+            pendingAvailableModelsRequestID = nil
+        }
+        if let nextModelCommands {
+            shouldNotify = availableModelCommands != nextModelCommands
+            availableModelCommands = nextModelCommands
+        } else {
+            shouldNotify = false
+        }
+        lock.unlock()
+
+        if shouldNotify {
+            notifyChange()
+        }
+    }
+
+    private func handleSetModelResponse(_ response: [String: Any], requestID: String?) {
+        let fallbackTarget: String?
+        lock.lock()
+        fallbackTarget = requestID.flatMap { pendingSetModelTargetsByRequestID.removeValue(forKey: $0) }
+        lock.unlock()
+
+        let message: String
+        let kind: SessionActivityItem.Kind
+        let currentModelStatus: String?
+        if bool(for: "success", in: response) == true {
+            let resolvedTarget = formattedModelTarget(fromResponse: response) ?? fallbackTarget ?? "selected model"
+            message = "Pi model switched to \(resolvedTarget)"
+            currentModelStatus = currentModelStatusText(fromModelResponse: response)
+            kind = .status
+            requestAvailableModels()
+        } else {
+            let detail = string(for: "error", in: response) ?? "Pi failed to switch models."
+            message = detail
+            currentModelStatus = nil
+            kind = .error
+        }
+
+        lock.lock()
+        appendActivityItemLocked(SessionActivityItem(kind: kind, text: message))
+        if let currentModelStatus {
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: currentModelStatus))
+        }
+        lock.unlock()
+        notifyChange()
     }
 
     private func requestSlashCommands(preferredID: String? = nil) {
@@ -639,6 +756,33 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         }
     }
 
+    private func requestAvailableModels(preferredID: String? = nil) {
+        let requestID: String
+        lock.lock()
+        if pendingAvailableModelsRequestID != nil {
+            lock.unlock()
+            return
+        }
+        if let preferredID {
+            requestID = preferredID
+        } else {
+            requestID = "nexus-pi-available-models-\(nextAvailableModelsRequestSequence)"
+            nextAvailableModelsRequestSequence += 1
+        }
+        pendingAvailableModelsRequestID = requestID
+        lock.unlock()
+
+        do {
+            try transport.sendLine(Self.jsonLine(["id": requestID, "type": "get_available_models"]))
+        } catch {
+            lock.lock()
+            if pendingAvailableModelsRequestID == requestID {
+                pendingAvailableModelsRequestID = nil
+            }
+            lock.unlock()
+        }
+    }
+
     private func parseSlashCommands(from response: [String: Any]) -> [SessionSlashCommand]? {
         guard let data = response["data"] as? [String: Any],
               let rawCommands = data["commands"] as? [[String: Any]] else {
@@ -662,6 +806,88 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         }
     }
 
+    private func parseAvailableModelCommands(from response: [String: Any]) -> [SessionSlashCommand]? {
+        guard let data = response["data"] as? [String: Any],
+              let rawModels = data["models"] as? [[String: Any]] else {
+            return nil
+        }
+
+        return rawModels.compactMap { model in
+            guard let provider = trimmedString(for: "provider", in: model),
+                  let modelID = trimmedString(for: "id", in: model) else {
+                return nil
+            }
+
+            let target = "\(provider)/\(modelID)"
+            let modelName = trimmedString(for: "name", in: model)
+            let displayName = modelName.map { "model \(target) — \($0)" } ?? "model \(target)"
+            let description = modelName.map { "Switch to \(target) — \($0)." } ?? "Switch to \(target)."
+            return SessionSlashCommand(
+                name: "model \(target)",
+                displayName: displayName,
+                insertionText: "model \(target)",
+                suggestionQueryPrefix: "model ",
+                description: description,
+                source: .builtIn
+            )
+        }
+    }
+
+    private func parseModelSelection(_ target: String) -> (provider: String, modelID: String, target: String)? {
+        guard let separator = target.firstIndex(of: "/") else {
+            return nil
+        }
+
+        let provider = String(target[..<separator]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let modelID = String(target[target.index(after: separator)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard provider.isEmpty == false, modelID.isEmpty == false else {
+            return nil
+        }
+
+        return (provider: provider, modelID: modelID, target: "\(provider)/\(modelID)")
+    }
+
+    private func formattedModelTarget(fromResponse response: [String: Any]) -> String? {
+        guard let data = response["data"] as? [String: Any] else {
+            return nil
+        }
+        return formattedModelTarget(fromModel: data)
+    }
+
+    private func formattedModelTarget(fromModel model: [String: Any]) -> String? {
+        guard let provider = trimmedString(for: "provider", in: model),
+              let modelID = trimmedString(for: "id", in: model) else {
+            return nil
+        }
+
+        let target = "\(provider)/\(modelID)"
+        if let name = trimmedString(for: "name", in: model) {
+            return "\(target) — \(name)"
+        }
+        return target
+    }
+
+    private func mergedSlashCommandsLocked() -> [SessionSlashCommand]? {
+        let merged = mergeSlashCommands(primary: providerSlashCommands, secondary: availableModelCommands)
+        return merged.isEmpty ? nil : merged
+    }
+
+    private func mergeSlashCommands(
+        primary: [SessionSlashCommand]?,
+        secondary: [SessionSlashCommand]?
+    ) -> [SessionSlashCommand] {
+        var merged: [SessionSlashCommand] = []
+        var seenNames: Set<String> = []
+
+        for command in (primary ?? []) + (secondary ?? []) {
+            if seenNames.insert(command.name).inserted {
+                merged.append(command)
+            }
+        }
+
+        return merged
+    }
+
     private func updateSessionLinkageLocked(from response: [String: Any]) {
         guard let data = response["data"] as? [String: Any] else {
             return
@@ -676,6 +902,27 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         }
 
         sessionLinkage = linkage
+    }
+
+    private func currentModelStatusText(from response: [String: Any]) -> String? {
+        guard let data = response["data"] as? [String: Any],
+              let model = data["model"] as? [String: Any],
+              let target = formattedModelTarget(fromModel: model) else {
+            return nil
+        }
+
+        if let thinkingLevel = trimmedString(for: "thinkingLevel", in: data) {
+            return "\(currentModelStatusPrefix) \(target) (thinking: \(thinkingLevel))"
+        }
+        return "\(currentModelStatusPrefix) \(target)"
+    }
+
+    private func currentModelStatusText(fromModelResponse response: [String: Any]) -> String? {
+        guard let data = response["data"] as? [String: Any],
+              let target = formattedModelTarget(fromModel: data) else {
+            return nil
+        }
+        return "\(currentModelStatusPrefix) \(target)"
     }
 
     private func toolExecutionCallText(toolName: String, args: [String: Any]?) -> String {
@@ -813,6 +1060,14 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
 
     private func string(for key: String, in object: [String: Any]) -> String? {
         object[key] as? String
+    }
+
+    private func trimmedString(for key: String, in object: [String: Any]) -> String? {
+        guard let value = string(for: key, in: object)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              value.isEmpty == false else {
+            return nil
+        }
+        return value
     }
 
     private func bool(for key: String, in object: [String: Any]) -> Bool? {

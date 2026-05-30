@@ -51,6 +51,40 @@ struct NexusServicePiSessionStreamTests {
         #expect(launchCounter.value == 1)
     }
 
+    @Test func localPiSessionScreenShowsCurrentModelFromStartupState() throws {
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in
+                TestPiRPCTransport(
+                    stateModel: TestPiRPCModel(
+                        provider: "anthropic",
+                        id: "claude-sonnet-4-20250514",
+                        name: "Claude Sonnet 4"
+                    ),
+                    stateThinkingLevel: "medium"
+                )
+            }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(screen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "Current Pi model: anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4 (thinking: medium)"
+        ])
+        #expect(screen.activityItems.map(\.kind) == [.status, .status])
+    }
+
     @Test func localPiSessionScreenIncludesLiveSlashCommandsFromRpc() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)
@@ -118,6 +152,98 @@ struct NexusServicePiSessionStreamTests {
                 path: "/Users/tester/.pi/agent/skills/create-cli/SKILL.md"
             )
         ])
+    }
+
+    @Test func localPiRuntimePublishesAvailableModelCommandsFromRpc() throws {
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in
+                TestPiRPCTransport(
+                    availableModels: [
+                        TestPiRPCModel(
+                            provider: "anthropic",
+                            id: "claude-sonnet-4-20250514",
+                            name: "Claude Sonnet 4"
+                        ),
+                        TestPiRPCModel(
+                            provider: "openai",
+                            id: "gpt-4o",
+                            name: "GPT-4o"
+                        )
+                    ]
+                )
+            }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(screen.slashCommands == [
+            SessionSlashCommand(
+                name: "model anthropic/claude-sonnet-4-20250514",
+                displayName: "model anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4",
+                insertionText: "model anthropic/claude-sonnet-4-20250514",
+                suggestionQueryPrefix: "model ",
+                description: "Switch to anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4.",
+                source: .builtIn
+            ),
+            SessionSlashCommand(
+                name: "model openai/gpt-4o",
+                displayName: "model openai/gpt-4o — GPT-4o",
+                insertionText: "model openai/gpt-4o",
+                suggestionQueryPrefix: "model ",
+                description: "Switch to openai/gpt-4o — GPT-4o.",
+                source: .builtIn
+            )
+        ])
+    }
+
+    @Test func localPiRuntimeSwitchesModelsViaBuiltInModelCommand() throws {
+        let transport = TestPiRPCTransport(
+            availableModels: [
+                TestPiRPCModel(
+                    provider: "anthropic",
+                    id: "claude-sonnet-4-20250514",
+                    name: "Claude Sonnet 4"
+                )
+            ]
+        )
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("/model anthropic/claude-sonnet-4-20250514")
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"set_model\"") }))
+        #expect(screen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "/model anthropic/claude-sonnet-4-20250514",
+            "Pi model switched to anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4",
+            "Current Pi model: anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4"
+        ])
+        #expect(screen.activityItems.map(\.kind) == [.status, .command, .status, .status])
+        #expect(screen.transcript.isEmpty)
     }
 
     @Test func localPiDefaultSessionRelaunchKeepsPiConversationLinkageAcrossServiceRestart() throws {
@@ -1017,15 +1143,45 @@ private struct TestPiRPCCommand {
     }
 }
 
+private struct TestPiRPCModel {
+    let provider: String
+    let id: String
+    let name: String?
+
+    func responseObject() -> [String: Any] {
+        var object: [String: Any] = [
+            "provider": provider,
+            "id": id
+        ]
+        if let name {
+            object["name"] = name
+        }
+        return object
+    }
+}
+
 private final class TestPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
     private let promptResponseText: String
     private let slashCommands: [TestPiRPCCommand]
+    private let availableModels: [TestPiRPCModel]
+    private let stateModel: TestPiRPCModel?
+    private let stateThinkingLevel: String?
+    private(set) var sentLines: [String] = []
     private var stdoutLineHandler: (@Sendable (String) -> Void)?
     private var terminationHandler: (@Sendable (Int32) -> Void)?
 
-    init(promptResponseText: String = "", slashCommands: [TestPiRPCCommand] = []) {
+    init(
+        promptResponseText: String = "",
+        slashCommands: [TestPiRPCCommand] = [],
+        availableModels: [TestPiRPCModel] = [],
+        stateModel: TestPiRPCModel? = nil,
+        stateThinkingLevel: String? = nil
+    ) {
         self.promptResponseText = promptResponseText
         self.slashCommands = slashCommands
+        self.availableModels = availableModels
+        self.stateModel = stateModel
+        self.stateThinkingLevel = stateThinkingLevel
     }
 
     func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
@@ -1039,6 +1195,8 @@ private final class TestPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
     func start() throws {}
 
     func sendLine(_ line: String) throws {
+        sentLines.append(line)
+
         guard let data = line.data(using: .utf8),
               let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let type = object["type"] as? String else {
@@ -1047,14 +1205,21 @@ private final class TestPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
 
         switch type {
         case "get_state":
+            var data: [String: Any] = [
+                "sessionId": "pi-session-1"
+            ]
+            if let stateModel {
+                data["model"] = stateModel.responseObject()
+            }
+            if let stateThinkingLevel {
+                data["thinkingLevel"] = stateThinkingLevel
+            }
             emit([
                 "id": object["id"] as? String ?? "state",
                 "type": "response",
                 "command": "get_state",
                 "success": true,
-                "data": [
-                    "sessionId": "pi-session-1"
-                ]
+                "data": data
             ])
         case "get_commands":
             emit([
@@ -1066,6 +1231,36 @@ private final class TestPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
                     "commands": slashCommands.map { $0.responseObject() }
                 ]
             ])
+        case "get_available_models":
+            emit([
+                "id": object["id"] as? String ?? "available-models",
+                "type": "response",
+                "command": "get_available_models",
+                "success": true,
+                "data": [
+                    "models": availableModels.map { $0.responseObject() }
+                ]
+            ])
+        case "set_model":
+            let provider = object["provider"] as? String ?? ""
+            let modelID = object["modelId"] as? String ?? ""
+            if let model = availableModels.first(where: { $0.provider == provider && $0.id == modelID }) {
+                emit([
+                    "id": object["id"] as? String ?? "set-model",
+                    "type": "response",
+                    "command": "set_model",
+                    "success": true,
+                    "data": model.responseObject()
+                ])
+            } else {
+                emit([
+                    "id": object["id"] as? String ?? "set-model",
+                    "type": "response",
+                    "command": "set_model",
+                    "success": false,
+                    "error": "Model not found: \(provider)/\(modelID)"
+                ])
+            }
         case "prompt":
             emit([
                 "type": "response",

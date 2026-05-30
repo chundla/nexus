@@ -356,6 +356,40 @@ struct StructuredSessionPresentationTests {
         #expect(menu.commands.first?.summary == "CLI UX/spec: args, flags, help, output, errors, config, dry-run.")
     }
 
+    @Test func structuredSessionSlashCommandMenuUsesStaticPiModelCommandAndLiveModelSuggestions() {
+        let screen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            ),
+            transcript: "",
+            slashCommands: [
+                SessionSlashCommand(
+                    name: "model anthropic/claude-sonnet-4-20250514",
+                    displayName: "model anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4",
+                    insertionText: "model anthropic/claude-sonnet-4-20250514",
+                    suggestionQueryPrefix: "model ",
+                    description: "Switch to anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4.",
+                    source: .builtIn
+                ),
+                SessionSlashCommand(
+                    name: "skill:tdd",
+                    description: "Test-driven development with red-green-refactor loop.",
+                    source: .skill,
+                    location: .project,
+                    path: "/tmp/project/.pi/skills/tdd/SKILL.md"
+                )
+            ]
+        )
+
+        #expect(structuredSessionSlashCommandMenuPresentation(for: "/", screen: screen).commands.map(\.displayText).contains("/model <provider>/<model>"))
+        #expect(structuredSessionSlashCommandMenuPresentation(for: "/", screen: screen).commands.contains(where: { $0.displayText.contains("Claude Sonnet 4") }) == false)
+        #expect(structuredSessionSlashCommandMenuPresentation(for: "/model anth", screen: screen).commands.map(\.displayText) == ["/model anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4"])
+    }
+
     @Test func structuredSessionSlashCommandMenuUsesLiveCodexModelCommandsOnlyAfterModelPrefix() {
         let screen = SessionScreen(
             session: Session(

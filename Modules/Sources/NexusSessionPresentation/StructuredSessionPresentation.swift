@@ -356,7 +356,17 @@ public func structuredSessionSlashCommands(for screen: SessionScreen) -> [Struct
             liveCommands: (screen.slashCommands ?? []).map(structuredSessionSlashCommand(from:))
         )
     case .pi:
-        return (screen.slashCommands ?? []).map(structuredSessionSlashCommand(from:))
+        return mergeStructuredSessionSlashCommands(
+            staticCommands: [
+                StructuredSessionSlashCommand(
+                    matchText: "model",
+                    displayText: "/model <provider>/<model>",
+                    insertionText: "/model ",
+                    summary: "Switch Pi to a configured provider/model."
+                )
+            ],
+            liveCommands: (screen.slashCommands ?? []).map(structuredSessionSlashCommand(from:))
+        )
     case .ibmBob:
         return mergeStructuredSessionSlashCommands(
             staticCommands: [
