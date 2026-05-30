@@ -29,6 +29,12 @@ protocol SessionInteractionManaging: AnyObject {
         approvalRequestID: UUID,
         decision: ApprovalRequestDecision
     ) async throws -> SessionScreen
+    func respondToRemoteExtensionDialog(
+        sessionID: UUID,
+        pairedDeviceID: UUID,
+        dialogID: String,
+        response: SessionExtensionUIDialogResponse
+    ) async throws -> SessionScreen
     func sendRemoteSessionText(sessionID: UUID, pairedDeviceID: UUID, text: String) async throws -> SessionScreen
     func sendRemoteSessionInputKey(
         sessionID: UUID,
@@ -185,6 +191,22 @@ final class ServiceSessionInteraction: SessionInteractionManaging, @unchecked Se
         )
         return dependencies.normalizedSessionScreen(
             try dependencies.respondToApprovalRequest(approvalRequestID, decision, resolvedSession)
+        )
+    }
+
+    func respondToRemoteExtensionDialog(
+        sessionID: UUID,
+        pairedDeviceID: UUID,
+        dialogID: String,
+        response: SessionExtensionUIDialogResponse
+    ) async throws -> SessionScreen {
+        let resolvedSession = try await readyRemoteControlledSession(
+            sessionID: sessionID,
+            pairedDeviceID: pairedDeviceID,
+            controllerError: .remoteExtensionDialogControllerRequired
+        )
+        return dependencies.normalizedSessionScreen(
+            try dependencies.respondToExtensionDialog(dialogID, response, resolvedSession)
         )
     }
 

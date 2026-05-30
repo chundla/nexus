@@ -370,6 +370,26 @@ nonisolated final class RemotePairingServer: @unchecked Sendable {
         }
 
         if request.method == "POST",
+           let extensionDialogResponseRequest = extensionDialogResponseRequest(from: request) {
+            await respondToAuthorizedRequest(
+                operation: .respondToExtensionDialog,
+                request: request,
+                over: connection,
+                sessionID: extensionDialogResponseRequest.sessionID
+            ) { [self] in
+                let pairedDeviceID = try self.pairedDeviceID(from: request)
+                let response = try JSONDecoder().decode(SessionExtensionUIDialogResponse.self, from: request.body)
+                return try await self.client.respondToRemoteExtensionDialog(
+                    sessionID: extensionDialogResponseRequest.sessionID,
+                    pairedDeviceID: pairedDeviceID,
+                    dialogID: extensionDialogResponseRequest.dialogID,
+                    response: response
+                )
+            }
+            return
+        }
+
+        if request.method == "POST",
            let sessionTextRequest = sessionTextRequest(from: request) {
             await respondToAuthorizedRequest(
                 operation: .sendSessionText,
@@ -695,6 +715,20 @@ nonisolated final class RemotePairingServer: @unchecked Sendable {
         return SessionApprovalDecisionRequest(sessionID: sessionID, approvalRequestID: approvalRequestID)
     }
 
+    private func extensionDialogResponseRequest(from request: ParsedRequest) -> SessionExtensionDialogResponseRequest? {
+        let components = request.path.split(separator: "/")
+        guard components.count == 6,
+              components[0] == "remote-client",
+              components[1] == "sessions",
+              let sessionID = UUID(uuidString: String(components[2])),
+              components[3] == "extension-dialogs",
+              components[5] == "response" else {
+            return nil
+        }
+
+        return SessionExtensionDialogResponseRequest(sessionID: sessionID, dialogID: String(components[4]))
+    }
+
     private func sessionTextRequest(from request: ParsedRequest) -> SessionScreenRequest? {
         let components = request.path.split(separator: "/")
         guard components.count == 4,
@@ -954,6 +988,11 @@ private struct SessionScreenControlRequest {
 private struct SessionApprovalDecisionRequest {
     let sessionID: UUID
     let approvalRequestID: UUID
+}
+
+private struct SessionExtensionDialogResponseRequest {
+    let sessionID: UUID
+    let dialogID: String
 }
 
 private enum RemotePairingServerError: LocalizedError {

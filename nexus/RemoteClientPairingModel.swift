@@ -18,6 +18,7 @@ protocol RemotePairingClient {
     func releaseSessionControl(for pairedMac: PairedMac, sessionID: UUID) async throws -> SessionScreen
     func sendSessionInput(for pairedMac: PairedMac, sessionID: UUID, text: String) async throws -> SessionScreen
     func respondToApprovalRequest(for pairedMac: PairedMac, sessionID: UUID, approvalRequestID: UUID, decision: ApprovalRequestDecision) async throws -> SessionScreen
+    func respondToExtensionDialog(for pairedMac: PairedMac, sessionID: UUID, dialogID: String, response: SessionExtensionUIDialogResponse) async throws -> SessionScreen
     func sendSessionText(for pairedMac: PairedMac, sessionID: UUID, text: String) async throws -> SessionScreen
     func sendSessionInputKey(for pairedMac: PairedMac, sessionID: UUID, key: SessionInputKey) async throws -> SessionScreen
     func observeSessionScreen(
@@ -608,6 +609,39 @@ final class RemoteClientPairingModel {
         }
     }
 
+    func respondToFocusedRemoteSessionExtensionDialog(_ dialogID: String, response: SessionExtensionUIDialogResponse) async throws {
+        guard let pairedMac = activePairedMac,
+              let sessionID = focusedSessionID else {
+            throw RemoteClientPairingModelError.focusedSessionUnavailable
+        }
+        guard focusedSessionIsController else {
+            throw RemoteClientPairingModelError.extensionDialogControllerRequired
+        }
+
+        let screenBeforeRequest = focusedSessionScreen
+
+        do {
+            let screen = try await client.respondToExtensionDialog(
+                for: pairedMac,
+                sessionID: sessionID,
+                dialogID: dialogID,
+                response: response
+            )
+            applyFocusedSessionInputResponse(
+                screen,
+                sessionID: sessionID,
+                screenBeforeRequest: screenBeforeRequest
+            )
+        } catch {
+            throw loggedRemoteActionError(
+                error,
+                operation: .respondToExtensionDialog,
+                pairedMac: pairedMac,
+                sessionID: sessionID
+            )
+        }
+    }
+
     func sendTextToFocusedRemoteSession(_ text: String) async throws {
         guard let pairedMac = activePairedMac,
               let sessionID = focusedSessionID else {
@@ -1161,6 +1195,7 @@ enum RemoteClientPairingModelError: LocalizedError {
     case controllerRequired
     case sessionInputControllerRequired
     case approvalRequestControllerRequired
+    case extensionDialogControllerRequired
     case actionRecovery(String)
 
     var errorDescription: String? {
@@ -1177,6 +1212,8 @@ enum RemoteClientPairingModelError: LocalizedError {
             "Take Controller on this iPhone before sending Session input"
         case .approvalRequestControllerRequired:
             "Take Controller on this iPhone before responding to Approval Requests"
+        case .extensionDialogControllerRequired:
+            "Take Controller on this iPhone before responding to Extension UI dialogs"
         case .actionRecovery(let message):
             message
         }

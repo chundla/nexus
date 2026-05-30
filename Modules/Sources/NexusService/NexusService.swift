@@ -183,6 +183,7 @@ enum NexusSessionControlError: LocalizedError {
     case remoteControllerRequired
     case remoteSessionInputControllerRequired
     case remoteApprovalRequestControllerRequired
+    case remoteExtensionDialogControllerRequired
 
     var errorDescription: String? {
         switch self {
@@ -192,6 +193,8 @@ enum NexusSessionControlError: LocalizedError {
             "Take Controller on this iPhone before sending Session input."
         case .remoteApprovalRequestControllerRequired:
             "Take Controller on this iPhone before responding to Approval Requests."
+        case .remoteExtensionDialogControllerRequired:
+            "Take Controller on this iPhone before responding to Extension UI dialogs."
         }
     }
 }
@@ -2083,6 +2086,36 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             pairedDeviceID: pairedDeviceID,
             approvalRequestID: approvalRequestID,
             decision: decision
+        )
+    }
+
+    func respondToRemoteExtensionDialog(
+        sessionID: UUID,
+        pairedDeviceID: UUID,
+        dialogID: String,
+        response: SessionExtensionUIDialogResponse
+    ) throws -> SessionScreen {
+        try AsyncOperationSupport.blocking {
+            try await self.respondToRemoteExtensionDialog(
+                sessionID: sessionID,
+                pairedDeviceID: pairedDeviceID,
+                dialogID: dialogID,
+                response: response
+            )
+        }
+    }
+
+    func respondToRemoteExtensionDialog(
+        sessionID: UUID,
+        pairedDeviceID: UUID,
+        dialogID: String,
+        response: SessionExtensionUIDialogResponse
+    ) async throws -> SessionScreen {
+        try await sessionInteraction.respondToRemoteExtensionDialog(
+            sessionID: sessionID,
+            pairedDeviceID: pairedDeviceID,
+            dialogID: dialogID,
+            response: response
         )
     }
 
@@ -4130,6 +4163,21 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol, @unchecked Senda
                     pairedDeviceID: self.resolveUUID(pairedDeviceID),
                     approvalRequestID: self.resolveUUID(approvalRequestID),
                     decision: resolvedDecision
+                )
+            },
+            reply: reply
+        )
+    }
+
+    func respondToRemoteExtensionDialog(sessionID: String, pairedDeviceID: String, dialogID: String, responsePayload: Data, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(
+            with: { [self] in
+                let response = try JSONDecoder().decode(SessionExtensionUIDialogResponse.self, from: responsePayload)
+                return try await self.service.respondToRemoteExtensionDialog(
+                    sessionID: self.resolveUUID(sessionID),
+                    pairedDeviceID: self.resolveUUID(pairedDeviceID),
+                    dialogID: dialogID,
+                    response: response
                 )
             },
             reply: reply

@@ -1927,6 +1927,160 @@ struct RemotePairingNetworkTests {
         ])
     }
 
+    @Test func remotePiReconnectRecoversProviderEventsAndExtensionUIWhileControllerOwnsDialogResponses() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let transport = RemotePairingExtensionUIPiRPCTransport()
+        let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
+            transport
+        })
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthFacts(
+                executableResolver: RemotePairingTestExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
+                commandRunner: RemotePairingTestCommandRunner(results: [
+                    RemotePairingTestCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
+                    RemotePairingTestCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                ]),
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+            ),
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
+
+        _ = try await client.setRemoteAccessEnabled(true)
+        let pairing = try await client.startPairing()
+        let group = try await client.createWorkspaceGroup(name: "Client Work")
+        let workspace = try await client.createLocalWorkspace(
+            name: "Nexus",
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+
+        let remoteClient = RemotePairingHTTPClient()
+        let pairedMac = try await remoteClient.completePairing(
+            host: server.displayHost,
+            port: server.port,
+            pairingCode: pairing.code,
+            deviceName: "Chris’s iPhone"
+        )
+        let session = try await remoteClient.launchOrResumeDefaultSession(
+            for: pairedMac,
+            workspaceID: workspace.id,
+            providerID: .pi
+        )
+
+        var observedScreens: [SessionScreen] = []
+        var observation = try await remoteClient.observeSessionScreen(
+            for: pairedMac,
+            sessionID: session.id,
+            onUpdate: { screen in
+                Task { @MainActor in
+                    observedScreens.append(screen)
+                }
+            },
+            onDisconnect: { _ in }
+        )
+        defer {
+            Task {
+                await observation.cancel()
+            }
+        }
+
+        _ = try await waitForObservedScreen {
+            observedScreens.last
+        }
+
+        _ = try await remoteClient.takeSessionControl(for: pairedMac, sessionID: session.id, columns: 44, rows: 12)
+        let pendingScreen = try await remoteClient.sendSessionInput(for: pairedMac, sessionID: session.id, text: "deploy")
+        let dialog = try #require(pendingScreen.extensionUI?.pendingDialogs.first)
+
+        #expect(pendingScreen.providerEvents.contains(where: { $0.type == "extension_ui_request" }))
+        #expect(dialog.title == "Deploy to production?")
+
+        transport.emitFireAndForgetUpdates()
+
+        let observedPendingScreen = try await waitForObservedScreen {
+            observedScreens.last {
+                $0.extensionUI?.title == "Pi Demo"
+                    && $0.extensionUI?.pendingDialogs.first?.id == dialog.id
+                    && $0.providerEvents.contains(where: { $0.type == "extension_ui_request" })
+            }
+        }
+        let fetchedPendingScreen = try await remoteClient.fetchSessionScreen(for: pairedMac, sessionID: session.id)
+
+        #expect(observedPendingScreen.extensionUI?.statuses == [SessionExtensionUIStatus(key: "rpc-demo", text: "Turn ready")])
+        #expect(fetchedPendingScreen.extensionUI?.widgets == [SessionExtensionUIWidget(key: "rpc-demo", lines: ["Ready.", "Waiting for input"], placement: .belowEditor)])
+        #expect(fetchedPendingScreen.extensionUI?.editorText == "This text was set by the rpc-demo extension.")
+
+        await observation.cancel()
+
+        var reconnectedScreens: [SessionScreen] = []
+        observation = try await remoteClient.observeSessionScreen(
+            for: pairedMac,
+            sessionID: session.id,
+            onUpdate: { screen in
+                Task { @MainActor in
+                    reconnectedScreens.append(screen)
+                }
+            },
+            onDisconnect: { _ in }
+        )
+
+        let recoveredScreen = try await waitForObservedScreen {
+            reconnectedScreens.last {
+                $0.extensionUI?.title == "Pi Demo"
+                    && $0.extensionUI?.pendingDialogs.first?.id == dialog.id
+                    && $0.providerEvents.contains(where: { $0.type == "extension_ui_request" })
+            }
+        }
+
+        #expect(recoveredScreen.extensionUI?.notifications.first?.message == "Editor prefilled")
+
+        _ = try await remoteClient.releaseSessionControl(for: pairedMac, sessionID: session.id)
+
+        do {
+            _ = try await remoteClient.respondToExtensionDialog(
+                for: pairedMac,
+                sessionID: session.id,
+                dialogID: dialog.id,
+                response: .confirmed(true)
+            )
+            Issue.record("Expected Pi Extension UI dialog responses on iPhone to require Controller first")
+        } catch {
+            #expect(error.localizedDescription == "Take Controller on this iPhone before responding to Extension UI dialogs.")
+        }
+
+        _ = try await remoteClient.takeSessionControl(for: pairedMac, sessionID: session.id, columns: 44, rows: 12)
+        let approvedScreen = try await remoteClient.respondToExtensionDialog(
+            for: pairedMac,
+            sessionID: session.id,
+            dialogID: dialog.id,
+            response: .confirmed(true)
+        )
+        let observedApprovedScreen = try await waitForObservedScreen {
+            reconnectedScreens.last {
+                $0.session.id == session.id
+                    && ($0.extensionUI?.pendingDialogs.isEmpty ?? true)
+                    && $0.activityItems.contains(where: { $0.text == "Pi: Deployment approved" })
+            }
+        }
+
+        #expect(approvedScreen.extensionUI?.pendingDialogs.isEmpty == true)
+        #expect(approvedScreen.activityItems.suffix(1).map { $0.text } == ["Pi: Deployment approved"])
+        #expect(observedApprovedScreen.transcript == "> deploy\nDeployment approved")
+
+        let fetchedApprovedScreen = try await remoteClient.fetchSessionScreen(for: pairedMac, sessionID: session.id)
+        #expect(fetchedApprovedScreen.providerEvents.contains(where: { $0.type == "extension_ui_request" }))
+        #expect(fetchedApprovedScreen.extensionUI?.statuses == [SessionExtensionUIStatus(key: "rpc-demo", text: "Turn ready")])
+    }
+
     @Test func completesFirstTimePairingOverDedicatedNetworkAPI() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)
@@ -2117,6 +2271,123 @@ private final class RemotePairingStreamingPiRPCTransport: PiRPCTransporting, @un
 
     func terminate() throws {
         terminationHandler?(0)
+    }
+
+    private func emit(_ object: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: object),
+              let line = String(data: data, encoding: .utf8) else {
+            return
+        }
+        stdoutLineHandler?(line)
+    }
+}
+
+private final class RemotePairingExtensionUIPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
+    private var pendingPrompt: String?
+    private var stdoutLineHandler: (@Sendable (String) -> Void)?
+    private var terminationHandler: (@Sendable (Int32) -> Void)?
+
+    func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
+        stdoutLineHandler = handler
+    }
+
+    func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?) {
+        terminationHandler = handler
+    }
+
+    func start() throws {}
+
+    func sendLine(_ line: String) throws {
+        guard let data = line.data(using: .utf8),
+              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = object["type"] as? String else {
+            return
+        }
+
+        switch type {
+        case "get_state":
+            emit([
+                "id": object["id"] as? String ?? "state",
+                "type": "response",
+                "command": "get_state",
+                "success": true,
+                "data": ["sessionId": "pi-session-1"]
+            ])
+        case "prompt":
+            pendingPrompt = object["message"] as? String
+            emit([
+                "type": "response",
+                "command": "prompt",
+                "success": true
+            ])
+            emit([
+                "type": "extension_ui_request",
+                "id": "11111111-1111-1111-1111-111111111111",
+                "method": "confirm",
+                "title": "Deploy to production?",
+                "message": "Pi wants to run deploy --prod.",
+                "timeout": 5000
+            ])
+        case "extension_ui_response":
+            let confirmed = object["confirmed"] as? Bool ?? false
+            pendingPrompt = nil
+            emitTurnEnd(text: confirmed ? "Deployment approved" : "Deployment denied")
+        default:
+            return
+        }
+    }
+
+    func terminate() throws {
+        terminationHandler?(0)
+    }
+
+    func emitFireAndForgetUpdates() {
+        emit([
+            "type": "extension_ui_request",
+            "id": "notify-1",
+            "method": "notify",
+            "message": "Editor prefilled",
+            "notifyType": "info"
+        ])
+        emit([
+            "type": "extension_ui_request",
+            "id": "status-1",
+            "method": "setStatus",
+            "statusKey": "rpc-demo",
+            "statusText": "Turn ready"
+        ])
+        emit([
+            "type": "extension_ui_request",
+            "id": "widget-1",
+            "method": "setWidget",
+            "widgetKey": "rpc-demo",
+            "widgetLines": ["Ready.", "Waiting for input"],
+            "widgetPlacement": "belowEditor"
+        ])
+        emit([
+            "type": "extension_ui_request",
+            "id": "title-1",
+            "method": "setTitle",
+            "title": "Pi Demo"
+        ])
+        emit([
+            "type": "extension_ui_request",
+            "id": "editor-text-1",
+            "method": "set_editor_text",
+            "text": "This text was set by the rpc-demo extension."
+        ])
+    }
+
+    private func emitTurnEnd(text: String) {
+        emit([
+            "type": "turn_end",
+            "message": [
+                "content": [[
+                    "type": "text",
+                    "text": text
+                ]]
+            ]
+        ])
     }
 
     private func emit(_ object: [String: Any]) {

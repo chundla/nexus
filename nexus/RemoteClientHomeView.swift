@@ -1412,6 +1412,7 @@ private struct RemoteSessionScreenView: View {
     @State private var isShowingStopConfirmation = false
     @State private var activeAction: RemoteSessionAction?
     @State private var activeApprovalRequestID: UUID?
+    @State private var activeExtensionDialogID: String?
     @State private var presentedError: RemoteClientHomePresentedError?
     @FocusState private var isStructuredPromptFocused: Bool
     @FocusState private var isTerminalInputFocused: Bool
@@ -1457,12 +1458,24 @@ private struct RemoteSessionScreenView: View {
         )
     }
 
+    private var extensionUI: SessionExtensionUIState? {
+        screen?.extensionUI
+    }
+
+    private var aboveEditorWidgets: [SessionExtensionUIWidget] {
+        extensionUI?.widgets.filter { $0.placement == .aboveEditor } ?? []
+    }
+
+    private var belowEditorWidgets: [SessionExtensionUIWidget] {
+        extensionUI?.widgets.filter { $0.placement == .belowEditor } ?? []
+    }
+
     private var supportsFocusedSessionSurface: Bool {
         surfacePresentation?.surfaceSupport == .supported
     }
 
     private var isPerformingAction: Bool {
-        activeAction != nil || activeApprovalRequestID != nil
+        activeAction != nil || activeApprovalRequestID != nil || activeExtensionDialogID != nil
     }
 
     private var accent: Color {
@@ -1698,6 +1711,10 @@ private struct RemoteSessionScreenView: View {
                         iosStructuredSessionSlashCommandMenu(presentation.slashCommandMenu)
                     }
 
+                    if aboveEditorWidgets.isEmpty == false {
+                        structuredSessionExtensionWidgetsView(aboveEditorWidgets)
+                    }
+
                     HStack(alignment: .bottom, spacing: 10) {
                         TextField(presentation.composer.placeholder, text: $structuredPrompt, axis: .vertical)
                             .focused($isStructuredPromptFocused)
@@ -1730,6 +1747,10 @@ private struct RemoteSessionScreenView: View {
                         }
                     }
                     .animation(.easeOut(duration: 0.16), value: presentation.sendAffordance.isVisible)
+
+                    if belowEditorWidgets.isEmpty == false {
+                        structuredSessionExtensionWidgetsView(belowEditorWidgets)
+                    }
                 } else {
                     HStack(spacing: 12) {
                         Text(presentation.composer.disabledReason ?? "Take over to reply from this iPhone.")
@@ -1972,12 +1993,25 @@ private struct RemoteSessionScreenView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
+                    if let extensionUI, extensionUI.pendingDialogs.isEmpty == false {
+                        VStack(alignment: .leading, spacing: 10) {
+                            ForEach(extensionUI.pendingDialogs) { dialog in
+                                structuredSessionExtensionDialogView(dialog)
+                            }
+                        }
+                    }
+
                     if presentation.feed.pendingApprovalRequests.isEmpty == false {
                         VStack(alignment: .leading, spacing: 10) {
                             ForEach(presentation.feed.pendingApprovalRequests) { request in
                                 structuredSessionApprovalRequestView(request, presentation: presentation.approvalRequest)
                             }
                         }
+                    }
+
+                    if let extensionUI,
+                       extensionUI.title != nil || extensionUI.statuses.isEmpty == false || extensionUI.notifications.isEmpty == false {
+                        structuredSessionExtensionSummaryView(extensionUI)
                     }
 
                     if presentation.feed.activityRows.isEmpty {
@@ -2018,6 +2052,16 @@ private struct RemoteSessionScreenView: View {
                 }
             }
             .onChange(of: presentation.feed.pendingApprovalRequests.count) { _, _ in
+                withAnimation(.easeOut(duration: 0.18)) {
+                    proxy.scrollTo(conversationBottomID, anchor: .bottom)
+                }
+            }
+            .onChange(of: extensionUI?.pendingDialogs.count ?? 0) { _, _ in
+                withAnimation(.easeOut(duration: 0.18)) {
+                    proxy.scrollTo(conversationBottomID, anchor: .bottom)
+                }
+            }
+            .onChange(of: extensionUI?.notifications.count ?? 0) { _, _ in
                 withAnimation(.easeOut(duration: 0.18)) {
                     proxy.scrollTo(conversationBottomID, anchor: .bottom)
                 }
@@ -2198,6 +2242,113 @@ private struct RemoteSessionScreenView: View {
         }
     }
 
+    private func structuredSessionExtensionDialogView(_ dialog: SessionExtensionUIDialog) -> some View {
+        RemoteStructuredSessionExtensionDialogCard(
+            dialog: dialog,
+            actionsAreEnabled: model.focusedSessionIsController,
+            isPerformingAction: isPerformingAction,
+            actionTitle: controllerActionTitle,
+            onTakeOver: toggleControllerState,
+            onRespond: { response in
+                respondToStructuredSessionExtensionDialog(dialog.id, response: response)
+            }
+        )
+    }
+
+    private func structuredSessionExtensionSummaryView(_ extensionUI: SessionExtensionUIState) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let title = extensionUI.title, title.isEmpty == false {
+                Text(title)
+                    .font(NexusIOSTheme.bodyFont(15, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+
+            if extensionUI.statuses.isEmpty == false {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Status")
+                        .font(NexusIOSTheme.bodyFont(11, relativeTo: .caption, weight: .semibold))
+                        .foregroundStyle(NexusIOSTheme.mutedText)
+
+                    ForEach(extensionUI.statuses) { status in
+                        Text(status.text)
+                            .font(NexusIOSTheme.bodyFont(12))
+                            .foregroundStyle(.white.opacity(0.92))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.white.opacity(0.05), in: Capsule())
+                    }
+                }
+            }
+
+            if extensionUI.notifications.isEmpty == false {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Notifications")
+                        .font(NexusIOSTheme.bodyFont(11, relativeTo: .caption, weight: .semibold))
+                        .foregroundStyle(NexusIOSTheme.mutedText)
+
+                    ForEach(extensionUI.notifications.suffix(5)) { notification in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(notification.kind.rawValue.capitalized)
+                                .font(NexusIOSTheme.bodyFont(10, relativeTo: .caption, weight: .semibold))
+                                .foregroundStyle(structuredSessionExtensionNotificationColor(notification.kind))
+                            Text(notification.message)
+                                .font(NexusIOSTheme.bodyFont(12))
+                                .foregroundStyle(.white.opacity(0.92))
+                                .textSelection(.enabled)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(NexusIOSTheme.teal.opacity(0.22))
+        }
+    }
+
+    private func structuredSessionExtensionWidgetsView(_ widgets: [SessionExtensionUIWidget]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(widgets) { widget in
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(widget.key)
+                        .font(NexusIOSTheme.bodyFont(10, relativeTo: .caption, weight: .semibold))
+                        .foregroundStyle(NexusIOSTheme.mutedText)
+                    ForEach(Array(widget.lines.enumerated()), id: \.offset) { _, line in
+                        Text(line)
+                            .font(NexusIOSTheme.bodyFont(12))
+                            .foregroundStyle(.white.opacity(0.92))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                }
+            }
+        }
+    }
+
+    private func structuredSessionExtensionNotificationColor(_ kind: SessionExtensionUINotificationKind) -> Color {
+        switch kind {
+        case .info:
+            NexusIOSTheme.teal
+        case .warning:
+            NexusIOSTheme.gold
+        case .error:
+            NexusIOSTheme.coral
+        }
+    }
+
     private func structuredSessionActivityColor(for emphasis: StructuredSessionActivityEmphasis) -> Color {
         switch emphasis {
         case .neutral:
@@ -2238,6 +2389,18 @@ private struct RemoteSessionScreenView: View {
             defer { activeApprovalRequestID = nil }
             do {
                 try await model.respondToFocusedRemoteSessionApprovalRequest(approvalRequestID, decision: decision)
+            } catch {
+                presentedError = RemoteClientHomePresentedError(message: error.localizedDescription)
+            }
+        }
+    }
+
+    private func respondToStructuredSessionExtensionDialog(_ dialogID: String, response: SessionExtensionUIDialogResponse) {
+        activeExtensionDialogID = dialogID
+        Task {
+            defer { activeExtensionDialogID = nil }
+            do {
+                try await model.respondToFocusedRemoteSessionExtensionDialog(dialogID, response: response)
             } catch {
                 presentedError = RemoteClientHomePresentedError(message: error.localizedDescription)
             }
@@ -2393,6 +2556,155 @@ private struct RemoteSessionScreenView: View {
             green: rgb.1 / 255,
             blue: rgb.2 / 255
         )
+    }
+}
+
+private struct RemoteStructuredSessionExtensionDialogCard: View {
+    let dialog: SessionExtensionUIDialog
+    let actionsAreEnabled: Bool
+    let isPerformingAction: Bool
+    let actionTitle: String
+    let onTakeOver: () -> Void
+    let onRespond: (SessionExtensionUIDialogResponse) -> Void
+
+    @State private var selectedOption: String
+    @State private var textValue: String
+
+    init(
+        dialog: SessionExtensionUIDialog,
+        actionsAreEnabled: Bool,
+        isPerformingAction: Bool,
+        actionTitle: String,
+        onTakeOver: @escaping () -> Void,
+        onRespond: @escaping (SessionExtensionUIDialogResponse) -> Void
+    ) {
+        self.dialog = dialog
+        self.actionsAreEnabled = actionsAreEnabled
+        self.isPerformingAction = isPerformingAction
+        self.actionTitle = actionTitle
+        self.onTakeOver = onTakeOver
+        self.onRespond = onRespond
+        _selectedOption = State(initialValue: dialog.options.first ?? "")
+        _textValue = State(initialValue: dialog.prefill ?? "")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Extension UI", systemImage: "puzzlepiece.extension.fill")
+                .font(NexusIOSTheme.bodyFont(14, weight: .semibold))
+                .foregroundStyle(NexusIOSTheme.teal)
+
+            Text(dialog.title)
+                .font(NexusIOSTheme.bodyFont(15, weight: .semibold))
+                .foregroundStyle(.white)
+
+            if let message = dialog.message, message.isEmpty == false {
+                Text(message)
+                    .font(NexusIOSTheme.bodyFont(14))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .textSelection(.enabled)
+            }
+
+            switch dialog.kind {
+            case .select:
+                Picker("Options", selection: $selectedOption) {
+                    ForEach(dialog.options, id: \.self) { option in
+                        Text(option).tag(option)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                actionRow(
+                    primaryTitle: "Select",
+                    primaryRole: .value(selectedOption),
+                    primaryDisabled: selectedOption.isEmpty
+                )
+            case .confirm:
+                actionRow(
+                    cancelTitle: "Cancel",
+                    cancelRole: .confirmed(false),
+                    primaryTitle: "Confirm",
+                    primaryRole: .confirmed(true),
+                    primaryDisabled: false
+                )
+            case .input:
+                TextField(dialog.placeholder ?? dialog.title, text: $textValue, axis: .vertical)
+                    .lineLimit(1 ... 4)
+                    .nexusIOSTextField(tint: NexusIOSTheme.teal)
+
+                actionRow(
+                    primaryTitle: "Submit",
+                    primaryRole: .value(textValue),
+                    primaryDisabled: false
+                )
+            case .editor:
+                TextEditor(text: $textValue)
+                    .font(NexusIOSTheme.bodyFont(14))
+                    .frame(minHeight: 140)
+                    .padding(8)
+                    .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(NexusIOSTheme.softLine, lineWidth: 1)
+                    }
+
+                actionRow(
+                    primaryTitle: "Submit",
+                    primaryRole: .value(textValue),
+                    primaryDisabled: false
+                )
+            }
+
+            if let timeoutMilliseconds = dialog.timeoutMilliseconds {
+                Text("Auto-cancels after \(timeoutMilliseconds / 1000)s")
+                    .font(NexusIOSTheme.bodyFont(11, relativeTo: .caption))
+                    .foregroundStyle(NexusIOSTheme.mutedText)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(NexusIOSTheme.teal.opacity(0.22))
+        }
+    }
+
+    @ViewBuilder
+    private func actionRow(
+        cancelTitle: String = "Cancel",
+        cancelRole: SessionExtensionUIDialogResponse = .cancelled,
+        primaryTitle: String,
+        primaryRole: SessionExtensionUIDialogResponse,
+        primaryDisabled: Bool
+    ) -> some View {
+        if actionsAreEnabled {
+            HStack(spacing: 10) {
+                Button(cancelTitle) {
+                    onRespond(cancelRole)
+                }
+                .buttonStyle(NexusIOSSecondaryButtonStyle())
+                .disabled(isPerformingAction)
+
+                Button(primaryTitle) {
+                    onRespond(primaryRole)
+                }
+                .buttonStyle(NexusIOSPrimaryButtonStyle())
+                .disabled(isPerformingAction || primaryDisabled)
+            }
+        } else {
+            HStack {
+                Text("Take Controller to respond to Extension UI dialogs from this iPhone.")
+                    .font(NexusIOSTheme.bodyFont(12, relativeTo: .caption))
+                    .foregroundStyle(NexusIOSTheme.mutedText)
+                Spacer(minLength: 0)
+                Button(actionTitle) {
+                    onTakeOver()
+                }
+                .buttonStyle(NexusIOSPrimaryButtonStyle())
+                .disabled(isPerformingAction)
+            }
+        }
     }
 }
 

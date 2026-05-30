@@ -67,6 +67,7 @@ public protocol SessionScreenObservation: Sendable {
     func releaseRemoteSessionControl(sessionID: String, pairedDeviceID: String, reply: @escaping (Data?, NSString?) -> Void)
     func sendRemoteSessionInput(sessionID: String, pairedDeviceID: String, text: String, reply: @escaping (Data?, NSString?) -> Void)
     func respondToRemoteApprovalRequest(sessionID: String, pairedDeviceID: String, approvalRequestID: String, decision: String, reply: @escaping (Data?, NSString?) -> Void)
+    func respondToRemoteExtensionDialog(sessionID: String, pairedDeviceID: String, dialogID: String, responsePayload: Data, reply: @escaping (Data?, NSString?) -> Void)
     func sendRemoteSessionText(sessionID: String, pairedDeviceID: String, text: String, reply: @escaping (Data?, NSString?) -> Void)
     func sendRemoteSessionInputKey(sessionID: String, pairedDeviceID: String, key: String, reply: @escaping (Data?, NSString?) -> Void)
 }
@@ -117,6 +118,7 @@ public protocol NexusServiceClient: Sendable {
     func releaseRemoteSessionControl(sessionID: UUID, pairedDeviceID: UUID) async throws -> SessionScreen
     func sendRemoteSessionInput(sessionID: UUID, pairedDeviceID: UUID, text: String) async throws -> SessionScreen
     func respondToRemoteApprovalRequest(sessionID: UUID, pairedDeviceID: UUID, approvalRequestID: UUID, decision: ApprovalRequestDecision) async throws -> SessionScreen
+    func respondToRemoteExtensionDialog(sessionID: UUID, pairedDeviceID: UUID, dialogID: String, response: SessionExtensionUIDialogResponse) async throws -> SessionScreen
     func sendRemoteSessionText(sessionID: UUID, pairedDeviceID: UUID, text: String) async throws -> SessionScreen
     func sendRemoteSessionInputKey(sessionID: UUID, pairedDeviceID: UUID, key: SessionInputKey) async throws -> SessionScreen
 }
@@ -130,6 +132,23 @@ public extension NexusServiceClient {
             domain: "NexusIPC",
             code: 1,
             userInfo: [NSLocalizedDescriptionKey: "This client does not support Extension UI dialogs."]
+        )
+    }
+
+    func respondToRemoteExtensionDialog(
+        sessionID: UUID,
+        pairedDeviceID: UUID,
+        dialogID: String,
+        response: SessionExtensionUIDialogResponse
+    ) async throws -> SessionScreen {
+        _ = sessionID
+        _ = pairedDeviceID
+        _ = dialogID
+        _ = response
+        throw NSError(
+            domain: "NexusIPC",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "This client does not support remote Extension UI dialogs."]
         )
     }
 }
@@ -521,6 +540,24 @@ public final class NexusIPCClient: NexusServiceClient, @unchecked Sendable {
                 pairedDeviceID: pairedDeviceID.uuidString,
                 approvalRequestID: approvalRequestID.uuidString,
                 decision: decision.rawValue,
+                reply: reply
+            )
+        }
+    }
+
+    nonisolated public func respondToRemoteExtensionDialog(
+        sessionID: UUID,
+        pairedDeviceID: UUID,
+        dialogID: String,
+        response: SessionExtensionUIDialogResponse
+    ) async throws -> SessionScreen {
+        let payload = try JSONEncoder().encode(response)
+        return try await requestDecodable { proxy, reply in
+            proxy.respondToRemoteExtensionDialog(
+                sessionID: sessionID.uuidString,
+                pairedDeviceID: pairedDeviceID.uuidString,
+                dialogID: dialogID,
+                responsePayload: payload,
                 reply: reply
             )
         }

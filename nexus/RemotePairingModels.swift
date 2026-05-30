@@ -249,6 +249,23 @@ nonisolated struct RemotePairingHTTPClient {
         return try JSONDecoder().decode(SessionScreen.self, from: data)
     }
 
+    func respondToExtensionDialog(
+        for pairedMac: PairedMac,
+        sessionID: UUID,
+        dialogID: String,
+        response: SessionExtensionUIDialogResponse
+    ) async throws -> SessionScreen {
+        var request = try authenticatedRequest(
+            for: pairedMac,
+            path: "/remote-client/sessions/\(sessionID.uuidString)/extension-dialogs/\(dialogID)/response"
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(response)
+        let data = try await send(request)
+        return try JSONDecoder().decode(SessionScreen.self, from: data)
+    }
+
     func sendSessionText(for pairedMac: PairedMac, sessionID: UUID, text: String) async throws -> SessionScreen {
         var request = try authenticatedRequest(
             for: pairedMac,

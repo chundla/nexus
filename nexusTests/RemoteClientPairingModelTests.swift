@@ -1021,6 +1021,167 @@ struct RemoteClientPairingModelTests {
         ])
     }
 
+    @Test func controllerCanRespondToFocusedRemotePiExtensionDialogAndKeepStructuredState() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Remote Pi",
+            kind: .remote,
+            folderPath: "/srv/api",
+            primaryGroupID: UUID(),
+            remoteHostID: UUID()
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let dialog = SessionExtensionUIDialog(
+            id: "dialog-1",
+            kind: .confirm,
+            title: "Deploy to production?",
+            message: "Pi wants to run deploy --prod.",
+            timeoutMilliseconds: 5000
+        )
+        let pairedDeviceID = UUID()
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: pairedDeviceID
+        )
+        let initialScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            controller: .mac,
+            transcript: "> deploy",
+            activityItems: [SessionActivityItem(kind: .message, text: "You: deploy")],
+            extensionUI: SessionExtensionUIState(
+                title: "Pi Demo",
+                pendingDialogs: [dialog],
+                notifications: [SessionExtensionUINotification(kind: .info, message: "Editor prefilled")],
+                statuses: [SessionExtensionUIStatus(key: "rpc-demo", text: "Turn ready")],
+                widgets: [SessionExtensionUIWidget(key: "rpc-demo", lines: ["Ready."], placement: .belowEditor)],
+                editorText: "This text was set by the rpc-demo extension."
+            ),
+            providerEvents: [
+                SessionProviderEvent(
+                    sequence: 1,
+                    providerID: .pi,
+                    type: "extension_ui_request",
+                    family: .unknown,
+                    rawPayload: "{\"type\":\"extension_ui_request\"}"
+                )
+            ],
+            isAgentTurnInProgress: true
+        )
+        let controlledScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            controller: .pairedDevice(pairedDeviceID),
+            transcript: initialScreen.transcript,
+            terminalColumns: 44,
+            terminalRows: 12,
+            activityItems: initialScreen.activityItems,
+            extensionUI: initialScreen.extensionUI,
+            providerEvents: initialScreen.providerEvents,
+            isAgentTurnInProgress: true
+        )
+        let updatedScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            controller: .pairedDevice(pairedDeviceID),
+            transcript: "> deploy\nDeployment approved",
+            terminalColumns: 44,
+            terminalRows: 12,
+            activityItems: initialScreen.activityItems + [SessionActivityItem(kind: .message, text: "Pi: Deployment approved")],
+            extensionUI: SessionExtensionUIState(
+                title: "Pi Demo",
+                notifications: [SessionExtensionUINotification(kind: .info, message: "Editor prefilled")],
+                statuses: [SessionExtensionUIStatus(key: "rpc-demo", text: "Turn ready")],
+                widgets: [SessionExtensionUIWidget(key: "rpc-demo", lines: ["Ready."], placement: .belowEditor)],
+                editorText: "This text was set by the rpc-demo extension."
+            ),
+            providerEvents: initialScreen.providerEvents,
+            isAgentTurnInProgress: false
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let client = StubRemotePairingClient(
+            result: pairedMac,
+            sessionScreen: initialScreen,
+            takeSessionControlResult: .success(controlledScreen),
+            respondToExtensionDialogResult: .success(updatedScreen)
+        )
+        let model = RemoteClientPairingModel(client: client, store: store)
+
+        await model.focusRemoteSession(sessionID: session.id)
+        try await model.takeFocusedRemoteSessionControl(columns: 44, rows: 12)
+        try await model.respondToFocusedRemoteSessionExtensionDialog(dialog.id, response: .confirmed(true))
+
+        #expect(client.requestLog.contains("respondToExtensionDialog"))
+        #expect(model.focusedSessionScreen == updatedScreen)
+        #expect(model.focusedSessionScreen?.providerEvents == initialScreen.providerEvents)
+        #expect(model.focusedSessionScreen?.extensionUI?.pendingDialogs.isEmpty == true)
+    }
+
+    @Test func respondingToFocusedRemotePiExtensionDialogRequiresController() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let dialog = SessionExtensionUIDialog(
+            id: "dialog-1",
+            kind: .confirm,
+            title: "Deploy to production?",
+            message: "Pi wants to run deploy --prod."
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let screen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "> deploy",
+            activityItems: [SessionActivityItem(kind: .message, text: "You: deploy")],
+            extensionUI: SessionExtensionUIState(pendingDialogs: [dialog])
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let client = StubRemotePairingClient(result: pairedMac, sessionScreen: screen)
+        let model = RemoteClientPairingModel(client: client, store: store)
+
+        await model.focusRemoteSession(sessionID: session.id)
+
+        do {
+            try await model.respondToFocusedRemoteSessionExtensionDialog(dialog.id, response: .confirmed(true))
+            Issue.record("Expected responding to a remote Pi Extension UI dialog as a Viewer to require taking Controller first")
+        } catch {
+            #expect(error.localizedDescription == "Take Controller on this iPhone before responding to Extension UI dialogs")
+        }
+    }
+
     @Test func respondingToFocusedRemoteSessionApprovalRequestRequiresController() async throws {
         let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -4329,6 +4490,7 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
     let takeSessionControlResult: Result<SessionScreen, any Error>?
     let releaseSessionControlResult: Result<SessionScreen, any Error>?
     let sendSessionInputResult: Result<SessionScreen, any Error>?
+    let respondToExtensionDialogResult: Result<SessionScreen, any Error>?
     let sendSessionTextResult: Result<SessionScreen, any Error>?
     let sendSessionInputKeyResult: Result<SessionScreen, any Error>?
     private let defaultSessionScreen: SessionScreen
@@ -4396,6 +4558,7 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
         takeSessionControlResult: Result<SessionScreen, any Error>? = nil,
         releaseSessionControlResult: Result<SessionScreen, any Error>? = nil,
         sendSessionInputResult: Result<SessionScreen, any Error>? = nil,
+        respondToExtensionDialogResult: Result<SessionScreen, any Error>? = nil,
         sendSessionTextResult: Result<SessionScreen, any Error>? = nil,
         sendSessionInputKeyResult: Result<SessionScreen, any Error>? = nil,
         emitsInitialObservedScreen: Bool = true,
@@ -4421,6 +4584,7 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
         self.takeSessionControlResult = takeSessionControlResult
         self.releaseSessionControlResult = releaseSessionControlResult
         self.sendSessionInputResult = sendSessionInputResult
+        self.respondToExtensionDialogResult = respondToExtensionDialogResult
         self.sendSessionTextResult = sendSessionTextResult
         self.sendSessionInputKeyResult = sendSessionInputKeyResult
         self.providerDetailResults = providerDetailResults
@@ -4593,6 +4757,45 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
                 )
             ],
             approvalRequests: updatedApprovalRequests
+        )
+    }
+
+    func respondToExtensionDialog(
+        for pairedMac: PairedMac,
+        sessionID: UUID,
+        dialogID: String,
+        response: SessionExtensionUIDialogResponse
+    ) async throws -> SessionScreen {
+        requestLog.append("respondToExtensionDialog")
+
+        if let respondToExtensionDialogResult {
+            return try respondToExtensionDialogResult.get()
+        }
+
+        let extensionUI = defaultSessionScreen.extensionUI.map {
+            SessionExtensionUIState(
+                title: $0.title,
+                pendingDialogs: $0.pendingDialogs.filter { $0.id != dialogID },
+                notifications: $0.notifications,
+                statuses: $0.statuses,
+                widgets: $0.widgets,
+                editorText: $0.editorText
+            )
+        }
+
+        return SessionScreen(
+            session: defaultSessionScreen.session,
+            primarySurface: defaultSessionScreen.primarySurface,
+            controller: .pairedDevice(pairedMac.pairedDeviceID ?? UUID()),
+            transcript: defaultSessionScreen.transcript,
+            terminalColumns: defaultSessionScreen.terminalColumns,
+            terminalRows: defaultSessionScreen.terminalRows,
+            activityItems: defaultSessionScreen.activityItems,
+            approvalRequests: defaultSessionScreen.approvalRequests,
+            extensionUI: extensionUI,
+            slashCommands: defaultSessionScreen.slashCommands,
+            providerEvents: defaultSessionScreen.providerEvents,
+            isAgentTurnInProgress: defaultSessionScreen.isAgentTurnInProgress
         )
     }
 
