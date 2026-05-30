@@ -116,6 +116,10 @@ _Avoid_: provider mode, renderer
 The status of whether a specific Nexus client can present and operate a Session's primary Session Surface.
 _Avoid_: Provider Capability, launchability
 
+**Session Presentation**:
+A client-side projection of a Session's primary Session Surface into shared render-ready state that platform-specific UI adapters consume.
+_Avoid_: view model, renderer helper, UI helper
+
 **Workspace Availability**:
 The status of whether a Workspace's target location is currently accessible and usable.
 _Avoid_: host validation, provider health
@@ -181,6 +185,7 @@ _Avoid_: stop, close
 - A **Session** always has one primary **Session Surface** and may expose additional secondary interaction capabilities
 - A **Session** always has a canonical shared activity stream regardless of its **Session Surface**
 - A **Session Surface** may have different **Session Surface Support** on different Nexus clients
+- A **Session Presentation** belongs to one client's projection of one **Session** primary **Session Surface**
 - The same **Provider** may expose different **Session Surfaces** on different **Workspace Targets** or runtimes
 - A remote **Provider Health** check resolves the **Provider** from the **Host** user's shell environments and records an absolute executable path for launch
 

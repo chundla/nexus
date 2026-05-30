@@ -48,9 +48,9 @@ Current bootstrap implementation:
 - `ProviderModule` is the service-owned seam between shared **Workspace Catalog** / **Session** lifecycle orchestration and provider-owned behavior.
 - ADR 0034 sets the target shape: one **Provider Module** seam per **Provider**, with no lasting `ServiceProviderAdapter` fallback.
 - the implementation plan lives in `docs/architecture/provider-module-deepening.md`.
-- Pi and Codex now route catalog reads, fresh-open planning, persisted relaunch planning, structured prelaunch surface selection, and module-owned launch/relaunch policy through dedicated provider modules.
-- the remaining follow-up is to move runtime construction, **Provider Health**, catalog text, and ready-without-runtime interaction bootstrap behind that seam, then delete shared `providerAdapter(...)` leakage.
-- issue #115 is the roadmap umbrella for that sequence.
+- Claude, Codex, IBM Bob, and Pi now route catalog reads, **Provider Health**, **Session** transition planning, runtime construction, prelaunch **Session Surface** selection, and module-owned launch/relaunch policy through dedicated provider modules.
+- shared code no longer relies on `ServiceProviderAdapter` or `providerAdapter(...)` fallbacks for Provider-specific behavior.
+- `docs/architecture/provider-module-deepening.md` remains the durable implementation sequence for how the seam was deepened.
 
 ### NexusDomain
 
@@ -81,7 +81,7 @@ Extract shared terminal model/runtime helpers once macOS+iOS renderers both exis
 
 ### NexusSessionPresentation
 
-Extract shared Session-stream and presentation helpers once structured Session UI exists for more than one Provider.
+Extract shared structured **Session Presentation** projection once the macOS and iPhone **Adapter**s both consume the same structured **Session Surface** rules. The implementation plan lives in `docs/architecture/session-presentation-deepening.md`.
 
 ## Boundary rules
 
