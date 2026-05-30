@@ -19,6 +19,11 @@ let package = Package(
             targets: ["NexusIPC"]
         ),
         .library(
+            name: "NexusSessionPresentation",
+            type: .static,
+            targets: ["NexusSessionPresentation"]
+        ),
+        .library(
             name: "NexusService",
             type: .static,
             targets: ["NexusService"]
@@ -33,11 +38,19 @@ let package = Package(
             dependencies: ["NexusDomain"]
         ),
         .target(
+            name: "NexusSessionPresentation",
+            dependencies: ["NexusDomain"]
+        ),
+        .target(
             name: "NexusService",
             dependencies: ["NexusDomain", "NexusIPC"],
             linkerSettings: [
                 .linkedLibrary("sqlite3")
             ]
+        ),
+        .testTarget(
+            name: "NexusSessionPresentationTests",
+            dependencies: ["NexusSessionPresentation"]
         ),
         .testTarget(
             name: "NexusServiceTests",

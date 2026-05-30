@@ -10,6 +10,7 @@
 		6F1D2A362FCD000100000001 /* NexusDomain in Frameworks */ = {isa = PBXBuildFile; productRef = 6F1D2A382FCD000100000001 /* NexusDomain */; };
 		6F1D2A3B2FCD000100000001 /* NexusIPC in Frameworks */ = {isa = PBXBuildFile; productRef = 6F1D2A3C2FCD000100000001 /* NexusIPC */; };
 		6F1D2A3D2FCD000100000001 /* NexusService in Frameworks */ = {isa = PBXBuildFile; productRef = 6F1D2A3E2FCD000100000001 /* NexusService */; };
+		6F1D2A702FCD000100000001 /* NexusSessionPresentation in Frameworks */ = {isa = PBXBuildFile; productRef = 6F1D2A712FCD000100000001 /* NexusSessionPresentation */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -74,6 +75,7 @@
 				6F1D2A362FCD000100000001 /* NexusDomain in Frameworks */,
 				6F1D2A3B2FCD000100000001 /* NexusIPC in Frameworks */,
 				6F1D2A3D2FCD000100000001 /* NexusService in Frameworks */,
+				6F1D2A702FCD000100000001 /* NexusSessionPresentation in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -137,6 +139,7 @@
 				6F1D2A382FCD000100000001 /* NexusDomain */,
 				6F1D2A3C2FCD000100000001 /* NexusIPC */,
 				6F1D2A3E2FCD000100000001 /* NexusService */,
+				6F1D2A712FCD000100000001 /* NexusSessionPresentation */,
 			);
 			productName = nexus;
 			productReference = 430B8E432FBB7EE3008606CB /* nexus.app */;
@@ -674,6 +677,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 6F1D2A392FCD000100000001 /* XCLocalSwiftPackageReference "Modules" */;
 			productName = NexusService;
+		};
+		6F1D2A712FCD000100000001 /* NexusSessionPresentation */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 6F1D2A392FCD000100000001 /* XCLocalSwiftPackageReference "Modules" */;
+			productName = NexusSessionPresentation;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
