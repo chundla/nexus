@@ -15,6 +15,22 @@ enum ProviderModuleFreshSessionOpenRequest {
     }
 }
 
+struct ProviderModuleCatalogReadRequest {
+    let workspace: Workspace
+    let remoteContext: RemoteWorkspaceHealthContext?
+    let defaultSession: Session?
+}
+
+struct ProviderModuleCatalogReadActions {
+    let providerHealthSummary: () async throws -> ProviderHealthSummary
+}
+
+struct ProviderModuleCatalogReadResult: Equatable {
+    let health: ProviderHealthSummary
+    let capabilities: ProviderCapabilities
+    let prelaunchPrimarySurface: SessionSurface
+}
+
 struct ProviderModuleFreshSessionOpenActions {
     let providerHealthSummary: (_ workspace: Workspace) async throws -> ProviderHealthSummary
 }
@@ -44,6 +60,23 @@ struct ProviderModulePersistedSessionRelaunchRequest {
     let execution: PersistedSessionLaunchExecution
 }
 
+enum ProviderModuleSessionTransitionRequest {
+    case openFresh(ProviderModuleFreshSessionOpenRequest, ProviderModuleFreshSessionOpenActions)
+    case relaunchPersisted(ProviderModulePersistedSessionRelaunchRequest)
+}
+
+enum ProviderModuleSessionTransitionPlan: Equatable {
+    case openFresh(ProviderModuleFreshSessionOpenResult)
+    case relaunchPersisted(ProviderModulePersistedSessionRelaunchPlan)
+}
+
+struct ProviderModuleRuntimeConstructionActions {
+    let makeLocalTerminalRuntime: () throws -> any SessionRuntime
+    let makeRemoteTerminalRuntime: () throws -> any SessionRuntime
+    let makeLocalProtocolNativeRuntime: () async throws -> (any SessionRuntime)?
+    let makeRemoteProtocolNativeRuntime: () async throws -> (any SessionRuntime)?
+}
+
 protocol ProviderModule {
     var provider: Provider { get }
 
@@ -56,6 +89,11 @@ protocol ProviderModule {
         remoteContext: RemoteWorkspaceHealthContext?,
         providerHealthEvaluator: any ProviderHealthEvaluating
     ) async -> ProviderHealthSummary
+
+    func readCatalog(
+        _ request: ProviderModuleCatalogReadRequest,
+        actions: ProviderModuleCatalogReadActions
+    ) async throws -> ProviderModuleCatalogReadResult
 
     func providerCapabilities(
         in workspace: Workspace,
@@ -82,6 +120,10 @@ protocol ProviderModule {
         remoteContext: RemoteWorkspaceHealthContext?
     ) -> Bool
 
+    func planSessionTransition(
+        _ request: ProviderModuleSessionTransitionRequest
+    ) async throws -> ProviderModuleSessionTransitionPlan
+
     func openFreshSession(
         _ request: ProviderModuleFreshSessionOpenRequest,
         actions: ProviderModuleFreshSessionOpenActions
@@ -107,9 +149,43 @@ protocol ProviderModule {
         _ error: Error,
         metadata: SessionRecordAdapterMetadata?
     ) throws -> Bool
+
+    func constructRuntime(
+        for session: Session,
+        workspace: Workspace,
+        launchConfiguration: SessionRuntimeLaunchConfiguration,
+        actions: ProviderModuleRuntimeConstructionActions
+    ) async throws -> (any SessionRuntime)?
 }
 
 extension ProviderModule {
+    func readCatalog(
+        _ request: ProviderModuleCatalogReadRequest,
+        actions: ProviderModuleCatalogReadActions
+    ) async throws -> ProviderModuleCatalogReadResult {
+        let health = try await actions.providerHealthSummary()
+        return ProviderModuleCatalogReadResult(
+            health: health,
+            capabilities: providerCapabilities(
+                in: request.workspace,
+                health: health,
+                defaultSession: request.defaultSession
+            ),
+            prelaunchPrimarySurface: prelaunchPrimarySurface(in: request.workspace)
+        )
+    }
+
+    func planSessionTransition(
+        _ request: ProviderModuleSessionTransitionRequest
+    ) async throws -> ProviderModuleSessionTransitionPlan {
+        switch request {
+        case let .openFresh(freshRequest, actions):
+            return .openFresh(try await openFreshSession(freshRequest, actions: actions))
+        case let .relaunchPersisted(relaunchRequest):
+            return .relaunchPersisted(planPersistedSessionRelaunch(relaunchRequest))
+        }
+    }
+
     func openFreshSession(
         _ request: ProviderModuleFreshSessionOpenRequest,
         actions: ProviderModuleFreshSessionOpenActions
@@ -167,6 +243,15 @@ extension ProviderModule {
         metadata: SessionRecordAdapterMetadata?
     ) throws -> Bool {
         false
+    }
+
+    func constructRuntime(
+        for session: Session,
+        workspace: Workspace,
+        launchConfiguration: SessionRuntimeLaunchConfiguration,
+        actions: ProviderModuleRuntimeConstructionActions
+    ) async throws -> (any SessionRuntime)? {
+        nil
     }
 
     func executeSharedFreshSessionOpen(

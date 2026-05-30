@@ -459,11 +459,13 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
     typealias ProtocolNativeRuntimeFactory = (_ launchConfiguration: SessionRuntimeLaunchConfiguration, _ session: Session, _ workspace: Workspace) async throws -> any SessionRuntime
 
     private let remoteSessionCommandBuilder = RemoteSessionCommandBuilder()
+    private let providerModuleRegistry: ProviderModuleRegistry?
     private let localShellCommandBuilder: LocalShellCommandBuilder
     private let localProtocolNativeRuntimeFactories: [ProviderID: ProtocolNativeRuntimeFactory]
     private let remoteProtocolNativeRuntimeFactories: [ProviderID: ProtocolNativeRuntimeFactory]
 
     init(
+        providerModuleRegistry: ProviderModuleRegistry? = nil,
         localShellCommandBuilder: LocalShellCommandBuilder = LocalShellCommandBuilder(),
         piTransportFactory: PiRPCSessionRuntime.TransportFactory? = nil,
         codexTransportFactory: CodexAppServerRuntime.TransportFactory? = nil,
@@ -488,6 +490,7 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
             )
         }
 
+        self.providerModuleRegistry = providerModuleRegistry
         self.localShellCommandBuilder = localShellCommandBuilder
         let resolvedIBMBobTransportFactory: IBMBobSessionRuntime.TransportFactory = ibmBobTransportFactory ?? { executable, arguments, workingDirectory in
             try ProcessIBMBobTransport(
@@ -517,6 +520,35 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
     }
 
     func makeRuntime(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) async throws -> any SessionRuntime {
+        if let providerModuleRegistry,
+           let runtime = try await providerModuleRegistry.module(for: session.providerID).constructRuntime(
+            for: session,
+            workspace: workspace,
+            launchConfiguration: launchConfiguration,
+            actions: ProviderModuleRuntimeConstructionActions(
+                makeLocalTerminalRuntime: { [self] in
+                    try makeLocalTerminalRuntime(launchConfiguration: launchConfiguration)
+                },
+                makeRemoteTerminalRuntime: { [self] in
+                    try makeRemoteTerminalRuntime(launchConfiguration: launchConfiguration)
+                },
+                makeLocalProtocolNativeRuntime: { [self] in
+                    guard let protocolNativeRuntimeFactory = localProtocolNativeRuntimeFactories[session.providerID] else {
+                        return nil
+                    }
+                    return try await protocolNativeRuntimeFactory(launchConfiguration, session, workspace)
+                },
+                makeRemoteProtocolNativeRuntime: { [self] in
+                    guard let protocolNativeRuntimeFactory = remoteProtocolNativeRuntimeFactories[session.providerID] else {
+                        return nil
+                    }
+                    return try await protocolNativeRuntimeFactory(launchConfiguration, session, workspace)
+                }
+            )
+           ) {
+            return runtime
+        }
+
         if launchConfiguration.remoteHost == nil,
            let protocolNativeRuntimeFactory = localProtocolNativeRuntimeFactories[session.providerID] {
             return try await protocolNativeRuntimeFactory(launchConfiguration, session, workspace)
@@ -527,31 +559,51 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
             return try await protocolNativeRuntimeFactory(launchConfiguration, session, workspace)
         }
 
-        if let remoteHost = launchConfiguration.remoteHost,
-           let runtimeIdentifier = launchConfiguration.remoteRuntimeIdentifier {
-            let arguments: [String]
-            switch launchConfiguration.remoteRuntimeLaunchMode {
-            case .launchNew:
-                arguments = remoteSessionCommandBuilder.launchArguments(configuration: launchConfiguration)
-            case .attachExisting:
-                arguments = remoteSessionCommandBuilder.recoverArguments(configuration: launchConfiguration)
-            }
+        if launchConfiguration.remoteHost != nil {
+            return try makeRemoteTerminalRuntime(launchConfiguration: launchConfiguration)
+        }
 
-            return try ProcessSessionRuntime(
-                executable: "/usr/bin/ssh",
-                arguments: arguments,
-                workingDirectory: nil,
-                initialTranscript: launchConfiguration.initialTranscript,
-                stopHandler: {
-                    try Self.runCommand(
-                        executable: "/usr/bin/ssh",
-                        arguments: self.remoteSessionCommandBuilder.stopArguments(runtimeIdentifier: runtimeIdentifier, host: remoteHost)
-                    )
-                },
-                terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder
+        return try makeLocalTerminalRuntime(launchConfiguration: launchConfiguration)
+    }
+
+    private func makeRemoteTerminalRuntime(
+        launchConfiguration: SessionRuntimeLaunchConfiguration
+    ) throws -> any SessionRuntime {
+        guard let remoteHost = launchConfiguration.remoteHost,
+              let runtimeIdentifier = launchConfiguration.remoteRuntimeIdentifier else {
+            throw NSError(
+                domain: "ProcessSessionRuntimeLauncher",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Remote terminal launch requires a Host and runtime identifier."]
             )
         }
 
+        let arguments: [String]
+        switch launchConfiguration.remoteRuntimeLaunchMode {
+        case .launchNew:
+            arguments = remoteSessionCommandBuilder.launchArguments(configuration: launchConfiguration)
+        case .attachExisting:
+            arguments = remoteSessionCommandBuilder.recoverArguments(configuration: launchConfiguration)
+        }
+
+        return try ProcessSessionRuntime(
+            executable: "/usr/bin/ssh",
+            arguments: arguments,
+            workingDirectory: nil,
+            initialTranscript: launchConfiguration.initialTranscript,
+            stopHandler: {
+                try Self.runCommand(
+                    executable: "/usr/bin/ssh",
+                    arguments: self.remoteSessionCommandBuilder.stopArguments(runtimeIdentifier: runtimeIdentifier, host: remoteHost)
+                )
+            },
+            terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder
+        )
+    }
+
+    private func makeLocalTerminalRuntime(
+        launchConfiguration: SessionRuntimeLaunchConfiguration
+    ) throws -> any SessionRuntime {
         let localLaunchCommand = localShellCommandBuilder.launchCommand(
             for: launchConfiguration.executable,
             arguments: launchConfiguration.arguments
@@ -1139,7 +1191,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         sessionInteraction: (any SessionInteractionManaging)? = nil,
         remoteAccessRuntime: RemoteAccessRuntime,
         ibmBobNativeSessionCleaner: any IBMBobNativeSessionCleaning,
-        providerAdapters: [ProviderID: ServiceProviderAdapter]
+        providerModuleRegistry: ProviderModuleRegistry
     ) {
         self.listener = listener
         self.storeURL = storeURL
@@ -1149,7 +1201,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         self.hostValidationEvaluator = hostValidationEvaluator
         self.workspaceAvailabilityEvaluator = workspaceAvailabilityEvaluator
         self.sessionRuntimeManager = sessionRuntimeManager
-        self.providerModuleRegistry = ServiceSessionProviderRegistry.providerModules(providerAdapters: providerAdapters)
+        self.providerModuleRegistry = providerModuleRegistry
         self.workspaceCatalog = WorkspaceCatalog(
             dependencies: WorkspaceCatalogDependencies(
                 metadataStore: metadataStore,
@@ -1299,12 +1351,13 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         providerHealthEvaluator: any ProviderHealthEvaluating,
         hostValidationEvaluator: any HostValidationEvaluating = HostValidationEvaluator(),
         workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating = WorkspaceAvailabilityEvaluator(),
-        sessionRuntimeManager: any SessionRuntimeManaging = InMemorySessionRuntimeManager(),
+        sessionRuntimeManager: (any SessionRuntimeManaging)? = nil,
         sessionLifecycle: (any SessionLifecycleManaging)? = nil,
         sessionInteraction: (any SessionInteractionManaging)? = nil,
         sessionRecordStoreFactory: ((NexusMetadataStore) -> any SessionRecordStore)? = nil,
         remoteAccessRuntime: RemoteAccessRuntime = RemoteAccessRuntime(),
         providerAdapters: [ProviderID: ServiceProviderAdapter]? = nil,
+        providerModuleRegistry: ProviderModuleRegistry? = nil,
         ibmBobNativeSessionCleaner: any IBMBobNativeSessionCleaning = IBMBobNativeSessionCleaner()
     ) throws -> NexusService {
         try bootstrap(
@@ -1318,6 +1371,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             sessionRecordStoreFactory: sessionRecordStoreFactory,
             remoteAccessRuntime: remoteAccessRuntime,
             providerAdapters: providerAdapters,
+            providerModuleRegistry: providerModuleRegistry,
             ibmBobNativeSessionCleaner: ibmBobNativeSessionCleaner
         )
     }
@@ -1326,7 +1380,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         rootURL: URL,
         hostValidationEvaluator: any HostValidationEvaluating,
         workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating = WorkspaceAvailabilityEvaluator(),
-        sessionRuntimeManager: any SessionRuntimeManaging = InMemorySessionRuntimeManager(),
+        sessionRuntimeManager: (any SessionRuntimeManaging)? = nil,
         sessionLifecycle: (any SessionLifecycleManaging)? = nil,
         sessionInteraction: (any SessionInteractionManaging)? = nil,
         sessionRecordStoreFactory: ((NexusMetadataStore) -> any SessionRecordStore)? = nil,
@@ -1351,12 +1405,13 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         providerHealthEvaluator: any ProviderHealthEvaluating = ProviderHealthEvaluator(),
         hostValidationEvaluator: any HostValidationEvaluating = HostValidationEvaluator(),
         workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating = WorkspaceAvailabilityEvaluator(),
-        sessionRuntimeManager: any SessionRuntimeManaging = InMemorySessionRuntimeManager(),
+        sessionRuntimeManager: (any SessionRuntimeManaging)? = nil,
         sessionLifecycle: (any SessionLifecycleManaging)? = nil,
         sessionInteraction: (any SessionInteractionManaging)? = nil,
         sessionRecordStoreFactory: ((NexusMetadataStore) -> any SessionRecordStore)? = nil,
         remoteAccessRuntime: RemoteAccessRuntime = RemoteAccessRuntime(),
         providerAdapters: [ProviderID: ServiceProviderAdapter]? = nil,
+        providerModuleRegistry: ProviderModuleRegistry? = nil,
         ibmBobNativeSessionCleaner: any IBMBobNativeSessionCleaning = IBMBobNativeSessionCleaner()
     ) throws -> NexusService {
         try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
@@ -1368,6 +1423,14 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
 
         let metadataStore = try NexusMetadataStore(storeURL: storeURL)
         let sessionRecordStore = sessionRecordStoreFactory?(metadataStore)
+        let resolvedProviderModuleRegistry = providerModuleRegistry
+            ?? ServiceSessionProviderRegistry.providerModules(
+                providerAdapters: ServiceSessionProviderRegistry.providerAdapters(overrides: providerAdapters)
+            )
+        let resolvedSessionRuntimeManager = sessionRuntimeManager
+            ?? InMemorySessionRuntimeManager(
+                launcher: ProcessSessionRuntimeLauncher(providerModuleRegistry: resolvedProviderModuleRegistry)
+            )
         remoteAccessRuntime.restore(isEnabled: try metadataStore.remoteAccessEnabled())
         return NexusService(
             listener: NSXPCListener.anonymous(),
@@ -1377,12 +1440,12 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             providerHealthEvaluator: providerHealthEvaluator,
             hostValidationEvaluator: hostValidationEvaluator,
             workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
-            sessionRuntimeManager: sessionRuntimeManager,
+            sessionRuntimeManager: resolvedSessionRuntimeManager,
             sessionLifecycle: sessionLifecycle,
             sessionInteraction: sessionInteraction,
             remoteAccessRuntime: remoteAccessRuntime,
             ibmBobNativeSessionCleaner: ibmBobNativeSessionCleaner,
-            providerAdapters: ServiceSessionProviderRegistry.providerAdapters(overrides: providerAdapters)
+            providerModuleRegistry: resolvedProviderModuleRegistry
         )
     }
 
@@ -1971,9 +2034,12 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
 
     private func executePersistedSessionLaunch(_ execution: PersistedSessionLaunchExecution) async throws -> Session {
         let providerModule = providerModuleRegistry.module(for: execution.session.providerID)
-        let plan = providerModule.planPersistedSessionRelaunch(
-            ProviderModulePersistedSessionRelaunchRequest(execution: execution)
+        let transitionPlan = try await providerModule.planSessionTransition(
+            .relaunchPersisted(ProviderModulePersistedSessionRelaunchRequest(execution: execution))
         )
+        guard case let .relaunchPersisted(plan) = transitionPlan else {
+            fatalError("Persisted Session relaunch must produce a relaunchPersisted transition plan.")
+        }
 
         switch plan {
         case .sharedLaunch:

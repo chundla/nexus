@@ -23,6 +23,22 @@ struct ClaudeProviderModule: ProviderModule {
         await providerHealthEvaluator.healthSummary(for: .claude, workspace: workspace, remoteContext: remoteContext)
     }
 
+    func readCatalog(
+        _ request: ProviderModuleCatalogReadRequest,
+        actions: ProviderModuleCatalogReadActions
+    ) async throws -> ProviderModuleCatalogReadResult {
+        let health = try await actions.providerHealthSummary()
+        return ProviderModuleCatalogReadResult(
+            health: health,
+            capabilities: providerCapabilities(
+                in: request.workspace,
+                health: health,
+                defaultSession: request.defaultSession
+            ),
+            prelaunchPrimarySurface: prelaunchPrimarySurface(in: request.workspace)
+        )
+    }
+
     func providerCapabilities(
         in workspace: Workspace,
         health: ProviderHealthSummary,
@@ -46,6 +62,30 @@ struct ClaudeProviderModule: ProviderModule {
         remoteContext: RemoteWorkspaceHealthContext?
     ) -> Bool {
         shouldReuseRemoteCLIHealthSnapshot(snapshot, remoteContext: remoteContext)
+    }
+
+    func planSessionTransition(
+        _ request: ProviderModuleSessionTransitionRequest
+    ) async throws -> ProviderModuleSessionTransitionPlan {
+        switch request {
+        case let .openFresh(freshRequest, actions):
+            return .openFresh(try await executeSharedFreshSessionOpen(freshRequest, actions: actions))
+        case let .relaunchPersisted(relaunchRequest):
+            return .relaunchPersisted(planPersistedSessionRelaunch(relaunchRequest))
+        }
+    }
+
+    func constructRuntime(
+        for session: Session,
+        workspace: Workspace,
+        launchConfiguration: SessionRuntimeLaunchConfiguration,
+        actions: ProviderModuleRuntimeConstructionActions
+    ) async throws -> (any SessionRuntime)? {
+        if workspace.kind == .remote {
+            return try actions.makeRemoteTerminalRuntime()
+        }
+
+        return try actions.makeLocalTerminalRuntime()
     }
 }
 #endif

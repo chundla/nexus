@@ -67,6 +67,71 @@ struct WorkspaceCatalogTests {
         #expect(detail.prelaunchPrimarySurface == piCard.prelaunchPrimarySurface)
     }
 
+    @Test func workspaceCatalogUsesProviderModuleCatalogReadResultForClaude() async throws {
+        let fixture = try WorkspaceCatalogFixture(
+            providerModuleRegistry: ProviderModuleRegistry(
+                modules: [
+                    .claude: StubProviderModule(
+                        providerID: .claude,
+                        health: ProviderHealthSummary(
+                            state: .misconfigured,
+                            summary: "Legacy catalog path should stay unused",
+                            launchability: .notLaunchable
+                        ),
+                        capabilities: ProviderCapabilities(
+                            launchDefaultSession: ProviderCapability(
+                                action: .launchDefaultSession,
+                                isSupported: false,
+                                isEnabled: false,
+                                disabledReason: "Legacy launch gating"
+                            ),
+                            createNamedSession: ProviderCapability(
+                                action: .createNamedSession,
+                                isSupported: false,
+                                isEnabled: false,
+                                disabledReason: "Legacy named-session gating"
+                            )
+                        ),
+                        prelaunchPrimarySurface: .structuredActivityFeed,
+                        catalogReadResult: ProviderModuleCatalogReadResult(
+                            health: ProviderHealthSummary(
+                                state: .available,
+                                summary: "Claude catalog result from the Provider Module",
+                                resolvedExecutable: "/tmp/fake-claude",
+                                launchability: .launchable
+                            ),
+                            capabilities: ProviderCapabilities(
+                                launchDefaultSession: ProviderCapability(
+                                    action: .launchDefaultSession,
+                                    isSupported: true,
+                                    isEnabled: true
+                                ),
+                                createNamedSession: ProviderCapability(
+                                    action: .createNamedSession,
+                                    isSupported: true,
+                                    isEnabled: true
+                                )
+                            ),
+                            prelaunchPrimarySurface: .terminal
+                        )
+                    )
+                ]
+            )
+        )
+
+        let overview = try await fixture.catalog.workspaceOverview(workspaceID: fixture.workspace.id)
+        let detail = try await fixture.catalog.providerDetail(workspaceID: fixture.workspace.id, providerID: .claude)
+        let claudeCard = try #require(overview.providerCards.first(where: { $0.provider.id == .claude }))
+
+        #expect(claudeCard.health.summary == "Claude catalog result from the Provider Module")
+        #expect(claudeCard.capabilities.launchDefaultSession.isEnabled)
+        #expect(claudeCard.capabilities.createNamedSession.isEnabled)
+        #expect(claudeCard.prelaunchPrimarySurface == .terminal)
+        #expect(detail.health == claudeCard.health)
+        #expect(detail.capabilities == claudeCard.capabilities)
+        #expect(detail.prelaunchPrimarySurface == claudeCard.prelaunchPrimarySurface)
+    }
+
     @Test func providerDetailUsesProviderModuleSurfaceWhenPersistedPiSessionHasNoLaunchSnapshot() async throws {
         let fixture = try WorkspaceCatalogFixture(
             providerAdapters: ServiceSessionProviderRegistry.providerAdapters(overrides: [
@@ -173,21 +238,35 @@ private struct StubProviderModule: ProviderModule {
     let health: ProviderHealthSummary
     let capabilities: ProviderCapabilities
     let prelaunchPrimarySurface: SessionSurface
+    let catalogReadResult: ProviderModuleCatalogReadResult?
 
     init(
         providerID: ProviderID,
         health: ProviderHealthSummary,
         capabilities: ProviderCapabilities,
-        prelaunchPrimarySurface: SessionSurface
+        prelaunchPrimarySurface: SessionSurface,
+        catalogReadResult: ProviderModuleCatalogReadResult? = nil
     ) {
         self.provider = Provider(id: providerID)
         self.health = health
         self.capabilities = capabilities
         self.prelaunchPrimarySurface = prelaunchPrimarySurface
+        self.catalogReadResult = catalogReadResult
     }
 
     func supportsDefaultSessionLaunch(in workspace: Workspace) -> Bool {
         capabilities.launchDefaultSession.isSupported
+    }
+
+    func readCatalog(
+        _ request: ProviderModuleCatalogReadRequest,
+        actions: ProviderModuleCatalogReadActions
+    ) async throws -> ProviderModuleCatalogReadResult {
+        catalogReadResult ?? ProviderModuleCatalogReadResult(
+            health: health,
+            capabilities: capabilities,
+            prelaunchPrimarySurface: prelaunchPrimarySurface
+        )
     }
 
     func supportsNamedSessions(in workspace: Workspace) -> Bool {

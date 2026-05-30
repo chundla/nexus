@@ -5,6 +5,26 @@ import NexusDomain
 import Testing
 
 struct ServiceSessionLifecycleScenariosTests {
+    @Test func localClaudeDefaultSessionFreshOpenUsesProviderModuleSessionTransitionPlan() async throws {
+        let fixture = try ServiceSessionLifecycleFixture()
+        let tracker = ProviderModuleSessionTransitionTracker()
+        let lifecycle = fixture.makeLifecycle(
+            providerModule: RecordingSessionTransitionProviderModule(
+                providerID: .claude,
+                tracker: tracker
+            )
+        )
+
+        _ = try await lifecycle.launchOrResumeDefaultSession(
+            workspaceID: fixture.workspace.id,
+            providerID: .claude
+        )
+
+        #expect(tracker.requests == [
+            .openFresh(.launchDefaultSession(workspaceID: fixture.workspace.id))
+        ])
+    }
+
     @Test func localPiDefaultSessionFreshOpenRoutesThroughProviderModuleSeam() async throws {
         let fixture = try ServiceSessionLifecycleFixture()
         let tracker = ProviderModuleFreshOpenTracker()
@@ -587,6 +607,92 @@ private enum ProviderModuleFreshOpenRequestExpectation: Equatable {
 
 private final class ProviderModuleFreshOpenTracker: @unchecked Sendable {
     var requests: [ProviderModuleFreshOpenRequestExpectation] = []
+}
+
+private enum ProviderModuleSessionTransitionRequestExpectation: Equatable {
+    case openFresh(ProviderModuleFreshOpenRequestExpectation)
+    case relaunchPersisted(sessionID: UUID)
+
+    init(request: ProviderModuleSessionTransitionRequest) {
+        switch request {
+        case let .openFresh(freshRequest, _):
+            self = .openFresh(.init(request: freshRequest))
+        case let .relaunchPersisted(relaunchRequest):
+            self = .relaunchPersisted(sessionID: relaunchRequest.execution.session.id)
+        }
+    }
+}
+
+private final class ProviderModuleSessionTransitionTracker: @unchecked Sendable {
+    var requests: [ProviderModuleSessionTransitionRequestExpectation] = []
+}
+
+private struct RecordingSessionTransitionProviderModule: ProviderModule {
+    let provider: Provider
+    let tracker: ProviderModuleSessionTransitionTracker
+
+    init(providerID: ProviderID, tracker: ProviderModuleSessionTransitionTracker) {
+        self.provider = Provider(id: providerID)
+        self.tracker = tracker
+    }
+
+    func supportsDefaultSessionLaunch(in workspace: Workspace) -> Bool {
+        true
+    }
+
+    func supportsNamedSessions(in workspace: Workspace) -> Bool {
+        true
+    }
+
+    func providerHealthSummary(
+        for workspace: Workspace,
+        remoteContext: RemoteWorkspaceHealthContext?,
+        providerHealthEvaluator: any ProviderHealthEvaluating
+    ) async -> ProviderHealthSummary {
+        await providerHealthEvaluator.healthSummary(for: provider.id, workspace: workspace, remoteContext: remoteContext)
+    }
+
+    func providerCapabilities(
+        in workspace: Workspace,
+        health: ProviderHealthSummary,
+        defaultSession: Session?
+    ) -> ProviderCapabilities {
+        ProviderCapabilities(
+            launchDefaultSession: ProviderCapability(action: .launchDefaultSession, isSupported: true, isEnabled: true),
+            createNamedSession: ProviderCapability(action: .createNamedSession, isSupported: true, isEnabled: true)
+        )
+    }
+
+    func prelaunchPrimarySurface(in workspace: Workspace) -> SessionSurface {
+        .terminal
+    }
+
+    func reusesRemoteHealthSnapshot(
+        _ snapshot: ProviderHealthSummary,
+        remoteContext: RemoteWorkspaceHealthContext?
+    ) -> Bool {
+        false
+    }
+
+    func planSessionTransition(
+        _ request: ProviderModuleSessionTransitionRequest
+    ) async throws -> ProviderModuleSessionTransitionPlan {
+        tracker.requests.append(.init(request: request))
+        switch request {
+        case let .openFresh(freshRequest, actions):
+            return .openFresh(try await executeSharedFreshSessionOpen(freshRequest, actions: actions))
+        case let .relaunchPersisted(relaunchRequest):
+            return .relaunchPersisted(planPersistedSessionRelaunch(relaunchRequest))
+        }
+    }
+
+    func openFreshSession(
+        _ request: ProviderModuleFreshSessionOpenRequest,
+        actions: ProviderModuleFreshSessionOpenActions
+    ) async throws -> ProviderModuleFreshSessionOpenResult {
+        Issue.record("Fresh Session open should route through planSessionTransition")
+        return try await executeSharedFreshSessionOpen(request, actions: actions)
+    }
 }
 
 private struct RecordingFreshOpenProviderModule: ProviderModule {

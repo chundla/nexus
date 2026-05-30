@@ -116,6 +116,40 @@ struct ProcessSessionRuntimeLauncherTests {
         #expect(screen.activityItems.map { $0.text } == ["Remote Codex ready"])
     }
 
+    @Test func claudeProviderModuleOwnsTerminalRuntimeConstructionUsingSharedProcessPath() async throws {
+        let tracker = RuntimeConstructionTracker()
+        let launcher = ProcessSessionRuntimeLauncher(
+            providerModuleRegistry: ProviderModuleRegistry(
+                modules: [
+                    .claude: RuntimeOwningClaudeProviderModule(tracker: tracker)
+                ]
+            ),
+            localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/sh"])
+        )
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Local Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: UUID()
+        )
+        let session = Session(id: UUID(), workspaceID: workspace.id, providerID: .claude, isDefault: true, state: .ready)
+
+        let runtime = try await launcher.makeRuntime(
+            session: session,
+            workspace: workspace,
+            launchConfiguration: SessionRuntimeLaunchConfiguration(
+                executable: "/usr/bin/true",
+                workingDirectory: workspace.folderPath,
+                remoteHost: nil
+            )
+        )
+
+        #expect(tracker.requests == [.localClaudeTerminal])
+        #expect(runtime is ProcessSessionRuntime)
+        #expect(runtime.sessionScreen(for: session).primarySurface == .terminal)
+    }
+
     @Test func terminalBackedProvidersStillUseProcessRuntimePath() async throws {
         let launcher = ProcessSessionRuntimeLauncher(
             localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/sh"])
@@ -158,6 +192,65 @@ private final class ProtocolNativeLaunchRecorder: @unchecked Sendable {
         lock.lock()
         records.append(Record(session: session, workspace: workspace, launchConfiguration: launchConfiguration))
         lock.unlock()
+    }
+}
+
+private enum RuntimeConstructionRequest: Equatable {
+    case localClaudeTerminal
+}
+
+private final class RuntimeConstructionTracker: @unchecked Sendable {
+    var requests: [RuntimeConstructionRequest] = []
+}
+
+private struct RuntimeOwningClaudeProviderModule: ProviderModule {
+    let provider = Provider(id: .claude)
+    let tracker: RuntimeConstructionTracker
+
+    func supportsDefaultSessionLaunch(in workspace: Workspace) -> Bool { true }
+    func supportsNamedSessions(in workspace: Workspace) -> Bool { true }
+
+    func providerHealthSummary(
+        for workspace: Workspace,
+        remoteContext: RemoteWorkspaceHealthContext?,
+        providerHealthEvaluator: any ProviderHealthEvaluating
+    ) async -> ProviderHealthSummary {
+        await providerHealthEvaluator.healthSummary(for: .claude, workspace: workspace, remoteContext: remoteContext)
+    }
+
+    func providerCapabilities(
+        in workspace: Workspace,
+        health: ProviderHealthSummary,
+        defaultSession: Session?
+    ) -> ProviderCapabilities {
+        makeProviderCapabilities(
+            provider: provider,
+            supportsDefaultSessionLaunch: true,
+            supportsNamedSessions: true,
+            health: health,
+            defaultSession: defaultSession
+        )
+    }
+
+    func prelaunchPrimarySurface(in workspace: Workspace) -> SessionSurface {
+        .terminal
+    }
+
+    func reusesRemoteHealthSnapshot(
+        _ snapshot: ProviderHealthSummary,
+        remoteContext: RemoteWorkspaceHealthContext?
+    ) -> Bool {
+        false
+    }
+
+    func constructRuntime(
+        for session: Session,
+        workspace: Workspace,
+        launchConfiguration: SessionRuntimeLaunchConfiguration,
+        actions: ProviderModuleRuntimeConstructionActions
+    ) async throws -> (any SessionRuntime)? {
+        tracker.requests.append(.localClaudeTerminal)
+        return try actions.makeLocalTerminalRuntime()
     }
 }
 

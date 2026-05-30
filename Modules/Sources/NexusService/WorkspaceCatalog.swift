@@ -42,14 +42,23 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
         var providerCards: [WorkspaceProviderCard] = []
         for providerID in ProviderID.allCases {
             let providerModule = providerModule(for: providerID)
-            let health = try await providerHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
             let defaultSession = try dependencies.sessionRecordStore.defaultSession(workspaceID: workspaceID, providerID: providerID)
+            let catalogRead = try await providerModule.readCatalog(
+                ProviderModuleCatalogReadRequest(
+                    workspace: workspace,
+                    remoteContext: remoteContext,
+                    defaultSession: defaultSession
+                ),
+                actions: ProviderModuleCatalogReadActions { [self] in
+                    try await self.providerHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
+                }
+            )
             providerCards.append(
                 WorkspaceProviderCard(
                     provider: Provider(id: providerID),
-                    health: health,
-                    capabilities: providerModule.providerCapabilities(in: workspace, health: health, defaultSession: defaultSession),
-                    prelaunchPrimarySurface: providerModule.prelaunchPrimarySurface(in: workspace),
+                    health: catalogRead.health,
+                    capabilities: catalogRead.capabilities,
+                    prelaunchPrimarySurface: catalogRead.prelaunchPrimarySurface,
                     defaultSession: try defaultSessionSummary(for: workspace, providerID: providerID),
                     alternateSessionCount: try dependencies.sessionRecordStore.listSessions(workspaceID: workspaceID, providerID: providerID)
                         .filter { $0.isDefault == false }
@@ -77,15 +86,24 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
         let providerModule = providerModule(for: providerID)
         let sessions = try dependencies.sessionRecordStore.listSessions(workspaceID: workspaceID, providerID: providerID)
             .map(reconcileSessionRuntimeState)
-        let health = try await providerHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
         let defaultSession = sessions.first(where: \.isDefault)
+        let catalogRead = try await providerModule.readCatalog(
+            ProviderModuleCatalogReadRequest(
+                workspace: workspace,
+                remoteContext: remoteContext,
+                defaultSession: defaultSession
+            ),
+            actions: ProviderModuleCatalogReadActions { [self] in
+                try await self.providerHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
+            }
+        )
 
         return ProviderDetail(
             workspace: workspace,
             provider: Provider(id: providerID),
-            health: health,
-            capabilities: providerModule.providerCapabilities(in: workspace, health: health, defaultSession: defaultSession),
-            prelaunchPrimarySurface: providerModule.prelaunchPrimarySurface(in: workspace),
+            health: catalogRead.health,
+            capabilities: catalogRead.capabilities,
+            prelaunchPrimarySurface: catalogRead.prelaunchPrimarySurface,
             defaultSession: defaultSession,
             alternateSessions: sessions.filter { $0.isDefault == false && $0.state != .failed },
             failedSessions: sessions.filter { $0.isDefault == false && $0.state == .failed }

@@ -90,14 +90,19 @@ final class ServiceSessionLifecycle: SessionLifecycleManaging {
         request: ProviderModuleFreshSessionOpenRequest,
         createSession: (Session.State, String?) throws -> Session
     ) async throws -> Session {
-        let openResult = try await dependencies.providerModule(providerID).openFreshSession(
-            request,
-            actions: ProviderModuleFreshSessionOpenActions(
-                providerHealthSummary: { [self] workspace in
-                    try await self.providerHealthSummary(for: providerID, workspace: workspace)
-                }
+        let transitionPlan = try await dependencies.providerModule(providerID).planSessionTransition(
+            .openFresh(
+                request,
+                ProviderModuleFreshSessionOpenActions(
+                    providerHealthSummary: { [self] workspace in
+                        try await self.providerHealthSummary(for: providerID, workspace: workspace)
+                    }
+                )
             )
         )
+        guard case let .openFresh(openResult) = transitionPlan else {
+            fatalError("Fresh Session open must produce an openFresh transition plan.")
+        }
 
         switch openResult {
         case let .failed(message):
