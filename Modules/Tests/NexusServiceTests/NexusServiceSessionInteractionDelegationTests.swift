@@ -403,6 +403,13 @@ private final class SessionInteractionSpy: SessionInteractionManaging, @unchecke
         let key: SessionInputKey
     }
 
+    struct RemoteExtensionDialogCall: Equatable {
+        let sessionID: UUID
+        let pairedDeviceID: UUID
+        let dialogID: String
+        let response: SessionExtensionUIDialogResponse
+    }
+
     private(set) var getSessionScreenCalls: [UUID] = []
     var observeSessionScreenResult = SessionScreenObservationStart(
         observationID: UUID(),
@@ -445,6 +452,12 @@ private final class SessionInteractionSpy: SessionInteractionManaging, @unchecke
         transcript: ""
     )
     private(set) var sendRemoteSessionInputKeyCalls: [RemoteInputKeyCall] = []
+    var respondToRemoteExtensionDialogResult = SessionScreen(
+        session: Session(id: UUID(), workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready),
+        primarySurface: .structuredActivityFeed,
+        transcript: ""
+    )
+    private(set) var respondToRemoteExtensionDialogCalls: [RemoteExtensionDialogCall] = []
 
     func getSessionScreen(sessionID: UUID) throws -> SessionScreen {
         getSessionScreenCalls.append(sessionID)
@@ -507,6 +520,18 @@ private final class SessionInteractionSpy: SessionInteractionManaging, @unchecke
             .init(sessionID: sessionID, pairedDeviceID: pairedDeviceID, text: text)
         )
         return sendRemoteSessionTextResult
+    }
+
+    func respondToRemoteExtensionDialog(
+        sessionID: UUID,
+        pairedDeviceID: UUID,
+        dialogID: String,
+        response: SessionExtensionUIDialogResponse
+    ) async throws -> SessionScreen {
+        respondToRemoteExtensionDialogCalls.append(
+            .init(sessionID: sessionID, pairedDeviceID: pairedDeviceID, dialogID: dialogID, response: response)
+        )
+        return respondToRemoteExtensionDialogResult
     }
 
     func sendRemoteSessionInputKey(

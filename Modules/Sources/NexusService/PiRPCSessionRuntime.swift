@@ -70,6 +70,10 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     private let currentModelStatusPrefix = "Current Pi model:"
     private var currentModel: PiRPCModelDescriptor?
     private var currentThinkingLevel: String?
+    private var steeringMode = "one-at-a-time"
+    private var followUpMode = "one-at-a-time"
+    private var queuedSteeringMessages: [String] = []
+    private var queuedFollowUpMessages: [String] = []
     private var runtimeState: Session.State = .ready
     private var transcriptEntries: [String] = []
     private var interruptedFailureMessage: String?
@@ -100,9 +104,13 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     private var pendingAvailableModelsRequestID: String?
     private var pendingSetModelTargetsByRequestID: [String: String] = [:]
     private var pendingSetThinkingLevelsByRequestID: [String: String] = [:]
+    private var pendingSetSteeringModesByRequestID: [String: String] = [:]
+    private var pendingSetFollowUpModesByRequestID: [String: String] = [:]
     private var nextSlashCommandsRequestSequence = 0
     private var nextAvailableModelsRequestSequence = 0
     private var nextSetThinkingRequestSequence = 0
+    private var nextSetSteeringModeRequestSequence = 0
+    private var nextSetFollowUpModeRequestSequence = 0
 
     convenience init(
         executable: String,
@@ -389,26 +397,197 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             return
         }
 
-        lock.lock()
-        guard isStreaming == false else {
-            lock.unlock()
-            throw PiRPCSessionRuntimeError.busy
+        if trimmed == "/abort" {
+            try submitAbortCommand()
+            return
         }
-        isStreaming = true
+
+        if trimmed == "/steering-mode" || trimmed.hasPrefix("/steering-mode ") || trimmed == "/steering_mode" || trimmed.hasPrefix("/steering_mode ") {
+            try submitSteeringModeCommand(trimmed)
+            return
+        }
+
+        if trimmed == "/follow-up-mode" || trimmed.hasPrefix("/follow-up-mode ") || trimmed == "/follow_up_mode" || trimmed.hasPrefix("/follow_up_mode ") {
+            try submitFollowUpModeCommand(trimmed)
+            return
+        }
+
+        if trimmed == "/steer" || trimmed.hasPrefix("/steer ") {
+            try submitSteeringCommand(trimmed)
+            return
+        }
+
+        if trimmed == "/follow-up" || trimmed.hasPrefix("/follow-up ") || trimmed == "/follow_up" || trimmed.hasPrefix("/follow_up ") {
+            try submitFollowUpCommand(trimmed)
+            return
+        }
+
+        lock.lock()
+        let isCurrentlyStreaming = isStreaming
+        if isCurrentlyStreaming == false {
+            isStreaming = true
+            assistantTranscriptIndex = nil
+            currentAssistantText = ""
+        }
         draft = ""
-        assistantTranscriptIndex = nil
-        currentAssistantText = ""
         transcriptEntries.append("> \(trimmed)")
-        appendActivityItemLocked(SessionActivityItem(kind: .message, text: "You: \(trimmed)"))
+        appendActivityItemLocked(
+            SessionActivityItem(
+                kind: .message,
+                text: isCurrentlyStreaming ? "Queued steering: \(trimmed)" : "You: \(trimmed)"
+            )
+        )
+        lock.unlock()
+        notifyChange()
+
+        var payload: [String: Any] = [
+            "type": "prompt",
+            "message": trimmed
+        ]
+        if isCurrentlyStreaming {
+            payload["streamingBehavior"] = "steer"
+        }
+        try transport.sendLine(Self.jsonLine(payload))
+    }
+
+    private func submitSteeringCommand(_ commandText: String) throws {
+        let message = String(commandText.dropFirst("/steer".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        try submitQueuedCommand(
+            message: message,
+            usageText: "Usage: /steer <message>",
+            activityText: "Queued steering: \(message)",
+            payload: [
+                "type": "steer",
+                "message": message
+            ]
+        )
+    }
+
+    private func submitFollowUpCommand(_ commandText: String) throws {
+        let trimmed = commandText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let message: String
+        if trimmed.hasPrefix("/follow_up") {
+            message = String(trimmed.dropFirst("/follow_up".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            message = String(trimmed.dropFirst("/follow-up".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        try submitQueuedCommand(
+            message: message,
+            usageText: "Usage: /follow-up <message>",
+            activityText: "Queued follow-up: \(message)",
+            payload: [
+                "type": "follow_up",
+                "message": message
+            ]
+        )
+    }
+
+    private func submitAbortCommand() throws {
+        lock.lock()
+        draft = ""
+        appendActivityItemLocked(SessionActivityItem(kind: .command, text: "/abort"))
+        lock.unlock()
+        notifyChange()
+
+        try transport.sendLine(Self.jsonLine(["type": "abort"]))
+    }
+
+    private func submitSteeringModeCommand(_ commandText: String) throws {
+        let trimmed = commandText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let modeText: String
+        if trimmed.hasPrefix("/steering_mode") {
+            modeText = String(trimmed.dropFirst("/steering_mode".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            modeText = String(trimmed.dropFirst("/steering-mode".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        guard let mode = parseQueueModeSelection(modeText) else {
+            lock.lock()
+            draft = ""
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: "Usage: /steering-mode <all|one-at-a-time>"))
+            lock.unlock()
+            notifyChange()
+            return
+        }
+
+        let requestID: String
+        lock.lock()
+        draft = ""
+        requestID = "nexus-pi-set-steering-mode-\(nextSetSteeringModeRequestSequence)"
+        nextSetSteeringModeRequestSequence += 1
+        pendingSetSteeringModesByRequestID[requestID] = mode
+        appendActivityItemLocked(SessionActivityItem(kind: .command, text: "/steering-mode \(mode)"))
         lock.unlock()
         notifyChange()
 
         try transport.sendLine(
             Self.jsonLine([
-                "type": "prompt",
-                "message": trimmed
+                "id": requestID,
+                "type": "set_steering_mode",
+                "mode": mode
             ])
         )
+    }
+
+    private func submitFollowUpModeCommand(_ commandText: String) throws {
+        let trimmed = commandText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let modeText: String
+        if trimmed.hasPrefix("/follow_up_mode") {
+            modeText = String(trimmed.dropFirst("/follow_up_mode".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            modeText = String(trimmed.dropFirst("/follow-up-mode".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        guard let mode = parseQueueModeSelection(modeText) else {
+            lock.lock()
+            draft = ""
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: "Usage: /follow-up-mode <all|one-at-a-time>"))
+            lock.unlock()
+            notifyChange()
+            return
+        }
+
+        let requestID: String
+        lock.lock()
+        draft = ""
+        requestID = "nexus-pi-set-follow-up-mode-\(nextSetFollowUpModeRequestSequence)"
+        nextSetFollowUpModeRequestSequence += 1
+        pendingSetFollowUpModesByRequestID[requestID] = mode
+        appendActivityItemLocked(SessionActivityItem(kind: .command, text: "/follow-up-mode \(mode)"))
+        lock.unlock()
+        notifyChange()
+
+        try transport.sendLine(
+            Self.jsonLine([
+                "id": requestID,
+                "type": "set_follow_up_mode",
+                "mode": mode
+            ])
+        )
+    }
+
+    private func submitQueuedCommand(
+        message: String,
+        usageText: String,
+        activityText: String,
+        payload: [String: Any]
+    ) throws {
+        guard message.isEmpty == false else {
+            lock.lock()
+            draft = ""
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: usageText))
+            lock.unlock()
+            notifyChange()
+            return
+        }
+
+        lock.lock()
+        draft = ""
+        transcriptEntries.append("> \(message)")
+        appendActivityItemLocked(SessionActivityItem(kind: .message, text: activityText))
+        lock.unlock()
+        notifyChange()
+
+        try transport.sendLine(Self.jsonLine(payload))
     }
 
     private func submitModelCommand(_ commandText: String) throws {
@@ -530,6 +709,16 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             return
         }
 
+        if command == "set_steering_mode" {
+            handleSetSteeringModeResponse(response, requestID: id)
+            return
+        }
+
+        if command == "set_follow_up_mode" {
+            handleSetFollowUpModeResponse(response, requestID: id)
+            return
+        }
+
         if command == "prompt", bool(for: "success", in: response) == true {
             requestSlashCommands()
         }
@@ -541,8 +730,12 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             notifyChange()
         case "message_update":
             handleMessageUpdate(object)
+        case "message_end":
+            handleMessageEnd(object)
         case "extension_ui_request":
             handleExtensionUIRequest(object)
+        case "queue_update":
+            handleQueueUpdate(object)
         case "tool_execution_start":
             handleToolExecutionStart(object)
         case "tool_execution_update":
@@ -604,6 +797,30 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             return .extensionError
         }
         return .unknown
+    }
+
+    private func handleQueueUpdate(_ object: [String: Any]) {
+        let steering = object["steering"] as? [String] ?? []
+        let followUp = object["followUp"] as? [String] ?? []
+
+        let shouldNotify: Bool
+        lock.lock()
+        shouldNotify = queuedSteeringMessages != steering || queuedFollowUpMessages != followUp
+        queuedSteeringMessages = steering
+        queuedFollowUpMessages = followUp
+        if shouldNotify {
+            appendActivityItemLocked(
+                SessionActivityItem(
+                    kind: .status,
+                    text: queueUpdateStatusText(steering: steering, followUp: followUp)
+                )
+            )
+        }
+        lock.unlock()
+
+        if shouldNotify {
+            notifyChange()
+        }
     }
 
     private func handleExtensionUIRequest(_ object: [String: Any]) {
@@ -748,6 +965,37 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         default:
             return
         }
+    }
+
+    private func handleMessageEnd(_ object: [String: Any]) {
+        guard let message = object["message"] as? [String: Any],
+              string(for: "role", in: message) == "assistant",
+              let stopReason = string(for: "stopReason", in: message),
+              stopReason == "aborted" || stopReason == "error" else {
+            return
+        }
+
+        let finalText = assistantText(from: message)
+        let errorText = trimmedString(for: "errorMessage", in: message)
+            ?? (stopReason == "aborted" ? "Operation aborted" : "Error")
+
+        lock.lock()
+        if finalText.isEmpty == false {
+            ensureAssistantTranscriptEntryLocked()
+            if let assistantTranscriptIndex {
+                transcriptEntries[assistantTranscriptIndex] = finalText
+            }
+            appendActivityItemLocked(SessionActivityItem(kind: .message, text: "Pi: \(finalText)"))
+        }
+        currentAssistantText = ""
+        assistantTranscriptIndex = nil
+        toolOutputByCallID.removeAll()
+        toolNamesByCallID.removeAll()
+        isStreaming = false
+        appendActivityItemLocked(SessionActivityItem(kind: .error, text: errorText))
+        lock.unlock()
+        requestSlashCommands()
+        notifyChange()
     }
 
     private func handleToolExecutionStart(_ object: [String: Any]) {
@@ -998,6 +1246,44 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         notifyChange()
     }
 
+    private func handleSetSteeringModeResponse(_ response: [String: Any], requestID: String?) {
+        lock.lock()
+        let requestedMode = requestID.flatMap { pendingSetSteeringModesByRequestID.removeValue(forKey: $0) }
+
+        if bool(for: "success", in: response) == true {
+            if let requestedMode {
+                steeringMode = requestedMode
+            }
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi steering mode set to \(steeringMode)"))
+        } else {
+            let detail = string(for: "error", in: response) ?? "Pi failed to update steering mode."
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: detail))
+        }
+
+        lock.unlock()
+        requestSlashCommands()
+        notifyChange()
+    }
+
+    private func handleSetFollowUpModeResponse(_ response: [String: Any], requestID: String?) {
+        lock.lock()
+        let requestedMode = requestID.flatMap { pendingSetFollowUpModesByRequestID.removeValue(forKey: $0) }
+
+        if bool(for: "success", in: response) == true {
+            if let requestedMode {
+                followUpMode = requestedMode
+            }
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi follow-up mode set to \(followUpMode)"))
+        } else {
+            let detail = string(for: "error", in: response) ?? "Pi failed to update follow-up mode."
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: detail))
+        }
+
+        lock.unlock()
+        requestSlashCommands()
+        notifyChange()
+    }
+
     private func requestSlashCommands(preferredID: String? = nil) {
         let requestID: String
         lock.lock()
@@ -1124,6 +1410,16 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         return normalized
     }
 
+    private func parseQueueModeSelection(_ target: String) -> String? {
+        let normalized = target.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch normalized {
+        case "all", "one-at-a-time":
+            return normalized
+        default:
+            return nil
+        }
+    }
+
     private func formattedModelTarget(fromResponse response: [String: Any]) -> String? {
         guard let data = response["data"] as? [String: Any] else {
             return nil
@@ -1231,8 +1527,70 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         }
     }
 
+    private func queueUpdateStatusText(steering: [String], followUp: [String]) -> String {
+        var segments: [String] = []
+        if steering.isEmpty == false {
+            segments.append("steering: \(steering.map { previewText($0, limit: 80) }.joined(separator: " · "))")
+        }
+        if followUp.isEmpty == false {
+            segments.append("follow-up: \(followUp.map { previewText($0, limit: 80) }.joined(separator: " · "))")
+        }
+        if segments.isEmpty {
+            return "Pi queue cleared"
+        }
+        return "Pi queue updated — \(segments.joined(separator: "; "))"
+    }
+
+    private func queueControlSlashCommandsLocked() -> [SessionSlashCommand] {
+        let steeringModes = ["all", "one-at-a-time"].map { mode in
+            SessionSlashCommand(
+                name: "steering-mode \(mode)",
+                displayName: "steering-mode \(mode)",
+                insertionText: "steering-mode \(mode)",
+                suggestionQueryPrefix: "steering-mode ",
+                description: mode == steeringMode ? "Current Pi steering mode." : "Set Pi steering mode to \(mode).",
+                source: .builtIn
+            )
+        }
+        let followUpModes = ["all", "one-at-a-time"].map { mode in
+            SessionSlashCommand(
+                name: "follow-up-mode \(mode)",
+                displayName: "follow-up-mode \(mode)",
+                insertionText: "follow-up-mode \(mode)",
+                suggestionQueryPrefix: "follow-up-mode ",
+                description: mode == followUpMode ? "Current Pi follow-up mode." : "Set Pi follow-up mode to \(mode).",
+                source: .builtIn
+            )
+        }
+        return [
+            SessionSlashCommand(
+                name: "steer",
+                displayName: "steer <message>",
+                insertionText: "steer ",
+                suggestionQueryPrefix: "steer ",
+                description: "Queue a steering message while Pi is running.",
+                source: .builtIn
+            ),
+            SessionSlashCommand(
+                name: "follow-up",
+                displayName: "follow-up <message>",
+                insertionText: "follow-up ",
+                suggestionQueryPrefix: "follow-up ",
+                description: "Queue a follow-up message for after Pi finishes.",
+                source: .builtIn
+            ),
+            SessionSlashCommand(
+                name: "abort",
+                displayName: "abort",
+                insertionText: "abort",
+                description: "Abort the current Pi run.",
+                source: .builtIn
+            )
+        ] + steeringModes + followUpModes
+    }
+
     private func mergedSlashCommandsLocked() -> [SessionSlashCommand]? {
-        let merged = mergeSlashCommands(groups: [providerSlashCommands, availableModelCommands, thinkingSlashCommandsLocked()])
+        let merged = mergeSlashCommands(groups: [providerSlashCommands, availableModelCommands, thinkingSlashCommandsLocked(), queueControlSlashCommandsLocked()])
         return merged.isEmpty ? nil : merged
     }
 
@@ -1276,6 +1634,8 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             currentModel = nil
         }
         currentThinkingLevel = trimmedString(for: "thinkingLevel", in: data)
+        steeringMode = trimmedString(for: "steeringMode", in: data) ?? steeringMode
+        followUpMode = trimmedString(for: "followUpMode", in: data) ?? followUpMode
     }
 
     private func currentModelStatusTextLocked() -> String? {

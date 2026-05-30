@@ -369,6 +369,38 @@ public func structuredSessionSlashCommands(for screen: SessionScreen) -> [Struct
                     displayText: "/thinking <level>",
                     insertionText: "/thinking ",
                     summary: "Set Pi's thinking level."
+                ),
+                StructuredSessionSlashCommand(
+                    matchText: "steer",
+                    displayText: "/steer <message>",
+                    insertionText: "/steer ",
+                    summary: "Queue a steering message while Pi is running.",
+                    acceptsArguments: true
+                ),
+                StructuredSessionSlashCommand(
+                    matchText: "follow-up",
+                    displayText: "/follow-up <message>",
+                    insertionText: "/follow-up ",
+                    summary: "Queue a follow-up message for after Pi finishes.",
+                    acceptsArguments: true
+                ),
+                StructuredSessionSlashCommand(
+                    matchText: "abort",
+                    displayText: "/abort",
+                    insertionText: "/abort",
+                    summary: "Abort the current Pi run."
+                ),
+                StructuredSessionSlashCommand(
+                    matchText: "steering-mode",
+                    displayText: "/steering-mode <mode>",
+                    insertionText: "/steering-mode ",
+                    summary: "Set how Pi delivers queued steering messages."
+                ),
+                StructuredSessionSlashCommand(
+                    matchText: "follow-up-mode",
+                    displayText: "/follow-up-mode <mode>",
+                    insertionText: "/follow-up-mode ",
+                    summary: "Set how Pi delivers queued follow-up messages."
                 )
             ],
             liveCommands: (screen.slashCommands ?? []).map(structuredSessionSlashCommand(from:))

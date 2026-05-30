@@ -355,6 +355,204 @@ struct NexusServicePiSessionStreamTests {
         #expect(screen.activityItems.map(\.kind) == [.status, .status, .command, .status, .status])
     }
 
+    @Test func localPiRuntimeQueuesSteeringCommandAndProjectsQueueUpdates() throws {
+        let transport = QueueControlPiRPCTransport()
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("/steer Focus on error handling")
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(transport.sentLines.contains(where: {
+            $0.contains("\"type\":\"steer\"") && $0.contains("\"message\":\"Focus on error handling\"")
+        }))
+        #expect(screen.providerEvents.contains(where: { $0.type == "queue_update" && $0.family == .queue }))
+        #expect(screen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "Queued steering: Focus on error handling",
+            "Pi queue updated — steering: Focus on error handling"
+        ])
+        #expect(screen.transcript == "> Focus on error handling")
+    }
+
+    @Test func localPiRuntimeQueuesFollowUpCommandAndProjectsQueueUpdates() throws {
+        let transport = QueueControlPiRPCTransport()
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("/follow-up After that, summarize the result")
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(transport.sentLines.contains(where: {
+            $0.contains("\"type\":\"follow_up\"") && $0.contains("\"message\":\"After that, summarize the result\"")
+        }))
+        #expect(screen.providerEvents.contains(where: { $0.type == "queue_update" && $0.family == .queue }))
+        #expect(screen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "Queued follow-up: After that, summarize the result",
+            "Pi queue updated — follow-up: After that, summarize the result"
+        ])
+        #expect(screen.transcript == "> After that, summarize the result")
+    }
+
+    @Test func localPiRuntimeQueuesStreamingPromptViaPromptStreamingBehavior() throws {
+        let transport = QueueControlPiRPCTransport()
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("hello")
+        try runtime.sendInput("Focus on error handling")
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(transport.sentLines.contains(where: {
+            $0.contains("\"type\":\"prompt\"")
+                && $0.contains("\"message\":\"hello\"")
+                && $0.contains("streamingBehavior") == false
+        }))
+        #expect(transport.sentLines.contains(where: {
+            $0.contains("\"type\":\"prompt\"")
+                && $0.contains("\"message\":\"Focus on error handling\"")
+                && $0.contains("\"streamingBehavior\":\"steer\"")
+        }))
+        #expect(screen.providerEvents.contains(where: { $0.type == "queue_update" && $0.family == .queue }))
+        #expect(screen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "You: hello",
+            "Queued steering: Focus on error handling",
+            "Pi queue updated — steering: Focus on error handling"
+        ])
+        #expect(screen.transcript == "> hello\n> Focus on error handling")
+        #expect(screen.isAgentTurnInProgress)
+    }
+
+    @Test func localPiRuntimeUpdatesQueueModesViaCommands() throws {
+        let transport = QueueControlPiRPCTransport()
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("/steering-mode all")
+        try runtime.sendInput("/follow-up-mode all")
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"set_steering_mode\"") && $0.contains("\"mode\":\"all\"") }))
+        #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"set_follow_up_mode\"") && $0.contains("\"mode\":\"all\"") }))
+        #expect(screen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "/steering-mode all",
+            "Pi steering mode set to all",
+            "/follow-up-mode all",
+            "Pi follow-up mode set to all"
+        ])
+        #expect(screen.transcript.isEmpty)
+    }
+
+    @Test func localPiRuntimePublishesQueueControlCommandsFromCurrentPiState() throws {
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in QueueControlPiRPCTransport() }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        let commandNames = runtime.sessionScreen(for: session).slashCommands?.map(\.name) ?? []
+
+        #expect(commandNames.contains("steer"))
+        #expect(commandNames.contains("follow-up"))
+        #expect(commandNames.contains("abort"))
+        #expect(commandNames.contains("steering-mode all"))
+        #expect(commandNames.contains("steering-mode one-at-a-time"))
+        #expect(commandNames.contains("follow-up-mode all"))
+        #expect(commandNames.contains("follow-up-mode one-at-a-time"))
+    }
+
+    @Test func localPiRuntimeAbortsActiveRunViaCommand() throws {
+        let transport = QueueControlPiRPCTransport()
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("hello")
+        try runtime.sendInput("/abort")
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"abort\"") }))
+        #expect(screen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "You: hello",
+            "/abort",
+            "Operation aborted"
+        ])
+        #expect(screen.transcript == "> hello")
+        #expect(screen.isAgentTurnInProgress == false)
+    }
+
     @Test func localPiDefaultSessionRelaunchKeepsPiConversationLinkageAcrossServiceRestart() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)
@@ -1320,6 +1518,143 @@ private final class PromptEventPiRPCTransport: PiRPCTransporting, @unchecked Sen
             for event in promptEvents {
                 emit(event)
             }
+        default:
+            return
+        }
+    }
+
+    func terminate() throws {
+        terminationHandler?(0)
+    }
+
+    private func emit(_ object: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: object),
+              let line = String(data: data, encoding: .utf8) else {
+            return
+        }
+        stdoutLineHandler?(line)
+    }
+}
+
+private final class QueueControlPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
+    private var stdoutLineHandler: (@Sendable (String) -> Void)?
+    private var terminationHandler: (@Sendable (Int32) -> Void)?
+    private(set) var sentLines: [String] = []
+
+    func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
+        stdoutLineHandler = handler
+    }
+
+    func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?) {
+        terminationHandler = handler
+    }
+
+    func start() throws {}
+
+    func sendLine(_ line: String) throws {
+        sentLines.append(line)
+        guard let data = line.data(using: .utf8),
+              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = object["type"] as? String else {
+            return
+        }
+
+        switch type {
+        case "get_state":
+            emit([
+                "id": object["id"] as? String ?? "state",
+                "type": "response",
+                "command": "get_state",
+                "success": true,
+                "data": [
+                    "sessionId": "pi-session-1",
+                    "steeringMode": "one-at-a-time",
+                    "followUpMode": "one-at-a-time"
+                ]
+            ])
+        case "get_commands":
+            emit([
+                "id": object["id"] as? String ?? "commands",
+                "type": "response",
+                "command": "get_commands",
+                "success": true,
+                "data": ["commands": []]
+            ])
+        case "get_available_models":
+            emit([
+                "id": object["id"] as? String ?? "available-models",
+                "type": "response",
+                "command": "get_available_models",
+                "success": true,
+                "data": ["models": []]
+            ])
+        case "steer":
+            let message = object["message"] as? String ?? ""
+            emit([
+                "type": "response",
+                "command": "steer",
+                "success": true
+            ])
+            emit([
+                "type": "queue_update",
+                "steering": [message],
+                "followUp": []
+            ])
+        case "follow_up":
+            let message = object["message"] as? String ?? ""
+            emit([
+                "type": "response",
+                "command": "follow_up",
+                "success": true
+            ])
+            emit([
+                "type": "queue_update",
+                "steering": [],
+                "followUp": [message]
+            ])
+        case "prompt":
+            emit([
+                "type": "response",
+                "command": "prompt",
+                "success": true
+            ])
+            if let streamingBehavior = object["streamingBehavior"] as? String,
+               let message = object["message"] as? String,
+               streamingBehavior == "steer" {
+                emit([
+                    "type": "queue_update",
+                    "steering": [message],
+                    "followUp": []
+                ])
+            }
+        case "set_steering_mode":
+            emit([
+                "id": object["id"] as? String ?? "set-steering-mode",
+                "type": "response",
+                "command": "set_steering_mode",
+                "success": true
+            ])
+        case "set_follow_up_mode":
+            emit([
+                "id": object["id"] as? String ?? "set-follow-up-mode",
+                "type": "response",
+                "command": "set_follow_up_mode",
+                "success": true
+            ])
+        case "abort":
+            emit([
+                "type": "response",
+                "command": "abort",
+                "success": true
+            ])
+            emit([
+                "type": "message_end",
+                "message": [
+                    "role": "assistant",
+                    "content": [],
+                    "stopReason": "aborted"
+                ]
+            ])
         default:
             return
         }

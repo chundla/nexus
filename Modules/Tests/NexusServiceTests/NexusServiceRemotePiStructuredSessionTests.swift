@@ -113,6 +113,48 @@ struct NexusServiceRemotePiStructuredSessionTests {
         #expect(promptedScreen.transcript == "> hello\nRemote hello")
     }
 
+    @Test func remoteControllerCanQueueFollowUpCommandThroughStructuredPiSessionAPI() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let transportHarness = RemotePiTransportHarness()
+        let service = try makeRemotePiService(rootURL: rootURL, transportHarness: transportHarness)
+
+        let group = try service.createWorkspaceGroup(name: "Remote")
+        let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
+        _ = try service.validateHost(hostID: host.id)
+        let workspace = try service.createRemoteWorkspace(
+            name: "Remote Pi",
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+
+        let pairedDeviceID = UUID()
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+        _ = try service.takeRemoteSessionControl(
+            sessionID: session.id,
+            pairedDeviceID: pairedDeviceID,
+            columns: 44,
+            rows: 12
+        )
+        let queuedScreen = try service.sendRemoteSessionInput(
+            sessionID: session.id,
+            pairedDeviceID: pairedDeviceID,
+            text: "/follow-up After that, summarize the result"
+        )
+
+        #expect(queuedScreen.primarySurface == .structuredActivityFeed)
+        #expect(queuedScreen.controller == .pairedDevice(pairedDeviceID))
+        #expect(queuedScreen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "Queued follow-up: After that, summarize the result",
+            "Pi queue updated — follow-up: After that, summarize the result"
+        ])
+        #expect(queuedScreen.transcript == "> After that, summarize the result")
+    }
+
     @Test func restartedRemotePiDefaultSessionStaysInterruptedUntilExplicitResumeRecoversExistingRuntime() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)
@@ -754,6 +796,18 @@ private final class RemotePiTransport: PiRPCTransporting, @unchecked Sendable {
                         ]
                     ]
                 ]
+            ])
+        case "follow_up":
+            let message = object["message"] as? String ?? ""
+            emit([
+                "type": "response",
+                "command": "follow_up",
+                "success": true
+            ])
+            emit([
+                "type": "queue_update",
+                "steering": [],
+                "followUp": [message]
             ])
         default:
             return

@@ -417,6 +417,38 @@ struct StructuredSessionPresentationTests {
         #expect(structuredSessionSlashCommandMenuPresentation(for: "/thinking h", screen: screen).commands.map(\.displayText) == ["/thinking high"])
     }
 
+    @Test func structuredSessionSlashCommandMenuUsesStaticPiQueueControlsAndLiveModeSuggestions() {
+        let screen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            ),
+            transcript: "",
+            slashCommands: [
+                SessionSlashCommand(
+                    name: "steering-mode one-at-a-time",
+                    displayName: "steering-mode one-at-a-time",
+                    insertionText: "steering-mode one-at-a-time",
+                    suggestionQueryPrefix: "steering-mode ",
+                    description: "Current Pi steering mode.",
+                    source: .builtIn
+                )
+            ]
+        )
+
+        let rootCommands = structuredSessionSlashCommandMenuPresentation(for: "/", screen: screen).commands.map(\.displayText)
+
+        #expect(rootCommands.contains("/steer <message>"))
+        #expect(rootCommands.contains("/follow-up <message>"))
+        #expect(rootCommands.contains("/abort"))
+        #expect(rootCommands.contains("/steering-mode <mode>"))
+        #expect(rootCommands.contains("/follow-up-mode <mode>"))
+        #expect(structuredSessionSlashCommandMenuPresentation(for: "/steering-mode o", screen: screen).commands.map(\.displayText) == ["/steering-mode one-at-a-time"])
+    }
+
     @Test func structuredSessionSlashCommandMenuUsesLiveCodexModelCommandsOnlyAfterModelPrefix() {
         let screen = SessionScreen(
             session: Session(
