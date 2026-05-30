@@ -189,6 +189,54 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func remoteStructuredSessionPresentationKeepsIPhoneStructuredConversationPolicyBehindTheSharedRootPresentation() {
+        let pendingRequest = SessionApprovalRequest(title: "Deploy", text: "Deploy to production?", state: .pending)
+        let approvedRequest = SessionApprovalRequest(title: "Cleanup", text: "Delete temp files?", state: .approved)
+        let screen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .codex,
+                isDefault: true,
+                state: .ready
+            ),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .message, text: "You: Ship it"),
+                SessionActivityItem(kind: .message, text: "Still working")
+            ],
+            approvalRequests: [pendingRequest, approvedRequest]
+        )
+
+        let presentation = structuredSessionPresentation(
+            for: screen,
+            isController: false,
+            draft: "/mo",
+            isPerformingAction: false
+        )
+
+        #expect(presentation.feed.pendingApprovalRequests == [pendingRequest])
+        #expect(presentation.composer == StructuredSessionComposerPresentation(
+            placeholder: "Send a prompt to Codex",
+            isEnabled: false,
+            disabledReason: "Take Controller to send a prompt from this iPhone."
+        ))
+        #expect(presentation.approvalRequest == StructuredSessionApprovalRequestPresentation(
+            actionsAreEnabled: false,
+            disabledReason: "Take Controller to respond to Approval Requests from this iPhone."
+        ))
+        #expect(structuredSessionConversationPresentation(for: presentation.feed.activityRows[0], screen: screen) == StructuredSessionConversationPresentation(
+            role: .user,
+            text: "Ship it"
+        ))
+        #expect(structuredSessionConversationPresentation(for: presentation.feed.activityRows[1], screen: screen) == StructuredSessionConversationPresentation(
+            role: .assistant(label: "Codex"),
+            text: "Still working"
+        ))
+    }
+
+    @MainActor
     @Test func remoteSessionSurfacePresentationSupportsExistingStructuredCodexSessionsOnIPhone() {
         let screen = SessionScreen(
             session: Session(

@@ -1443,6 +1443,19 @@ private struct RemoteSessionScreenView: View {
         )
     }
 
+    private var structuredPresentation: StructuredSessionPresentation? {
+        guard let screen else {
+            return nil
+        }
+
+        return structuredSessionPresentation(
+            for: screen,
+            isController: model.focusedSessionIsController,
+            draft: structuredPrompt,
+            isPerformingAction: isPerformingAction || screen.isAgentTurnInProgress
+        )
+    }
+
     private var supportsFocusedSessionSurface: Bool {
         surfacePresentation?.surfaceSupport == .supported
     }
@@ -1609,8 +1622,8 @@ private struct RemoteSessionScreenView: View {
 
     private var structuredConversationView: some View {
         Group {
-            if let screen {
-                structuredSessionContent(screen)
+            if let screen, let presentation = structuredPresentation {
+                structuredSessionContent(screen, presentation: presentation)
             } else if let errorMessage = model.focusedSessionErrorMessage {
                 ScrollView {
                     RemoteUnavailableInsetCard(title: "Conversation unavailable", detail: errorMessage, accent: NexusIOSTheme.coral)
@@ -1677,27 +1690,15 @@ private struct RemoteSessionScreenView: View {
 
     @ViewBuilder
     private var structuredComposerBar: some View {
-        if let screen {
-            let composer = structuredSessionComposerPresentation(for: screen, isController: model.focusedSessionIsController)
-            let sendAffordance = structuredSessionComposerSendAffordance(
-                for: structuredPrompt,
-                composer: composer,
-                isPerformingAction: isPerformingAction || screen.isAgentTurnInProgress
-            )
-
+        if let screen, let presentation = structuredPresentation {
             VStack(spacing: 8) {
-                if composer.isEnabled {
-                    let slashCommands = structuredSessionSlashCommandMenuPresentation(
-                        for: structuredPrompt,
-                        screen: screen
-                    )
-
-                    if slashCommands.isVisible {
-                        iosStructuredSessionSlashCommandMenu(slashCommands.commands)
+                if presentation.composer.isEnabled {
+                    if presentation.slashCommandMenu.isVisible {
+                        iosStructuredSessionSlashCommandMenu(presentation.slashCommandMenu.commands)
                     }
 
                     HStack(alignment: .bottom, spacing: 10) {
-                        TextField(composer.placeholder, text: $structuredPrompt, axis: .vertical)
+                        TextField(presentation.composer.placeholder, text: $structuredPrompt, axis: .vertical)
                             .focused($isStructuredPromptFocused)
                             .textInputAutocapitalization(.sentences)
                             .autocorrectionDisabled()
@@ -1706,7 +1707,7 @@ private struct RemoteSessionScreenView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .nexusIOSTextField(tint: NexusIOSTheme.gold)
 
-                        if sendAffordance.isVisible {
+                        if presentation.sendAffordance.isVisible {
                             Button {
                                 sendStructuredPrompt()
                             } label: {
@@ -1715,22 +1716,22 @@ private struct RemoteSessionScreenView: View {
                                     .foregroundStyle(.white)
                                     .frame(width: 34, height: 34)
                                     .background(
-                                        sendAffordance.isEnabled
+                                        presentation.sendAffordance.isEnabled
                                             ? NexusIOSTheme.gold
                                             : NexusIOSTheme.gold.opacity(0.32),
                                         in: Circle()
                                     )
                             }
                             .buttonStyle(.plain)
-                            .disabled(sendAffordance.isEnabled == false)
+                            .disabled(presentation.sendAffordance.isEnabled == false)
                             .accessibilityLabel("Send")
                             .transition(.scale(scale: 0.92).combined(with: .opacity))
                         }
                     }
-                    .animation(.easeOut(duration: 0.16), value: sendAffordance.isVisible)
+                    .animation(.easeOut(duration: 0.16), value: presentation.sendAffordance.isVisible)
                 } else {
                     HStack(spacing: 12) {
-                        Text(composer.disabledReason ?? "Take over to reply from this iPhone.")
+                        Text(presentation.composer.disabledReason ?? "Take over to reply from this iPhone.")
                             .font(NexusIOSTheme.bodyFont(13))
                             .foregroundStyle(NexusIOSTheme.mutedText)
                             .fixedSize(horizontal: false, vertical: true)
@@ -1963,34 +1964,35 @@ private struct RemoteSessionScreenView: View {
         }
     }
 
-    private func structuredSessionContent(_ screen: SessionScreen) -> some View {
-        let presentation = structuredSessionFeedPresentation(for: screen)
-
-        return ScrollViewReader { proxy in
+    private func structuredSessionContent(
+        _ screen: SessionScreen,
+        presentation: StructuredSessionPresentation
+    ) -> some View {
+        ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
-                    if presentation.pendingApprovalRequests.isEmpty == false {
+                    if presentation.feed.pendingApprovalRequests.isEmpty == false {
                         VStack(alignment: .leading, spacing: 10) {
-                            ForEach(presentation.pendingApprovalRequests) { request in
-                                structuredSessionApprovalRequestView(request)
+                            ForEach(presentation.feed.pendingApprovalRequests) { request in
+                                structuredSessionApprovalRequestView(request, presentation: presentation.approvalRequest)
                             }
                         }
                     }
 
-                    if presentation.activityRows.isEmpty {
+                    if presentation.feed.activityRows.isEmpty {
                         RemoteUnavailableInsetCard(
-                            title: presentation.copy.emptyStateTitle,
-                            detail: presentation.copy.emptyStateDescription,
+                            title: presentation.feed.copy.emptyStateTitle,
+                            detail: presentation.feed.copy.emptyStateDescription,
                             accent: NexusIOSTheme.gold
                         )
                     } else {
                         LazyVStack(spacing: 10) {
-                            ForEach(presentation.activityRows) { row in
-                                structuredSessionActivityRowView(row)
+                            ForEach(presentation.feed.activityRows) { row in
+                                structuredSessionActivityRowView(row, screen: screen)
                                     .id(row.id)
                             }
 
-                            if let thinkingIndicator = presentation.thinkingIndicator {
+                            if let thinkingIndicator = presentation.feed.thinkingIndicator {
                                 structuredSessionThinkingIndicatorView(thinkingIndicator)
                             }
 
@@ -2009,12 +2011,12 @@ private struct RemoteSessionScreenView: View {
                     proxy.scrollTo(conversationBottomID, anchor: .bottom)
                 }
             }
-            .onChange(of: presentation.activityRows.count) { _, _ in
+            .onChange(of: presentation.feed.activityRows.count) { _, _ in
                 withAnimation(.easeOut(duration: 0.18)) {
                     proxy.scrollTo(conversationBottomID, anchor: .bottom)
                 }
             }
-            .onChange(of: presentation.pendingApprovalRequests.count) { _, _ in
+            .onChange(of: presentation.feed.pendingApprovalRequests.count) { _, _ in
                 withAnimation(.easeOut(duration: 0.18)) {
                     proxy.scrollTo(conversationBottomID, anchor: .bottom)
                 }
@@ -2040,17 +2042,19 @@ private struct RemoteSessionScreenView: View {
     }
 
     @ViewBuilder
-    private func structuredSessionActivityRowView(_ row: StructuredSessionActivityRow) -> some View {
+    private func structuredSessionActivityRowView(
+        _ row: StructuredSessionActivityRow,
+        screen: SessionScreen
+    ) -> some View {
         let accentColor = structuredSessionActivityColor(for: row.emphasis)
-        let role = structuredConversationRole(for: row, providerName: currentSession.providerID.displayName)
-        let messageText = structuredConversationText(for: row)
+        let conversation = structuredSessionConversationPresentation(for: row, screen: screen)
 
-        switch role {
+        switch conversation.role {
         case .user:
             HStack {
                 Spacer(minLength: 48)
                 VStack(alignment: .trailing, spacing: 4) {
-                    Text(messageText)
+                    Text(conversation.text)
                         .font(NexusIOSTheme.bodyFont(15))
                         .foregroundStyle(.white)
                         .textSelection(.enabled)
@@ -2066,7 +2070,7 @@ private struct RemoteSessionScreenView: View {
                     Text(label)
                         .font(NexusIOSTheme.bodyFont(11, relativeTo: .caption, weight: .medium))
                         .foregroundStyle(NexusIOSTheme.mutedText)
-                    Text(messageText)
+                    Text(conversation.text)
                         .font(NexusIOSTheme.bodyFont(15))
                         .foregroundStyle(.white.opacity(0.94))
                         .textSelection(.enabled)
@@ -2087,7 +2091,7 @@ private struct RemoteSessionScreenView: View {
                     Label(row.title, systemImage: row.systemImage)
                         .font(NexusIOSTheme.monoFont(10, relativeTo: .caption))
                         .foregroundStyle(accentColor)
-                    Text(messageText)
+                    Text(conversation.text)
                         .font(NexusIOSTheme.monoFont(12, relativeTo: .callout))
                         .foregroundStyle(.white.opacity(0.92))
                         .textSelection(.enabled)
@@ -2107,7 +2111,7 @@ private struct RemoteSessionScreenView: View {
                     Label("Error", systemImage: row.systemImage)
                         .font(NexusIOSTheme.bodyFont(12, relativeTo: .caption, weight: .semibold))
                         .foregroundStyle(accentColor)
-                    Text(messageText)
+                    Text(conversation.text)
                         .font(NexusIOSTheme.bodyFont(14))
                         .foregroundStyle(.white.opacity(0.94))
                         .textSelection(.enabled)
@@ -2124,7 +2128,7 @@ private struct RemoteSessionScreenView: View {
         case .system:
             HStack {
                 Spacer()
-                Label(messageText, systemImage: row.systemImage)
+                Label(conversation.text, systemImage: row.systemImage)
                     .font(NexusIOSTheme.bodyFont(11, relativeTo: .caption))
                     .foregroundStyle(NexusIOSTheme.mutedText)
                     .padding(.horizontal, 10)
@@ -2135,8 +2139,10 @@ private struct RemoteSessionScreenView: View {
         }
     }
 
-    private func structuredSessionApprovalRequestView(_ request: SessionApprovalRequest) -> some View {
-        let presentation = structuredSessionApprovalRequestPresentation(isController: model.focusedSessionIsController)
+    private func structuredSessionApprovalRequestView(
+        _ request: SessionApprovalRequest,
+        presentation: StructuredSessionApprovalRequestPresentation
+    ) -> some View {
         let isApproving = activeApprovalRequestID == request.id
 
         return VStack(alignment: .leading, spacing: 12) {
@@ -2202,46 +2208,6 @@ private struct RemoteSessionScreenView: View {
         case .success:
             NexusIOSTheme.teal
         }
-    }
-
-    private func structuredConversationRole(for row: StructuredSessionActivityRow, providerName: String) -> StructuredConversationRole {
-        if row.title == "Message", let split = structuredConversationPrefixSplit(for: row.text) {
-            if split.label.caseInsensitiveCompare("you") == .orderedSame {
-                return .user
-            }
-            return .assistant(label: split.label)
-        }
-
-        switch row.title {
-        case "Command", "Diff":
-            return .command
-        case "Error":
-            return .error
-        case "Message":
-            return .assistant(label: providerName)
-        default:
-            return .system
-        }
-    }
-
-    private func structuredConversationText(for row: StructuredSessionActivityRow) -> String {
-        if row.title == "Message", let split = structuredConversationPrefixSplit(for: row.text) {
-            return split.body
-        }
-        return row.text
-    }
-
-    private func structuredConversationPrefixSplit(for text: String) -> (label: String, body: String)? {
-        guard let separatorRange = text.range(of: ": ") else {
-            return nil
-        }
-
-        let label = String(text[..<separatorRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
-        let body = String(text[separatorRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard label.isEmpty == false, body.isEmpty == false, label.count <= 24 else {
-            return nil
-        }
-        return (label, body)
     }
 
     private var terminalCellWidth: CGFloat { 8.5 }
@@ -2427,14 +2393,6 @@ private struct RemoteSessionScreenView: View {
             blue: rgb.2 / 255
         )
     }
-}
-
-private enum StructuredConversationRole {
-    case user
-    case assistant(label: String)
-    case command
-    case error
-    case system
 }
 
 private struct RemoteProviderSessionSummaryCard: View {
