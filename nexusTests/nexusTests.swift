@@ -6145,6 +6145,23 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func ipcClientListsRecentPerformanceDiagnostics() async throws {
+        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests()
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(name: nil, folderPath: "/tmp/perf-diagnostics-workspace", primaryGroupID: nil)
+
+        _ = try await client.getWorkspaceOverview(workspaceID: workspace.id)
+        let diagnostics = try await client.listPerformanceDiagnostics(limit: 10)
+        let record = try #require(diagnostics.first)
+
+        #expect(record.operation == .workspaceOverview)
+        #expect(record.workspaceID == workspace.id)
+        #expect(record.providerID == nil)
+        #expect(record.steps.contains(where: { $0.name == "loadWorkspace" }))
+    }
+
+    @MainActor
     @Test func appModelLoadsWorkspaceCatalogFromIPCClient() async throws {
         let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests()
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -8675,6 +8692,10 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
 
     func recordRemoteClientDiagnosticBreadcrumb(_ breadcrumb: RemoteClientDiagnosticBreadcrumb) async throws {}
 
+    func listPerformanceDiagnostics(limit: Int) async throws -> [PerformanceDiagnosticRecord] {
+        []
+    }
+
     func getRemoteAccessState() async throws -> RemoteAccessState {
         remoteAccessStateValue
     }
@@ -9086,6 +9107,10 @@ private struct FailingServiceClient: NexusServiceClient {
     }
 
     func recordRemoteClientDiagnosticBreadcrumb(_ breadcrumb: RemoteClientDiagnosticBreadcrumb) async throws {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func listPerformanceDiagnostics(limit: Int) async throws -> [PerformanceDiagnosticRecord] {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 

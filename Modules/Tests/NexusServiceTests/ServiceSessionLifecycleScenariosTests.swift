@@ -66,6 +66,29 @@ struct ServiceSessionLifecycleScenariosTests {
         ])
     }
 
+    @Test func freshDefaultSessionLaunchRecordsPerformanceDiagnostic() async throws {
+        let fixture = try ServiceSessionLifecycleFixture()
+        let diagnostics = PerformanceDiagnosticSpy()
+        let lifecycle = fixture.makeLifecycle(recordPerformanceDiagnostic: diagnostics.record)
+
+        _ = try await lifecycle.launchOrResumeDefaultSession(
+            workspaceID: fixture.workspace.id,
+            providerID: .claude
+        )
+        let record = try #require(diagnostics.records.first)
+
+        #expect(record.operation == .launchDefaultSession)
+        #expect(record.workspaceID == fixture.workspace.id)
+        #expect(record.providerID == .claude)
+        #expect(record.sessionID == nil)
+        #expect(record.steps.contains(where: { $0.name == "loadWorkspace" }))
+        #expect(record.steps.contains(where: { $0.name == "loadDefaultSession" }))
+        #expect(record.steps.contains(where: { $0.name == "planFreshSessionOpen" }))
+        #expect(record.steps.contains(where: { $0.name == "createDefaultSession" }))
+        #expect(record.steps.contains(where: { $0.name == "ensureLaunchSnapshot" }))
+        #expect(record.steps.contains(where: { $0.name == "launchFreshSession" }))
+    }
+
     @Test func localPiDefaultSessionLaunchUsesProviderModuleSupportAndStructuredPrelaunchSurface() async throws {
         let fixture = try ServiceSessionLifecycleFixture(
             health: ProviderHealthSummary(
@@ -269,6 +292,102 @@ struct ServiceSessionLifecycleScenariosTests {
             )
         ])
         #expect(tracker.freshLaunches.isEmpty)
+    }
+
+    @Test func remoteRuntimeRecoveryRecordsPerformanceDiagnostic() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+
+        let store = try NexusMetadataStore(storeURL: rootURL.appendingPathComponent("Nexus.sqlite", isDirectory: false))
+        let group = try store.createWorkspaceGroup(name: "Remote")
+        let host = try store.createHost(name: "Build Server", sshTarget: "build-box", port: nil)
+        let workspace = try store.createRemoteWorkspace(
+            name: "Remote Pi",
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+        let existingSession = try store.createDefaultSession(
+            workspaceID: workspace.id,
+            providerID: .pi,
+            state: .interrupted,
+            failureMessage: "Session interrupted"
+        )
+        _ = try store.ensureLaunchSnapshot(
+            sessionID: existingSession.id,
+            workspaceID: workspace.id,
+            providerID: .pi,
+            primarySurface: .structuredActivityFeed,
+            resolvedExecutable: "/tmp/pi",
+            resolvedWorkingDirectory: workspace.folderPath
+        )
+        let tracker = SessionLifecycleTracker()
+        let diagnostics = PerformanceDiagnosticSpy()
+        let lifecycle = ServiceSessionLifecycle(
+            dependencies: ServiceSessionLifecycleDependencies(
+                workspace: { try store.workspace(id: $0) },
+                sessionRecordStore: TrackingSessionRecordStore(metadataStore: store),
+                providerModule: { providerID in
+                    TestProviderModule(
+                        providerID: providerID,
+                        healthSummaryEvaluator: { _, _, _ in
+                            ProviderHealthSummary(
+                                state: .available,
+                                summary: "Ready",
+                                resolvedExecutable: "/tmp/pi",
+                                launchability: .launchable
+                            )
+                        }
+                    )
+                },
+                remoteWorkspaceHealthContext: { _ in Optional<RemoteWorkspaceHealthContext>.none },
+                providerHealthSummary: { _, _, _ in
+                    ProviderHealthSummary(
+                        state: .available,
+                        summary: "Ready",
+                        resolvedExecutable: "/tmp/pi",
+                        launchability: .launchable
+                    )
+                },
+                resolveNamedSessionName: { requestedName, _ in requestedName ?? "Session 1" },
+                reconcileSessionRuntimeState: { $0 },
+                sessionMayRemainReadyWithoutRuntime: { _, _ in false },
+                hasRuntime: { _ in false },
+                runtimeState: { _ in .interrupted },
+                executePersistedSessionLaunch: { execution in
+                    tracker.persistedLaunchExecutions.append(
+                        PersistedLaunchExecutionExpectation(
+                            sessionID: execution.session.id,
+                            mode: expectedMode(for: execution.mode),
+                            launchSnapshot: execution.launchSnapshot
+                        )
+                    )
+                    return execution.session
+                },
+                launchFreshSession: { session, workspace, launchSnapshot in
+                    tracker.freshLaunches.append((session, workspace, launchSnapshot))
+                    return session
+                },
+                recordPerformanceDiagnostic: diagnostics.record
+            )
+        )
+
+        _ = try await lifecycle.launchOrResumeDefaultSession(
+            workspaceID: workspace.id,
+            providerID: .pi
+        )
+        let record = try #require(diagnostics.records.first)
+
+        #expect(record.operation == .launchDefaultSession)
+        #expect(record.workspaceID == workspace.id)
+        #expect(record.providerID == .pi)
+        #expect(record.steps.contains(where: { $0.name == "loadDefaultSession" }))
+        #expect(record.steps.contains(where: { $0.name == "reconcileSession" }))
+        #expect(record.steps.contains(where: { $0.name == "resolveRelaunchMetadataSource" }))
+        #expect(record.steps.contains(where: { $0.name == "loadLaunchSnapshot" }))
+        #expect(record.steps.contains(where: { $0.name == "executePersistedLaunch.recoverRemoteRuntime" }))
     }
 
     @Test func createNamedSessionCreatesReadyNamedSessionAndLaunchSnapshot() async throws {
@@ -544,7 +663,8 @@ private struct ServiceSessionLifecycleFixture {
     }
 
     func makeLifecycle(
-        overrideProviderModule: (any ProviderModule)? = nil
+        overrideProviderModule: (any ProviderModule)? = nil,
+        recordPerformanceDiagnostic: @escaping (PerformanceDiagnosticRecord) throws -> Void = { _ in }
     ) -> ServiceSessionLifecycle {
         ServiceSessionLifecycle(
             dependencies: ServiceSessionLifecycleDependencies(
@@ -573,7 +693,8 @@ private struct ServiceSessionLifecycleFixture {
                 launchFreshSession: { session, workspace, launchSnapshot in
                     tracker.freshLaunches.append((session, workspace, launchSnapshot))
                     return session
-                }
+                },
+                recordPerformanceDiagnostic: recordPerformanceDiagnostic
             )
         )
     }
@@ -590,6 +711,14 @@ private enum ProviderModuleFreshOpenRequestExpectation: Equatable {
         case let .createNamedSession(workspace):
             self = .createNamedSession(workspaceID: workspace.id)
         }
+    }
+}
+
+private final class PerformanceDiagnosticSpy {
+    private(set) var records: [PerformanceDiagnosticRecord] = []
+
+    func record(_ record: PerformanceDiagnosticRecord) {
+        records.append(record)
     }
 }
 

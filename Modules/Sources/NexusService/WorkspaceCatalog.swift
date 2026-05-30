@@ -16,6 +16,30 @@ struct WorkspaceCatalogDependencies {
     let workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating
     let sessionRuntimeManager: any SessionRuntimeManaging
     let providerModuleRegistry: ProviderModuleRegistry
+    let recordPerformanceDiagnostic: (PerformanceDiagnosticRecord) throws -> Void
+    let currentUptimeNanoseconds: () -> UInt64
+
+    init(
+        metadataStore: NexusMetadataStore,
+        sessionRecordStore: any SessionRecordStore,
+        providerHealthEvaluator: any ProviderHealthEvaluating,
+        hostValidationEvaluator: any HostValidationEvaluating,
+        workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating,
+        sessionRuntimeManager: any SessionRuntimeManaging,
+        providerModuleRegistry: ProviderModuleRegistry,
+        recordPerformanceDiagnostic: @escaping (PerformanceDiagnosticRecord) throws -> Void = { _ in },
+        currentUptimeNanoseconds: @escaping () -> UInt64 = { DispatchTime.now().uptimeNanoseconds }
+    ) {
+        self.metadataStore = metadataStore
+        self.sessionRecordStore = sessionRecordStore
+        self.providerHealthEvaluator = providerHealthEvaluator
+        self.hostValidationEvaluator = hostValidationEvaluator
+        self.workspaceAvailabilityEvaluator = workspaceAvailabilityEvaluator
+        self.sessionRuntimeManager = sessionRuntimeManager
+        self.providerModuleRegistry = providerModuleRegistry
+        self.recordPerformanceDiagnostic = recordPerformanceDiagnostic
+        self.currentUptimeNanoseconds = currentUptimeNanoseconds
+    }
 }
 
 final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
@@ -26,88 +50,133 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
     }
 
     func workspaceOverview(workspaceID: UUID) async throws -> WorkspaceOverview {
-        guard let workspace = try dependencies.metadataStore.workspace(id: workspaceID) else {
-            throw NexusMetadataStoreError.workspaceNotFound
-        }
+        var trace = PerformanceDiagnosticTrace(
+            operation: .workspaceOverview,
+            workspaceID: workspaceID,
+            currentUptimeNanoseconds: dependencies.currentUptimeNanoseconds
+        )
 
-        let remoteTarget = try remoteWorkspaceTargetOverview(for: workspace)
-        let remoteContext = remoteTarget.map {
-            RemoteWorkspaceHealthContext(
-                host: $0.host,
-                hostValidation: $0.hostValidation,
-                workspaceAvailability: $0.workspaceAvailability
-            )
-        }
+        do {
+            guard let workspace = try trace.measure("loadWorkspace", { try dependencies.metadataStore.workspace(id: workspaceID) }) else {
+                throw NexusMetadataStoreError.workspaceNotFound
+            }
 
-        var providerCards: [WorkspaceProviderCard] = []
-        for providerID in ProviderID.allCases {
-            let providerModule = providerModule(for: providerID)
-            let sessions = try dependencies.sessionRecordStore.listSessions(workspaceID: workspaceID, providerID: providerID)
-                .map(reconcileSessionRuntimeState)
-            let defaultSession = sessions.first(where: \.isDefault)
-            let catalogRead = try await providerModule.readCatalog(
-                ProviderModuleCatalogReadRequest(
-                    workspace: workspace,
-                    remoteContext: remoteContext,
-                    defaultSession: defaultSession
-                ),
-                actions: ProviderModuleCatalogReadActions { [self] in
-                    try await self.providerHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
+            let remoteTarget = try trace.measure("loadRemoteTarget", { try remoteWorkspaceTargetOverview(for: workspace) })
+            let remoteContext = remoteTarget.map {
+                RemoteWorkspaceHealthContext(
+                    host: $0.host,
+                    hostValidation: $0.hostValidation,
+                    workspaceAvailability: $0.workspaceAvailability
+                )
+            }
+
+            var providerCards: [WorkspaceProviderCard] = []
+            for providerID in ProviderID.allCases {
+                let providerModule = providerModule(for: providerID)
+                let sessions = try trace.measure("loadSessions.\(providerID.rawValue)") {
+                    try dependencies.sessionRecordStore.listSessions(workspaceID: workspaceID, providerID: providerID)
+                        .map(reconcileSessionRuntimeState)
                 }
-            )
-            providerCards.append(
-                WorkspaceProviderCard(
-                    provider: Provider(id: providerID),
-                    health: catalogRead.health,
-                    capabilities: catalogRead.capabilities,
-                    prelaunchPrimarySurface: catalogRead.prelaunchPrimarySurface,
-                    defaultSession: catalogRead.defaultSession,
-                    alternateSessionCount: sessions.filter { $0.isDefault == false }.count
+                let defaultSession = sessions.first(where: \.isDefault)
+                let catalogRead = try await trace.measure("readProviderCatalog.\(providerID.rawValue)") {
+                    try await providerModule.readCatalog(
+                        ProviderModuleCatalogReadRequest(
+                            workspace: workspace,
+                            remoteContext: remoteContext,
+                            defaultSession: defaultSession
+                        ),
+                        actions: ProviderModuleCatalogReadActions { [self] in
+                            try await self.providerHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
+                        }
+                    )
+                }
+                providerCards.append(
+                    WorkspaceProviderCard(
+                        provider: Provider(id: providerID),
+                        health: catalogRead.health,
+                        capabilities: catalogRead.capabilities,
+                        prelaunchPrimarySurface: catalogRead.prelaunchPrimarySurface,
+                        defaultSession: catalogRead.defaultSession,
+                        alternateSessionCount: sessions.filter { $0.isDefault == false }.count
+                    )
+                )
+            }
+
+            let overview = WorkspaceOverview(workspace: workspace, providerCards: providerCards, remoteTarget: remoteTarget)
+            try? dependencies.recordPerformanceDiagnostic(trace.finish(outcome: .success))
+            return overview
+        } catch {
+            try? dependencies.recordPerformanceDiagnostic(
+                trace.finish(
+                    outcome: .failure,
+                    failureMessage: String(describing: error)
                 )
             )
+            throw error
         }
-
-        return WorkspaceOverview(workspace: workspace, providerCards: providerCards, remoteTarget: remoteTarget)
     }
 
     func providerDetail(workspaceID: UUID, providerID: ProviderID) async throws -> ProviderDetail {
-        guard let workspace = try dependencies.metadataStore.workspace(id: workspaceID) else {
-            throw NexusMetadataStoreError.workspaceNotFound
-        }
+        var trace = PerformanceDiagnosticTrace(
+            operation: .providerDetail,
+            workspaceID: workspaceID,
+            providerID: providerID,
+            currentUptimeNanoseconds: dependencies.currentUptimeNanoseconds
+        )
 
-        let remoteTarget = try remoteWorkspaceTargetOverview(for: workspace)
-        let remoteContext = remoteTarget.map {
-            RemoteWorkspaceHealthContext(
-                host: $0.host,
-                hostValidation: $0.hostValidation,
-                workspaceAvailability: $0.workspaceAvailability
-            )
-        }
-        let providerModule = providerModule(for: providerID)
-        let sessions = try dependencies.sessionRecordStore.listSessions(workspaceID: workspaceID, providerID: providerID)
-            .map(reconcileSessionRuntimeState)
-        let defaultSession = sessions.first(where: \.isDefault)
-        let catalogRead = try await providerModule.readCatalog(
-            ProviderModuleCatalogReadRequest(
-                workspace: workspace,
-                remoteContext: remoteContext,
-                defaultSession: defaultSession
-            ),
-            actions: ProviderModuleCatalogReadActions { [self] in
-                try await self.providerHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
+        do {
+            guard let workspace = try trace.measure("loadWorkspace", { try dependencies.metadataStore.workspace(id: workspaceID) }) else {
+                throw NexusMetadataStoreError.workspaceNotFound
             }
-        )
 
-        return ProviderDetail(
-            workspace: workspace,
-            provider: Provider(id: providerID),
-            health: catalogRead.health,
-            capabilities: catalogRead.capabilities,
-            prelaunchPrimarySurface: catalogRead.prelaunchPrimarySurface,
-            defaultSession: defaultSession,
-            alternateSessions: sessions.filter { $0.isDefault == false && $0.state != .failed },
-            failedSessions: sessions.filter { $0.isDefault == false && $0.state == .failed }
-        )
+            let remoteTarget = try trace.measure("loadRemoteTarget", { try remoteWorkspaceTargetOverview(for: workspace) })
+            let remoteContext = remoteTarget.map {
+                RemoteWorkspaceHealthContext(
+                    host: $0.host,
+                    hostValidation: $0.hostValidation,
+                    workspaceAvailability: $0.workspaceAvailability
+                )
+            }
+            let providerModule = providerModule(for: providerID)
+            let sessions = try trace.measure("loadSessions") {
+                try dependencies.sessionRecordStore.listSessions(workspaceID: workspaceID, providerID: providerID)
+                    .map(reconcileSessionRuntimeState)
+            }
+            let defaultSession = sessions.first(where: \.isDefault)
+            let catalogRead = try await trace.measure("readProviderCatalog") {
+                try await providerModule.readCatalog(
+                    ProviderModuleCatalogReadRequest(
+                        workspace: workspace,
+                        remoteContext: remoteContext,
+                        defaultSession: defaultSession
+                    ),
+                    actions: ProviderModuleCatalogReadActions { [self] in
+                        try await self.providerHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
+                    }
+                )
+            }
+
+            let detail = ProviderDetail(
+                workspace: workspace,
+                provider: Provider(id: providerID),
+                health: catalogRead.health,
+                capabilities: catalogRead.capabilities,
+                prelaunchPrimarySurface: catalogRead.prelaunchPrimarySurface,
+                defaultSession: defaultSession,
+                alternateSessions: sessions.filter { $0.isDefault == false && $0.state != .failed },
+                failedSessions: sessions.filter { $0.isDefault == false && $0.state == .failed }
+            )
+            try? dependencies.recordPerformanceDiagnostic(trace.finish(outcome: .success))
+            return detail
+        } catch {
+            try? dependencies.recordPerformanceDiagnostic(
+                trace.finish(
+                    outcome: .failure,
+                    failureMessage: String(describing: error)
+                )
+            )
+            throw error
+        }
     }
 
     func workspaceOverviews(workspaceIDs: [UUID]) async throws -> [WorkspaceOverview] {

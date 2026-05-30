@@ -35,6 +35,7 @@ public protocol SessionScreenObservation: Sendable {
     func recordNavigation(targetPayload: Data, reply: @escaping (Data?, NSString?) -> Void)
     func searchNavigation(query: String, reply: @escaping (Data?, NSString?) -> Void)
     func recordRemoteClientDiagnosticBreadcrumb(payload: Data, reply: @escaping (Data?, NSString?) -> Void)
+    func listPerformanceDiagnostics(limit: Int, reply: @escaping (Data?, NSString?) -> Void)
     func getRemoteAccessState(_ reply: @escaping (Data?, NSString?) -> Void)
     func setRemoteAccessEnabled(isEnabled: Bool, reply: @escaping (Data?, NSString?) -> Void)
     func startPairing(_ reply: @escaping (Data?, NSString?) -> Void)
@@ -82,6 +83,7 @@ public protocol NexusServiceClient: Sendable {
     func recordNavigation(target: NavigationTarget) async throws
     func searchNavigation(query: String) async throws -> [NavigationItem]
     func recordRemoteClientDiagnosticBreadcrumb(_ breadcrumb: RemoteClientDiagnosticBreadcrumb) async throws
+    func listPerformanceDiagnostics(limit: Int) async throws -> [PerformanceDiagnosticRecord]
     func getRemoteAccessState() async throws -> RemoteAccessState
     func setRemoteAccessEnabled(_ isEnabled: Bool) async throws -> RemoteAccessState
     func startPairing() async throws -> PairingCeremony
@@ -225,6 +227,12 @@ public final class NexusIPCClient: NexusServiceClient, @unchecked Sendable {
         let payload = try JSONEncoder().encode(breadcrumb)
         let _: Bool = try await requestDecodable { proxy, reply in
             proxy.recordRemoteClientDiagnosticBreadcrumb(payload: payload, reply: reply)
+        }
+    }
+
+    nonisolated public func listPerformanceDiagnostics(limit: Int = 10) async throws -> [PerformanceDiagnosticRecord] {
+        try await requestDecodable { proxy, reply in
+            proxy.listPerformanceDiagnostics(limit: limit, reply: reply)
         }
     }
 

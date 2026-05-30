@@ -1277,7 +1277,10 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 hostValidationEvaluator: hostValidationEvaluator,
                 workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
                 sessionRuntimeManager: sessionRuntimeManager,
-                providerModuleRegistry: self.providerModuleRegistry
+                providerModuleRegistry: self.providerModuleRegistry,
+                recordPerformanceDiagnostic: { [metadataStore] in
+                    try metadataStore.recordPerformanceDiagnostic($0)
+                }
             )
         )
         self.sessionLifecycle = sessionLifecycle
@@ -1330,6 +1333,9 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                         launchSnapshot: launchSnapshot,
                         forceFreshRemoteRuntime: true
                     )
+                },
+                recordPerformanceDiagnostic: { [metadataStore] in
+                    try metadataStore.recordPerformanceDiagnostic($0)
                 }
             )
         )
@@ -1656,6 +1662,10 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         return workspaceItems.sorted(by: navigationItemSort)
             + providerItems.sorted(by: navigationItemSort)
             + sessionItems.sorted(by: navigationItemSort)
+    }
+
+    func listPerformanceDiagnostics(limit: Int) throws -> [PerformanceDiagnosticRecord] {
+        try metadataStore.listPerformanceDiagnostics(limit: limit)
     }
 
     func getWorkspaceOverview(workspaceID: UUID) throws -> WorkspaceOverview {
@@ -3750,6 +3760,10 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol, @unchecked Senda
             },
             reply: reply
         )
+    }
+
+    func listPerformanceDiagnostics(limit: Int, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(with: { try service.listPerformanceDiagnostics(limit: limit) }, reply: reply)
     }
 
     func getWorkspaceOverview(workspaceID: String, reply: @escaping (Data?, NSString?) -> Void) {
