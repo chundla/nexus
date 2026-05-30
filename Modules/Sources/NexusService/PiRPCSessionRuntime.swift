@@ -1300,6 +1300,14 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             handleExtensionUIRequest(object)
         case "queue_update":
             handleQueueUpdate(object)
+        case "compaction_start":
+            handleCompactionStart(object)
+        case "compaction_end":
+            handleCompactionEnd(object)
+        case "auto_retry_start":
+            handleAutoRetryStart(object)
+        case "auto_retry_end":
+            handleAutoRetryEnd(object)
         case "new_session", "switch_session":
             handleSessionTransitionEvent(object)
         case "tool_execution_start":
@@ -1387,6 +1395,84 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         if shouldNotify {
             notifyChange()
         }
+    }
+
+    private func handleCompactionStart(_ object: [String: Any]) {
+        let reason = trimmedString(for: "reason", in: object) ?? "manual"
+
+        lock.lock()
+        switch reason {
+        case "threshold", "overflow":
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi is auto-compacting the Session context"))
+        default:
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi is compacting the Session context"))
+        }
+        lock.unlock()
+        notifyChange()
+    }
+
+    private func handleCompactionEnd(_ object: [String: Any]) {
+        lock.lock()
+
+        let reason = trimmedString(for: "reason", in: object) ?? "manual"
+        let isAutomatic = reason == "threshold" || reason == "overflow"
+
+        if bool(for: "aborted", in: object) == true {
+            appendActivityItemLocked(
+                SessionActivityItem(
+                    kind: .error,
+                    text: isAutomatic ? "Pi auto-compaction was cancelled" : "Pi compaction was cancelled"
+                )
+            )
+        } else if let result = object["result"] as? [String: Any] {
+            appendActivityItemLocked(
+                SessionActivityItem(
+                    kind: .status,
+                    text: isAutomatic ? "Pi auto-compacted the Session context" : "Pi compacted the Session context"
+                )
+            )
+            if let summary = trimmedString(for: "summary", in: result) {
+                appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Compaction summary: \(summary)"))
+            }
+        } else if let errorMessage = trimmedString(for: "errorMessage", in: object) {
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: errorMessage))
+        }
+
+        lock.unlock()
+        notifyChange()
+    }
+
+    private func handleAutoRetryStart(_ object: [String: Any]) {
+        let attempt = intValue(object["attempt"]) ?? 1
+        let maxAttempts = intValue(object["maxAttempts"]) ?? attempt
+        let delayMs = intValue(object["delayMs"]) ?? 0
+        let delaySeconds = max(1, Int(ceil(Double(delayMs) / 1000)))
+
+        lock.lock()
+        appendActivityItemLocked(
+            SessionActivityItem(
+                kind: .status,
+                text: "Pi will retry automatically (attempt \(attempt) of \(maxAttempts)) in \(delaySeconds)s"
+            )
+        )
+        lock.unlock()
+        notifyChange()
+    }
+
+    private func handleAutoRetryEnd(_ object: [String: Any]) {
+        let success = bool(for: "success", in: object) == true
+        let attempt = intValue(object["attempt"]) ?? 1
+        let finalError = trimmedString(for: "finalError", in: object)
+
+        lock.lock()
+        if success {
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi retry succeeded on attempt \(attempt)"))
+        } else {
+            let detail = finalError ?? "Unknown error"
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: "Pi retry failed after \(attempt) attempts: \(detail)"))
+        }
+        lock.unlock()
+        notifyChange()
     }
 
     private func handleExtensionUIRequest(_ object: [String: Any]) {

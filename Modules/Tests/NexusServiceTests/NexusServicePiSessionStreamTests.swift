@@ -1520,6 +1520,87 @@ struct NexusServicePiSessionStreamTests {
         #expect(screen.transcript == "> hello\nworld")
     }
 
+    @Test func localPiRuntimeProjectsCompactionAndRetryLifecycleIntoSharedSessionActivity() throws {
+        let transport = PromptEventPiRPCTransport(promptEvents: [
+            ["type": "compaction_start", "reason": "manual"],
+            [
+                "type": "compaction_end",
+                "reason": "manual",
+                "aborted": false,
+                "willRetry": false,
+                "result": [
+                    "summary": "Focus on the latest code changes",
+                    "tokensBefore": 128000
+                ]
+            ],
+            [
+                "type": "auto_retry_start",
+                "attempt": 2,
+                "maxAttempts": 3,
+                "delayMs": 3000,
+                "errorMessage": "Provider overloaded"
+            ],
+            [
+                "type": "auto_retry_end",
+                "success": false,
+                "attempt": 3,
+                "finalError": "Provider overloaded"
+            ],
+            [
+                "type": "turn_end",
+                "message": [
+                    "content": [[
+                        "type": "text",
+                        "text": "done"
+                    ]]
+                ]
+            ]
+        ])
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("hello")
+        let screen = runtime.sessionScreen(for: session)
+        let providerEvents = screen.providerEvents.filter { $0.family != .response }
+
+        #expect(providerEvents.map(\.type) == [
+            "compaction_start",
+            "compaction_end",
+            "auto_retry_start",
+            "auto_retry_end",
+            "turn_end"
+        ])
+        #expect(providerEvents.map(\.family) == [
+            .compaction,
+            .compaction,
+            .retry,
+            .retry,
+            .turn
+        ])
+        #expect(screen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "You: hello",
+            "Pi is compacting the Session context",
+            "Pi compacted the Session context",
+            "Compaction summary: Focus on the latest code changes",
+            "Pi will retry automatically (attempt 2 of 3) in 3s",
+            "Pi retry failed after 3 attempts: Provider overloaded",
+            "Pi: done"
+        ])
+    }
+
     @Test func localPiRuntimePreservesUnknownAndUnprojectedProviderEventsOpaquely() throws {
         let transport = PromptEventPiRPCTransport(promptEvents: [
             ["type": "queue_update", "depth": 2],
