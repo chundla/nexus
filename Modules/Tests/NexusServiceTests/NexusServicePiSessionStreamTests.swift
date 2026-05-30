@@ -604,6 +604,184 @@ struct NexusServicePiSessionStreamTests {
         #expect(screen.transcript == "> hello\nworld")
     }
 
+    @Test func localPiRuntimePreservesRawProviderEventsAlongsideProjectedSharedSessionActivity() throws {
+        let transport = PromptEventPiRPCTransport(promptEvents: [
+            ["type": "agent_start", "agent": "pi"],
+            [
+                "type": "message_update",
+                "assistantMessageEvent": [
+                    "type": "text_delta",
+                    "delta": "world"
+                ]
+            ],
+            [
+                "type": "tool_execution_start",
+                "toolCallId": "tool-1",
+                "toolName": "subagent",
+                "args": ["agent": "reviewer", "task": "Review the latest diff"]
+            ],
+            [
+                "type": "tool_execution_update",
+                "toolCallId": "tool-1",
+                "partialResult": [
+                    "content": [[
+                        "type": "text_delta",
+                        "delta": "Looks good overall."
+                    ]]
+                ]
+            ],
+            [
+                "type": "tool_execution_end",
+                "toolCallId": "tool-1",
+                "toolName": "subagent",
+                "result": [
+                    "content": [[
+                        "type": "text",
+                        "text": "Looks good overall."
+                    ]]
+                ]
+            ],
+            [
+                "type": "turn_end",
+                "message": [
+                    "content": [[
+                        "type": "text",
+                        "text": "world"
+                    ]]
+                ]
+            ]
+        ])
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("hello")
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(screen.providerEvents.map(\.type) == [
+            "response",
+            "response",
+            "response",
+            "response",
+            "response",
+            "agent_start",
+            "message_update",
+            "tool_execution_start",
+            "tool_execution_update",
+            "tool_execution_end",
+            "turn_end",
+            "response"
+        ])
+        #expect(screen.providerEvents.map(\.command) == [
+            "get_state",
+            "get_commands",
+            "get_available_models",
+            "prompt",
+            "get_commands",
+            nil,
+            nil,
+            nil,
+            nil,
+            nil,
+            nil,
+            "get_commands"
+        ])
+        #expect(screen.providerEvents.map(\.family) == [
+            .response,
+            .response,
+            .response,
+            .response,
+            .response,
+            .agent,
+            .message,
+            .toolExecution,
+            .toolExecution,
+            .toolExecution,
+            .turn,
+            .response
+        ])
+        #expect(screen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "You: hello",
+            "subagent reviewer: Review the latest diff",
+            "subagent: Looks good overall.",
+            "Pi: world"
+        ])
+        #expect(screen.transcript == "> hello\nworld")
+    }
+
+    @Test func localPiRuntimePreservesUnknownAndUnprojectedProviderEventsOpaquely() throws {
+        let transport = PromptEventPiRPCTransport(promptEvents: [
+            ["type": "queue_update", "depth": 2],
+            ["type": "compaction_checkpoint", "tokens": 128],
+            ["type": "retry_scheduled", "delaySeconds": 3],
+            ["type": "extension_error", "message": "Widget render failed"],
+            ["type": "future_event", "ticket": 7, "nested": ["flag": true]],
+            [
+                "type": "turn_end",
+                "message": [
+                    "content": [[
+                        "type": "text",
+                        "text": "done"
+                    ]]
+                ]
+            ]
+        ])
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("hello")
+        let screen = runtime.sessionScreen(for: session)
+        let providerEvents = screen.providerEvents.filter { $0.family != .response }
+
+        #expect(providerEvents.map(\.type) == [
+            "queue_update",
+            "compaction_checkpoint",
+            "retry_scheduled",
+            "extension_error",
+            "future_event",
+            "turn_end"
+        ])
+        #expect(providerEvents.map(\.family) == [
+            .queue,
+            .compaction,
+            .retry,
+            .extensionError,
+            .unknown,
+            .turn
+        ])
+        #expect(try #require(providerEvents.first(where: { $0.type == "extension_error" })).rawPayload.contains("Widget render failed"))
+        #expect(try #require(providerEvents.first(where: { $0.type == "future_event" })).rawPayload.contains("\"ticket\":7"))
+        #expect(screen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "You: hello",
+            "Pi: done"
+        ])
+    }
+
     @Test func localPiRuntimeSurfacesToolExecutionAndKeepsThinkingIndicatorVisibleUntilTurnEnds() throws {
         let transport = StreamingToolPiRPCTransport()
         let runtime = try PiRPCSessionRuntime(
@@ -1019,6 +1197,86 @@ private final class PersistentTestPiRPCTransport: PiRPCTransporting, @unchecked 
                     ]
                 ]
             ])
+        default:
+            return
+        }
+    }
+
+    func terminate() throws {
+        terminationHandler?(0)
+    }
+
+    private func emit(_ object: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: object),
+              let line = String(data: data, encoding: .utf8) else {
+            return
+        }
+        stdoutLineHandler?(line)
+    }
+}
+
+private final class PromptEventPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
+    private let promptEvents: [[String: Any]]
+    private var stdoutLineHandler: (@Sendable (String) -> Void)?
+    private var terminationHandler: (@Sendable (Int32) -> Void)?
+
+    init(promptEvents: [[String: Any]]) {
+        self.promptEvents = promptEvents
+    }
+
+    func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
+        stdoutLineHandler = handler
+    }
+
+    func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?) {
+        terminationHandler = handler
+    }
+
+    func start() throws {}
+
+    func sendLine(_ line: String) throws {
+        guard let data = line.data(using: .utf8),
+              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = object["type"] as? String else {
+            return
+        }
+
+        switch type {
+        case "get_state":
+            emit([
+                "id": object["id"] as? String ?? "state",
+                "type": "response",
+                "command": "get_state",
+                "success": true,
+                "data": [
+                    "sessionId": "pi-session-1"
+                ]
+            ])
+        case "get_commands":
+            emit([
+                "id": object["id"] as? String ?? "commands",
+                "type": "response",
+                "command": "get_commands",
+                "success": true,
+                "data": ["commands": []]
+            ])
+        case "get_available_models":
+            emit([
+                "id": object["id"] as? String ?? "available-models",
+                "type": "response",
+                "command": "get_available_models",
+                "success": true,
+                "data": ["models": []]
+            ])
+        case "prompt":
+            emit([
+                "type": "response",
+                "command": "prompt",
+                "success": true
+            ])
+            for event in promptEvents {
+                emit(event)
+            }
         default:
             return
         }

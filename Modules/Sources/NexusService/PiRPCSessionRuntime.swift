@@ -73,6 +73,8 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     private var draft = ""
     private var activityItems: [SessionActivityItem] = []
     private var approvalRequests: [SessionApprovalRequest] = []
+    private var providerEvents: [SessionProviderEvent] = []
+    private var nextProviderEventSequence = 0
     private var providerSlashCommands: [SessionSlashCommand]?
     private var availableModelCommands: [SessionSlashCommand]?
     private var terminalColumns = 80
@@ -177,15 +179,21 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         let startupWaiter = AsyncResultWaiter<Void>()
 
         transport.setStdoutLineHandler { [weak self] line in
-            guard let self else { return }
-
-            if let response = self.responseObject(from: line),
-               self.string(for: "type", in: response) == "response" {
-                self.handleResponse(response, startupState: startupState, startupWaiter: startupWaiter)
+            guard let self,
+                  let object = self.responseObject(from: line),
+                  let type = self.string(for: "type", in: object) else {
                 return
             }
 
-            self.handleOutputLine(line)
+            self.recordProviderEvent(rawPayload: line, object: object, type: type)
+
+            if type == "response" {
+                self.handleResponse(object, startupState: startupState, startupWaiter: startupWaiter)
+                self.notifyChange()
+                return
+            }
+
+            self.handleOutputEvent(object, type: type)
         }
         transport.setTerminationHandler { [weak self] status in
             if status != 0, startupState.error == nil {
@@ -227,6 +235,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             activityItems: activityItems,
             approvalRequests: approvalRequests,
             slashCommands: mergedSlashCommandsLocked(),
+            providerEvents: providerEvents,
             isAgentTurnInProgress: isStreaming
         )
     }
@@ -490,15 +499,10 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         }
     }
 
-    private func handleOutputLine(_ line: String) {
-        guard let object = responseObject(from: line),
-              let type = string(for: "type", in: object) else {
-            return
-        }
-
+    private func handleOutputEvent(_ object: [String: Any], type: String) {
         switch type {
         case "agent_start":
-            return
+            notifyChange()
         case "message_update":
             handleMessageUpdate(object)
         case "approval_request":
@@ -512,8 +516,58 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         case "turn_end":
             handleTurnEnd(object)
         default:
-            return
+            notifyChange()
         }
+    }
+
+    private func recordProviderEvent(rawPayload: String, object: [String: Any], type: String) {
+        lock.lock()
+        let event = SessionProviderEvent(
+            sequence: nextProviderEventSequence,
+            providerID: .pi,
+            type: type,
+            family: providerEventFamily(for: type),
+            command: type == "response" ? string(for: "command", in: object) : nil,
+            rawPayload: rawPayload
+        )
+        nextProviderEventSequence += 1
+        providerEvents.append(event)
+        if providerEvents.count > 1_000 {
+            providerEvents.removeFirst(providerEvents.count - 1_000)
+        }
+        lock.unlock()
+    }
+
+    private func providerEventFamily(for type: String) -> SessionProviderEvent.Family {
+        let normalizedType = type.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalizedType == "response" {
+            return .response
+        }
+        if normalizedType == "agent" || normalizedType.hasPrefix("agent_") {
+            return .agent
+        }
+        if normalizedType == "turn" || normalizedType.hasPrefix("turn_") {
+            return .turn
+        }
+        if normalizedType == "message" || normalizedType.hasPrefix("message_") {
+            return .message
+        }
+        if normalizedType == "tool_execution" || normalizedType.hasPrefix("tool_execution_") {
+            return .toolExecution
+        }
+        if normalizedType.contains("queue") {
+            return .queue
+        }
+        if normalizedType.contains("compaction") {
+            return .compaction
+        }
+        if normalizedType.contains("retry") {
+            return .retry
+        }
+        if normalizedType == "extension_error" || (normalizedType.contains("extension") && normalizedType.contains("error")) {
+            return .extensionError
+        }
+        return .unknown
     }
 
     private func handleApprovalRequest(_ object: [String: Any]) {

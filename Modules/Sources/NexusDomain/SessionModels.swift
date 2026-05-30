@@ -262,6 +262,46 @@ public struct SessionSlashCommand: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+public struct SessionProviderEvent: Codable, Equatable, Identifiable, Sendable {
+    public enum Family: String, Codable, Sendable {
+        case response
+        case agent
+        case turn
+        case message
+        case toolExecution
+        case queue
+        case compaction
+        case retry
+        case extensionError
+        case unknown
+    }
+
+    public let sequence: Int
+    public let providerID: ProviderID
+    public let type: String
+    public let family: Family
+    public let command: String?
+    public let rawPayload: String
+
+    public var id: Int { sequence }
+
+    public init(
+        sequence: Int,
+        providerID: ProviderID,
+        type: String,
+        family: Family,
+        command: String? = nil,
+        rawPayload: String
+    ) {
+        self.sequence = sequence
+        self.providerID = providerID
+        self.type = type
+        self.family = family
+        self.command = command
+        self.rawPayload = rawPayload
+    }
+}
+
 public struct SessionScreen: Codable, Equatable, Sendable {
     public let session: Session
     public let primarySurface: SessionSurface
@@ -272,6 +312,7 @@ public struct SessionScreen: Codable, Equatable, Sendable {
     public let activityItems: [SessionActivityItem]
     public let approvalRequests: [SessionApprovalRequest]
     public let slashCommands: [SessionSlashCommand]?
+    public let providerEvents: [SessionProviderEvent]
     public let isAgentTurnInProgress: Bool
     public let visibleLines: [String]
     public let styledVisibleLines: [TerminalLine]
@@ -289,6 +330,7 @@ public struct SessionScreen: Codable, Equatable, Sendable {
         activityItems: [SessionActivityItem] = [],
         approvalRequests: [SessionApprovalRequest] = [],
         slashCommands: [SessionSlashCommand]? = nil,
+        providerEvents: [SessionProviderEvent] = [],
         isAgentTurnInProgress: Bool = false,
         visibleLines: [String]? = nil,
         styledVisibleLines: [TerminalLine]? = nil,
@@ -312,12 +354,50 @@ public struct SessionScreen: Codable, Equatable, Sendable {
         self.activityItems = activityItems
         self.approvalRequests = approvalRequests
         self.slashCommands = slashCommands
+        self.providerEvents = providerEvents
         self.isAgentTurnInProgress = isAgentTurnInProgress
         self.visibleLines = resolvedVisibleLines
         self.styledVisibleLines = styledVisibleLines ?? resolvedVisibleLines.map(Self.defaultStyledLine)
         self.cursorRow = cursorRow ?? viewport.cursorRow
         self.cursorColumn = cursorColumn ?? viewport.cursorColumn
         self.cursorVisible = cursorVisible
+    }
+
+    public init(
+        session: Session,
+        primarySurface: SessionSurface = .terminal,
+        controller: SessionController = .mac,
+        transcript: String,
+        terminalColumns: Int = 80,
+        terminalRows: Int = 24,
+        activityItems: [SessionActivityItem] = [],
+        approvalRequests: [SessionApprovalRequest] = [],
+        slashCommands: [SessionSlashCommand]? = nil,
+        isAgentTurnInProgress: Bool = false,
+        visibleLines: [String]? = nil,
+        styledVisibleLines: [TerminalLine]? = nil,
+        cursorRow: Int? = nil,
+        cursorColumn: Int? = nil,
+        cursorVisible: Bool = true
+    ) {
+        self.init(
+            session: session,
+            primarySurface: primarySurface,
+            controller: controller,
+            transcript: transcript,
+            terminalColumns: terminalColumns,
+            terminalRows: terminalRows,
+            activityItems: activityItems,
+            approvalRequests: approvalRequests,
+            slashCommands: slashCommands,
+            providerEvents: [],
+            isAgentTurnInProgress: isAgentTurnInProgress,
+            visibleLines: visibleLines,
+            styledVisibleLines: styledVisibleLines,
+            cursorRow: cursorRow,
+            cursorColumn: cursorColumn,
+            cursorVisible: cursorVisible
+        )
     }
 
     private static func defaultStyledLine(for line: String) -> TerminalLine {
