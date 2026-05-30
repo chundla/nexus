@@ -240,8 +240,29 @@ struct nexusTests {
                     emphasis: .accent
                 )
             ],
-            pendingApprovalRequests: [pendingRequest]
+            pendingApprovalRequests: [pendingRequest],
+            thinkingIndicator: nil
         ))
+    }
+
+    @MainActor
+    @Test func structuredSessionFeedPresentationShowsThinkingIndicatorWhileAgentTurnIsInProgress() {
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .codex,
+            isDefault: true,
+            state: .ready
+        )
+        let screen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [SessionActivityItem(kind: .message, text: "You: Ship it")],
+            isAgentTurnInProgress: true
+        )
+
+        #expect(structuredSessionFeedPresentation(for: screen).thinkingIndicator == StructuredSessionThinkingIndicator(text: "Thinking…"))
     }
 
     @MainActor
@@ -328,6 +349,158 @@ struct nexusTests {
             actionsAreEnabled: false,
             disabledReason: "Take Controller to respond to Approval Requests from this iPhone."
         ))
+    }
+
+    @Test func structuredSessionSlashCommandMenuAppearsAsSoonAsSlashIsTyped() {
+        let menu = structuredSessionSlashCommandMenuPresentation(
+            for: "/",
+            screen: SessionScreen(
+                session: Session(
+                    id: UUID(),
+                    workspaceID: UUID(),
+                    providerID: .codex,
+                    isDefault: true,
+                    state: .ready
+                ),
+                transcript: ""
+            )
+        )
+
+        #expect(menu.isVisible)
+        #expect(menu.commands.first?.displayText == "/model")
+    }
+
+    @Test func structuredSessionSlashCommandMenuNarrowsUsingTypedPrefixAndSupportsArgumentCommands() {
+        let codexMenu = structuredSessionSlashCommandMenuPresentation(
+            for: "/go",
+            screen: SessionScreen(
+                session: Session(
+                    id: UUID(),
+                    workspaceID: UUID(),
+                    providerID: .codex,
+                    isDefault: true,
+                    state: .ready
+                ),
+                transcript: ""
+            )
+        )
+        let bobMenu = structuredSessionSlashCommandMenuPresentation(
+            for: "/mode a",
+            screen: SessionScreen(
+                session: Session(
+                    id: UUID(),
+                    workspaceID: UUID(),
+                    providerID: .ibmBob,
+                    isDefault: true,
+                    state: .ready
+                ),
+                transcript: ""
+            )
+        )
+
+        #expect(codexMenu.commands.map(\.displayText) == ["/goal <objective>"])
+        #expect(bobMenu.commands.map(\.displayText) == ["/mode advanced"])
+    }
+
+    @Test func structuredSessionSlashCommandMenuUsesLivePiSkillCommandsFromSessionScreen() {
+        let screen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            ),
+            transcript: "",
+            slashCommands: [
+                SessionSlashCommand(
+                    name: "skill:create-cli",
+                    description: "CLI UX/spec: args, flags, help, output, errors, config, dry-run.",
+                    source: .skill,
+                    location: .user,
+                    path: "/Users/tester/.pi/agent/skills/create-cli/SKILL.md"
+                ),
+                SessionSlashCommand(
+                    name: "skill:tdd",
+                    description: "Test-driven development with red-green-refactor loop.",
+                    source: .skill,
+                    location: .project,
+                    path: "/tmp/project/.pi/skills/tdd/SKILL.md"
+                )
+            ]
+        )
+        let menu = structuredSessionSlashCommandMenuPresentation(for: "/skill:", screen: screen)
+
+        #expect(menu.isVisible)
+        #expect(menu.commands.map(\.displayText) == ["/skill:create-cli [u]", "/skill:tdd [p]"])
+        #expect(menu.commands.first?.summary == "CLI UX/spec: args, flags, help, output, errors, config, dry-run.")
+    }
+
+    @Test func structuredSessionSlashCommandMenuUsesLiveCodexModelCommandsOnlyAfterModelPrefix() {
+        let screen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .codex,
+                isDefault: true,
+                state: .ready
+            ),
+            transcript: "",
+            slashCommands: [
+                SessionSlashCommand(
+                    name: "model gpt-5.5",
+                    displayName: "model gpt-5.5 — GPT-5.5",
+                    insertionText: "model gpt-5.5",
+                    suggestionQueryPrefix: "model ",
+                    description: "Default model. Frontier coding model.",
+                    source: .builtIn
+                )
+            ]
+        )
+
+        #expect(structuredSessionSlashCommandMenuPresentation(for: "/", screen: screen).commands.contains(where: { $0.displayText.contains("GPT-5.5") }) == false)
+        #expect(structuredSessionSlashCommandMenuPresentation(for: "/model g", screen: screen).commands.map(\.displayText) == ["/model gpt-5.5 — GPT-5.5"])
+    }
+
+    @Test func structuredSessionSlashCommandMenuUsesLiveBobCommandArgumentHintsFromSessionScreen() throws {
+        let screen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .ibmBob,
+                isDefault: true,
+                state: .ready
+            ),
+            transcript: "",
+            slashCommands: [
+                SessionSlashCommand(
+                    name: "api-endpoint",
+                    displayName: "api-endpoint <endpoint-name> <http-method>",
+                    insertionText: "api-endpoint ",
+                    description: "Create a new API endpoint.",
+                    source: .prompt,
+                    location: .project,
+                    path: "/tmp/project/.bob/commands/api-endpoint.md"
+                )
+            ]
+        )
+        let menu = structuredSessionSlashCommandMenuPresentation(for: "/api", screen: screen)
+
+        #expect(menu.commands.map(\.displayText) == ["/api-endpoint <endpoint-name> <http-method> [p]"])
+        let command = try #require(menu.commands.first)
+        #expect(applyStructuredSessionSlashCommand(command, to: "/api") == "/api-endpoint ")
+    }
+
+    @Test func applyStructuredSessionSlashCommandReplacesSlashDraftWhilePreservingLeadingWhitespace() {
+        let command = StructuredSessionSlashCommand(
+            matchText: "goal",
+            displayText: "/goal <objective>",
+            insertionText: "/goal ",
+            summary: "Set or view the goal for a long-running task.",
+            acceptsArguments: true
+        )
+
+        #expect(applyStructuredSessionSlashCommand(command, to: "  /go") == "  /goal ")
     }
 
     @MainActor

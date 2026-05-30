@@ -216,6 +216,52 @@ public struct SessionApprovalRequest: Codable, Equatable, Identifiable, Sendable
     }
 }
 
+public enum SessionSlashCommandSource: String, Codable, Equatable, Sendable {
+    case builtIn
+    case `extension`
+    case prompt
+    case skill
+}
+
+public enum SessionSlashCommandLocation: String, Codable, Equatable, Sendable {
+    case user
+    case project
+    case path
+}
+
+public struct SessionSlashCommand: Codable, Equatable, Identifiable, Sendable {
+    public let name: String
+    public let displayName: String?
+    public let insertionText: String?
+    public let suggestionQueryPrefix: String?
+    public let description: String?
+    public let source: SessionSlashCommandSource
+    public let location: SessionSlashCommandLocation?
+    public let path: String?
+
+    public var id: String { name }
+
+    public init(
+        name: String,
+        displayName: String? = nil,
+        insertionText: String? = nil,
+        suggestionQueryPrefix: String? = nil,
+        description: String? = nil,
+        source: SessionSlashCommandSource,
+        location: SessionSlashCommandLocation? = nil,
+        path: String? = nil
+    ) {
+        self.name = name
+        self.displayName = displayName
+        self.insertionText = insertionText
+        self.suggestionQueryPrefix = suggestionQueryPrefix
+        self.description = description
+        self.source = source
+        self.location = location
+        self.path = path
+    }
+}
+
 public struct SessionScreen: Codable, Equatable, Sendable {
     public let session: Session
     public let primarySurface: SessionSurface
@@ -225,6 +271,8 @@ public struct SessionScreen: Codable, Equatable, Sendable {
     public let terminalRows: Int
     public let activityItems: [SessionActivityItem]
     public let approvalRequests: [SessionApprovalRequest]
+    public let slashCommands: [SessionSlashCommand]?
+    public let isAgentTurnInProgress: Bool
     public let visibleLines: [String]
     public let styledVisibleLines: [TerminalLine]
     public let cursorRow: Int
@@ -240,6 +288,8 @@ public struct SessionScreen: Codable, Equatable, Sendable {
         terminalRows: Int = 24,
         activityItems: [SessionActivityItem] = [],
         approvalRequests: [SessionApprovalRequest] = [],
+        slashCommands: [SessionSlashCommand]? = nil,
+        isAgentTurnInProgress: Bool = false,
         visibleLines: [String]? = nil,
         styledVisibleLines: [TerminalLine]? = nil,
         cursorRow: Int? = nil,
@@ -261,6 +311,8 @@ public struct SessionScreen: Codable, Equatable, Sendable {
         self.terminalRows = terminalRows
         self.activityItems = activityItems
         self.approvalRequests = approvalRequests
+        self.slashCommands = slashCommands
+        self.isAgentTurnInProgress = isAgentTurnInProgress
         self.visibleLines = resolvedVisibleLines
         self.styledVisibleLines = styledVisibleLines ?? resolvedVisibleLines.map(Self.defaultStyledLine)
         self.cursorRow = cursorRow ?? viewport.cursorRow

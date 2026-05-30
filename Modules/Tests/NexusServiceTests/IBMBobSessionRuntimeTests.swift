@@ -66,6 +66,63 @@ struct IBMBobSessionRuntimeTests {
         ])
     }
 
+    @Test func sessionScreenIncludesLiveBobSlashCommandsFromWorkspaceFiles() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("IBMBobSessionRuntimeTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let commandsDirectory = rootURL.appendingPathComponent(".bob/commands", isDirectory: true)
+        try FileManager.default.createDirectory(at: commandsDirectory, withIntermediateDirectories: true)
+        try """
+        ---
+        description: Create a new API endpoint
+        argument-hint: <endpoint-name> <http-method>
+        ---
+        Create a new API endpoint called $1 that handles $2 requests.
+        """.write(to: commandsDirectory.appendingPathComponent("api-endpoint.md"), atomically: true, encoding: .utf8)
+        try """
+        customModes:
+          - slug: shell-debug
+            name: Shell Debugger
+            whenToUse: Use for debugging shell scripts and environment issues.
+        """.write(to: rootURL.appendingPathComponent(".bob/custom_modes.yaml"), atomically: true, encoding: .utf8)
+
+        let runtime = try IBMBobSessionRuntime(
+            executable: "/tmp/fake-bob",
+            workingDirectory: rootURL.path,
+            terminationStatusMessageBuilder: { status in "IBM Bob exited with status \(status)." },
+            transportFactory: { _, _, _ in
+                SynchronousIBMBobTransport(stdoutLines: [], terminationStatus: 0)
+            }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .ibmBob,
+            isDefault: true,
+            state: .ready
+        )
+
+        #expect(runtime.sessionScreen(for: session).slashCommands == [
+            SessionSlashCommand(
+                name: "api-endpoint",
+                displayName: "api-endpoint <endpoint-name> <http-method>",
+                insertionText: "api-endpoint ",
+                description: "Create a new API endpoint",
+                source: .prompt,
+                location: .project,
+                path: commandsDirectory.appendingPathComponent("api-endpoint.md").resolvingSymlinksInPath().path
+            ),
+            SessionSlashCommand(
+                name: "shell-debug",
+                description: "Use for debugging shell scripts and environment issues.",
+                source: .builtIn,
+                location: .project,
+                path: rootURL.appendingPathComponent(".bob/custom_modes.yaml").resolvingSymlinksInPath().path
+            )
+        ])
+    }
+
     @Test func secondPromptStartsFreshBobTurnOnSameReadyRuntime() throws {
         let launchRecorder = IBMBobLaunchRecorder()
         let runtime = try IBMBobSessionRuntime(
@@ -219,7 +276,44 @@ struct IBMBobSessionRuntimeTests {
         #expect(screen.activityItems.map(\.text) == [
             "IBM Bob Session ready. Send a prompt to start IBM Bob.",
             "You: Hey who are you",
+            "attempt_completion: I am Bob.",
             "I am Bob."
+        ])
+    }
+
+    @Test func surfacesBobToolUseWhenOnlyToolMetadataIsAvailable() throws {
+        let runtime = try IBMBobSessionRuntime(
+            executable: "/tmp/fake-bob",
+            workingDirectory: "/tmp/workspace",
+            terminationStatusMessageBuilder: { status in "IBM Bob exited with status \(status)." },
+            transportFactory: { _, _, _ in
+                SynchronousIBMBobTransport(
+                    stdoutLines: [
+                        #"{"type":"tool_use","tool_name":"subagent","tool_id":"tool-1","parameters":{"agent":"reviewer","task":"Summarize the latest diff"}}"#,
+                        #"{"type":"tool_result","tool_id":"tool-1","status":"success","output":"Watch the retry path."}"#,
+                        #"{"type":"result","status":"success"}"#
+                    ],
+                    terminationStatus: 0
+                )
+            }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .ibmBob,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("delegate")
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(screen.activityItems.map(\.text) == [
+            "IBM Bob Session ready. Send a prompt to start IBM Bob.",
+            "You: delegate",
+            "subagent: reviewer: Summarize the latest diff",
+            "Watch the retry path."
         ])
     }
 }

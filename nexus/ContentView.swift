@@ -23,6 +23,7 @@ struct ContentView: View {
     @State private var terminalFocusToken = UUID()
     @State private var structuredSessionPrompt = ""
     @State private var presentedError: PresentedError?
+    @FocusState private var isStructuredSessionPromptFocused: Bool
 
     private let terminalLayout = TerminalViewportLayout.live
 
@@ -1541,6 +1542,10 @@ struct ContentView: View {
                                     .id(row.id)
                             }
 
+                            if let thinkingIndicator = presentation.thinkingIndicator {
+                                structuredSessionThinkingIndicatorView(thinkingIndicator)
+                            }
+
                             Color.clear
                                 .frame(height: 1)
                                 .id("conversation-bottom")
@@ -1568,22 +1573,35 @@ struct ContentView: View {
             }
 
             if isReady {
-                HStack(spacing: 8) {
-                    TextField(presentation.copy.composerPlaceholder, text: $structuredSessionPrompt, axis: .vertical)
-                        .font(NexusMacTheme.bodyFont(13))
-                        .textFieldStyle(.plain)
-                        .lineLimit(1 ... 4)
-                        .submitLabel(.send)
-                        .onSubmit {
-                            sendStructuredSessionPrompt()
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(Color.white.opacity(0.08), in: Capsule())
-                        .overlay {
-                            Capsule()
-                                .stroke(NexusMacTheme.softLine, lineWidth: 1)
-                        }
+                let slashCommands = structuredSessionSlashCommandMenuPresentation(
+                    for: structuredSessionPrompt,
+                    screen: screen
+                )
+
+                VStack(alignment: .leading, spacing: 8) {
+                    if slashCommands.isVisible {
+                        macStructuredSessionSlashCommandMenu(slashCommands.commands)
+                    }
+
+                    HStack(spacing: 8) {
+                        TextField(presentation.copy.composerPlaceholder, text: $structuredSessionPrompt, axis: .vertical)
+                            .focused($isStructuredSessionPromptFocused)
+                            .font(NexusMacTheme.bodyFont(13))
+                            .textFieldStyle(.plain)
+                            .lineLimit(1 ... 4)
+                            .submitLabel(.send)
+                            .disabled(screen.isAgentTurnInProgress)
+                            .onSubmit {
+                                sendStructuredSessionPrompt()
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(Color.white.opacity(0.08), in: Capsule())
+                            .overlay {
+                                Capsule()
+                                    .stroke(NexusMacTheme.softLine, lineWidth: 1)
+                            }
+                    }
                 }
                 .padding(14)
                 .background(Color.white.opacity(0.02))
@@ -1591,6 +1609,56 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .nexusPanel(tint: NexusMacTheme.teal, radius: 22)
+    }
+
+    @ViewBuilder
+    private func macStructuredSessionSlashCommandMenu(_ commands: [StructuredSessionSlashCommand]) -> some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 4) {
+                ForEach(commands) { command in
+                    Button {
+                        structuredSessionPrompt = applyStructuredSessionSlashCommand(command, to: structuredSessionPrompt)
+                        isStructuredSessionPromptFocused = true
+                    } label: {
+                        HStack(alignment: .top, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(command.displayText)
+                                    .font(NexusMacTheme.monoFont(12, relativeTo: .callout))
+                                    .foregroundStyle(.white)
+                                Text(command.summary)
+                                    .font(NexusMacTheme.bodyFont(11, relativeTo: .caption))
+                                    .foregroundStyle(NexusMacTheme.mutedText)
+                                    .multilineTextAlignment(.leading)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color.white.opacity(0.03))
+                    )
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(NexusMacTheme.softLine.opacity(0.8), lineWidth: 1)
+                    }
+                }
+            }
+            .padding(8)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(maxHeight: 220)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.black.opacity(0.88))
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(NexusMacTheme.softLine, lineWidth: 1)
+        }
     }
 
     private func structuredSessionActivityRowView(_ row: StructuredSessionActivityRow, providerName: String) -> some View {
@@ -1697,6 +1765,24 @@ struct ContentView: View {
                     Spacer()
                 }
             )
+        }
+    }
+
+    private func structuredSessionThinkingIndicatorView(_ indicator: StructuredSessionThinkingIndicator) -> some View {
+        HStack {
+            Spacer()
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(NexusMacTheme.gold)
+                Text(indicator.text)
+                    .font(NexusMacTheme.bodyFont(11, relativeTo: .caption))
+                    .foregroundStyle(NexusMacTheme.mutedText)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.white.opacity(0.05), in: Capsule())
+            Spacer()
         }
     }
 

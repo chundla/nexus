@@ -58,6 +58,82 @@ struct NexusServicePiSessionStreamTests {
         #expect(launchCounter.value == 1)
     }
 
+    @Test func localPiSessionScreenIncludesLiveSlashCommandsFromRpc() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
+
+        let launcher = ProcessSessionRuntimeLauncher(localProtocolNativeRuntimeFactories: [.pi: { launchConfiguration, _, _ in
+            try PiRPCSessionRuntime(
+                executable: launchConfiguration.executable,
+                workingDirectory: launchConfiguration.workingDirectory,
+                terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
+                transportFactory: { _, _, _ in
+                    TestPiRPCTransport(
+                        slashCommands: [
+                            TestPiRPCCommand(
+                                name: "review-changes",
+                                description: "Summarize the current diff.",
+                                source: .prompt,
+                                location: .project,
+                                path: "/tmp/project/.pi/prompts/review-changes.md"
+                            ),
+                            TestPiRPCCommand(
+                                name: "skill:create-cli",
+                                description: "CLI UX/spec: args, flags, help, output, errors, config, dry-run.",
+                                source: .skill,
+                                location: .user,
+                                path: "/Users/tester/.pi/agent/skills/create-cli/SKILL.md"
+                            )
+                        ]
+                    )
+                }
+            )
+        }])
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: PiStreamStubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
+                commandRunner: PiStreamStubCommandRunner(results: [
+                    .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
+                    .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                ]),
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+            ),
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+        )
+
+        let group = try service.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try service.createLocalWorkspace(
+            name: "Local Pi",
+            folderPath: workspaceFolder.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+        let screen = try service.getSessionScreen(sessionID: session.id)
+
+        #expect(screen.slashCommands == [
+            SessionSlashCommand(
+                name: "review-changes",
+                description: "Summarize the current diff.",
+                source: .prompt,
+                location: .project,
+                path: "/tmp/project/.pi/prompts/review-changes.md"
+            ),
+            SessionSlashCommand(
+                name: "skill:create-cli",
+                description: "CLI UX/spec: args, flags, help, output, errors, config, dry-run.",
+                source: .skill,
+                location: .user,
+                path: "/Users/tester/.pi/agent/skills/create-cli/SKILL.md"
+            )
+        ])
+    }
+
     @Test func localPiDefaultSessionRelaunchKeepsPiConversationLinkageAcrossServiceRestart() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)
@@ -273,7 +349,7 @@ struct NexusServicePiSessionStreamTests {
         try FileManager.default.createDirectory(at: binURL, withIntermediateDirectories: true)
 
         let interpreterURL = binURL.appendingPathComponent("fake-node-interpreter", isDirectory: false)
-        try "#!/bin/sh\nIFS= read -r _line\nprintf '%s\\n' '{\"id\":\"nexus-pi-startup\",\"type\":\"response\",\"command\":\"get_state\",\"success\":true,\"data\":{\"sessionId\":\"pi-session-1\"}}'\n".write(to: interpreterURL, atomically: true, encoding: .utf8)
+        try "#!/bin/sh\nIFS= read -r _line\nprintf '%s\\n' '{\"id\":\"nexus-pi-startup-state\",\"type\":\"response\",\"command\":\"get_state\",\"success\":true,\"data\":{\"sessionId\":\"pi-session-1\"}}'\n".write(to: interpreterURL, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: interpreterURL.path)
 
         let scriptURL = binURL.appendingPathComponent("fake-pi", isDirectory: false)
@@ -294,7 +370,7 @@ struct NexusServicePiSessionStreamTests {
 
         try transport.start()
         defer { try? transport.terminate() }
-        try transport.sendLine("{\"id\":\"nexus-pi-startup\",\"type\":\"get_state\"}")
+        try transport.sendLine("{\"id\":\"nexus-pi-startup-state\",\"type\":\"get_state\"}")
 
         #expect(startupSemaphore.wait(timeout: .now() + 2) == .success)
         #expect(response.get()?.contains("\"success\":true") == true)
@@ -329,6 +405,61 @@ struct NexusServicePiSessionStreamTests {
         ])
         #expect(screen.activityItems.map(\.kind) == [.status, .message, .message])
         #expect(screen.transcript == "> hello\nworld")
+    }
+
+    @Test func localPiRuntimeSurfacesToolExecutionAndKeepsThinkingIndicatorVisibleUntilTurnEnds() throws {
+        let transport = StreamingToolPiRPCTransport()
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("delegate")
+        let runningScreen = runtime.sessionScreen(for: session)
+
+        #expect(runningScreen.isAgentTurnInProgress)
+        #expect(runningScreen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "You: delegate"
+        ])
+
+        transport.emitToolExecutionStart(
+            toolCallID: "tool-1",
+            toolName: "subagent",
+            args: ["agent": "reviewer", "task": "Review the latest diff and summarize issues"]
+        )
+        transport.emitToolExecutionEnd(
+            toolCallID: "tool-1",
+            toolName: "subagent",
+            result: [
+                "content": [[
+                    "type": "text",
+                    "text": "Looks good overall. Watch the new error path."
+                ]]
+            ]
+        )
+        transport.emitTurnEnd(text: "Done")
+
+        let completedScreen = runtime.sessionScreen(for: session)
+
+        #expect(completedScreen.isAgentTurnInProgress == false)
+        #expect(completedScreen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "You: delegate",
+            "subagent reviewer: Review the latest diff and summarize issues",
+            "subagent: Looks good overall. Watch the new error path.",
+            "Pi: Done"
+        ])
     }
 
     @Test func localPiSessionScreenShowsPendingApprovalRequestInSharedSessionStream() throws {
@@ -748,6 +879,91 @@ private final class ApprovalRequestTestPiRPCTransport: PiRPCTransporting, @unche
     }
 }
 
+private final class StreamingToolPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
+    private var stdoutLineHandler: (@Sendable (String) -> Void)?
+    private var terminationHandler: (@Sendable (Int32) -> Void)?
+
+    func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
+        stdoutLineHandler = handler
+    }
+
+    func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?) {
+        terminationHandler = handler
+    }
+
+    func start() throws {}
+
+    func sendLine(_ line: String) throws {
+        guard let data = line.data(using: .utf8),
+              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = object["type"] as? String else {
+            return
+        }
+
+        switch type {
+        case "get_state":
+            emit([
+                "id": object["id"] as? String ?? "state",
+                "type": "response",
+                "command": "get_state",
+                "success": true,
+                "data": ["sessionId": "pi-session-1"]
+            ])
+        case "prompt":
+            emit([
+                "type": "response",
+                "command": "prompt",
+                "success": true
+            ])
+        default:
+            return
+        }
+    }
+
+    func terminate() throws {
+        terminationHandler?(0)
+    }
+
+    func emitToolExecutionStart(toolCallID: String, toolName: String, args: [String: Any]) {
+        emit([
+            "type": "tool_execution_start",
+            "toolCallId": toolCallID,
+            "toolName": toolName,
+            "args": args
+        ])
+    }
+
+    func emitToolExecutionEnd(toolCallID: String, toolName: String, result: [String: Any], isError: Bool = false) {
+        emit([
+            "type": "tool_execution_end",
+            "toolCallId": toolCallID,
+            "toolName": toolName,
+            "result": result,
+            "isError": isError
+        ])
+    }
+
+    func emitTurnEnd(text: String) {
+        emit([
+            "type": "turn_end",
+            "message": [
+                "content": [[
+                    "type": "text",
+                    "text": text
+                ]]
+            ]
+        ])
+    }
+
+    private func emit(_ object: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: object),
+              let line = String(data: data, encoding: .utf8) else {
+            return
+        }
+        stdoutLineHandler?(line)
+    }
+}
+
 private final class LockedValue<Value>: @unchecked Sendable {
     private let lock = NSLock()
     private var value: Value
@@ -769,13 +985,40 @@ private final class LockedValue<Value>: @unchecked Sendable {
     }
 }
 
+private struct TestPiRPCCommand {
+    let name: String
+    let description: String?
+    let source: SessionSlashCommandSource
+    let location: SessionSlashCommandLocation?
+    let path: String?
+
+    func responseObject() -> [String: Any] {
+        var object: [String: Any] = [
+            "name": name,
+            "source": source.rawValue
+        ]
+        if let description {
+            object["description"] = description
+        }
+        if let location {
+            object["location"] = location.rawValue
+        }
+        if let path {
+            object["path"] = path
+        }
+        return object
+    }
+}
+
 private final class TestPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
     private let promptResponseText: String
+    private let slashCommands: [TestPiRPCCommand]
     private var stdoutLineHandler: (@Sendable (String) -> Void)?
     private var terminationHandler: (@Sendable (Int32) -> Void)?
 
-    init(promptResponseText: String = "") {
+    init(promptResponseText: String = "", slashCommands: [TestPiRPCCommand] = []) {
         self.promptResponseText = promptResponseText
+        self.slashCommands = slashCommands
     }
 
     func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
@@ -804,6 +1047,16 @@ private final class TestPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
                 "success": true,
                 "data": [
                     "sessionId": "pi-session-1"
+                ]
+            ])
+        case "get_commands":
+            emit([
+                "id": object["id"] as? String ?? "commands",
+                "type": "response",
+                "command": "get_commands",
+                "success": true,
+                "data": [
+                    "commands": slashCommands.map { $0.responseObject() }
                 ]
             ])
         case "prompt":

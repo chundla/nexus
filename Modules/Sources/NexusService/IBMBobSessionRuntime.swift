@@ -40,6 +40,7 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
     private var draft = ""
     private var transcriptEntries: [String] = []
     private var activityItems: [SessionActivityItem]
+    private let slashCommands: [SessionSlashCommand]?
     private var changeHandler: (@Sendable () -> Void)?
     private var activeTransport: (any IBMBobTransporting)?
     private var activeTurn: ActiveTurn?
@@ -68,6 +69,7 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
         self.terminationStatusMessageBuilder = terminationStatusMessageBuilder
         self.unexpectedTerminationStateEvaluator = unexpectedTerminationStateEvaluator ?? { _, _ in unexpectedTerminationState }
         self.transportFactory = transportFactory
+        self.slashCommands = Self.discoverSlashCommands(executable: executable, workingDirectory: workingDirectory)
         let restoredActivityItems = sessionLinkage?.persistedActivityItems ?? []
         self.activityItems = restoredActivityItems.isEmpty ? Self.defaultActivityItems : restoredActivityItems
         self.transcriptEntries = Self.transcriptEntries(from: self.activityItems)
@@ -99,6 +101,7 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
         let terminalColumns = terminalColumns
         let terminalRows = terminalRows
         let activityItems = activityItems
+        let isTurnInProgress = isStreaming
         lock.unlock()
 
         return SessionScreen(
@@ -115,7 +118,9 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
             transcript: transcript,
             terminalColumns: terminalColumns,
             terminalRows: terminalRows,
-            activityItems: activityItems
+            activityItems: activityItems,
+            slashCommands: slashCommands,
+            isAgentTurnInProgress: isTurnInProgress
         )
     }
 
@@ -449,7 +454,17 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
             }
             return BobEvent(kind: .message, text: text)
         case "command", "tool_use":
-            guard let text = stringValue(in: object, keys: ["command", "text", "message"]), text.isEmpty == false else {
+            let explicitText = stringValue(in: object, keys: ["command", "text", "message"])
+            let toolName = stringValue(in: object, keys: ["tool_name", "toolName", "name"])
+            let parameterPreview = toolParameterPreview(in: object)
+            let text = explicitText
+                ?? {
+                    if let toolName, let parameterPreview {
+                        return "\(toolName): \(parameterPreview)"
+                    }
+                    return toolName
+                }()
+            guard let text, text.isEmpty == false else {
                 return nil
             }
             return BobEvent(kind: .command, text: text)
@@ -488,9 +503,9 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
         }
 
         switch role {
-        case "assistant", "model", "ai", "bot":
+        case "assistant", "model", "ai", "bot", "tool":
             return true
-        case "user", "human", "tool", "system":
+        case "user", "human", "system":
             return false
         default:
             return true
@@ -538,6 +553,30 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
         return text.isEmpty ? nil : text
     }
 
+    private func toolParameterPreview(in object: [String: Any]) -> String? {
+        guard let parameters = object["parameters"] as? [String: Any] else {
+            return nil
+        }
+
+        if let agent = stringValue(in: parameters, keys: ["agent"]),
+           let task = stringValue(in: parameters, keys: ["task", "prompt"]) {
+            return "\(agent): \(previewText(task, limit: 80))"
+        }
+
+        if let command = stringValue(in: parameters, keys: ["command", "task", "prompt", "result"]) {
+            return previewText(command, limit: 80)
+        }
+
+        return nil
+    }
+
+    private func previewText(_ text: String, limit: Int) -> String {
+        guard text.count > limit else {
+            return text
+        }
+        return String(text.prefix(limit)) + "…"
+    }
+
     private func resolvedSessionID(from object: [String: Any]) -> String? {
         if let sessionID = stringValue(in: object, keys: ["session_id", "sessionId", "conversation_id", "conversationId"]) {
             return sessionID
@@ -561,6 +600,178 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
             }
         }
         return nil
+    }
+
+    private static func discoverSlashCommands(executable: String, workingDirectory: String) -> [SessionSlashCommand]? {
+        guard shouldDiscoverSlashCommandsLocally(executable: executable, workingDirectory: workingDirectory) else {
+            return nil
+        }
+
+        let fileManager = FileManager.default
+        let homeDirectory = fileManager.homeDirectoryForCurrentUser
+        let projectRoot = URL(fileURLWithPath: workingDirectory, isDirectory: true)
+
+        var commandsByName: [String: SessionSlashCommand] = [:]
+        for command in loadBobCustomCommands(from: homeDirectory.appendingPathComponent(".bob/commands", isDirectory: true), location: .user) {
+            commandsByName[command.name] = command
+        }
+        for command in loadBobCustomModes(from: homeDirectory.appendingPathComponent(".bob/custom_modes.yaml", isDirectory: false), location: .user) {
+            commandsByName[command.name] = command
+        }
+        for command in loadBobCustomCommands(from: projectRoot.appendingPathComponent(".bob/commands", isDirectory: true), location: .project) {
+            commandsByName[command.name] = command
+        }
+        for command in loadBobCustomModes(from: projectRoot.appendingPathComponent(".bob/custom_modes.yaml", isDirectory: false), location: .project) {
+            commandsByName[command.name] = command
+        }
+
+        let commands = commandsByName.values.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        return commands.isEmpty ? nil : commands
+    }
+
+    private static func shouldDiscoverSlashCommandsLocally(executable: String, workingDirectory: String) -> Bool {
+        let executableName = URL(fileURLWithPath: executable).lastPathComponent.lowercased()
+        guard executableName != "ssh" else {
+            return false
+        }
+        return FileManager.default.fileExists(atPath: workingDirectory)
+    }
+
+    private static func loadBobCustomCommands(from directory: URL, location: SessionSlashCommandLocation) -> [SessionSlashCommand] {
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: directory.path) else {
+            return []
+        }
+
+        let urls = (fileManager.enumerator(at: directory, includingPropertiesForKeys: nil)?.allObjects ?? []).compactMap { $0 as? URL }
+        let resolvedDirectoryPath = directory.resolvingSymlinksInPath().path
+        return urls
+            .filter { $0.pathExtension.lowercased() == "md" }
+            .compactMap { fileURL in
+                let resolvedFilePath = fileURL.resolvingSymlinksInPath().path
+                let relativePath = resolvedFilePath.replacingOccurrences(of: resolvedDirectoryPath + "/", with: "")
+                let commandName = (relativePath as NSString).deletingPathExtension.replacingOccurrences(of: "\\", with: "/")
+                guard commandName.isEmpty == false else {
+                    return nil
+                }
+
+                let metadata = readBobMarkdownMetadata(at: fileURL)
+                let description = metadata.description ?? "Custom Bob command"
+                let displayName = metadata.argumentHint.map { "\(commandName) \($0)" }
+                let insertionText = metadata.argumentHint == nil ? nil : "\(commandName) "
+
+                return SessionSlashCommand(
+                    name: commandName,
+                    displayName: displayName,
+                    insertionText: insertionText,
+                    description: description,
+                    source: .prompt,
+                    location: location,
+                    path: resolvedFilePath
+                )
+            }
+    }
+
+    private static func loadBobCustomModes(from fileURL: URL, location: SessionSlashCommandLocation) -> [SessionSlashCommand] {
+        guard let text = try? String(contentsOf: fileURL, encoding: .utf8) else {
+            return []
+        }
+
+        struct PendingMode {
+            var slug: String?
+            var name: String?
+            var whenToUse: String?
+        }
+
+        func finalize(_ mode: PendingMode) -> SessionSlashCommand? {
+            guard let slug = mode.slug?.trimmingCharacters(in: .whitespacesAndNewlines), slug.isEmpty == false else {
+                return nil
+            }
+            let trimmedWhenToUse = mode.whenToUse?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedName = mode.name?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let summary = (trimmedWhenToUse?.isEmpty == false ? trimmedWhenToUse : nil)
+                ?? (trimmedName?.isEmpty == false ? trimmedName : nil)
+                ?? "Custom Bob mode"
+            return SessionSlashCommand(
+                name: slug,
+                description: summary,
+                source: .builtIn,
+                location: location,
+                path: fileURL.resolvingSymlinksInPath().path
+            )
+        }
+
+        var commands: [SessionSlashCommand] = []
+        var current = PendingMode()
+        for rawLine in text.components(separatedBy: .newlines) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("- slug:") {
+                if let command = finalize(current) {
+                    commands.append(command)
+                }
+                current = PendingMode(slug: parseBobConfigValue(from: line, key: "- slug:"))
+                continue
+            }
+            if current.slug == nil {
+                continue
+            }
+            if line.hasPrefix("slug:") {
+                current.slug = parseBobConfigValue(from: line, key: "slug:")
+            } else if line.hasPrefix("name:") {
+                current.name = parseBobConfigValue(from: line, key: "name:")
+            } else if line.hasPrefix("whenToUse:") {
+                current.whenToUse = parseBobConfigValue(from: line, key: "whenToUse:")
+            }
+        }
+        if let command = finalize(current) {
+            commands.append(command)
+        }
+        return commands
+    }
+
+    private static func readBobMarkdownMetadata(at fileURL: URL) -> (description: String?, argumentHint: String?) {
+        guard let text = try? String(contentsOf: fileURL, encoding: .utf8) else {
+            return (nil, nil)
+        }
+
+        let lines = text.components(separatedBy: .newlines)
+        guard lines.first?.trimmingCharacters(in: .whitespacesAndNewlines) == "---" else {
+            return (nil, nil)
+        }
+
+        var description: String?
+        var argumentHint: String?
+        for line in lines.dropFirst() {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed == "---" {
+                break
+            }
+            if trimmed.hasPrefix("description:") {
+                description = parseBobConfigValue(from: trimmed, key: "description:")
+            } else if trimmed.hasPrefix("argument-hint:") {
+                argumentHint = parseBobConfigValue(from: trimmed, key: "argument-hint:")
+            }
+        }
+
+        return (description, argumentHint)
+    }
+
+    private static func parseBobConfigValue(from line: String, key: String) -> String? {
+        let value = line.dropFirst(key.count).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard value.isEmpty == false,
+              value != "|-",
+              value != ">-",
+              value != "|",
+              value != ">" else {
+            return nil
+        }
+        if value.hasPrefix("\"") && value.hasSuffix("\"") && value.count >= 2 {
+            return String(value.dropFirst().dropLast())
+        }
+        if value.hasPrefix("'") && value.hasSuffix("'") && value.count >= 2 {
+            return String(value.dropFirst().dropLast())
+        }
+        return value
     }
 
     private static var defaultActivityItems: [SessionActivityItem] {

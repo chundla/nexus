@@ -1412,6 +1412,7 @@ private struct RemoteSessionScreenView: View {
     @State private var activeAction: RemoteSessionAction?
     @State private var activeApprovalRequestID: UUID?
     @State private var presentedError: RemoteClientHomePresentedError?
+    @FocusState private var isStructuredPromptFocused: Bool
     @FocusState private var isTerminalInputFocused: Bool
 
     private let conversationBottomID = "conversation-bottom"
@@ -1681,17 +1682,27 @@ private struct RemoteSessionScreenView: View {
             let sendAffordance = structuredSessionComposerSendAffordance(
                 for: structuredPrompt,
                 composer: composer,
-                isPerformingAction: isPerformingAction
+                isPerformingAction: isPerformingAction || screen.isAgentTurnInProgress
             )
 
             VStack(spacing: 8) {
                 if composer.isEnabled {
+                    let slashCommands = structuredSessionSlashCommandMenuPresentation(
+                        for: structuredPrompt,
+                        screen: screen
+                    )
+
+                    if slashCommands.isVisible {
+                        iosStructuredSessionSlashCommandMenu(slashCommands.commands)
+                    }
+
                     HStack(alignment: .bottom, spacing: 10) {
                         TextField(composer.placeholder, text: $structuredPrompt, axis: .vertical)
+                            .focused($isStructuredPromptFocused)
                             .textInputAutocapitalization(.sentences)
                             .autocorrectionDisabled()
                             .lineLimit(1 ... 6)
-                            .disabled(isPerformingAction)
+                            .disabled(isPerformingAction || screen.isAgentTurnInProgress)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .nexusIOSTextField(tint: NexusIOSTheme.gold)
 
@@ -1743,6 +1754,54 @@ private struct RemoteSessionScreenView: View {
                     .fill(Color.white.opacity(0.08))
                     .frame(height: 1)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func iosStructuredSessionSlashCommandMenu(_ commands: [StructuredSessionSlashCommand]) -> some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 6) {
+                ForEach(commands) { command in
+                    Button {
+                        structuredPrompt = applyStructuredSessionSlashCommand(command, to: structuredPrompt)
+                        isStructuredPromptFocused = true
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(command.displayText)
+                                .font(NexusIOSTheme.monoFont(13, relativeTo: .callout))
+                                .foregroundStyle(.white)
+                            Text(command.summary)
+                                .font(NexusIOSTheme.bodyFont(12, relativeTo: .caption))
+                                .foregroundStyle(NexusIOSTheme.mutedText)
+                                .multilineTextAlignment(.leading)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(Color.white.opacity(0.04))
+                    )
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                    }
+                }
+            }
+            .padding(8)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(maxHeight: 220)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.black.opacity(0.86))
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
         }
     }
 
@@ -1931,6 +1990,10 @@ private struct RemoteSessionScreenView: View {
                                     .id(row.id)
                             }
 
+                            if let thinkingIndicator = presentation.thinkingIndicator {
+                                structuredSessionThinkingIndicatorView(thinkingIndicator)
+                            }
+
                             Color.clear
                                 .frame(height: 1)
                                 .id(conversationBottomID)
@@ -1956,6 +2019,23 @@ private struct RemoteSessionScreenView: View {
                     proxy.scrollTo(conversationBottomID, anchor: .bottom)
                 }
             }
+        }
+    }
+
+    private func structuredSessionThinkingIndicatorView(_ indicator: StructuredSessionThinkingIndicator) -> some View {
+        HStack {
+            Spacer()
+            HStack(spacing: 8) {
+                ProgressView()
+                    .tint(NexusIOSTheme.gold)
+                Text(indicator.text)
+                    .font(NexusIOSTheme.bodyFont(12, relativeTo: .caption))
+                    .foregroundStyle(NexusIOSTheme.mutedText)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.white.opacity(0.05), in: Capsule())
+            Spacer()
         }
     }
 

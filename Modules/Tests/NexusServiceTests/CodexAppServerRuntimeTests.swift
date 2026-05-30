@@ -31,7 +31,59 @@ struct CodexAppServerRuntimeTests {
         #expect(screen.transcript.isEmpty)
         #expect(screen.activityItems.map { $0.kind } == [SessionActivityItem.Kind.status])
         #expect(screen.activityItems.map { $0.text } == ["Codex shared Session stream connected"])
-        #expect(transport.sentMessages.compactMap { $0["method"] as? String } == ["initialize", "initialized", "thread/start"])
+        #expect(transport.sentMessages.compactMap { $0["method"] as? String } == ["initialize", "initialized", "thread/start", "model/list"])
+    }
+
+    @Test func sessionScreenIncludesLiveCodexModelSlashCommandsFromAppServer() throws {
+        let transport = TestCodexAppServerTransport(
+            threadID: "codex-thread-1",
+            models: [
+                [
+                    "id": "gpt-5.5",
+                    "displayName": "GPT-5.5",
+                    "description": "Frontier coding model.",
+                    "isDefault": true
+                ],
+                [
+                    "id": "gpt-5",
+                    "displayName": "GPT-5",
+                    "description": "Fast coding model.",
+                    "isDefault": false
+                ]
+            ]
+        )
+        let runtime = try CodexAppServerRuntime(
+            executable: "/tmp/fake-codex",
+            workingDirectory: "/tmp/workspace",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .codex,
+            isDefault: true,
+            state: .ready
+        )
+
+        #expect(runtime.sessionScreen(for: session).slashCommands == [
+            SessionSlashCommand(
+                name: "model gpt-5.5",
+                displayName: "model gpt-5.5 — GPT-5.5",
+                insertionText: "model gpt-5.5",
+                suggestionQueryPrefix: "model ",
+                description: "Default model. Frontier coding model.",
+                source: .builtIn
+            ),
+            SessionSlashCommand(
+                name: "model gpt-5",
+                displayName: "model gpt-5 — GPT-5",
+                insertionText: "model gpt-5",
+                suggestionQueryPrefix: "model ",
+                description: "Fast coding model.",
+                source: .builtIn
+            )
+        ])
     }
 
     @Test func resumesStructuredSessionFromExistingCodexThreadLinkage() throws {
@@ -44,9 +96,11 @@ struct CodexAppServerRuntimeTests {
             transportFactory: { _, _, _ in transport }
         )
 
-        let resumeParameters = try #require(transport.sentMessages.last?["params"] as? [String: Any])
+        let resumeParameters = try #require(
+            transport.sentMessages.first(where: { $0["method"] as? String == "thread/resume" })?["params"] as? [String: Any]
+        )
 
-        #expect(transport.sentMessages.compactMap { $0["method"] as? String } == ["initialize", "initialized", "thread/resume"])
+        #expect(transport.sentMessages.compactMap { $0["method"] as? String } == ["initialize", "initialized", "thread/resume", "model/list"])
         #expect(resumeParameters["threadId"] as? String == "codex-thread-1")
         #expect(resumeParameters["cwd"] as? String == "/tmp/workspace")
     }
@@ -139,7 +193,7 @@ struct CodexAppServerRuntimeTests {
         let turnStartParameters = try #require(turnStart["params"] as? [String: Any])
         let input = try #require(turnStartParameters["input"] as? [[String: String]])
 
-        #expect(transport.sentMessages.compactMap { $0["method"] as? String } == ["initialize", "initialized", "thread/start", "turn/start"])
+        #expect(transport.sentMessages.compactMap { $0["method"] as? String } == ["initialize", "initialized", "thread/start", "model/list", "turn/start"])
         #expect(turnStart["method"] as? String == "turn/start")
         #expect(turnStartParameters["threadId"] as? String == "codex-thread-1")
         #expect(input == [["type": "text", "text": "Hello"]])
@@ -147,6 +201,63 @@ struct CodexAppServerRuntimeTests {
             "Codex shared Session stream connected",
             "You: Hello",
             "Codex: Hello. What would you like to work on in `nexus`?"
+        ])
+    }
+
+    @Test func surfacesCodexToolActivityAndKeepsThinkingIndicatorVisibleUntilFinalAgentMessageArrives() throws {
+        let transport = TestCodexAppServerTransport(threadID: "codex-thread-1")
+        let runtime = try CodexAppServerRuntime(
+            executable: "/tmp/fake-codex",
+            workingDirectory: "/tmp/workspace",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .codex,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("Ship it")
+        let runningScreen = runtime.sessionScreen(for: session)
+
+        #expect(runningScreen.isAgentTurnInProgress)
+        #expect(runningScreen.activityItems.map(\.text) == [
+            "Codex shared Session stream connected",
+            "You: Ship it"
+        ])
+
+        transport.emitItemStarted(item: [
+            "type": "subagent",
+            "id": "subagent-1",
+            "agent": "reviewer",
+            "task": "Check the diff and summarize follow-up work"
+        ])
+        transport.emitItemCompleted(item: [
+            "type": "subagent",
+            "id": "subagent-1",
+            "agent": "reviewer",
+            "task": "Check the diff and summarize follow-up work",
+            "result": [
+                "content": [[
+                    "type": "text",
+                    "text": "Looks good overall. Follow up on the retry path."
+                ]]
+            ]
+        ])
+        transport.emitCompletedAgentMessage(itemID: "agent-message-2", text: "Done")
+
+        let completedScreen = runtime.sessionScreen(for: session)
+
+        #expect(completedScreen.isAgentTurnInProgress == false)
+        #expect(completedScreen.activityItems.map(\.text) == [
+            "Codex shared Session stream connected",
+            "You: Ship it",
+            "subagent reviewer: Check the diff and summarize follow-up work",
+            "subagent: Looks good overall. Follow up on the retry path.",
+            "Codex: Done"
         ])
     }
 
@@ -541,14 +652,21 @@ private final class TestCodexAppServerTransport: CodexAppServerTransporting, @un
     private let threadID: String
     private let omitThreadIDFromStartResponse: Bool
     private let completedAgentMessageText: String?
+    private let models: [[String: Any]]
     private var stdoutLineHandler: (@Sendable (String) -> Void)?
     private var terminationHandler: (@Sendable (CodexAppServerTermination) -> Void)?
     private(set) var sentMessages: [[String: Any]] = []
 
-    init(threadID: String, omitThreadIDFromStartResponse: Bool = false, completedAgentMessageText: String? = nil) {
+    init(
+        threadID: String,
+        omitThreadIDFromStartResponse: Bool = false,
+        completedAgentMessageText: String? = nil,
+        models: [[String: Any]] = []
+    ) {
         self.threadID = threadID
         self.omitThreadIDFromStartResponse = omitThreadIDFromStartResponse
         self.completedAgentMessageText = completedAgentMessageText
+        self.models = models
     }
 
     func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
@@ -673,6 +791,13 @@ private final class TestCodexAppServerTransport: CodexAppServerTransporting, @un
                     ]
                 ]))
             }
+        case "model/list":
+            stdoutLineHandler?(jsonLine([
+                "id": object["id"] ?? 0,
+                "result": [
+                    "data": models
+                ]
+            ]))
         default:
             break
         }
@@ -697,6 +822,40 @@ private final class TestCodexAppServerTransport: CodexAppServerTransporting, @un
                 "cwd": "/tmp/workspace"
             ]
         ]))
+    }
+
+    func emitItemStarted(item: [String: Any]) {
+        stdoutLineHandler?(jsonLine([
+            "jsonrpc": "2.0",
+            "method": "item/started",
+            "params": [
+                "item": item,
+                "threadId": threadID,
+                "turnId": "turn-1"
+            ]
+        ]))
+    }
+
+    func emitItemCompleted(item: [String: Any]) {
+        stdoutLineHandler?(jsonLine([
+            "jsonrpc": "2.0",
+            "method": "item/completed",
+            "params": [
+                "item": item,
+                "threadId": threadID,
+                "turnId": "turn-1",
+                "completedAtMs": 1
+            ]
+        ]))
+    }
+
+    func emitCompletedAgentMessage(itemID: String, text: String) {
+        emitItemCompleted(item: [
+            "type": "agentMessage",
+            "id": itemID,
+            "text": text,
+            "phase": "final_answer"
+        ])
     }
 
     func emitFileChangeApprovalRequest(requestID: String, itemID: String, reason: String) {

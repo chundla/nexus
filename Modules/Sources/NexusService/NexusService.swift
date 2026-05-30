@@ -2633,6 +2633,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             terminalRows: screen.terminalRows,
             activityItems: screen.activityItems,
             approvalRequests: screen.approvalRequests,
+            slashCommands: screen.slashCommands,
+            isAgentTurnInProgress: screen.isAgentTurnInProgress,
             visibleLines: renderState.visibleLines,
             styledVisibleLines: renderState.styledVisibleLines,
             cursorRow: renderState.cursorRow,

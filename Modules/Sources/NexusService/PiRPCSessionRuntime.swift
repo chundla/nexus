@@ -51,13 +51,15 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     private let terminationStatusMessageBuilder: (Int32) -> String
     private let unexpectedTerminationState: Session.State
     private let unexpectedTerminationMessageBuilder: (Int32) -> String
-    private let startupResponseID = "nexus-pi-startup"
+    private let startupStateResponseID = "nexus-pi-startup-state"
+    private let startupCommandsResponseID = "nexus-pi-startup-commands"
     private var runtimeState: Session.State = .ready
     private var transcriptEntries: [String] = []
     private var interruptedFailureMessage: String?
     private var draft = ""
     private var activityItems: [SessionActivityItem] = []
     private var approvalRequests: [SessionApprovalRequest] = []
+    private var slashCommands: [SessionSlashCommand]?
     private var terminalColumns = 80
     private var terminalRows = 24
     private var sessionLinkage: PiSessionLinkage?
@@ -65,7 +67,11 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     private var isStreaming = false
     private var assistantTranscriptIndex: Int?
     private var currentAssistantText = ""
+    private var toolOutputByCallID: [String: String] = [:]
+    private var toolNamesByCallID: [String: String] = [:]
     private var didRequestStop = false
+    private var pendingSlashCommandsRequestID: String?
+    private var nextSlashCommandsRequestSequence = 0
 
     convenience init(
         executable: String,
@@ -154,20 +160,8 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             guard let self else { return }
 
             if let response = self.responseObject(from: line),
-               self.string(for: "type", in: response) == "response",
-               self.string(for: "id", in: response) == self.startupResponseID {
-                if self.bool(for: "success", in: response) == true {
-                    self.lock.lock()
-                    self.updateSessionLinkageLocked(from: response)
-                    self.appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"))
-                    self.lock.unlock()
-                    startupWaiter.succeed()
-                } else {
-                    let errorMessage = self.string(for: "error", in: response) ?? "Pi RPC startup failed."
-                    let startupError = PiRPCSessionRuntimeError.startupFailed(errorMessage)
-                    startupState.record(error: startupError)
-                    startupWaiter.fail(startupError)
-                }
+               self.string(for: "type", in: response) == "response" {
+                self.handleResponse(response, startupState: startupState, startupWaiter: startupWaiter)
                 return
             }
 
@@ -183,7 +177,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         }
 
         try transport.start()
-        try transport.sendLine(Self.jsonLine(["id": startupResponseID, "type": "get_state"]))
+        try transport.sendLine(Self.jsonLine(["id": startupStateResponseID, "type": "get_state"]))
 
         do {
             try await startupWaiter.wait(
@@ -211,7 +205,9 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             terminalColumns: terminalColumns,
             terminalRows: terminalRows,
             activityItems: activityItems,
-            approvalRequests: approvalRequests
+            approvalRequests: approvalRequests,
+            slashCommands: slashCommands,
+            isAgentTurnInProgress: isStreaming
         )
     }
 
@@ -340,6 +336,41 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         )
     }
 
+    private func handleResponse(
+        _ response: [String: Any],
+        startupState: StartupState,
+        startupWaiter: AsyncResultWaiter<Void>
+    ) {
+        let id = string(for: "id", in: response)
+        let command = string(for: "command", in: response)
+
+        if id == startupStateResponseID {
+            if bool(for: "success", in: response) == true {
+                lock.lock()
+                updateSessionLinkageLocked(from: response)
+                appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"))
+                lock.unlock()
+                requestSlashCommands(preferredID: startupCommandsResponseID)
+                startupWaiter.succeed()
+            } else {
+                let errorMessage = string(for: "error", in: response) ?? "Pi RPC startup failed."
+                let startupError = PiRPCSessionRuntimeError.startupFailed(errorMessage)
+                startupState.record(error: startupError)
+                startupWaiter.fail(startupError)
+            }
+            return
+        }
+
+        if command == "get_commands" {
+            handleGetCommandsResponse(response, requestID: id)
+            return
+        }
+
+        if command == "prompt", bool(for: "success", in: response) == true {
+            requestSlashCommands()
+        }
+    }
+
     private func handleOutputLine(_ line: String) {
         guard let object = responseObject(from: line),
               let type = string(for: "type", in: object) else {
@@ -353,6 +384,12 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             handleMessageUpdate(object)
         case "approval_request":
             handleApprovalRequest(object)
+        case "tool_execution_start":
+            handleToolExecutionStart(object)
+        case "tool_execution_update":
+            handleToolExecutionUpdate(object)
+        case "tool_execution_end":
+            handleToolExecutionEnd(object)
         case "turn_end":
             handleTurnEnd(object)
         default:
@@ -403,6 +440,87 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         }
     }
 
+    private func handleToolExecutionStart(_ object: [String: Any]) {
+        guard let toolCallID = string(for: "toolCallId", in: object),
+              let toolName = string(for: "toolName", in: object) else {
+            return
+        }
+
+        let args = object["args"] as? [String: Any]
+        let callText = toolExecutionCallText(toolName: toolName, args: args)
+
+        lock.lock()
+        toolNamesByCallID[toolCallID] = toolName
+        toolOutputByCallID[toolCallID] = ""
+        appendActivityItemLocked(SessionActivityItem(kind: .command, text: callText))
+        lock.unlock()
+        notifyChange()
+    }
+
+    private func handleToolExecutionUpdate(_ object: [String: Any]) {
+        guard let toolCallID = string(for: "toolCallId", in: object) else {
+            return
+        }
+
+        let partialResult = object["partialResult"] as? [String: Any]
+        let outputText = toolExecutionResultText(partialResult)
+        guard outputText.isEmpty == false else {
+            return
+        }
+
+        let shouldNotify: Bool
+        lock.lock()
+        let previousText = toolOutputByCallID[toolCallID] ?? ""
+        let nextDelta = incrementalToolOutput(from: previousText, to: outputText)
+        toolOutputByCallID[toolCallID] = outputText
+        if nextDelta.isEmpty == false {
+            let toolLabel = toolExecutionOutputLabel(for: toolNamesByCallID[toolCallID])
+            appendActivityItemLocked(SessionActivityItem(kind: .message, text: "\(toolLabel): \(nextDelta)"))
+            shouldNotify = true
+        } else {
+            shouldNotify = false
+        }
+        lock.unlock()
+
+        if shouldNotify {
+            notifyChange()
+        }
+    }
+
+    private func handleToolExecutionEnd(_ object: [String: Any]) {
+        guard let toolCallID = string(for: "toolCallId", in: object) else {
+            return
+        }
+
+        let result = object["result"] as? [String: Any]
+        let outputText = toolExecutionResultText(result)
+        let isError = bool(for: "isError", in: object) == true
+
+        let shouldNotify: Bool
+        lock.lock()
+        let previousText = toolOutputByCallID[toolCallID] ?? ""
+        let nextDelta = incrementalToolOutput(from: previousText, to: outputText)
+        toolOutputByCallID.removeValue(forKey: toolCallID)
+        let toolLabel = toolExecutionOutputLabel(for: toolNamesByCallID.removeValue(forKey: toolCallID))
+
+        if nextDelta.isEmpty == false {
+            appendActivityItemLocked(
+                SessionActivityItem(
+                    kind: isError ? .error : .message,
+                    text: isError ? nextDelta : "\(toolLabel): \(nextDelta)"
+                )
+            )
+            shouldNotify = true
+        } else {
+            shouldNotify = false
+        }
+        lock.unlock()
+
+        if shouldNotify {
+            notifyChange()
+        }
+    }
+
     private func handleTurnEnd(_ object: [String: Any]) {
         let resolvedText = assistantText(from: object["message"] as? [String: Any])
 
@@ -417,8 +535,11 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         }
         currentAssistantText = ""
         assistantTranscriptIndex = nil
+        toolOutputByCallID.removeAll()
+        toolNamesByCallID.removeAll()
         isStreaming = false
         lock.unlock()
+        requestSlashCommands()
         notifyChange()
     }
 
@@ -465,6 +586,82 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         return lines.joined(separator: "\n")
     }
 
+    private func handleGetCommandsResponse(_ response: [String: Any], requestID: String?) {
+        let nextSlashCommands: [SessionSlashCommand]?
+        if bool(for: "success", in: response) == true {
+            nextSlashCommands = parseSlashCommands(from: response) ?? []
+        } else {
+            nextSlashCommands = nil
+        }
+
+        let shouldNotify: Bool
+        lock.lock()
+        if requestID == pendingSlashCommandsRequestID {
+            pendingSlashCommandsRequestID = nil
+        }
+        if let nextSlashCommands {
+            shouldNotify = slashCommands != nextSlashCommands
+            slashCommands = nextSlashCommands
+        } else {
+            shouldNotify = false
+        }
+        lock.unlock()
+
+        if shouldNotify {
+            notifyChange()
+        }
+    }
+
+    private func requestSlashCommands(preferredID: String? = nil) {
+        let requestID: String
+        lock.lock()
+        if pendingSlashCommandsRequestID != nil {
+            lock.unlock()
+            return
+        }
+        if let preferredID {
+            requestID = preferredID
+        } else {
+            requestID = "nexus-pi-commands-\(nextSlashCommandsRequestSequence)"
+            nextSlashCommandsRequestSequence += 1
+        }
+        pendingSlashCommandsRequestID = requestID
+        lock.unlock()
+
+        do {
+            try transport.sendLine(Self.jsonLine(["id": requestID, "type": "get_commands"]))
+        } catch {
+            lock.lock()
+            if pendingSlashCommandsRequestID == requestID {
+                pendingSlashCommandsRequestID = nil
+            }
+            lock.unlock()
+        }
+    }
+
+    private func parseSlashCommands(from response: [String: Any]) -> [SessionSlashCommand]? {
+        guard let data = response["data"] as? [String: Any],
+              let rawCommands = data["commands"] as? [[String: Any]] else {
+            return nil
+        }
+
+        return rawCommands.compactMap { command in
+            guard let name = string(for: "name", in: command),
+                  let sourceValue = string(for: "source", in: command),
+                  let source = SessionSlashCommandSource(rawValue: sourceValue) else {
+                return nil
+            }
+
+            return SessionSlashCommand(
+                name: name,
+                description: string(for: "description", in: command),
+                source: source,
+                location: string(for: "location", in: command).flatMap(SessionSlashCommandLocation.init(rawValue:)),
+                path: string(for: "path", in: command)
+            )
+        }
+    }
+
     private func updateSessionLinkageLocked(from response: [String: Any]) {
         guard let data = response["data"] as? [String: Any] else {
             return
@@ -479,6 +676,90 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         }
 
         sessionLinkage = linkage
+    }
+
+    private func toolExecutionCallText(toolName: String, args: [String: Any]?) -> String {
+        let normalizedToolName = toolName.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if normalizedToolName.caseInsensitiveCompare("subagent") == .orderedSame {
+            let agent = args.flatMap { string(for: "agent", in: $0) }?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let task = args.flatMap { string(for: "task", in: $0) }?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let taskPreview = task.map { previewText($0, limit: 80) }
+            if let agent, agent.isEmpty == false, let taskPreview, taskPreview.isEmpty == false {
+                return "subagent \(agent): \(taskPreview)"
+            }
+            if let agent, agent.isEmpty == false {
+                return "subagent \(agent)"
+            }
+        }
+
+        if let command = args.flatMap({ string(for: "command", in: $0) })?.trimmingCharacters(in: .whitespacesAndNewlines),
+           command.isEmpty == false {
+            return command
+        }
+
+        if let task = args.flatMap({ string(for: "task", in: $0) })?.trimmingCharacters(in: .whitespacesAndNewlines),
+           task.isEmpty == false {
+            return "\(normalizedToolName): \(previewText(task, limit: 80))"
+        }
+
+        return normalizedToolName.isEmpty ? "Tool" : normalizedToolName
+    }
+
+    private func toolExecutionOutputLabel(for toolName: String?) -> String {
+        let normalizedToolName = toolName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let normalizedToolName, normalizedToolName.isEmpty == false else {
+            return "Tool"
+        }
+        return normalizedToolName.caseInsensitiveCompare("subagent") == .orderedSame ? "subagent" : normalizedToolName
+    }
+
+    private func toolExecutionResultText(_ object: [String: Any]?) -> String {
+        guard let object else {
+            return ""
+        }
+
+        if let content = object["content"] as? [[String: Any]] {
+            let text = content.compactMap { block -> String? in
+                guard string(for: "type", in: block) == "text" else {
+                    return nil
+                }
+                return string(for: "text", in: block)
+            }.joined()
+            if text.isEmpty == false {
+                return text
+            }
+        }
+
+        return string(for: "text", in: object)
+            ?? string(for: "message", in: object)
+            ?? string(for: "output", in: object)
+            ?? ""
+    }
+
+    private func incrementalToolOutput(from previousText: String, to nextText: String) -> String {
+        let trimmedNextText = nextText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedNextText.isEmpty == false else {
+            return ""
+        }
+
+        let trimmedPreviousText = previousText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedPreviousText.isEmpty {
+            return trimmedNextText
+        }
+
+        if trimmedNextText.hasPrefix(trimmedPreviousText) {
+            return String(trimmedNextText.dropFirst(trimmedPreviousText.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        return trimmedNextText == trimmedPreviousText ? "" : trimmedNextText
+    }
+
+    private func previewText(_ text: String, limit: Int) -> String {
+        guard text.count > limit else {
+            return text
+        }
+        return String(text.prefix(limit)) + "…"
     }
 
     private func appendActivityItemLocked(_ item: SessionActivityItem) {

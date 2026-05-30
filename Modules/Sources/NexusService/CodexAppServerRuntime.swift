@@ -89,10 +89,17 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
     private var transcript = ""
     private var activityItems: [SessionActivityItem] = []
     private var approvalRequests: [SessionApprovalRequest] = []
+    private var slashCommands: [SessionSlashCommand]?
     private var pendingApprovalRequests: [UUID: PendingCodexApprovalRequest] = [:]
     private var pendingTurnRequestIDs: Set<String> = []
+    private var pendingSlashCommandRequestIDs: Set<String> = []
     private var nextTurnRequestSequence = 0
+    private var nextSlashCommandRequestSequence = 0
     private var completedAgentMessageItemIDs: Set<String> = []
+    private var startedItemIDs: Set<String> = []
+    private var streamedToolOutputByItemID: [String: String] = [:]
+    private var toolLabelsByItemID: [String: String] = [:]
+    private var isTurnInProgress = false
     private var didAnnounceConnectedStatus = false
     private var sessionLinkage: CodexSessionLinkage?
     private var changeHandler: (@Sendable () -> Void)?
@@ -303,6 +310,8 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
             try? transport.terminate()
             throw startupError
         }
+
+        requestSlashCommands(forceRefresh: true)
     }
 
     func sessionScreen(for session: Session) -> SessionScreen {
@@ -315,7 +324,9 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
             terminalColumns: terminalColumns,
             terminalRows: terminalRows,
             activityItems: activityItems,
-            approvalRequests: approvalRequests
+            approvalRequests: approvalRequests,
+            slashCommands: slashCommands,
+            isAgentTurnInProgress: isTurnInProgress
         )
     }
 
@@ -353,6 +364,7 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
         nextTurnRequestSequence += 1
         requestID = "nexus-codex-turn-\(nextTurnRequestSequence)"
         pendingTurnRequestIDs.insert(requestID)
+        isTurnInProgress = true
         appendActivityItemLocked(SessionActivityItem(kind: .message, text: "You: \(trimmed)"))
         lock.unlock()
         notifyChange()
@@ -439,23 +451,43 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
             return false
         }
 
-        let shouldHandle: Bool
         lock.lock()
-        shouldHandle = pendingTurnRequestIDs.contains(id)
-        if shouldHandle {
+        let isPendingTurnRequest = pendingTurnRequestIDs.contains(id)
+        if isPendingTurnRequest {
             pendingTurnRequestIDs.remove(id)
+            lock.unlock()
+
+            if let error = rpcErrorMessage(from: object) {
+                lock.lock()
+                isTurnInProgress = false
+                appendActivityItemLocked(SessionActivityItem(kind: .error, text: error))
+                lock.unlock()
+                notifyChange()
+            }
+
+            return true
+        }
+
+        let isPendingSlashCommandRequest = pendingSlashCommandRequestIDs.contains(id)
+        if isPendingSlashCommandRequest {
+            pendingSlashCommandRequestIDs.remove(id)
         }
         lock.unlock()
 
-        guard shouldHandle else {
+        guard isPendingSlashCommandRequest else {
             return false
         }
 
-        if let error = rpcErrorMessage(from: object) {
+        if let nextSlashCommands = parseSlashCommands(from: object) {
+            let shouldNotify: Bool
             lock.lock()
-            appendActivityItemLocked(SessionActivityItem(kind: .error, text: error))
+            shouldNotify = slashCommands != nextSlashCommands
+            slashCommands = nextSlashCommands
             lock.unlock()
-            notifyChange()
+
+            if shouldNotify {
+                notifyChange()
+            }
         }
 
         return true
@@ -478,7 +510,14 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
         case "thread/started", "thread/resumed":
             if captureThreadLinkage(from: object, appendConnectedStatus: true) {
                 notifyChange()
+                requestSlashCommands(forceRefresh: true)
             }
+        case "model/rerouted", "account/updated", "config/warning", "warning":
+            requestSlashCommands(forceRefresh: true)
+        case "item/started":
+            handleStartedItem(object["params"] as? [String: Any])
+        case "item/updated":
+            handleUpdatedItem(object["params"] as? [String: Any])
         case "item/completed":
             handleCompletedItem(object["params"] as? [String: Any])
         case "item/commandExecution/requestApproval":
@@ -536,26 +575,173 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
         return didChange
     }
 
-    private func handleCompletedItem(_ params: [String: Any]?) {
+    private func requestSlashCommands(forceRefresh _: Bool) {
+        let requestID: String
+        lock.lock()
+        if pendingSlashCommandRequestIDs.isEmpty == false {
+            lock.unlock()
+            return
+        }
+        requestID = "nexus-codex-model-list-\(nextSlashCommandRequestSequence)"
+        nextSlashCommandRequestSequence += 1
+        pendingSlashCommandRequestIDs.insert(requestID)
+        lock.unlock()
+
+        do {
+            try transport.sendLine(Self.jsonLine([
+                "jsonrpc": "2.0",
+                "id": requestID,
+                "method": "model/list",
+                "params": [
+                    "includeHidden": false,
+                    "limit": 100
+                ]
+            ]))
+        } catch {
+            lock.lock()
+            pendingSlashCommandRequestIDs.remove(requestID)
+            lock.unlock()
+        }
+    }
+
+    private func parseSlashCommands(from object: [String: Any]) -> [SessionSlashCommand]? {
+        guard let result = object["result"] as? [String: Any],
+              let data = result["data"] as? [[String: Any]] else {
+            return nil
+        }
+
+        return data.compactMap { model in
+            guard let id = trimmedString(for: "id", in: model) else {
+                return nil
+            }
+
+            let displayName = trimmedString(for: "displayName", in: model)
+            let description = trimmedString(for: "description", in: model)
+            let isDefault = model["isDefault"] as? Bool == true
+            let summaryPrefix = isDefault ? "Default model. " : ""
+            let summary = [summaryPrefix.isEmpty ? nil : summaryPrefix, description].compactMap { $0 }.joined()
+
+            return SessionSlashCommand(
+                name: "model \(id)",
+                displayName: displayName.map { "model \(id) — \($0)" } ?? "model \(id)",
+                insertionText: "model \(id)",
+                suggestionQueryPrefix: "model ",
+                description: summary.isEmpty ? nil : summary,
+                source: .builtIn
+            )
+        }
+    }
+
+    private func handleStartedItem(_ params: [String: Any]?) {
         guard let item = params?["item"] as? [String: Any],
-              string(for: "type", in: item) == "agentMessage",
               let itemID = string(for: "id", in: item) else {
             return
         }
 
-        let text = string(for: "text", in: item)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard text.isEmpty == false else {
+        let announcement = codexToolAnnouncement(for: item)
+        guard announcement.isEmpty == false else {
             return
         }
 
+        let shouldNotify: Bool
         lock.lock()
-        let inserted = completedAgentMessageItemIDs.insert(itemID).inserted
-        if inserted {
-            appendActivityItemLocked(SessionActivityItem(kind: .message, text: "Codex: \(text)"))
+        shouldNotify = startedItemIDs.insert(itemID).inserted
+        if shouldNotify {
+            toolLabelsByItemID[itemID] = codexToolLabel(for: item)
+            appendActivityItemLocked(SessionActivityItem(kind: .command, text: announcement))
         }
         lock.unlock()
 
-        if inserted {
+        if shouldNotify {
+            notifyChange()
+        }
+    }
+
+    private func handleUpdatedItem(_ params: [String: Any]?) {
+        guard let item = params?["item"] as? [String: Any],
+              let itemID = string(for: "id", in: item) else {
+            return
+        }
+
+        let outputText = codexToolOutputText(from: item)
+        guard outputText.isEmpty == false else {
+            return
+        }
+
+        let shouldNotify: Bool
+        lock.lock()
+        let previousText = streamedToolOutputByItemID[itemID] ?? ""
+        let nextDelta = incrementalToolOutput(from: previousText, to: outputText)
+        streamedToolOutputByItemID[itemID] = outputText
+        if nextDelta.isEmpty == false {
+            let toolLabel = toolLabelsByItemID[itemID] ?? codexToolLabel(for: item)
+            appendActivityItemLocked(SessionActivityItem(kind: .message, text: "\(toolLabel): \(nextDelta)"))
+            shouldNotify = true
+        } else {
+            shouldNotify = false
+        }
+        lock.unlock()
+
+        if shouldNotify {
+            notifyChange()
+        }
+    }
+
+    private func handleCompletedItem(_ params: [String: Any]?) {
+        guard let item = params?["item"] as? [String: Any],
+              let itemID = string(for: "id", in: item) else {
+            return
+        }
+
+        let itemType = string(for: "type", in: item)?.lowercased() ?? ""
+        let shouldNotify: Bool
+
+        lock.lock()
+        if itemType == "agentmessage" {
+            let text = codexAgentMessageText(from: item)
+            guard text.isEmpty == false else {
+                lock.unlock()
+                return
+            }
+
+            let inserted = completedAgentMessageItemIDs.insert(itemID).inserted
+            if inserted {
+                appendActivityItemLocked(SessionActivityItem(kind: .message, text: "Codex: \(text)"))
+                isTurnInProgress = false
+            }
+            shouldNotify = inserted
+        } else {
+            let announcement = codexToolAnnouncement(for: item)
+            let outputText = codexToolOutputText(from: item)
+            let previousOutputText = streamedToolOutputByItemID[itemID] ?? ""
+            let toolLabel = toolLabelsByItemID[itemID] ?? codexToolLabel(for: item)
+            let outputDelta = incrementalToolOutput(from: previousOutputText, to: outputText)
+            let isError = codexItemIsError(item)
+
+            var didAppend = false
+            if startedItemIDs.contains(itemID) == false, announcement.isEmpty == false {
+                appendActivityItemLocked(SessionActivityItem(kind: .command, text: announcement))
+                didAppend = true
+            }
+
+            if outputDelta.isEmpty == false {
+                appendActivityItemLocked(
+                    SessionActivityItem(
+                        kind: isError ? .error : .message,
+                        text: isError ? outputDelta : "\(toolLabel): \(outputDelta)"
+                    )
+                )
+                didAppend = true
+            }
+
+            startedItemIDs.remove(itemID)
+            streamedToolOutputByItemID.removeValue(forKey: itemID)
+            toolLabelsByItemID.removeValue(forKey: itemID)
+            shouldNotify = didAppend
+        }
+        lock.unlock()
+
+        if shouldNotify {
             notifyChange()
         }
     }
@@ -600,6 +786,146 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
         notifyChange()
     }
 
+    private func codexAgentMessageText(from item: [String: Any]) -> String {
+        if let text = string(for: "text", in: item)?.trimmingCharacters(in: .whitespacesAndNewlines),
+           text.isEmpty == false {
+            return text
+        }
+
+        if let content = item["content"] as? [[String: Any]] {
+            let text = content.compactMap { block -> String? in
+                guard string(for: "type", in: block)?.lowercased() == "text" else {
+                    return nil
+                }
+                return string(for: "text", in: block)
+            }.joined()
+            if text.isEmpty == false {
+                return text.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+
+        return ""
+    }
+
+    private func codexToolAnnouncement(for item: [String: Any]) -> String {
+        let itemType = string(for: "type", in: item)?.lowercased() ?? ""
+        guard itemType.contains("agentmessage") == false else {
+            return ""
+        }
+
+        let label = codexToolLabel(for: item)
+        if let command = codexString(in: item, keys: ["command", "cmd", "title", "summary"]) {
+            return label == "subagent" ? "subagent: \(previewText(command, limit: 80))" : previewText(command, limit: 120)
+        }
+
+        if label == "subagent" {
+            if let agent = codexString(in: item, keys: ["agent", "agentName"]) {
+                if let task = codexString(in: item, keys: ["task", "prompt"]) {
+                    return "subagent \(agent): \(previewText(task, limit: 80))"
+                }
+                return "subagent \(agent)"
+            }
+            if let task = codexString(in: item, keys: ["task", "prompt"]) {
+                return "subagent: \(previewText(task, limit: 80))"
+            }
+            return "subagent"
+        }
+
+        return label == "tool" ? "" : label
+    }
+
+    private func codexToolLabel(for item: [String: Any]) -> String {
+        let itemType = string(for: "type", in: item)?.lowercased() ?? ""
+        if itemType.contains("subagent") || itemType.contains("delegate") || itemType.contains("task") {
+            return "subagent"
+        }
+        if itemType.contains("command") {
+            return "command"
+        }
+        if itemType.contains("filechange") || itemType.contains("patch") || itemType.contains("diff") {
+            return "diff"
+        }
+        if itemType.contains("reason") || itemType.contains("thinking") {
+            return "thinking"
+        }
+        return itemType.isEmpty ? "tool" : itemType
+    }
+
+    private func codexToolOutputText(from item: [String: Any]) -> String {
+        if let text = codexString(in: item, keys: ["output", "text", "message", "summary"]) {
+            return text
+        }
+
+        if let result = item["result"] as? [String: Any] {
+            let text = codexToolOutputText(from: result)
+            if text.isEmpty == false {
+                return text
+            }
+        }
+
+        if let content = item["content"] as? [[String: Any]] {
+            let text = content.compactMap { block -> String? in
+                guard string(for: "type", in: block)?.lowercased() == "text" else {
+                    return nil
+                }
+                return string(for: "text", in: block)
+            }.joined()
+            if text.isEmpty == false {
+                return text.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+
+        return ""
+    }
+
+    private func codexItemIsError(_ item: [String: Any]) -> Bool {
+        if item["isError"] as? Bool == true {
+            return true
+        }
+        if let status = string(for: "status", in: item)?.lowercased(), status.contains("error") || status.contains("failed") {
+            return true
+        }
+        if let result = item["result"] as? [String: Any] {
+            return codexItemIsError(result)
+        }
+        return false
+    }
+
+    private func codexString(in object: [String: Any], keys: [String]) -> String? {
+        for key in keys {
+            if let value = string(for: key, in: object)?.trimmingCharacters(in: .whitespacesAndNewlines),
+               value.isEmpty == false {
+                return value
+            }
+        }
+        return nil
+    }
+
+    private func incrementalToolOutput(from previousText: String, to nextText: String) -> String {
+        let trimmedNextText = nextText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedNextText.isEmpty == false else {
+            return ""
+        }
+
+        let trimmedPreviousText = previousText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedPreviousText.isEmpty {
+            return trimmedNextText
+        }
+
+        if trimmedNextText.hasPrefix(trimmedPreviousText) {
+            return String(trimmedNextText.dropFirst(trimmedPreviousText.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        return trimmedNextText == trimmedPreviousText ? "" : trimmedNextText
+    }
+
+    private func previewText(_ text: String, limit: Int) -> String {
+        guard text.count > limit else {
+            return text
+        }
+        return String(text.prefix(limit)) + "…"
+    }
+
     private func handleTermination(status: Int32) {
         let shouldNotify: Bool
         let statusMessage: String
@@ -609,6 +935,7 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
         resolvedState = didRequestStop ? .exited : unexpectedTerminationState
         shouldNotify = runtimeState != resolvedState || didRequestStop == false
         runtimeState = resolvedState
+        isTurnInProgress = false
         statusMessage = didRequestStop ? "" : unexpectedTerminationMessageBuilder(status)
         let trimmedStatusMessage = statusMessage.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmedStatusMessage.isEmpty == false {
