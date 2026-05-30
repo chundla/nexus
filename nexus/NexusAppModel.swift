@@ -99,10 +99,8 @@ final class NexusAppModel {
             let loadedRemoteAccessState = try await remoteAccessState
             let loadedPairedDevices = try await pairedDevices
 
-            var loadedWorkspaceOverviews: [UUID: WorkspaceOverview] = [:]
-            for workspace in loadedWorkspaces {
-                loadedWorkspaceOverviews[workspace.id] = try await client.getWorkspaceOverview(workspaceID: workspace.id)
-            }
+            let loadedWorkspaceOverviewList = try await client.getWorkspaceOverviews(workspaceIDs: loadedWorkspaces.map(\.id))
+            let loadedWorkspaceOverviews = Dictionary(uniqueKeysWithValues: loadedWorkspaceOverviewList.map { ($0.workspace.id, $0) })
 
             self.serviceStatus = loadedServiceStatus
             self.workspaceGroups = loadedWorkspaceGroups

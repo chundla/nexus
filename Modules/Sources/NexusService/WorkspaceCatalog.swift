@@ -8,6 +8,12 @@ protocol WorkspaceCatalogReading: Sendable {
     func workspaceOverviews(workspaceIDs: [UUID]) async throws -> [WorkspaceOverview]
 }
 
+private struct LoadedWorkspaceProviderCard {
+    let index: Int
+    let card: WorkspaceProviderCard
+    let performanceSteps: [PerformanceDiagnosticStep]
+}
+
 struct WorkspaceCatalogDependencies {
     let metadataStore: NexusMetadataStore
     let sessionRecordStore: any SessionRecordStore
@@ -70,37 +76,12 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
                 )
             }
 
-            var providerCards: [WorkspaceProviderCard] = []
-            for providerID in ProviderID.allCases {
-                let providerModule = providerModule(for: providerID)
-                let sessions = try trace.measure("loadSessions.\(providerID.rawValue)") {
-                    try dependencies.sessionRecordStore.listSessions(workspaceID: workspaceID, providerID: providerID)
-                        .map(reconcileSessionRuntimeState)
-                }
-                let defaultSession = sessions.first(where: \.isDefault)
-                let catalogRead = try await trace.measure("readProviderCatalog.\(providerID.rawValue)") {
-                    try await providerModule.readCatalog(
-                        ProviderModuleCatalogReadRequest(
-                            workspace: workspace,
-                            remoteContext: remoteContext,
-                            defaultSession: defaultSession
-                        ),
-                        actions: ProviderModuleCatalogReadActions { [self] in
-                            try await self.providerHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
-                        }
-                    )
-                }
-                providerCards.append(
-                    WorkspaceProviderCard(
-                        provider: Provider(id: providerID),
-                        health: catalogRead.health,
-                        capabilities: catalogRead.capabilities,
-                        prelaunchPrimarySurface: catalogRead.prelaunchPrimarySurface,
-                        defaultSession: catalogRead.defaultSession,
-                        alternateSessionCount: sessions.filter { $0.isDefault == false }.count
-                    )
-                )
-            }
+            let providerCards = try await workspaceProviderCards(
+                workspaceID: workspaceID,
+                workspace: workspace,
+                remoteContext: remoteContext,
+                trace: &trace
+            )
 
             let overview = WorkspaceOverview(workspace: workspace, providerCards: providerCards, remoteTarget: remoteTarget)
             try? dependencies.recordPerformanceDiagnostic(trace.finish(outcome: .success))
@@ -180,12 +161,19 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
     }
 
     func workspaceOverviews(workspaceIDs: [UUID]) async throws -> [WorkspaceOverview] {
-        var overviews: [WorkspaceOverview] = []
-        overviews.reserveCapacity(workspaceIDs.count)
-        for workspaceID in workspaceIDs {
-            overviews.append(try await workspaceOverview(workspaceID: workspaceID))
+        try await withThrowingTaskGroup(of: (Int, WorkspaceOverview).self, returning: [WorkspaceOverview].self) { group in
+            for (index, workspaceID) in workspaceIDs.enumerated() {
+                group.addTask { [self] in
+                    (index, try await workspaceOverview(workspaceID: workspaceID))
+                }
+            }
+
+            var orderedOverviews = Array<WorkspaceOverview?>(repeating: nil, count: workspaceIDs.count)
+            for try await (index, overview) in group {
+                orderedOverviews[index] = overview
+            }
+            return orderedOverviews.compactMap { $0 }
         }
-        return overviews
     }
 
     func remoteWorkspaceHealthContext(
@@ -311,6 +299,92 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
             persistedPrimarySurface: try persistedPrimarySurface(for: session, workspace: workspace),
             storedMetadata: try dependencies.sessionRecordStore.sessionRecordAdapterMetadata(sessionID: session.id)
         )
+    }
+
+    private func workspaceProviderCards(
+        workspaceID: UUID,
+        workspace: Workspace,
+        remoteContext: RemoteWorkspaceHealthContext?,
+        trace: inout PerformanceDiagnosticTrace
+    ) async throws -> [WorkspaceProviderCard] {
+        let providerIDs = Array(ProviderID.allCases)
+        let loadedProviderCards = try await withThrowingTaskGroup(of: LoadedWorkspaceProviderCard.self, returning: [LoadedWorkspaceProviderCard].self) { group in
+            for (index, providerID) in providerIDs.enumerated() {
+                group.addTask { [self] in
+                    let providerModule = providerModule(for: providerID)
+                    let (sessions, loadSessionsStep) = try measuredStep("loadSessions.\(providerID.rawValue)") {
+                        try dependencies.sessionRecordStore.listSessions(workspaceID: workspaceID, providerID: providerID)
+                            .map(reconcileSessionRuntimeState)
+                    }
+                    let defaultSession = sessions.first(where: \.isDefault)
+                    let (catalogRead, readProviderCatalogStep) = try await measuredStep("readProviderCatalog.\(providerID.rawValue)") {
+                        try await providerModule.readCatalog(
+                            ProviderModuleCatalogReadRequest(
+                                workspace: workspace,
+                                remoteContext: remoteContext,
+                                defaultSession: defaultSession
+                            ),
+                            actions: ProviderModuleCatalogReadActions { [self] in
+                                try await self.providerHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
+                            }
+                        )
+                    }
+
+                    return LoadedWorkspaceProviderCard(
+                        index: index,
+                        card: WorkspaceProviderCard(
+                            provider: Provider(id: providerID),
+                            health: catalogRead.health,
+                            capabilities: catalogRead.capabilities,
+                            prelaunchPrimarySurface: catalogRead.prelaunchPrimarySurface,
+                            defaultSession: catalogRead.defaultSession,
+                            alternateSessionCount: sessions.filter { $0.isDefault == false }.count
+                        ),
+                        performanceSteps: [loadSessionsStep, readProviderCatalogStep]
+                    )
+                }
+            }
+
+            var orderedProviderCards = Array<LoadedWorkspaceProviderCard?>(repeating: nil, count: providerIDs.count)
+            for try await loadedProviderCard in group {
+                orderedProviderCards[loadedProviderCard.index] = loadedProviderCard
+            }
+            return orderedProviderCards.compactMap { $0 }
+        }
+
+        for loadedProviderCard in loadedProviderCards {
+            trace.appendSteps(loadedProviderCard.performanceSteps)
+        }
+        return loadedProviderCards.map(\.card)
+    }
+
+    private func measuredStep<T>(_ name: String, _ block: () throws -> T) rethrows -> (T, PerformanceDiagnosticStep) {
+        let startedAt = dependencies.currentUptimeNanoseconds()
+        let value = try block()
+        return (
+            value,
+            PerformanceDiagnosticStep(
+                name: name,
+                elapsedMilliseconds: elapsedMilliseconds(since: startedAt)
+            )
+        )
+    }
+
+    private func measuredStep<T>(_ name: String, _ block: () async throws -> T) async rethrows -> (T, PerformanceDiagnosticStep) {
+        let startedAt = dependencies.currentUptimeNanoseconds()
+        let value = try await block()
+        return (
+            value,
+            PerformanceDiagnosticStep(
+                name: name,
+                elapsedMilliseconds: elapsedMilliseconds(since: startedAt)
+            )
+        )
+    }
+
+    private func elapsedMilliseconds(since startedAt: UInt64) -> Int {
+        let current = dependencies.currentUptimeNanoseconds()
+        return Int((current >= startedAt ? current - startedAt : 0) / 1_000_000)
     }
 
     private func providerModule(for providerID: ProviderID) -> any ProviderModule {

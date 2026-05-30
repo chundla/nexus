@@ -1676,6 +1676,14 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         try await workspaceCatalog.workspaceOverview(workspaceID: workspaceID)
     }
 
+    func getWorkspaceOverviews(workspaceIDs: [UUID]) throws -> [WorkspaceOverview] {
+        try AsyncOperationSupport.blocking { try await self.getWorkspaceOverviews(workspaceIDs: workspaceIDs) }
+    }
+
+    func getWorkspaceOverviews(workspaceIDs: [UUID]) async throws -> [WorkspaceOverview] {
+        try await workspaceCatalog.workspaceOverviews(workspaceIDs: workspaceIDs)
+    }
+
     func getProviderDetail(workspaceID: UUID, providerID: ProviderID) throws -> ProviderDetail {
         try AsyncOperationSupport.blocking { try await self.getProviderDetail(workspaceID: workspaceID, providerID: providerID) }
     }
@@ -3768,6 +3776,16 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol, @unchecked Senda
 
     func getWorkspaceOverview(workspaceID: String, reply: @escaping (Data?, NSString?) -> Void) {
         sendReply(with: { [self] in try await self.service.getWorkspaceOverview(workspaceID: self.resolveUUID(workspaceID)) }, reply: reply)
+    }
+
+    func getWorkspaceOverviews(workspaceIDsPayload: Data, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(
+            with: { [self] in
+                let workspaceIDs = try JSONDecoder().decode([UUID].self, from: workspaceIDsPayload)
+                return try await self.service.getWorkspaceOverviews(workspaceIDs: workspaceIDs)
+            },
+            reply: reply
+        )
     }
 
     func getProviderDetail(workspaceID: String, providerID: String, reply: @escaping (Data?, NSString?) -> Void) {

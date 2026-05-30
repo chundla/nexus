@@ -136,10 +136,7 @@ nonisolated final class RemotePairingServer: @unchecked Sendable {
                 let workspaceGroups = try await self.client.listWorkspaceGroups()
                 let recentNavigation = try await self.client.listRecentNavigation(limit: 10)
                 let workspaces = try await self.client.listWorkspaces()
-                var workspaceOverviews: [WorkspaceOverview] = []
-                for workspace in workspaces {
-                    workspaceOverviews.append(try await self.client.getWorkspaceOverview(workspaceID: workspace.id))
-                }
+                let workspaceOverviews = try await self.client.getWorkspaceOverviews(workspaceIDs: workspaces.map(\.id))
 
                 return RemoteWorkspaceCatalog(
                     workspaceGroups: workspaceGroups,

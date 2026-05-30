@@ -6178,6 +6178,60 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func ipcClientBatchWorkspaceOverviewsPreserveRequestedOrderAndParity() async throws {
+        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests()
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        let group = try await client.createWorkspaceGroup(name: "Solo Group")
+        let firstWorkspace = try await client.createLocalWorkspace(
+            name: "First Workspace",
+            folderPath: "/tmp/ipc-batch-workspace-1",
+            primaryGroupID: group.id
+        )
+        let secondWorkspace = try await client.createLocalWorkspace(
+            name: "Second Workspace",
+            folderPath: "/tmp/ipc-batch-workspace-2",
+            primaryGroupID: group.id
+        )
+
+        let firstOverview = try await client.getWorkspaceOverview(workspaceID: firstWorkspace.id)
+        let secondOverview = try await client.getWorkspaceOverview(workspaceID: secondWorkspace.id)
+        let batchOverviews = try await client.getWorkspaceOverviews(workspaceIDs: [secondWorkspace.id, firstWorkspace.id])
+
+        #expect(batchOverviews.map(\.workspace.id) == [secondWorkspace.id, firstWorkspace.id])
+        #expect(batchOverviews == [secondOverview, firstOverview])
+    }
+
+    @MainActor
+    @Test func appModelRefreshUsesBatchWorkspaceOverviewRequest() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []),
+            session: session,
+            screen: SessionScreen(session: session, transcript: "Claude ready")
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+
+        #expect(client.workspaceOverviewBatchRequestCount == 1)
+        #expect(client.workspaceOverviewRequestCount == 0)
+    }
+
+    @MainActor
     @Test func appModelLoadsRemoteAccessStateAndPairedDevices() async throws {
         let group = WorkspaceGroup(id: UUID(), name: "Group")
         let workspace = Workspace(
@@ -8530,6 +8584,7 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
     private var observedScreenHandlers: [UUID: @Sendable (SessionScreen) -> Void] = [:]
 
     var workspaceOverviewRequestCount = 0
+    var workspaceOverviewBatchRequestCount = 0
     var recordedNavigationTargets: [NavigationTarget] = []
     var respondedApprovalRequests: [(sessionID: UUID, approvalRequestID: UUID, decision: ApprovalRequestDecision)] = []
     var observedScreenHandlerCount: Int {
@@ -8737,6 +8792,11 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
     func getWorkspaceOverview(workspaceID: UUID) async throws -> WorkspaceOverview {
         workspaceOverviewRequestCount += 1
         return workspaceOverviewValue
+    }
+
+    func getWorkspaceOverviews(workspaceIDs: [UUID]) async throws -> [WorkspaceOverview] {
+        workspaceOverviewBatchRequestCount += 1
+        return workspaceIDs.map { _ in workspaceOverviewValue }
     }
 
     func getProviderDetail(workspaceID: UUID, providerID: ProviderID) async throws -> ProviderDetail {
@@ -9139,6 +9199,10 @@ private struct FailingServiceClient: NexusServiceClient {
     }
 
     func getWorkspaceOverview(workspaceID: UUID) async throws -> WorkspaceOverview {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func getWorkspaceOverviews(workspaceIDs: [UUID]) async throws -> [WorkspaceOverview] {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 

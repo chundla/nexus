@@ -214,6 +214,22 @@ struct WorkspaceCatalogTests {
 
         #expect(overviews.map(\.workspace.id) == [secondWorkspace.id, fixture.workspace.id])
     }
+
+    @Test func workspaceOverviewAssemblesProviderCardsConcurrentlyWhilePreservingProviderOrder() async throws {
+        let tracker = ProviderCatalogReadConcurrencyTracker()
+        let fixture = try WorkspaceCatalogFixture(
+            providerModuleRegistry: ProviderModuleRegistry(
+                modules: Dictionary(uniqueKeysWithValues: ProviderID.allCases.map { providerID in
+                    (providerID, ConcurrentCatalogReadProviderModule(providerID: providerID, tracker: tracker))
+                })
+            )
+        )
+
+        let overview = try await fixture.catalog.workspaceOverview(workspaceID: fixture.workspace.id)
+
+        #expect(overview.providerCards.map(\.provider.id) == ProviderID.allCases)
+        #expect(await tracker.maximumConcurrentReads() > 1)
+    }
 }
 
 private struct WorkspaceCatalogFixture {
@@ -385,6 +401,114 @@ private struct UnusedWorkspaceAvailabilityEvaluator: WorkspaceAvailabilityEvalua
     func evaluate(workspace: Workspace, host: NexusDomain.Host, hostValidation: HostValidationSnapshot?) -> WorkspaceAvailabilityResult {
         Issue.record("Workspace Availability should not run for local Workspace tests")
         return WorkspaceAvailabilityResult(state: .available, summary: "Workspace is available", diagnostics: [])
+    }
+}
+
+private actor ProviderCatalogReadConcurrencyTracker {
+    private var activeReads = 0
+    private var maxActiveReads = 0
+
+    func beginRead() {
+        activeReads += 1
+        maxActiveReads = max(maxActiveReads, activeReads)
+    }
+
+    func endRead() {
+        activeReads -= 1
+    }
+
+    func maximumConcurrentReads() -> Int {
+        maxActiveReads
+    }
+}
+
+private struct ConcurrentCatalogReadProviderModule: ProviderModule {
+    let provider: Provider
+    let tracker: ProviderCatalogReadConcurrencyTracker
+
+    init(providerID: ProviderID, tracker: ProviderCatalogReadConcurrencyTracker) {
+        self.provider = Provider(id: providerID)
+        self.tracker = tracker
+    }
+
+    func supportsDefaultSessionLaunch(in workspace: Workspace) -> Bool {
+        true
+    }
+
+    func supportsNamedSessions(in workspace: Workspace) -> Bool {
+        true
+    }
+
+    func readCatalog(
+        _ request: ProviderModuleCatalogReadRequest,
+        actions: ProviderModuleCatalogReadActions
+    ) async throws -> ProviderModuleCatalogReadResult {
+        await tracker.beginRead()
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        await tracker.endRead()
+
+        let health = try await actions.providerHealthSummary()
+        return ProviderModuleCatalogReadResult(
+            health: health,
+            capabilities: providerCapabilities(
+                in: request.workspace,
+                health: health,
+                defaultSession: request.defaultSession
+            ),
+            prelaunchPrimarySurface: prelaunchPrimarySurface(in: request.workspace),
+            defaultSession: defaultSessionSummary(for: request.defaultSession)
+        )
+    }
+
+    func providerHealthSummary(
+        for workspace: Workspace,
+        remoteContext: RemoteWorkspaceHealthContext?,
+        providerHealthEvaluator: any ProviderHealthEvaluating
+    ) async -> ProviderHealthSummary {
+        ProviderHealthSummary(
+            state: .available,
+            summary: "Ready",
+            resolvedExecutable: "/tmp/\(provider.id.rawValue)",
+            launchability: .launchable
+        )
+    }
+
+    func providerCapabilities(
+        in workspace: Workspace,
+        health: ProviderHealthSummary,
+        defaultSession: Session?
+    ) -> ProviderCapabilities {
+        ProviderCapabilities(
+            launchDefaultSession: ProviderCapability(
+                action: .launchDefaultSession,
+                isSupported: true,
+                isEnabled: true
+            ),
+            createNamedSession: ProviderCapability(
+                action: .createNamedSession,
+                isSupported: true,
+                isEnabled: true
+            )
+        )
+    }
+
+    func prelaunchPrimarySurface(in workspace: Workspace) -> SessionSurface {
+        .terminal
+    }
+
+    func reusesRemoteHealthSnapshot(
+        _ snapshot: ProviderHealthSummary,
+        remoteContext: RemoteWorkspaceHealthContext?
+    ) -> Bool {
+        false
+    }
+
+    func interruptedSessionFailureMessage(
+        for session: Session,
+        workspace: Workspace?,
+        persistedPrimarySurface: SessionSurface
+    ) -> String {
+        providerModuleDefaultInterruptedSessionFailureMessage()
     }
 }
 #endif

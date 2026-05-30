@@ -53,6 +53,10 @@ struct PerformanceDiagnosticTrace {
         return value
     }
 
+    mutating func appendSteps(_ steps: [PerformanceDiagnosticStep]) {
+        self.steps.append(contentsOf: steps)
+    }
+
     func finish(
         outcome: PerformanceDiagnosticOutcome,
         failureMessage: String? = nil

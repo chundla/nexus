@@ -43,6 +43,7 @@ public protocol SessionScreenObservation: Sendable {
     func listPairedDevices(_ reply: @escaping (Data?, NSString?) -> Void)
     func revokePairedDevice(deviceID: String, reply: @escaping (Data?, NSString?) -> Void)
     func getWorkspaceOverview(workspaceID: String, reply: @escaping (Data?, NSString?) -> Void)
+    func getWorkspaceOverviews(workspaceIDsPayload: Data, reply: @escaping (Data?, NSString?) -> Void)
     func getProviderDetail(workspaceID: String, providerID: String, reply: @escaping (Data?, NSString?) -> Void)
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: String?, reply: @escaping (Data?, NSString?) -> Void)
     func createRemoteWorkspace(name: String?, hostID: String, remotePath: String, primaryGroupID: String?, reply: @escaping (Data?, NSString?) -> Void)
@@ -91,6 +92,7 @@ public protocol NexusServiceClient: Sendable {
     func listPairedDevices() async throws -> [PairedDevice]
     func revokePairedDevice(deviceID: UUID) async throws -> Bool
     func getWorkspaceOverview(workspaceID: UUID) async throws -> WorkspaceOverview
+    func getWorkspaceOverviews(workspaceIDs: [UUID]) async throws -> [WorkspaceOverview]
     func getProviderDetail(workspaceID: UUID, providerID: ProviderID) async throws -> ProviderDetail
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: UUID?) async throws -> Workspace
     func createRemoteWorkspace(name: String?, hostID: UUID, remotePath: String, primaryGroupID: UUID?) async throws -> Workspace
@@ -275,6 +277,13 @@ public final class NexusIPCClient: NexusServiceClient, @unchecked Sendable {
     nonisolated public func getWorkspaceOverview(workspaceID: UUID) async throws -> WorkspaceOverview {
         try await requestDecodable { proxy, reply in
             proxy.getWorkspaceOverview(workspaceID: workspaceID.uuidString, reply: reply)
+        }
+    }
+
+    nonisolated public func getWorkspaceOverviews(workspaceIDs: [UUID]) async throws -> [WorkspaceOverview] {
+        let payload = try JSONEncoder().encode(workspaceIDs)
+        return try await requestDecodable { proxy, reply in
+            proxy.getWorkspaceOverviews(workspaceIDsPayload: payload, reply: reply)
         }
     }
 
