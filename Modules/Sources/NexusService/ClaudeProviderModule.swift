@@ -245,14 +245,14 @@ private extension ClaudeProviderModule {
         }
 
         let remoteProbeResult: RemoteCLIHealthProbeResult
-        if let browseFacts = remoteContext?.browseFacts,
+        if let probeFacts = remoteContext?.probeFacts,
            let sharedHealthFacts = healthFacts as? any SharedRemoteCLIProviderHealthFactProviding {
             remoteProbeResult = await sharedHealthFacts.remoteCLIHealthProbe(
                 commandName: "claude",
                 providerName: provider.displayName,
                 workspace: workspace,
                 host: host,
-                browseFacts: browseFacts
+                probeFacts: probeFacts
             )
         } else {
             remoteProbeResult = await healthFacts.remoteCLIHealthProbe(

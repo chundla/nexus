@@ -2,42 +2,72 @@
 import Foundation
 import NexusDomain
 
-protocol RemoteWorkspaceBrowseFactCollecting: Sendable {
-    func collect(workspace: Workspace, host: NexusDomain.Host) -> RemoteWorkspaceBrowseFactCollection
+protocol RemoteWorkspaceProbeCollecting: Sendable {
+    func collect(workspace: Workspace, host: NexusDomain.Host) -> RemoteWorkspaceProbeCollection
 }
 
-enum RemoteWorkspaceBrowseFactCollection: Equatable {
-    case collected(RemoteWorkspaceBrowseFacts)
+enum RemoteWorkspaceProbeCollection: Equatable {
+    case collected(RemoteWorkspaceProbeFacts)
     case transportFailed(String)
+    case rawProbeFailed(String)
 }
 
-enum RemoteWorkspacePathBrowseFact: Equatable {
+enum RemoteWorkspacePathProbeFact: Equatable {
     case notChecked
     case available
     case failed(String)
 }
 
-struct RemoteProviderBrowseFact: Equatable {
+struct RemoteWorkspaceProbeWorkspaceFacts: Equatable {
+    let tmuxAvailable: Bool
+    let workspacePath: RemoteWorkspacePathProbeFact
+}
+
+struct RemoteProviderProbeFacts: Equatable {
     let executable: String?
     let version: String?
     let resolutionDetail: String?
     let probeDetail: String?
 }
 
-struct RemoteWorkspaceBrowseFacts: Equatable {
-    let tmuxAvailable: Bool
-    let workspacePath: RemoteWorkspacePathBrowseFact
-    let providerFacts: [ProviderID: RemoteProviderBrowseFact]
+struct RemoteWorkspaceProbeFacts: Equatable {
+    let workspace: RemoteWorkspaceProbeWorkspaceFacts
+    let providerFacts: [ProviderID: RemoteProviderProbeFacts]
+
+    init(
+        workspace: RemoteWorkspaceProbeWorkspaceFacts,
+        providerFacts: [ProviderID: RemoteProviderProbeFacts]
+    ) {
+        self.workspace = workspace
+        self.providerFacts = providerFacts
+    }
+
+    init(
+        tmuxAvailable: Bool,
+        workspacePath: RemoteWorkspacePathProbeFact,
+        providerFacts: [ProviderID: RemoteProviderProbeFacts]
+    ) {
+        self.init(
+            workspace: RemoteWorkspaceProbeWorkspaceFacts(
+                tmuxAvailable: tmuxAvailable,
+                workspacePath: workspacePath
+            ),
+            providerFacts: providerFacts
+        )
+    }
+
+    var tmuxAvailable: Bool { workspace.tmuxAvailable }
+    var workspacePath: RemoteWorkspacePathProbeFact { workspace.workspacePath }
 }
 
-struct RemoteWorkspaceBrowseFactCollector: RemoteWorkspaceBrowseFactCollecting {
+struct RemoteWorkspaceProbeCollector: RemoteWorkspaceProbeCollecting {
     let commandRunner: any ProviderCommandRunning
 
     init(commandRunner: any ProviderCommandRunning = SystemProviderCommandRunner()) {
         self.commandRunner = commandRunner
     }
 
-    func collect(workspace: Workspace, host: NexusDomain.Host) -> RemoteWorkspaceBrowseFactCollection {
+    func collect(workspace: Workspace, host: NexusDomain.Host) -> RemoteWorkspaceProbeCollection {
         do {
             let result = try commandRunner.run(
                 executable: "/usr/bin/ssh",
@@ -45,24 +75,29 @@ struct RemoteWorkspaceBrowseFactCollector: RemoteWorkspaceBrowseFactCollecting {
                 currentDirectoryURL: nil
             )
 
-            if let facts = parse(stdout: result.stdout), result.exitStatus == 0 {
+            switch parse(stdout: result.stdout) {
+            case let .collected(facts):
                 return .collected(facts)
+            case let .invalid(detail):
+                if result.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    return .transportFailed(providerCommandFirstDiagnosticLine(stdout: result.stdout, stderr: result.stderr))
+                }
+                return .rawProbeFailed(detail)
             }
-
-            if let facts = parse(stdout: result.stdout), result.exitStatus != 0 {
-                return .collected(facts)
-            }
-
-            return .transportFailed(providerCommandFirstDiagnosticLine(stdout: result.stdout, stderr: result.stderr))
         } catch {
             return .transportFailed(error.localizedDescription)
         }
     }
 
-    private func parse(stdout: String) -> RemoteWorkspaceBrowseFacts? {
+    private enum ParseResult {
+        case collected(RemoteWorkspaceProbeFacts)
+        case invalid(String)
+    }
+
+    private func parse(stdout: String) -> ParseResult {
         var protocolVersion: String?
         var tmuxAvailable = false
-        var workspacePath: RemoteWorkspacePathBrowseFact = .notChecked
+        var workspacePath: RemoteWorkspacePathProbeFact = .notChecked
         var workspacePathDetail: String?
         var providerFields: [ProviderID: [String: String]] = [:]
 
@@ -114,26 +149,34 @@ struct RemoteWorkspaceBrowseFactCollector: RemoteWorkspaceBrowseFactCollecting {
             providerFields[providerID, default: [:]][String(components[2])] = value
         }
 
+        guard let protocolVersion else {
+            return .invalid("Remote probe did not emit a supported protocol envelope")
+        }
+
         guard protocolVersion == "v1" else {
-            return nil
+            return .invalid("Unsupported remote probe protocol: \(protocolVersion)")
         }
 
         if case .failed = workspacePath {
             workspacePath = .failed(workspacePathDetail ?? "")
         }
 
-        return RemoteWorkspaceBrowseFacts(
-            tmuxAvailable: tmuxAvailable,
-            workspacePath: workspacePath,
-            providerFacts: providerFields.reduce(into: [:]) { partialResult, entry in
-                let fields = entry.value
-                partialResult[entry.key] = RemoteProviderBrowseFact(
-                    executable: fields["executable"],
-                    version: fields["version"],
-                    resolutionDetail: fields["resolutionDetail"],
-                    probeDetail: fields["probeDetail"]
-                )
-            }
+        return .collected(
+            RemoteWorkspaceProbeFacts(
+                workspace: RemoteWorkspaceProbeWorkspaceFacts(
+                    tmuxAvailable: tmuxAvailable,
+                    workspacePath: workspacePath
+                ),
+                providerFacts: providerFields.reduce(into: [:]) { partialResult, entry in
+                    let fields = entry.value
+                    partialResult[entry.key] = RemoteProviderProbeFacts(
+                        executable: fields["executable"],
+                        version: fields["version"],
+                        resolutionDetail: fields["resolutionDetail"],
+                        probeDetail: fields["probeDetail"]
+                    )
+                }
+            )
         )
     }
 
@@ -296,6 +339,13 @@ struct RemoteWorkspaceBrowseFactCollector: RemoteWorkspaceBrowseFactCollecting {
         "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
 }
+
+typealias RemoteWorkspaceBrowseFactCollecting = RemoteWorkspaceProbeCollecting
+typealias RemoteWorkspaceBrowseFactCollection = RemoteWorkspaceProbeCollection
+typealias RemoteWorkspacePathBrowseFact = RemoteWorkspacePathProbeFact
+typealias RemoteProviderBrowseFact = RemoteProviderProbeFacts
+typealias RemoteWorkspaceBrowseFacts = RemoteWorkspaceProbeFacts
+typealias RemoteWorkspaceBrowseFactCollector = RemoteWorkspaceProbeCollector
 
 func providerCommandFirstDiagnosticLine(stdout: String, stderr: String) -> String {
     [stderr, stdout]

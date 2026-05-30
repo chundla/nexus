@@ -306,12 +306,12 @@ private extension IBMBobProviderModule {
         }
 
         let remoteProbeResult: RemoteIBMBobPassiveProbeResult
-        if let browseFacts = remoteContext?.browseFacts,
+        if let probeFacts = remoteContext?.probeFacts,
            let sharedHealthFacts = healthFacts as? any SharedRemoteIBMBobProviderHealthFactProviding {
             remoteProbeResult = await sharedHealthFacts.remoteIBMBobPassiveProbe(
                 workspace: workspace,
                 host: host,
-                browseFacts: browseFacts
+                probeFacts: probeFacts
             )
         } else {
             remoteProbeResult = await healthFacts.remoteIBMBobPassiveProbe(workspace: workspace, host: host)

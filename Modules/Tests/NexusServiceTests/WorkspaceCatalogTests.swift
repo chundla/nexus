@@ -659,6 +659,47 @@ struct WorkspaceCatalogTests {
         #expect(workspaceAvailabilityEvaluator.callCount == 0)
         #expect(commandRunner.callCount == 0)
     }
+
+    @Test func refreshWorkspaceOverviewClassifiesRemoteBrowseRawProbeFailureWithoutSeparateChecks() async throws {
+        let hostValidationEvaluator = CountingHostValidationEvaluator(
+            result: HostValidationResult(state: .available, summary: "Unexpected Host Validation", diagnostics: [])
+        )
+        let workspaceAvailabilityEvaluator = CountingWorkspaceAvailabilityEvaluator(
+            result: WorkspaceAvailabilityResult(state: .available, summary: "Unexpected Workspace Availability", diagnostics: [])
+        )
+        let commandRunner = FailingWorkspaceCatalogCommandRunner()
+        let collector = RecordingRemoteWorkspaceBrowseFactCollector(
+            result: .rawProbeFailed("Unsupported remote probe protocol: v2")
+        )
+        let fixture = try WorkspaceCatalogFixture(
+            providerHealthEvaluator: ProviderHealthFacts(commandRunner: commandRunner),
+            hostValidationEvaluator: hostValidationEvaluator,
+            workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
+            remoteWorkspaceBrowseFactCollector: collector
+        )
+        let host = try fixture.metadataStore.createHost(name: "Build Server", sshTarget: "build-box", port: nil)
+        let remoteWorkspace = try fixture.metadataStore.createRemoteWorkspace(
+            name: "Remote API",
+            hostID: host.id,
+            remotePath: "/srv/missing",
+            primaryGroupID: fixture.group.id
+        )
+
+        let overview = try await fixture.catalog.refreshWorkspaceOverview(workspaceID: remoteWorkspace.id)
+        let remoteTarget = try #require(overview.remoteTarget)
+        let claudeCard = try #require(overview.providerCards.first(where: { $0.provider.id == .claude }))
+
+        #expect(remoteTarget.hostValidation?.state == .broken)
+        #expect(remoteTarget.hostValidation?.summary == "Host validation failed")
+        #expect(remoteTarget.workspaceAvailability.state == .blocked)
+        #expect(remoteTarget.workspaceAvailability.summary == "Workspace Availability is blocked by Host Validation")
+        #expect(claudeCard.health.state == .blocked)
+        #expect(claudeCard.health.summary == "Provider Health is blocked by Host Validation")
+        #expect(collector.callCount == 1)
+        #expect(hostValidationEvaluator.callCount == 0)
+        #expect(workspaceAvailabilityEvaluator.callCount == 0)
+        #expect(commandRunner.callCount == 0)
+    }
 }
 
 private struct WorkspaceCatalogFixture {

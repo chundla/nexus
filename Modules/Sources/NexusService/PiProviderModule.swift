@@ -285,12 +285,12 @@ private extension PiProviderModule {
         }
 
         let remoteProbeResult: RemotePiHealthProbeResult
-        if let browseFacts = remoteContext?.browseFacts,
+        if let probeFacts = remoteContext?.probeFacts,
            let sharedHealthFacts = healthFacts as? any SharedRemotePiProviderHealthFactProviding {
             remoteProbeResult = await sharedHealthFacts.remotePiHealthProbe(
                 workspace: workspace,
                 host: host,
-                browseFacts: browseFacts
+                probeFacts: probeFacts
             )
         } else {
             remoteProbeResult = await healthFacts.remotePiHealthProbe(workspace: workspace, host: host)

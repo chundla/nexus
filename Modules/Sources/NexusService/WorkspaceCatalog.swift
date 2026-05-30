@@ -181,13 +181,13 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
             return storedContext
         }
 
-        let (remoteTarget, _, remoteBrowseFacts) = try workspaceOverviewRemoteTargetOverview(for: workspace, mode: .forceFresh)
+        let (remoteTarget, _, remoteProbeFacts) = try workspaceOverviewRemoteTargetOverview(for: workspace, mode: .forceFresh)
         return remoteTarget.map {
             RemoteWorkspaceHealthContext(
                 host: $0.host,
                 hostValidation: $0.hostValidation,
                 workspaceAvailability: $0.workspaceAvailability,
-                browseFacts: remoteBrowseFacts
+                probeFacts: remoteProbeFacts
             )
         }
     }
@@ -362,7 +362,7 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
                 throw NexusMetadataStoreError.workspaceNotFound
             }
 
-            let (remoteTarget, usesStaleRemoteFacts, remoteBrowseFacts) = try trace.measure("loadRemoteTarget") {
+            let (remoteTarget, usesStaleRemoteFacts, remoteProbeFacts) = try trace.measure("loadRemoteTarget") {
                 try workspaceOverviewRemoteTargetOverview(for: workspace, mode: mode)
             }
             let remoteContext = remoteTarget.map {
@@ -370,7 +370,7 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
                     host: $0.host,
                     hostValidation: $0.hostValidation,
                     workspaceAvailability: $0.workspaceAvailability,
-                    browseFacts: remoteBrowseFacts
+                    probeFacts: remoteProbeFacts
                 )
             }
 
@@ -404,7 +404,7 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
     private func workspaceOverviewRemoteTargetOverview(
         for workspace: Workspace,
         mode: WorkspaceOverviewLoadMode
-    ) throws -> (RemoteWorkspaceTargetOverview?, Bool, RemoteWorkspaceBrowseFacts?) {
+    ) throws -> (RemoteWorkspaceTargetOverview?, Bool, RemoteWorkspaceProbeFacts?) {
         guard workspace.kind == .remote,
               let hostID = workspace.remoteHostID,
               let host = try dependencies.metadataStore.host(id: hostID) else {
@@ -453,16 +453,16 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
                 nil
             )
         case .forceFresh:
-            let browseFactsCollection = dependencies.remoteWorkspaceBrowseFactCollector.collect(workspace: workspace, host: host)
+            let probeFactsCollection = dependencies.remoteWorkspaceBrowseFactCollector.collect(workspace: workspace, host: host)
             let hostValidation = try dependencies.metadataStore.saveHostValidation(
                 hostID: hostID,
-                result: hostValidationResult(from: browseFactsCollection, host: host),
+                result: hostValidationResult(from: probeFactsCollection, host: host),
                 checkedAt: dependencies.currentDate()
             )
             let availability = try dependencies.metadataStore.saveWorkspaceAvailability(
                 workspaceID: workspace.id,
                 result: workspaceAvailabilityResult(
-                    from: browseFactsCollection,
+                    from: probeFactsCollection,
                     workspace: workspace,
                     host: host,
                     hostValidation: hostValidation
@@ -470,10 +470,10 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
                 checkedAt: dependencies.currentDate()
             )
 
-            let browseFacts: RemoteWorkspaceBrowseFacts? = switch browseFactsCollection {
+            let probeFacts: RemoteWorkspaceProbeFacts? = switch probeFactsCollection {
             case let .collected(facts):
                 facts
-            case .transportFailed:
+            case .transportFailed, .rawProbeFailed:
                 nil
             }
 
@@ -484,7 +484,7 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
                     workspaceAvailability: availability
                 ),
                 false,
-                browseFacts
+                probeFacts
             )
         }
     }
@@ -623,7 +623,7 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
         host: NexusDomain.Host
     ) -> HostValidationResult {
         switch browseFactsCollection {
-        case let .transportFailed(detail):
+        case let .transportFailed(detail), let .rawProbeFailed(detail):
             let classification = classifyHostValidationFailure(detail: detail)
             return HostValidationResult(
                 state: classification.state,

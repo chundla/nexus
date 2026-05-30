@@ -183,7 +183,7 @@ protocol SharedRemoteCLIProviderHealthFactProviding: Sendable {
         providerName: String,
         workspace: Workspace,
         host: NexusDomain.Host,
-        browseFacts: RemoteWorkspaceBrowseFacts
+        probeFacts: RemoteWorkspaceProbeFacts
     ) async -> RemoteCLIHealthProbeResult
 }
 
@@ -191,7 +191,7 @@ protocol SharedRemoteCodexProviderHealthFactProviding: Sendable {
     func remoteCodexHealthProbe(
         workspace: Workspace,
         host: NexusDomain.Host,
-        browseFacts: RemoteWorkspaceBrowseFacts
+        probeFacts: RemoteWorkspaceProbeFacts
     ) async -> RemoteCodexHealthProbeResult
 }
 
@@ -199,7 +199,7 @@ protocol SharedRemotePiProviderHealthFactProviding: Sendable {
     func remotePiHealthProbe(
         workspace: Workspace,
         host: NexusDomain.Host,
-        browseFacts: RemoteWorkspaceBrowseFacts
+        probeFacts: RemoteWorkspaceProbeFacts
     ) async -> RemotePiHealthProbeResult
 }
 
@@ -207,7 +207,7 @@ protocol SharedRemoteIBMBobProviderHealthFactProviding: Sendable {
     func remoteIBMBobPassiveProbe(
         workspace: Workspace,
         host: NexusDomain.Host,
-        browseFacts: RemoteWorkspaceBrowseFacts
+        probeFacts: RemoteWorkspaceProbeFacts
     ) async -> RemoteIBMBobPassiveProbeResult
 }
 
@@ -215,19 +215,35 @@ struct RemoteWorkspaceHealthContext {
     let host: NexusDomain.Host
     let hostValidation: HostValidationSnapshot?
     let workspaceAvailability: WorkspaceAvailabilitySnapshot?
-    let browseFacts: RemoteWorkspaceBrowseFacts?
+    let probeFacts: RemoteWorkspaceProbeFacts?
 
     init(
         host: NexusDomain.Host,
         hostValidation: HostValidationSnapshot?,
         workspaceAvailability: WorkspaceAvailabilitySnapshot?,
-        browseFacts: RemoteWorkspaceBrowseFacts? = nil
+        probeFacts: RemoteWorkspaceProbeFacts? = nil
     ) {
         self.host = host
         self.hostValidation = hostValidation
         self.workspaceAvailability = workspaceAvailability
-        self.browseFacts = browseFacts
+        self.probeFacts = probeFacts
     }
+
+    init(
+        host: NexusDomain.Host,
+        hostValidation: HostValidationSnapshot?,
+        workspaceAvailability: WorkspaceAvailabilitySnapshot?,
+        browseFacts: RemoteWorkspaceBrowseFacts?
+    ) {
+        self.init(
+            host: host,
+            hostValidation: hostValidation,
+            workspaceAvailability: workspaceAvailability,
+            probeFacts: browseFacts
+        )
+    }
+
+    var browseFacts: RemoteWorkspaceBrowseFacts? { probeFacts }
 }
 
 protocol ProviderHealthEvaluating: Sendable {
@@ -355,10 +371,10 @@ struct ProviderHealthFacts: ProviderHealthEvaluating, CLIProviderHealthFactProvi
         providerName: String,
         workspace: Workspace,
         host: NexusDomain.Host,
-        browseFacts: RemoteWorkspaceBrowseFacts
+        probeFacts: RemoteWorkspaceProbeFacts
     ) async -> RemoteCLIHealthProbeResult {
         let providerID = providerID(forRemoteCommandName: commandName)
-        let fact = providerID.flatMap { browseFacts.providerFacts[$0] }
+        let fact = providerID.flatMap { probeFacts.providerFacts[$0] }
 
         if let resolutionDetail = fact?.resolutionDetail {
             return .probeFailed(resolutionDetail)
@@ -385,8 +401,8 @@ struct ProviderHealthFacts: ProviderHealthEvaluating, CLIProviderHealthFactProvi
         )
     }
 
-    func remoteCodexHealthProbe(workspace: Workspace, host: NexusDomain.Host, browseFacts: RemoteWorkspaceBrowseFacts) async -> RemoteCodexHealthProbeResult {
-        let fact = browseFacts.providerFacts[.codex]
+    func remoteCodexHealthProbe(workspace: Workspace, host: NexusDomain.Host, probeFacts: RemoteWorkspaceProbeFacts) async -> RemoteCodexHealthProbeResult {
+        let fact = probeFacts.providerFacts[.codex]
         if let resolutionDetail = fact?.resolutionDetail {
             return .resolutionProbeFailed(resolutionDetail)
         }
@@ -481,8 +497,8 @@ struct ProviderHealthFacts: ProviderHealthEvaluating, CLIProviderHealthFactProvi
         }
     }
 
-    func remotePiHealthProbe(workspace: Workspace, host: NexusDomain.Host, browseFacts: RemoteWorkspaceBrowseFacts) async -> RemotePiHealthProbeResult {
-        let fact = browseFacts.providerFacts[.pi]
+    func remotePiHealthProbe(workspace: Workspace, host: NexusDomain.Host, probeFacts: RemoteWorkspaceProbeFacts) async -> RemotePiHealthProbeResult {
+        let fact = probeFacts.providerFacts[.pi]
         if let resolutionDetail = fact?.resolutionDetail {
             return .resolutionProbeFailed(resolutionDetail)
         }
@@ -577,8 +593,8 @@ struct ProviderHealthFacts: ProviderHealthEvaluating, CLIProviderHealthFactProvi
         }
     }
 
-    func remoteIBMBobPassiveProbe(workspace: Workspace, host: NexusDomain.Host, browseFacts: RemoteWorkspaceBrowseFacts) async -> RemoteIBMBobPassiveProbeResult {
-        let fact = browseFacts.providerFacts[.ibmBob]
+    func remoteIBMBobPassiveProbe(workspace: Workspace, host: NexusDomain.Host, probeFacts: RemoteWorkspaceProbeFacts) async -> RemoteIBMBobPassiveProbeResult {
+        let fact = probeFacts.providerFacts[.ibmBob]
         if let resolutionDetail = fact?.resolutionDetail {
             return .resolutionProbeFailed(resolutionDetail)
         }

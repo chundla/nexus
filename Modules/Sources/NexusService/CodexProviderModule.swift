@@ -254,12 +254,12 @@ private extension CodexProviderModule {
         }
 
         let remoteProbeResult: RemoteCodexHealthProbeResult
-        if let browseFacts = remoteContext?.browseFacts,
+        if let probeFacts = remoteContext?.probeFacts,
            let sharedHealthFacts = healthFacts as? any SharedRemoteCodexProviderHealthFactProviding {
             remoteProbeResult = await sharedHealthFacts.remoteCodexHealthProbe(
                 workspace: workspace,
                 host: host,
-                browseFacts: browseFacts
+                probeFacts: probeFacts
             )
         } else {
             remoteProbeResult = await healthFacts.remoteCodexHealthProbe(workspace: workspace, host: host)

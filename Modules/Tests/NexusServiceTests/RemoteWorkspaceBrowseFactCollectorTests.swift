@@ -82,6 +82,33 @@ struct RemoteWorkspaceBrowseFactCollectorTests {
         #expect(facts == .transportFailed("Permission denied (publickey)."))
         #expect(runner.invocation?.arguments.last?.contains("/bin/sh -lc") == true)
     }
+
+    @Test func collectReturnsRawProbeFailureWhenSSHReturnsUnsupportedProbeEnvelope() throws {
+        let runner = RecordingRemoteWorkspaceBrowseFactCommandRunner(
+            result: ProviderCommandResult(
+                exitStatus: 0,
+                stdout: """
+                protocol	v2
+                tmuxAvailable	true
+                """,
+                stderr: ""
+            )
+        )
+        let collector = RemoteWorkspaceProbeCollector(commandRunner: runner)
+        let host = NexusDomain.Host(id: UUID(), name: "Build Server", sshTarget: "build-box")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Remote API",
+            kind: .remote,
+            folderPath: "/srv/api",
+            primaryGroupID: UUID(),
+            remoteHostID: host.id
+        )
+
+        let facts = collector.collect(workspace: workspace, host: host)
+
+        #expect(facts == .rawProbeFailed("Unsupported remote probe protocol: v2"))
+    }
 }
 
 private final class RecordingRemoteWorkspaceBrowseFactCommandRunner: ProviderCommandRunning, @unchecked Sendable {
