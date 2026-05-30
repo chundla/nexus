@@ -429,6 +429,219 @@ struct PiProviderModuleTests {
         #expect(missingMetadataRetry == false)
     }
 
+    @Test func piProviderModuleDerivesLocalCatalogReadFromSharedCLIProbeFacts() async throws {
+        let module = PiProviderModule()
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Local Pi",
+            kind: .local,
+            folderPath: "/tmp/local-pi",
+            primaryGroupID: UUID()
+        )
+        let providerHealthEvaluator = RecordingPiHealthFactProvider(
+            localProbeResult: .ready(
+                executable: "/tmp/fake-pi",
+                version: "1.2.3",
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .warning,
+                        code: "versionUnavailable",
+                        message: "Version came from the shared probe"
+                    )
+                ]
+            )
+        )
+
+        let catalogRead = try await module.readCatalog(
+            ProviderModuleCatalogReadRequest(
+                workspace: workspace,
+                remoteContext: nil,
+                defaultSession: nil
+            ),
+            actions: ProviderModuleCatalogReadActions(
+                providerHealthSummary: {
+                    await module.providerHealthSummary(
+                        for: workspace,
+                        remoteContext: nil,
+                        providerHealthEvaluator: providerHealthEvaluator
+                    )
+                }
+            )
+        )
+
+        #expect(catalogRead.health == ProviderHealthSummary(
+            state: .available,
+            summary: "Pi 1.2.3 is available",
+            resolvedExecutable: "/tmp/fake-pi",
+            version: "1.2.3",
+            launchability: .launchable,
+            diagnostics: [
+                ProviderHealthDiagnostic(
+                    severity: .warning,
+                    code: "versionUnavailable",
+                    message: "Version came from the shared probe"
+                )
+            ]
+        ))
+        #expect(providerHealthEvaluator.localProbeRequests == [workspace.id])
+        #expect(providerHealthEvaluator.legacyRequests.isEmpty)
+        #expect(catalogRead.capabilities.launchDefaultSession.isEnabled)
+        #expect(catalogRead.capabilities.createNamedSession.isEnabled)
+        #expect(catalogRead.prelaunchPrimarySurface == .structuredActivityFeed)
+    }
+
+    @Test func piProviderModuleDerivesRemoteBlockedCatalogReadFromPrerequisiteFacts() async throws {
+        let module = PiProviderModule()
+        let workspaceID = UUID()
+        let hostID = UUID()
+        let workspace = Workspace(
+            id: workspaceID,
+            name: "Remote Pi",
+            kind: .remote,
+            folderPath: "/srv/api",
+            primaryGroupID: UUID(),
+            remoteHostID: hostID
+        )
+        let providerHealthEvaluator = RecordingPiHealthFactProvider(
+            localProbeResult: .ready(executable: "/tmp/unused", version: nil, diagnostics: [])
+        )
+        let remoteContext = RemoteWorkspaceHealthContext(
+            host: NexusDomain.Host(id: hostID, name: "Build Server", sshTarget: "build-box"),
+            hostValidation: HostValidationSnapshot(
+                hostID: hostID,
+                state: .unavailable,
+                summary: "SSH authentication failed",
+                checkedAt: Date()
+            ),
+            workspaceAvailability: WorkspaceAvailabilitySnapshot(
+                workspaceID: workspaceID,
+                state: .available,
+                summary: "Workspace is available",
+                checkedAt: Date()
+            )
+        )
+
+        let catalogRead = try await module.readCatalog(
+            ProviderModuleCatalogReadRequest(
+                workspace: workspace,
+                remoteContext: remoteContext,
+                defaultSession: nil
+            ),
+            actions: ProviderModuleCatalogReadActions(
+                providerHealthSummary: {
+                    await module.providerHealthSummary(
+                        for: workspace,
+                        remoteContext: remoteContext,
+                        providerHealthEvaluator: providerHealthEvaluator
+                    )
+                }
+            )
+        )
+
+        #expect(catalogRead.health == ProviderHealthSummary(
+            state: .blocked,
+            summary: "Provider Health is blocked by Host Validation",
+            diagnostics: [
+                ProviderHealthDiagnostic(
+                    severity: .warning,
+                    code: "hostValidationBlocked",
+                    message: "Provider Health for Pi is blocked by Host Validation: SSH authentication failed."
+                )
+            ]
+        ))
+        #expect(providerHealthEvaluator.remoteProbeRequests.isEmpty)
+        #expect(providerHealthEvaluator.legacyRequests.isEmpty)
+        #expect(catalogRead.capabilities.launchDefaultSession.isEnabled == false)
+        #expect(catalogRead.capabilities.launchDefaultSession.disabledReason == "Provider Health is blocked by Host Validation")
+        #expect(catalogRead.prelaunchPrimarySurface == .structuredActivityFeed)
+    }
+
+    @Test func piProviderModuleDerivesRemoteProbeBackedCatalogReadFromSharedPiProbeFacts() async throws {
+        let module = PiProviderModule()
+        let workspaceID = UUID()
+        let hostID = UUID()
+        let workspace = Workspace(
+            id: workspaceID,
+            name: "Remote Pi",
+            kind: .remote,
+            folderPath: "/srv/api",
+            primaryGroupID: UUID(),
+            remoteHostID: hostID
+        )
+        let providerHealthEvaluator = RecordingPiHealthFactProvider(
+            localProbeResult: .ready(executable: "/tmp/unused", version: nil, diagnostics: []),
+            remoteProbeResult: .authenticationUncertain(
+                executable: "/home/tester/.local/bin/pi",
+                version: "1.2.3",
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .info,
+                        code: "remoteProbe",
+                        message: "Validated remote Pi launch prerequisites on Build Server for /srv/api."
+                    )
+                ],
+                message: "Pi auth readiness could not be confirmed."
+            )
+        )
+        let remoteContext = RemoteWorkspaceHealthContext(
+            host: NexusDomain.Host(id: hostID, name: "Build Server", sshTarget: "build-box"),
+            hostValidation: HostValidationSnapshot(
+                hostID: hostID,
+                state: .available,
+                summary: "Host is available",
+                checkedAt: Date()
+            ),
+            workspaceAvailability: WorkspaceAvailabilitySnapshot(
+                workspaceID: workspaceID,
+                state: .available,
+                summary: "Workspace is available",
+                checkedAt: Date()
+            )
+        )
+
+        let catalogRead = try await module.readCatalog(
+            ProviderModuleCatalogReadRequest(
+                workspace: workspace,
+                remoteContext: remoteContext,
+                defaultSession: nil
+            ),
+            actions: ProviderModuleCatalogReadActions(
+                providerHealthSummary: {
+                    await module.providerHealthSummary(
+                        for: workspace,
+                        remoteContext: remoteContext,
+                        providerHealthEvaluator: providerHealthEvaluator
+                    )
+                }
+            )
+        )
+
+        #expect(catalogRead.health == ProviderHealthSummary(
+            state: .available,
+            summary: "Pi 1.2.3 is available",
+            resolvedExecutable: "/home/tester/.local/bin/pi",
+            version: "1.2.3",
+            launchability: .launchable,
+            diagnostics: [
+                ProviderHealthDiagnostic(
+                    severity: .info,
+                    code: "remoteProbe",
+                    message: "Validated remote Pi launch prerequisites on Build Server for /srv/api."
+                ),
+                ProviderHealthDiagnostic(
+                    severity: .warning,
+                    code: "remoteAuthUncertain",
+                    message: "Pi auth readiness could not be confirmed."
+                )
+            ]
+        ))
+        #expect(providerHealthEvaluator.remoteProbeRequests == [workspace.id])
+        #expect(providerHealthEvaluator.legacyRequests.isEmpty)
+        #expect(catalogRead.capabilities.launchDefaultSession.isEnabled)
+        #expect(catalogRead.capabilities.createNamedSession.isEnabled)
+        #expect(catalogRead.prelaunchPrimarySurface == .structuredActivityFeed)
+    }
+
     @Test func piProviderModulePreservesPiCatalogReadBehavior() async {
         let module = PiProviderModule()
         let workspaceID = UUID()
@@ -638,6 +851,50 @@ private final class RecordingPiProviderHealthEvaluator: @unchecked Sendable, Pro
     func healthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> ProviderHealthSummary {
         requests.append(.init(providerID: providerID, workspaceID: workspace.id))
         return summary
+    }
+}
+
+private final class RecordingPiHealthFactProvider: @unchecked Sendable, ProviderHealthEvaluating, CLIProviderHealthFactProviding, PiProviderHealthFactProviding {
+    let localProbeResult: LocalCLIHealthProbeResult
+    let remoteProbeResult: RemotePiHealthProbeResult
+    private(set) var localProbeRequests: [UUID] = []
+    private(set) var remoteProbeRequests: [UUID] = []
+    private(set) var legacyRequests: [UUID] = []
+
+    init(
+        localProbeResult: LocalCLIHealthProbeResult,
+        remoteProbeResult: RemotePiHealthProbeResult = .sshResolutionLaunchFailed("unexpected")
+    ) {
+        self.localProbeResult = localProbeResult
+        self.remoteProbeResult = remoteProbeResult
+    }
+
+    func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> [WorkspaceProviderCard] {
+        []
+    }
+
+    func healthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> ProviderHealthSummary {
+        legacyRequests.append(workspace.id)
+        return ProviderHealthSummary(
+            state: .misconfigured,
+            summary: "legacy evaluator path should stay unused",
+            launchability: .notLaunchable
+        )
+    }
+
+    func localCLIHealthProbe(commandName: String, providerName: String, workspace: Workspace) async -> LocalCLIHealthProbeResult {
+        localProbeRequests.append(workspace.id)
+        return localProbeResult
+    }
+
+    func remoteCLIHealthProbe(commandName: String, providerName: String, workspace: Workspace, host: NexusDomain.Host) async -> RemoteCLIHealthProbeResult {
+        Issue.record("Pi should not use the shared generic remote CLI probe")
+        return .sshLaunchFailed("unexpected")
+    }
+
+    func remotePiHealthProbe(workspace: Workspace, host: NexusDomain.Host) async -> RemotePiHealthProbeResult {
+        remoteProbeRequests.append(workspace.id)
+        return remoteProbeResult
     }
 }
 

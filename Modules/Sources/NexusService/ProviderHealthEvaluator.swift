@@ -107,6 +107,25 @@ enum RemoteCodexHealthProbeResult: Sendable, Equatable {
     )
 }
 
+enum RemotePiHealthProbeResult: Sendable, Equatable {
+    case sshResolutionLaunchFailed(String)
+    case resolutionProbeFailed(String)
+    case resolutionReturnedNoExecutable
+    case readinessProbeFailed(executable: String, version: String?, detail: String)
+    case authenticationRequired(executable: String, version: String?, message: String)
+    case authenticationUncertain(
+        executable: String,
+        version: String?,
+        diagnostics: [ProviderHealthDiagnostic],
+        message: String?
+    )
+    case ready(
+        executable: String,
+        version: String?,
+        diagnostics: [ProviderHealthDiagnostic]
+    )
+}
+
 enum LocalIBMBobPassiveProbeResult: Sendable, Equatable {
     case executableNotFound(ProviderExecutableResolution)
     case passiveProbeLaunchFailed(
@@ -149,6 +168,10 @@ protocol CodexProviderHealthFactProviding: Sendable {
     func remoteCodexHealthProbe(workspace: Workspace, host: NexusDomain.Host) async -> RemoteCodexHealthProbeResult
 }
 
+protocol PiProviderHealthFactProviding: Sendable {
+    func remotePiHealthProbe(workspace: Workspace, host: NexusDomain.Host) async -> RemotePiHealthProbeResult
+}
+
 protocol IBMBobProviderHealthFactProviding: Sendable {
     func localIBMBobPassiveProbe(workspace: Workspace) async -> LocalIBMBobPassiveProbeResult
     func remoteIBMBobPassiveProbe(workspace: Workspace, host: NexusDomain.Host) async -> RemoteIBMBobPassiveProbeResult
@@ -186,7 +209,7 @@ extension ProviderHealthEvaluating {
     }
 }
 
-struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactProviding, CodexProviderHealthFactProviding, IBMBobProviderHealthFactProviding, @unchecked Sendable {
+struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactProviding, CodexProviderHealthFactProviding, PiProviderHealthFactProviding, IBMBobProviderHealthFactProviding, @unchecked Sendable {
     let executableResolver: any ProviderExecutableResolving
     let commandRunner: any ProviderCommandRunning
     let localShellCommandBuilder: LocalShellCommandBuilder
@@ -243,10 +266,11 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactP
                 providerHealthEvaluator: self
             )
         case .pi:
-            if workspace.kind == .remote {
-                return await remoteHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
-            }
-            return await localCLIHealthSummary(commandName: "pi", providerName: "Pi", workspace: workspace)
+            return await PiProviderModule().providerHealthSummary(
+                for: workspace,
+                remoteContext: remoteContext,
+                providerHealthEvaluator: self
+            )
         case .ibmBob:
             return await IBMBobProviderModule().providerHealthSummary(
                 for: workspace,
@@ -254,115 +278,6 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactP
                 providerHealthEvaluator: self
             )
         }
-    }
-
-    private func remoteHealthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> ProviderHealthSummary {
-        let providerName = Provider(id: providerID).displayName
-
-        if let blockedByHostValidation = blockedByHostValidation(providerName: providerName, remoteContext: remoteContext) {
-            return blockedByHostValidation
-        }
-
-        if let blockedByWorkspaceAvailability = blockedByWorkspaceAvailability(providerName: providerName, remoteContext: remoteContext) {
-            return blockedByWorkspaceAvailability
-        }
-
-        guard let remoteContext else {
-            return ProviderHealthSummary(
-                state: .blocked,
-                summary: "Provider Health is blocked by Workspace Availability",
-                diagnostics: [
-                    ProviderHealthDiagnostic(
-                        severity: .warning,
-                        code: "workspaceAvailabilityBlocked",
-                        message: "Provider Health for \(providerName) is blocked until Workspace Availability is checked."
-                    )
-                ]
-            )
-        }
-
-        switch providerID {
-        case .claude:
-            return await remoteCLIHealthSummary(commandName: "claude", providerName: "Claude", workspace: workspace, host: remoteContext.host)
-        case .codex:
-            return await CodexProviderModule().providerHealthSummary(
-                for: workspace,
-                remoteContext: remoteContext,
-                providerHealthEvaluator: self
-            )
-        case .pi:
-            return await remotePiHealthSummary(workspace: workspace, host: remoteContext.host)
-        case .ibmBob:
-            return await IBMBobProviderModule().providerHealthSummary(
-                for: workspace,
-                remoteContext: remoteContext,
-                providerHealthEvaluator: self
-            )
-        }
-    }
-
-    private func blockedByHostValidation(providerName: String, remoteContext: RemoteWorkspaceHealthContext?) -> ProviderHealthSummary? {
-        guard let hostValidation = remoteContext?.hostValidation else {
-            return ProviderHealthSummary(
-                state: .blocked,
-                summary: "Provider Health is blocked by Host Validation",
-                diagnostics: [
-                    ProviderHealthDiagnostic(
-                        severity: .warning,
-                        code: "hostValidationBlocked",
-                        message: "Provider Health for \(providerName) is blocked until Host Validation runs."
-                    )
-                ]
-            )
-        }
-
-        guard hostValidation.state != .available else {
-            return nil
-        }
-
-        return ProviderHealthSummary(
-            state: .blocked,
-            summary: "Provider Health is blocked by Host Validation",
-            diagnostics: [
-                ProviderHealthDiagnostic(
-                    severity: .warning,
-                    code: "hostValidationBlocked",
-                    message: "Provider Health for \(providerName) is blocked by Host Validation: \(hostValidation.summary)."
-                )
-            ]
-        )
-    }
-
-    private func blockedByWorkspaceAvailability(providerName: String, remoteContext: RemoteWorkspaceHealthContext?) -> ProviderHealthSummary? {
-        guard let workspaceAvailability = remoteContext?.workspaceAvailability else {
-            return ProviderHealthSummary(
-                state: .blocked,
-                summary: "Provider Health is blocked by Workspace Availability",
-                diagnostics: [
-                    ProviderHealthDiagnostic(
-                        severity: .warning,
-                        code: "workspaceAvailabilityBlocked",
-                        message: "Provider Health for \(providerName) is blocked until Workspace Availability is checked."
-                    )
-                ]
-            )
-        }
-
-        guard workspaceAvailability.state != .available else {
-            return nil
-        }
-
-        return ProviderHealthSummary(
-            state: .blocked,
-            summary: "Provider Health is blocked by Workspace Availability",
-            diagnostics: [
-                ProviderHealthDiagnostic(
-                    severity: .warning,
-                    code: "workspaceAvailabilityBlocked",
-                    message: "Provider Health for \(providerName) is blocked by Workspace Availability: \(workspaceAvailability.summary)."
-                )
-            ]
-        )
     }
 
     func remoteCLIHealthProbe(
@@ -517,7 +432,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactP
         }
     }
 
-    private func remotePiHealthSummary(workspace: Workspace, host: NexusDomain.Host) async -> ProviderHealthSummary {
+    func remotePiHealthProbe(workspace: Workspace, host: NexusDomain.Host) async -> RemotePiHealthProbeResult {
         let result: ProviderCommandResult
         do {
             result = try commandRunner.run(
@@ -526,39 +441,11 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactP
                 currentDirectoryURL: nil
             )
         } catch {
-            return ProviderHealthSummary(
-                state: .unavailable,
-                summary: "Remote Pi health check failed before the SSH probe completed",
-                launchability: .notLaunchable,
-                diagnostics: [
-                    ProviderHealthDiagnostic(
-                        severity: .error,
-                        code: "sshLaunchFailed",
-                        message: error.localizedDescription
-                    )
-                ]
-            )
+            return .sshResolutionLaunchFailed(error.localizedDescription)
         }
 
         guard result.exitStatus == 0 else {
-            let detail = firstDiagnosticLine(stdout: result.stdout, stderr: result.stderr)
-            let classification = classifyRemoteCLIProbeFailure(
-                detail: detail,
-                providerName: "Pi",
-                notFoundMarker: remoteExecutableNotFoundMarker(commandName: "pi")
-            )
-            return ProviderHealthSummary(
-                state: classification.state,
-                summary: classification.summary,
-                launchability: .notLaunchable,
-                diagnostics: [
-                    ProviderHealthDiagnostic(
-                        severity: .error,
-                        code: classification.code,
-                        message: classification.message ?? (detail.isEmpty ? classification.summary : detail)
-                    )
-                ]
-            )
+            return .resolutionProbeFailed(firstDiagnosticLine(stdout: result.stdout, stderr: result.stderr))
         }
 
         let outputLines = result.stdout
@@ -567,93 +454,36 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactP
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { $0.isEmpty == false }
         guard let executable = outputLines.first else {
-            return ProviderHealthSummary(
-                state: .misconfigured,
-                summary: "Pi executable resolution returned no executable path",
-                launchability: .notLaunchable,
-                diagnostics: [
-                    ProviderHealthDiagnostic(
-                        severity: .error,
-                        code: "remoteExecutableResolutionFailed",
-                        message: "The remote Pi executable resolution probe did not return an executable path."
-                    )
-                ]
-            )
+            return .resolutionReturnedNoExecutable
         }
         let version = outputLines.dropFirst().first
+        let diagnostics = [
+            ProviderHealthDiagnostic(
+                severity: .info,
+                code: "remoteProbe",
+                message: "Validated remote Pi launch prerequisites on \(host.name) for \(workspace.folderPath)."
+            )
+        ]
 
         do {
             switch try await remotePiReadinessProbe.probe(host: host, executable: executable, workingDirectory: workspace.folderPath) {
             case .ready:
-                return ProviderHealthSummary(
-                    state: .available,
-                    summary: version.map { "Pi \($0) is available" } ?? "Pi is available",
-                    resolvedExecutable: executable,
-                    version: version,
-                    launchability: .launchable,
-                    diagnostics: [
-                        ProviderHealthDiagnostic(
-                            severity: .info,
-                            code: "remoteProbe",
-                            message: "Validated remote Pi launch prerequisites on \(host.name) for \(workspace.folderPath)."
-                        )
-                    ]
-                )
+                return .ready(executable: executable, version: version, diagnostics: diagnostics)
             case let .authenticationRequired(message):
-                return ProviderHealthSummary(
-                    state: .unavailable,
-                    summary: "Pi requires authentication on the Remote Workspace",
-                    resolvedExecutable: executable,
-                    version: version,
-                    launchability: .notLaunchable,
-                    diagnostics: [
-                        ProviderHealthDiagnostic(
-                            severity: .error,
-                            code: "remoteAuthRequired",
-                            message: message
-                        )
-                    ]
-                )
+                return .authenticationRequired(executable: executable, version: version, message: message)
             case let .authenticationUncertain(message):
-                var diagnostics = [
-                    ProviderHealthDiagnostic(
-                        severity: .info,
-                        code: "remoteProbe",
-                        message: "Validated remote Pi launch prerequisites on \(host.name) for \(workspace.folderPath)."
-                    )
-                ]
-                if let message, message.isEmpty == false {
-                    diagnostics.append(
-                        ProviderHealthDiagnostic(
-                            severity: .warning,
-                            code: "remoteAuthUncertain",
-                            message: message
-                        )
-                    )
-                }
-                return ProviderHealthSummary(
-                    state: .available,
-                    summary: version.map { "Pi \($0) is available" } ?? "Pi is available",
-                    resolvedExecutable: executable,
+                return .authenticationUncertain(
+                    executable: executable,
                     version: version,
-                    launchability: .launchable,
-                    diagnostics: diagnostics
+                    diagnostics: diagnostics,
+                    message: message
                 )
             }
         } catch {
-            return ProviderHealthSummary(
-                state: .misconfigured,
-                summary: "Pi is installed but failed the remote protocol-native readiness probe",
-                resolvedExecutable: executable,
+            return .readinessProbeFailed(
+                executable: executable,
                 version: version,
-                launchability: .notLaunchable,
-                diagnostics: [
-                    ProviderHealthDiagnostic(
-                        severity: .error,
-                        code: "remoteLaunchProbeFailed",
-                        message: error.localizedDescription
-                    )
-                ]
+                detail: error.localizedDescription
             )
         }
     }
