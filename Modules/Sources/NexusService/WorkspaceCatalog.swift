@@ -12,6 +12,12 @@ private struct LoadedWorkspaceProviderCard {
     let index: Int
     let card: WorkspaceProviderCard
     let performanceSteps: [PerformanceDiagnosticStep]
+    let usesStaleBrowseFacts: Bool
+}
+
+private enum WorkspaceOverviewLoadMode {
+    case browse
+    case forceFresh
 }
 
 struct WorkspaceCatalogDependencies {
@@ -24,6 +30,7 @@ struct WorkspaceCatalogDependencies {
     let providerModuleRegistry: ProviderModuleRegistry
     let recordPerformanceDiagnostic: (PerformanceDiagnosticRecord) throws -> Void
     let currentUptimeNanoseconds: () -> UInt64
+    let currentDate: () -> Date
 
     init(
         metadataStore: NexusMetadataStore,
@@ -34,7 +41,8 @@ struct WorkspaceCatalogDependencies {
         sessionRuntimeManager: any SessionRuntimeManaging,
         providerModuleRegistry: ProviderModuleRegistry,
         recordPerformanceDiagnostic: @escaping (PerformanceDiagnosticRecord) throws -> Void = { _ in },
-        currentUptimeNanoseconds: @escaping () -> UInt64 = { DispatchTime.now().uptimeNanoseconds }
+        currentUptimeNanoseconds: @escaping () -> UInt64 = { DispatchTime.now().uptimeNanoseconds },
+        currentDate: @escaping () -> Date = Date.init
     ) {
         self.metadataStore = metadataStore
         self.sessionRecordStore = sessionRecordStore
@@ -45,6 +53,7 @@ struct WorkspaceCatalogDependencies {
         self.providerModuleRegistry = providerModuleRegistry
         self.recordPerformanceDiagnostic = recordPerformanceDiagnostic
         self.currentUptimeNanoseconds = currentUptimeNanoseconds
+        self.currentDate = currentDate
     }
 }
 
@@ -56,45 +65,11 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
     }
 
     func workspaceOverview(workspaceID: UUID) async throws -> WorkspaceOverview {
-        var trace = PerformanceDiagnosticTrace(
-            operation: .workspaceOverview,
-            workspaceID: workspaceID,
-            currentUptimeNanoseconds: dependencies.currentUptimeNanoseconds
-        )
+        try await loadWorkspaceOverview(workspaceID: workspaceID, mode: .browse)
+    }
 
-        do {
-            guard let workspace = try trace.measure("loadWorkspace", { try dependencies.metadataStore.workspace(id: workspaceID) }) else {
-                throw NexusMetadataStoreError.workspaceNotFound
-            }
-
-            let remoteTarget = try trace.measure("loadRemoteTarget", { try remoteWorkspaceTargetOverview(for: workspace) })
-            let remoteContext = remoteTarget.map {
-                RemoteWorkspaceHealthContext(
-                    host: $0.host,
-                    hostValidation: $0.hostValidation,
-                    workspaceAvailability: $0.workspaceAvailability
-                )
-            }
-
-            let providerCards = try await workspaceProviderCards(
-                workspaceID: workspaceID,
-                workspace: workspace,
-                remoteContext: remoteContext,
-                trace: &trace
-            )
-
-            let overview = WorkspaceOverview(workspace: workspace, providerCards: providerCards, remoteTarget: remoteTarget)
-            try? dependencies.recordPerformanceDiagnostic(trace.finish(outcome: .success))
-            return overview
-        } catch {
-            try? dependencies.recordPerformanceDiagnostic(
-                trace.finish(
-                    outcome: .failure,
-                    failureMessage: String(describing: error)
-                )
-            )
-            throw error
-        }
+    func refreshWorkspaceOverview(workspaceID: UUID) async throws -> WorkspaceOverview {
+        try await loadWorkspaceOverview(workspaceID: workspaceID, mode: .forceFresh)
     }
 
     func providerDetail(workspaceID: UUID, providerID: ProviderID) async throws -> ProviderDetail {
@@ -211,16 +186,23 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
             hostValidation = existingHostValidation
         }
 
-        let availabilityResult = dependencies.workspaceAvailabilityEvaluator.evaluate(
-            workspace: workspace,
-            host: host,
-            hostValidation: hostValidation
-        )
-        let availability = try dependencies.metadataStore.saveWorkspaceAvailability(
-            workspaceID: workspace.id,
-            result: availabilityResult,
-            checkedAt: Date()
-        )
+        let availability: WorkspaceAvailabilitySnapshot
+        if refreshHostValidation == false,
+           let existingAvailability = try dependencies.metadataStore.workspaceAvailability(workspaceID: workspace.id),
+           isRecent(existingAvailability.checkedAt) {
+            availability = existingAvailability
+        } else {
+            let availabilityResult = dependencies.workspaceAvailabilityEvaluator.evaluate(
+                workspace: workspace,
+                host: host,
+                hostValidation: hostValidation
+            )
+            availability = try dependencies.metadataStore.saveWorkspaceAvailability(
+                workspaceID: workspace.id,
+                result: availabilityResult,
+                checkedAt: dependencies.currentDate()
+            )
+        }
         return RemoteWorkspaceTargetOverview(
             host: host,
             hostValidation: hostValidation,
@@ -235,6 +217,13 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
         preferFreshRemoteCheck: Bool = false
     ) async throws -> ProviderHealthSummary {
         let providerModule = providerModule(for: providerID)
+
+        if preferFreshRemoteCheck == false,
+           let snapshot = try dependencies.metadataStore.providerHealth(workspaceID: workspace.id, providerID: providerID),
+           workspace.kind != .remote,
+           isRecent(snapshot.checkedAt) {
+            return snapshot
+        }
 
         guard workspace.kind == .remote else {
             return await providerModule.providerHealthSummary(
@@ -301,12 +290,141 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
         )
     }
 
+    private func loadWorkspaceOverview(
+        workspaceID: UUID,
+        mode: WorkspaceOverviewLoadMode
+    ) async throws -> WorkspaceOverview {
+        var trace = PerformanceDiagnosticTrace(
+            operation: .workspaceOverview,
+            workspaceID: workspaceID,
+            currentUptimeNanoseconds: dependencies.currentUptimeNanoseconds
+        )
+
+        do {
+            guard let workspace = try trace.measure("loadWorkspace", { try dependencies.metadataStore.workspace(id: workspaceID) }) else {
+                throw NexusMetadataStoreError.workspaceNotFound
+            }
+
+            let (remoteTarget, usesStaleRemoteFacts) = try trace.measure("loadRemoteTarget") {
+                try workspaceOverviewRemoteTargetOverview(for: workspace, mode: mode)
+            }
+            let remoteContext = remoteTarget.map {
+                RemoteWorkspaceHealthContext(
+                    host: $0.host,
+                    hostValidation: $0.hostValidation,
+                    workspaceAvailability: $0.workspaceAvailability
+                )
+            }
+
+            let (providerCards, usesStaleProviderFacts) = try await workspaceProviderCards(
+                workspaceID: workspaceID,
+                workspace: workspace,
+                remoteContext: remoteContext,
+                mode: mode,
+                trace: &trace
+            )
+
+            let overview = WorkspaceOverview(
+                workspace: workspace,
+                providerCards: providerCards,
+                remoteTarget: remoteTarget,
+                usesStaleBrowseFacts: mode == .browse && (usesStaleRemoteFacts || usesStaleProviderFacts)
+            )
+            try? dependencies.recordPerformanceDiagnostic(trace.finish(outcome: .success))
+            return overview
+        } catch {
+            try? dependencies.recordPerformanceDiagnostic(
+                trace.finish(
+                    outcome: .failure,
+                    failureMessage: String(describing: error)
+                )
+            )
+            throw error
+        }
+    }
+
+    private func workspaceOverviewRemoteTargetOverview(
+        for workspace: Workspace,
+        mode: WorkspaceOverviewLoadMode
+    ) throws -> (RemoteWorkspaceTargetOverview?, Bool) {
+        guard workspace.kind == .remote,
+              let hostID = workspace.remoteHostID,
+              let host = try dependencies.metadataStore.host(id: hostID) else {
+            return (nil, false)
+        }
+
+        let existingHostValidation = try dependencies.metadataStore.hostValidation(hostID: hostID)
+        let hostValidation: HostValidationSnapshot?
+        let usesStaleHostValidation: Bool
+        switch mode {
+        case .browse:
+            hostValidation = existingHostValidation
+            usesStaleHostValidation = existingHostValidation.map { isRecent($0.checkedAt) == false } ?? false
+        case .forceFresh:
+            hostValidation = try dependencies.metadataStore.saveHostValidation(
+                hostID: hostID,
+                result: dependencies.hostValidationEvaluator.validate(host: host),
+                checkedAt: dependencies.currentDate()
+            )
+            usesStaleHostValidation = false
+        }
+
+        let availability: WorkspaceAvailabilitySnapshot
+        let usesStaleAvailability: Bool
+        switch mode {
+        case .browse:
+            if let existingAvailability = try dependencies.metadataStore.workspaceAvailability(workspaceID: workspace.id) {
+                if isRecent(existingAvailability.checkedAt) {
+                    availability = existingAvailability
+                    usesStaleAvailability = false
+                } else {
+                    availability = existingAvailability
+                    usesStaleAvailability = true
+                }
+            } else {
+                let availabilityResult = dependencies.workspaceAvailabilityEvaluator.evaluate(
+                    workspace: workspace,
+                    host: host,
+                    hostValidation: hostValidation
+                )
+                availability = try dependencies.metadataStore.saveWorkspaceAvailability(
+                    workspaceID: workspace.id,
+                    result: availabilityResult,
+                    checkedAt: dependencies.currentDate()
+                )
+                usesStaleAvailability = false
+            }
+        case .forceFresh:
+            let availabilityResult = dependencies.workspaceAvailabilityEvaluator.evaluate(
+                workspace: workspace,
+                host: host,
+                hostValidation: hostValidation
+            )
+            availability = try dependencies.metadataStore.saveWorkspaceAvailability(
+                workspaceID: workspace.id,
+                result: availabilityResult,
+                checkedAt: dependencies.currentDate()
+            )
+            usesStaleAvailability = false
+        }
+
+        return (
+            RemoteWorkspaceTargetOverview(
+                host: host,
+                hostValidation: hostValidation,
+                workspaceAvailability: availability
+            ),
+            usesStaleHostValidation || usesStaleAvailability
+        )
+    }
+
     private func workspaceProviderCards(
         workspaceID: UUID,
         workspace: Workspace,
         remoteContext: RemoteWorkspaceHealthContext?,
+        mode: WorkspaceOverviewLoadMode,
         trace: inout PerformanceDiagnosticTrace
-    ) async throws -> [WorkspaceProviderCard] {
+    ) async throws -> ([WorkspaceProviderCard], Bool) {
         let providerIDs = Array(ProviderID.allCases)
         let loadedProviderCards = try await withThrowingTaskGroup(of: LoadedWorkspaceProviderCard.self, returning: [LoadedWorkspaceProviderCard].self) { group in
             for (index, providerID) in providerIDs.enumerated() {
@@ -317,18 +435,17 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
                             .map(reconcileSessionRuntimeState)
                     }
                     let defaultSession = sessions.first(where: \.isDefault)
-                    let (catalogRead, readProviderCatalogStep) = try await measuredStep("readProviderCatalog.\(providerID.rawValue)") {
-                        try await providerModule.readCatalog(
-                            ProviderModuleCatalogReadRequest(
-                                workspace: workspace,
-                                remoteContext: remoteContext,
-                                defaultSession: defaultSession
-                            ),
-                            actions: ProviderModuleCatalogReadActions { [self] in
-                                try await self.providerHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
-                            }
+                    let (catalogReadResult, readProviderCatalogStep) = try await measuredStep("readProviderCatalog.\(providerID.rawValue)") {
+                        try await self.workspaceOverviewCatalogRead(
+                            providerID: providerID,
+                            providerModule: providerModule,
+                            workspace: workspace,
+                            remoteContext: remoteContext,
+                            defaultSession: defaultSession,
+                            mode: mode
                         )
                     }
+                    let (catalogRead, usesStaleBrowseFacts) = catalogReadResult
 
                     return LoadedWorkspaceProviderCard(
                         index: index,
@@ -340,7 +457,8 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
                             defaultSession: catalogRead.defaultSession,
                             alternateSessionCount: sessions.filter { $0.isDefault == false }.count
                         ),
-                        performanceSteps: [loadSessionsStep, readProviderCatalogStep]
+                        performanceSteps: [loadSessionsStep, readProviderCatalogStep],
+                        usesStaleBrowseFacts: usesStaleBrowseFacts
                     )
                 }
             }
@@ -355,7 +473,78 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
         for loadedProviderCard in loadedProviderCards {
             trace.appendSteps(loadedProviderCard.performanceSteps)
         }
-        return loadedProviderCards.map(\.card)
+        return (
+            loadedProviderCards.map(\.card),
+            loadedProviderCards.contains(where: \.usesStaleBrowseFacts)
+        )
+    }
+
+    private func workspaceOverviewCatalogRead(
+        providerID: ProviderID,
+        providerModule: any ProviderModule,
+        workspace: Workspace,
+        remoteContext: RemoteWorkspaceHealthContext?,
+        defaultSession: Session?,
+        mode: WorkspaceOverviewLoadMode
+    ) async throws -> (ProviderModuleCatalogReadResult, Bool) {
+        var usesStaleBrowseFacts = false
+        let catalogRead = try await providerModule.readCatalog(
+            ProviderModuleCatalogReadRequest(
+                workspace: workspace,
+                remoteContext: remoteContext,
+                defaultSession: defaultSession
+            ),
+            actions: ProviderModuleCatalogReadActions { [self] in
+                let health = try await self.workspaceOverviewProviderHealthSummary(
+                    for: providerID,
+                    workspace: workspace,
+                    remoteContext: remoteContext,
+                    mode: mode
+                )
+                usesStaleBrowseFacts = health.usesStaleBrowseFacts
+                return health.summary
+            }
+        )
+        return (catalogRead, usesStaleBrowseFacts)
+    }
+
+    private func workspaceOverviewProviderHealthSummary(
+        for providerID: ProviderID,
+        workspace: Workspace,
+        remoteContext: RemoteWorkspaceHealthContext?,
+        mode: WorkspaceOverviewLoadMode
+    ) async throws -> (summary: ProviderHealthSummary, usesStaleBrowseFacts: Bool) {
+        switch mode {
+        case .browse:
+            if let snapshot = try dependencies.metadataStore.providerHealth(workspaceID: workspace.id, providerID: providerID) {
+                if isRecent(snapshot.checkedAt) {
+                    return (snapshot, false)
+                }
+                return (snapshot, true)
+            }
+        case .forceFresh:
+            break
+        }
+
+        return (try await evaluateAndPersistProviderHealth(for: providerID, workspace: workspace, remoteContext: remoteContext), false)
+    }
+
+    private func evaluateAndPersistProviderHealth(
+        for providerID: ProviderID,
+        workspace: Workspace,
+        remoteContext: RemoteWorkspaceHealthContext?
+    ) async throws -> ProviderHealthSummary {
+        let evaluated = await providerModule(for: providerID).providerHealthSummary(
+            for: workspace,
+            remoteContext: remoteContext,
+            providerHealthEvaluator: dependencies.providerHealthEvaluator
+        )
+        return try dependencies.metadataStore.saveProviderHealth(
+            workspaceID: workspace.id,
+            providerID: providerID,
+            summary: evaluated,
+            checkedAt: dependencies.currentDate()
+        )
     }
 
     private func measuredStep<T>(_ name: String, _ block: () throws -> T) rethrows -> (T, PerformanceDiagnosticStep) {
@@ -389,6 +578,14 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
 
     private func providerModule(for providerID: ProviderID) -> any ProviderModule {
         dependencies.providerModuleRegistry.module(for: providerID)
+    }
+
+    private func isRecent(_ checkedAt: Date?) -> Bool {
+        guard let checkedAt else {
+            return false
+        }
+
+        return dependencies.currentDate().timeIntervalSince(checkedAt) <= 30
     }
 
     private func updatedSessionForRuntimeState(_ session: Session, runtimeState: Session.State) throws -> Session {

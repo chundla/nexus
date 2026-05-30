@@ -230,6 +230,249 @@ struct WorkspaceCatalogTests {
         #expect(overview.providerCards.map(\.provider.id) == ProviderID.allCases)
         #expect(await tracker.maximumConcurrentReads() > 1)
     }
+
+    @Test func workspaceOverviewReusesRecentLocalProviderHealthSnapshot() async throws {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let evaluator = CountingProviderHealthEvaluator(
+            summariesByProvider: [
+                ProviderID.claude: ProviderHealthSummary(
+                    state: .available,
+                    summary: "Fresh Claude health should stay unused",
+                    resolvedExecutable: "/tmp/fresh-claude",
+                    launchability: .launchable
+                )
+            ]
+        )
+        let fixture = try WorkspaceCatalogFixture(
+            providerHealthEvaluator: evaluator,
+            providerModuleRegistry: ProviderModuleRegistry(
+                modules: [
+                    ProviderID.claude: TestProviderModule(providerID: .claude) { workspace, remoteContext, providerHealthEvaluator in
+                        await providerHealthEvaluator.healthSummary(for: .claude, workspace: workspace, remoteContext: remoteContext)
+                    }
+                ]
+            ),
+            currentDate: { now }
+        )
+        let cached = try fixture.metadataStore.saveProviderHealth(
+            workspaceID: fixture.workspace.id,
+            providerID: ProviderID.claude,
+            summary: ProviderHealthSummary(
+                state: .available,
+                summary: "Cached Claude health",
+                resolvedExecutable: "/tmp/cached-claude",
+                launchability: .launchable
+            ),
+            checkedAt: now.addingTimeInterval(-10)
+        )
+
+        let overview = try await fixture.catalog.workspaceOverview(workspaceID: fixture.workspace.id)
+        let claudeCard = try #require(overview.providerCards.first(where: { $0.provider.id == ProviderID.claude }))
+
+        #expect(claudeCard.health == cached)
+        #expect(await evaluator.callCount(for: ProviderID.claude) == 0)
+        #expect(overview.usesStaleBrowseFacts == false)
+    }
+
+    @Test func workspaceOverviewMarksStaleLocalProviderHealthSnapshotUntilExplicitRefresh() async throws {
+        let now = Date(timeIntervalSince1970: 2_000)
+        let freshSummary = ProviderHealthSummary(
+            state: .available,
+            summary: "Fresh Claude health",
+            resolvedExecutable: "/tmp/fresh-claude",
+            launchability: .launchable
+        )
+        let evaluator = CountingProviderHealthEvaluator(summariesByProvider: [ProviderID.claude: freshSummary])
+        let fixture = try WorkspaceCatalogFixture(
+            providerHealthEvaluator: evaluator,
+            providerModuleRegistry: ProviderModuleRegistry(
+                modules: [
+                    ProviderID.claude: TestProviderModule(providerID: .claude) { workspace, remoteContext, providerHealthEvaluator in
+                        await providerHealthEvaluator.healthSummary(for: .claude, workspace: workspace, remoteContext: remoteContext)
+                    }
+                ]
+            ),
+            currentDate: { now }
+        )
+        let cached = try fixture.metadataStore.saveProviderHealth(
+            workspaceID: fixture.workspace.id,
+            providerID: ProviderID.claude,
+            summary: ProviderHealthSummary(
+                state: .unavailable,
+                summary: "Stale Claude health",
+                launchability: .notLaunchable
+            ),
+            checkedAt: now.addingTimeInterval(-120)
+        )
+
+        let staleOverview = try await fixture.catalog.workspaceOverview(workspaceID: fixture.workspace.id)
+        let staleCard = try #require(staleOverview.providerCards.first(where: { $0.provider.id == ProviderID.claude }))
+
+        #expect(staleCard.health == cached)
+        #expect(staleOverview.usesStaleBrowseFacts)
+
+        let refreshedOverview = try await fixture.catalog.refreshWorkspaceOverview(workspaceID: fixture.workspace.id)
+        let refreshedCard = try #require(refreshedOverview.providerCards.first(where: { $0.provider.id == ProviderID.claude }))
+        let persistedSummary = try #require(try fixture.metadataStore.providerHealth(workspaceID: fixture.workspace.id, providerID: ProviderID.claude))
+
+        #expect(refreshedCard.health.summary == "Fresh Claude health")
+        #expect(refreshedOverview.usesStaleBrowseFacts == false)
+        #expect(persistedSummary.summary == "Fresh Claude health")
+        #expect(await evaluator.callCount(for: ProviderID.claude) == 1)
+    }
+
+    @Test func workspaceOverviewReusesRecentRemoteSnapshotsWithoutRefreshingChecks() async throws {
+        let now = Date(timeIntervalSince1970: 3_000)
+        let hostValidationEvaluator = CountingHostValidationEvaluator(
+            result: HostValidationResult(state: .available, summary: "Fresh Host Validation", diagnostics: [])
+        )
+        let workspaceAvailabilityEvaluator = CountingWorkspaceAvailabilityEvaluator(
+            result: WorkspaceAvailabilityResult(state: .available, summary: "Fresh Workspace Availability", diagnostics: [])
+        )
+        let providerHealthEvaluator = CountingProviderHealthEvaluator(
+            summariesByProvider: [
+                ProviderID.claude: ProviderHealthSummary(
+                    state: .available,
+                    summary: "Fresh Claude health should stay unused",
+                    resolvedExecutable: "/tmp/fresh-claude",
+                    launchability: .launchable
+                )
+            ]
+        )
+        let fixture = try WorkspaceCatalogFixture(
+            providerHealthEvaluator: providerHealthEvaluator,
+            hostValidationEvaluator: hostValidationEvaluator,
+            workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
+            providerModuleRegistry: ProviderModuleRegistry(
+                modules: [
+                    ProviderID.claude: TestProviderModule(providerID: .claude) { workspace, remoteContext, providerHealthEvaluator in
+                        await providerHealthEvaluator.healthSummary(for: .claude, workspace: workspace, remoteContext: remoteContext)
+                    }
+                ]
+            ),
+            currentDate: { now }
+        )
+        let host = try fixture.metadataStore.createHost(name: "Build Server", sshTarget: "build-box", port: nil)
+        let remoteWorkspace = try fixture.metadataStore.createRemoteWorkspace(
+            name: "Remote API",
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: fixture.group.id
+        )
+        let cachedHostValidation = try fixture.metadataStore.saveHostValidation(
+            hostID: host.id,
+            result: HostValidationResult(state: .unavailable, summary: "Cached Host Validation", diagnostics: []),
+            checkedAt: now.addingTimeInterval(-10)
+        )
+        let cachedAvailability = try fixture.metadataStore.saveWorkspaceAvailability(
+            workspaceID: remoteWorkspace.id,
+            result: WorkspaceAvailabilityResult(state: .blocked, summary: "Cached Workspace Availability", diagnostics: []),
+            checkedAt: now.addingTimeInterval(-10)
+        )
+        let cachedHealth = try fixture.metadataStore.saveProviderHealth(
+            workspaceID: remoteWorkspace.id,
+            providerID: ProviderID.claude,
+            summary: ProviderHealthSummary(
+                state: .blocked,
+                summary: "Cached Claude health",
+                launchability: .notLaunchable
+            ),
+            checkedAt: now.addingTimeInterval(-10)
+        )
+
+        let overview = try await fixture.catalog.workspaceOverview(workspaceID: remoteWorkspace.id)
+        let remoteTarget = try #require(overview.remoteTarget)
+        let claudeCard = try #require(overview.providerCards.first(where: { $0.provider.id == ProviderID.claude }))
+
+        #expect(remoteTarget.hostValidation == cachedHostValidation)
+        #expect(remoteTarget.workspaceAvailability == cachedAvailability)
+        #expect(claudeCard.health == cachedHealth)
+        #expect(overview.usesStaleBrowseFacts == false)
+        #expect(hostValidationEvaluator.callCount == 0)
+        #expect(workspaceAvailabilityEvaluator.callCount == 0)
+        #expect(await providerHealthEvaluator.callCount(for: ProviderID.claude) == 0)
+    }
+
+    @Test func workspaceOverviewMarksStaleRemoteSnapshotsUntilExplicitRefresh() async throws {
+        let now = Date(timeIntervalSince1970: 4_000)
+        let hostValidationEvaluator = CountingHostValidationEvaluator(
+            result: HostValidationResult(state: .available, summary: "Fresh Host Validation", diagnostics: [])
+        )
+        let workspaceAvailabilityEvaluator = CountingWorkspaceAvailabilityEvaluator(
+            result: WorkspaceAvailabilityResult(state: .available, summary: "Fresh Workspace Availability", diagnostics: [])
+        )
+        let providerHealthEvaluator = CountingProviderHealthEvaluator(
+            summariesByProvider: [
+                ProviderID.claude: ProviderHealthSummary(
+                    state: .available,
+                    summary: "Fresh Claude health",
+                    resolvedExecutable: "/tmp/fresh-claude",
+                    launchability: .launchable
+                )
+            ]
+        )
+        let fixture = try WorkspaceCatalogFixture(
+            providerHealthEvaluator: providerHealthEvaluator,
+            hostValidationEvaluator: hostValidationEvaluator,
+            workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
+            providerModuleRegistry: ProviderModuleRegistry(
+                modules: [
+                    ProviderID.claude: TestProviderModule(providerID: .claude) { workspace, remoteContext, providerHealthEvaluator in
+                        await providerHealthEvaluator.healthSummary(for: .claude, workspace: workspace, remoteContext: remoteContext)
+                    }
+                ]
+            ),
+            currentDate: { now }
+        )
+        let host = try fixture.metadataStore.createHost(name: "Build Server", sshTarget: "build-box", port: nil)
+        let remoteWorkspace = try fixture.metadataStore.createRemoteWorkspace(
+            name: "Remote API",
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: fixture.group.id
+        )
+        let cachedHostValidation = try fixture.metadataStore.saveHostValidation(
+            hostID: host.id,
+            result: HostValidationResult(state: .unavailable, summary: "Stale Host Validation", diagnostics: []),
+            checkedAt: now.addingTimeInterval(-120)
+        )
+        let cachedAvailability = try fixture.metadataStore.saveWorkspaceAvailability(
+            workspaceID: remoteWorkspace.id,
+            result: WorkspaceAvailabilityResult(state: .blocked, summary: "Stale Workspace Availability", diagnostics: []),
+            checkedAt: now.addingTimeInterval(-120)
+        )
+        let cachedHealth = try fixture.metadataStore.saveProviderHealth(
+            workspaceID: remoteWorkspace.id,
+            providerID: ProviderID.claude,
+            summary: ProviderHealthSummary(
+                state: .blocked,
+                summary: "Stale Claude health",
+                launchability: .notLaunchable
+            ),
+            checkedAt: now.addingTimeInterval(-120)
+        )
+
+        let staleOverview = try await fixture.catalog.workspaceOverview(workspaceID: remoteWorkspace.id)
+        let staleRemoteTarget = try #require(staleOverview.remoteTarget)
+        let staleCard = try #require(staleOverview.providerCards.first(where: { $0.provider.id == ProviderID.claude }))
+
+        #expect(staleRemoteTarget.hostValidation == cachedHostValidation)
+        #expect(staleRemoteTarget.workspaceAvailability == cachedAvailability)
+        #expect(staleCard.health == cachedHealth)
+        #expect(staleOverview.usesStaleBrowseFacts)
+
+        let refreshedOverview = try await fixture.catalog.refreshWorkspaceOverview(workspaceID: remoteWorkspace.id)
+        let refreshedRemoteTarget = try #require(refreshedOverview.remoteTarget)
+        let refreshedCard = try #require(refreshedOverview.providerCards.first(where: { $0.provider.id == ProviderID.claude }))
+
+        #expect(refreshedRemoteTarget.hostValidation?.summary == "Fresh Host Validation")
+        #expect(refreshedRemoteTarget.workspaceAvailability.summary == "Fresh Workspace Availability")
+        #expect(refreshedCard.health.summary == "Fresh Claude health")
+        #expect(refreshedOverview.usesStaleBrowseFacts == false)
+        #expect(hostValidationEvaluator.callCount == 1)
+        #expect(workspaceAvailabilityEvaluator.callCount == 1)
+        #expect(await providerHealthEvaluator.callCount(for: ProviderID.claude) == 1)
+    }
 }
 
 private struct WorkspaceCatalogFixture {
@@ -241,7 +484,11 @@ private struct WorkspaceCatalogFixture {
     let secondWorkspaceFolder: URL
 
     init(
-        providerModuleRegistry: ProviderModuleRegistry? = nil
+        providerHealthEvaluator: any ProviderHealthEvaluating = AvailableProviderHealthFacts(),
+        hostValidationEvaluator: any HostValidationEvaluating = UnusedHostValidationEvaluator(),
+        workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating = UnusedWorkspaceAvailabilityEvaluator(),
+        providerModuleRegistry: ProviderModuleRegistry? = nil,
+        currentDate: @escaping () -> Date = Date.init
     ) throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("WorkspaceCatalogTests", isDirectory: true)
@@ -271,11 +518,12 @@ private struct WorkspaceCatalogFixture {
             dependencies: WorkspaceCatalogDependencies(
                 metadataStore: metadataStore,
                 sessionRecordStore: sessionRecordStore,
-                providerHealthEvaluator: AvailableProviderHealthFacts(),
-                hostValidationEvaluator: UnusedHostValidationEvaluator(),
-                workspaceAvailabilityEvaluator: UnusedWorkspaceAvailabilityEvaluator(),
+                providerHealthEvaluator: providerHealthEvaluator,
+                hostValidationEvaluator: hostValidationEvaluator,
+                workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
                 sessionRuntimeManager: InMemorySessionRuntimeManager(),
-                providerModuleRegistry: providerModuleRegistry ?? ServiceSessionProviderRegistry.providerModules()
+                providerModuleRegistry: providerModuleRegistry ?? ServiceSessionProviderRegistry.providerModules(),
+                currentDate: currentDate
             )
         )
     }
@@ -401,6 +649,66 @@ private struct UnusedWorkspaceAvailabilityEvaluator: WorkspaceAvailabilityEvalua
     func evaluate(workspace: Workspace, host: NexusDomain.Host, hostValidation: HostValidationSnapshot?) -> WorkspaceAvailabilityResult {
         Issue.record("Workspace Availability should not run for local Workspace tests")
         return WorkspaceAvailabilityResult(state: .available, summary: "Workspace is available", diagnostics: [])
+    }
+}
+
+private actor CountingProviderHealthEvaluator: ProviderHealthEvaluating {
+    let summariesByProvider: [ProviderID: ProviderHealthSummary]
+    private var callsByProvider: [ProviderID: Int] = [:]
+
+    init(summariesByProvider: [ProviderID: ProviderHealthSummary]) {
+        self.summariesByProvider = summariesByProvider
+    }
+
+    func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> [WorkspaceProviderCard] {
+        ProviderID.allCases.map { providerID in
+            WorkspaceProviderCard(
+                provider: Provider(id: providerID),
+                health: ProviderHealthSummary(state: .notChecked, summary: "Unused"),
+                defaultSession: ProviderDefaultSessionSummary(
+                    state: .notCreated,
+                    summary: "No default session yet",
+                    actionTitle: "Launch"
+                )
+            )
+        }
+    }
+
+    func healthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> ProviderHealthSummary {
+        callsByProvider[providerID, default: 0] += 1
+        return summariesByProvider[providerID] ?? ProviderHealthSummary(state: .notChecked, summary: "Unused")
+    }
+
+    func callCount(for providerID: ProviderID) -> Int {
+        callsByProvider[providerID, default: 0]
+    }
+}
+
+private final class CountingHostValidationEvaluator: HostValidationEvaluating, @unchecked Sendable {
+    let result: HostValidationResult
+    private(set) var callCount = 0
+
+    init(result: HostValidationResult) {
+        self.result = result
+    }
+
+    func validate(host: NexusDomain.Host) -> HostValidationResult {
+        callCount += 1
+        return result
+    }
+}
+
+private final class CountingWorkspaceAvailabilityEvaluator: WorkspaceAvailabilityEvaluating, @unchecked Sendable {
+    let result: WorkspaceAvailabilityResult
+    private(set) var callCount = 0
+
+    init(result: WorkspaceAvailabilityResult) {
+        self.result = result
+    }
+
+    func evaluate(workspace: Workspace, host: NexusDomain.Host, hostValidation: HostValidationSnapshot?) -> WorkspaceAvailabilityResult {
+        callCount += 1
+        return result
     }
 }
 

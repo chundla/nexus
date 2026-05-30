@@ -376,11 +376,18 @@ public struct WorkspaceOverview: Codable, Equatable, Sendable {
     public let workspace: Workspace
     public let providerCards: [WorkspaceProviderCard]
     public let remoteTarget: RemoteWorkspaceTargetOverview?
+    public let usesStaleBrowseFacts: Bool
 
-    public init(workspace: Workspace, providerCards: [WorkspaceProviderCard], remoteTarget: RemoteWorkspaceTargetOverview? = nil) {
+    public init(
+        workspace: Workspace,
+        providerCards: [WorkspaceProviderCard],
+        remoteTarget: RemoteWorkspaceTargetOverview? = nil,
+        usesStaleBrowseFacts: Bool = false
+    ) {
         self.workspace = workspace
         self.providerCards = providerCards
         self.remoteTarget = remoteTarget
+        self.usesStaleBrowseFacts = usesStaleBrowseFacts
     }
 }
 

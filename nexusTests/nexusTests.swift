@@ -6232,6 +6232,87 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelRefreshReplacesStaleWorkspaceOverviewInBackground() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let staleOverview = WorkspaceOverview(
+            workspace: workspace,
+            providerCards: [
+                WorkspaceProviderCard(
+                    provider: Provider(id: .claude),
+                    health: ProviderHealthSummary(
+                        state: .unavailable,
+                        summary: "Cached Claude health",
+                        launchability: .notLaunchable
+                    ),
+                    defaultSession: ProviderDefaultSessionSummary(
+                        state: .notCreated,
+                        summary: "No default session yet",
+                        actionTitle: "Launch"
+                    )
+                )
+            ],
+            usesStaleBrowseFacts: true
+        )
+        let freshOverview = WorkspaceOverview(
+            workspace: workspace,
+            providerCards: [
+                WorkspaceProviderCard(
+                    provider: Provider(id: .claude),
+                    health: ProviderHealthSummary(
+                        state: .available,
+                        summary: "Fresh Claude health",
+                        resolvedExecutable: "/tmp/fresh-claude",
+                        launchability: .launchable
+                    ),
+                    defaultSession: ProviderDefaultSessionSummary(
+                        state: .notCreated,
+                        summary: "No default session yet",
+                        actionTitle: "Launch"
+                    )
+                )
+            ]
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: staleOverview,
+            refreshedWorkspaceOverview: freshOverview,
+            session: session,
+            screen: SessionScreen(session: session, transcript: "Claude ready")
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+
+        #expect(model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary == "Cached Claude health")
+
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary != "Fresh Claude health" {
+            guard ContinuousClock.now < deadline else {
+                Issue.record("Timed out waiting for the refreshed Workspace Overview")
+                break
+            }
+
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+
+        #expect(model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary == "Fresh Claude health")
+        #expect(client.refreshWorkspaceOverviewRequestCount == 1)
+    }
+
+    @MainActor
     @Test func appModelLoadsRemoteAccessStateAndPairedDevices() async throws {
         let group = WorkspaceGroup(id: UUID(), name: "Group")
         let workspace = Workspace(
@@ -8572,6 +8653,7 @@ private final class StubSessionRuntimeManager: SessionRuntimeManaging {
 
 private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendable {
     private var workspaceOverviewValue: WorkspaceOverview
+    private var refreshedWorkspaceOverviewValue: WorkspaceOverview?
     private var providerDetailValue: ProviderDetail
     private var sessionValue: Session
     private var screenValue: SessionScreen
@@ -8585,6 +8667,7 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
 
     var workspaceOverviewRequestCount = 0
     var workspaceOverviewBatchRequestCount = 0
+    var refreshWorkspaceOverviewRequestCount = 0
     var recordedNavigationTargets: [NavigationTarget] = []
     var respondedApprovalRequests: [(sessionID: UUID, approvalRequestID: UUID, decision: ApprovalRequestDecision)] = []
     var observedScreenHandlerCount: Int {
@@ -8593,6 +8676,7 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
 
     init(
         workspaceOverview: WorkspaceOverview,
+        refreshedWorkspaceOverview: WorkspaceOverview? = nil,
         session: Session,
         screen: SessionScreen,
         providerDetail: ProviderDetail? = nil,
@@ -8604,6 +8688,7 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
         pairedDevices: [PairedDevice] = []
     ) {
         self.workspaceOverviewValue = workspaceOverview
+        self.refreshedWorkspaceOverviewValue = refreshedWorkspaceOverview
         self.providerDetailValue = providerDetail ?? ProviderDetail(
             workspace: workspaceOverview.workspace,
             provider: Provider(id: session.providerID),
@@ -8797,6 +8882,13 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
     func getWorkspaceOverviews(workspaceIDs: [UUID]) async throws -> [WorkspaceOverview] {
         workspaceOverviewBatchRequestCount += 1
         return workspaceIDs.map { _ in workspaceOverviewValue }
+    }
+
+    func refreshWorkspaceOverview(workspaceID: UUID) async throws -> WorkspaceOverview {
+        refreshWorkspaceOverviewRequestCount += 1
+        let refreshed = refreshedWorkspaceOverviewValue ?? workspaceOverviewValue
+        workspaceOverviewValue = refreshed
+        return refreshed
     }
 
     func getProviderDetail(workspaceID: UUID, providerID: ProviderID) async throws -> ProviderDetail {
@@ -9199,6 +9291,10 @@ private struct FailingServiceClient: NexusServiceClient {
     }
 
     func getWorkspaceOverview(workspaceID: UUID) async throws -> WorkspaceOverview {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func refreshWorkspaceOverview(workspaceID: UUID) async throws -> WorkspaceOverview {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 

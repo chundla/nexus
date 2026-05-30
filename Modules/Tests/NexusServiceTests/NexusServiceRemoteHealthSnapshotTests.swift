@@ -120,7 +120,14 @@ struct NexusServiceRemoteHealthSnapshotTests {
             workspaceAvailabilityEvaluator: AvailableWorkspaceAvailabilityEvaluator()
         )
 
-        let refreshedOverview = try secondService.getWorkspaceOverview(workspaceID: workspace.id)
+        let reusedOverview = try secondService.getWorkspaceOverview(workspaceID: workspace.id)
+        let reusedCard = try #require(reusedOverview.providerCards.first(where: { $0.provider.id == .codex }))
+
+        #expect(reusedCard.health.state == .notChecked)
+        #expect(reusedCard.health.summary == "Remote Codex execution is not implemented yet")
+        #expect(reusedOverview.usesStaleBrowseFacts == false)
+
+        let refreshedOverview = try secondService.refreshWorkspaceOverview(workspaceID: workspace.id)
         let refreshedCard = try #require(refreshedOverview.providerCards.first(where: { $0.provider.id == .codex }))
 
         #expect(refreshedCard.health.state == .available)

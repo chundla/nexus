@@ -1676,6 +1676,14 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         try await workspaceCatalog.workspaceOverview(workspaceID: workspaceID)
     }
 
+    func refreshWorkspaceOverview(workspaceID: UUID) throws -> WorkspaceOverview {
+        try AsyncOperationSupport.blocking { try await self.refreshWorkspaceOverview(workspaceID: workspaceID) }
+    }
+
+    func refreshWorkspaceOverview(workspaceID: UUID) async throws -> WorkspaceOverview {
+        try await workspaceCatalog.refreshWorkspaceOverview(workspaceID: workspaceID)
+    }
+
     func getWorkspaceOverviews(workspaceIDs: [UUID]) throws -> [WorkspaceOverview] {
         try AsyncOperationSupport.blocking { try await self.getWorkspaceOverviews(workspaceIDs: workspaceIDs) }
     }
@@ -3776,6 +3784,10 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol, @unchecked Senda
 
     func getWorkspaceOverview(workspaceID: String, reply: @escaping (Data?, NSString?) -> Void) {
         sendReply(with: { [self] in try await self.service.getWorkspaceOverview(workspaceID: self.resolveUUID(workspaceID)) }, reply: reply)
+    }
+
+    func refreshWorkspaceOverview(workspaceID: String, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(with: { [self] in try await self.service.refreshWorkspaceOverview(workspaceID: self.resolveUUID(workspaceID)) }, reply: reply)
     }
 
     func getWorkspaceOverviews(workspaceIDsPayload: Data, reply: @escaping (Data?, NSString?) -> Void) {
