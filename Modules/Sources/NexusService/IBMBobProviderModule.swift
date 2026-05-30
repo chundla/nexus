@@ -35,23 +35,6 @@ struct IBMBobProviderModule: ProviderModule {
         return await localProviderHealthSummary(for: workspace, healthFacts: healthFacts)
     }
 
-    func readCatalog(
-        _ request: ProviderModuleCatalogReadRequest,
-        actions: ProviderModuleCatalogReadActions
-    ) async throws -> ProviderModuleCatalogReadResult {
-        let health = try await actions.providerHealthSummary()
-        return ProviderModuleCatalogReadResult(
-            health: health,
-            capabilities: providerCapabilities(
-                in: request.workspace,
-                health: health,
-                defaultSession: request.defaultSession
-            ),
-            prelaunchPrimarySurface: prelaunchPrimarySurface(in: request.workspace),
-            defaultSession: defaultSessionSummary(for: request.defaultSession)
-        )
-    }
-
     func providerCapabilities(
         in workspace: Workspace,
         health: ProviderHealthSummary,
@@ -70,24 +53,17 @@ struct IBMBobProviderModule: ProviderModule {
         .structuredActivityFeed
     }
 
+    func supportsSharedRemoteProbeFacts(
+        with providerHealthEvaluator: any ProviderHealthEvaluating
+    ) -> Bool {
+        providerHealthEvaluator is any SharedRemoteIBMBobProviderHealthFactProviding
+    }
+
     func reusesRemoteHealthSnapshot(
         _ snapshot: ProviderHealthSummary,
         remoteContext: RemoteWorkspaceHealthContext?
     ) -> Bool {
         false
-    }
-
-    func planSessionTransition(
-        _ request: ProviderModuleSessionTransitionRequest
-    ) async throws -> ProviderModuleSessionTransitionPlan {
-        switch request {
-        case let .openFresh(freshRequest, actions):
-            return .openFresh(try await executeSharedFreshSessionOpen(freshRequest, actions: actions))
-        case let .relaunchPersisted(relaunchRequest):
-            return .relaunchPersisted(planPersistedSessionRelaunch(relaunchRequest))
-        case let .bootstrapReadyWithoutRuntime(bootstrapRequest):
-            return .bootstrapReadyWithoutRuntime(planReadyWithoutRuntimeBootstrap(bootstrapRequest))
-        }
     }
 
     func persistedSessionRelaunchMetadataSource(

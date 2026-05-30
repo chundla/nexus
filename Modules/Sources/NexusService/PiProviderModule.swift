@@ -39,23 +39,6 @@ struct PiProviderModule: ProviderModule {
         return await localProviderHealthSummary(for: workspace, healthFacts: healthFacts)
     }
 
-    func readCatalog(
-        _ request: ProviderModuleCatalogReadRequest,
-        actions: ProviderModuleCatalogReadActions
-    ) async throws -> ProviderModuleCatalogReadResult {
-        let health = try await actions.providerHealthSummary()
-        return ProviderModuleCatalogReadResult(
-            health: health,
-            capabilities: providerCapabilities(
-                in: request.workspace,
-                health: health,
-                defaultSession: request.defaultSession
-            ),
-            prelaunchPrimarySurface: prelaunchPrimarySurface(in: request.workspace),
-            defaultSession: defaultSessionSummary(for: request.defaultSession)
-        )
-    }
-
     func providerCapabilities(
         in workspace: Workspace,
         health: ProviderHealthSummary,
@@ -72,6 +55,12 @@ struct PiProviderModule: ProviderModule {
 
     func prelaunchPrimarySurface(in workspace: Workspace) -> SessionSurface {
         .structuredActivityFeed
+    }
+
+    func supportsSharedRemoteProbeFacts(
+        with providerHealthEvaluator: any ProviderHealthEvaluating
+    ) -> Bool {
+        providerHealthEvaluator is any PiProviderHealthFactProviding
     }
 
     func reusesRemoteHealthSnapshot(

@@ -485,15 +485,13 @@ struct WorkspaceCatalogTests {
         #expect(await providerHealthEvaluator.callCount(for: ProviderID.claude) == 1)
     }
 
-    @Test func providerDetailUsesSingleRemoteProbePassForRemoteClaudeWorkspaceTarget() async throws {
+    @Test func providerDetailUsesSingleRemoteProbePassWhenProviderModuleConsumesSharedProbeFacts() async throws {
         let hostValidationEvaluator = CountingHostValidationEvaluator(
             result: HostValidationResult(state: .available, summary: "Unexpected Host Validation", diagnostics: [])
         )
         let workspaceAvailabilityEvaluator = CountingWorkspaceAvailabilityEvaluator(
             result: WorkspaceAvailabilityResult(state: .available, summary: "Unexpected Workspace Availability", diagnostics: [])
         )
-        let commandRunner = FailingWorkspaceCatalogCommandRunner()
-        let providerHealthEvaluator = ProviderHealthFacts(commandRunner: commandRunner)
         let collector = RecordingRemoteWorkspaceProbeCollector(
             result: .collected(
                 RemoteWorkspaceProbeFacts(
@@ -510,11 +508,32 @@ struct WorkspaceCatalogTests {
                 )
             )
         )
+        let providerModule = TestProviderModule(
+            providerID: .claude,
+            healthSummaryEvaluator: { _, remoteContext, _ in
+                guard let probeFact = remoteContext?.probeFacts?.providerFacts[.claude],
+                      let executable = probeFact.executable else {
+                    return ProviderHealthSummary(state: .notChecked, summary: "Missing probe facts")
+                }
+
+                return ProviderHealthSummary(
+                    state: .available,
+                    summary: probeFact.version.map { "Claude \($0) is available" } ?? "Claude is available",
+                    resolvedExecutable: executable,
+                    version: probeFact.version,
+                    launchability: .launchable
+                )
+            },
+            sharedRemoteProbeFactsSupportEvaluator: { _ in true }
+        )
         let fixture = try WorkspaceCatalogFixture(
-            providerHealthEvaluator: providerHealthEvaluator,
+            providerHealthEvaluator: AvailableProviderHealthFacts(),
             hostValidationEvaluator: hostValidationEvaluator,
             workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
-            remoteWorkspaceProbeCollector: collector
+            remoteWorkspaceProbeCollector: collector,
+            providerModuleRegistry: ServiceSessionProviderRegistry.providerModules(
+                overrides: [.claude: providerModule]
+            )
         )
         let host = try fixture.metadataStore.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
         let remoteWorkspace = try fixture.metadataStore.createRemoteWorkspace(
@@ -527,63 +546,10 @@ struct WorkspaceCatalogTests {
         let detail = try await fixture.catalog.providerDetail(workspaceID: remoteWorkspace.id, providerID: .claude)
 
         #expect(detail.health.summary == "Claude 1.2.3 is available")
+        #expect(detail.health.resolvedExecutable == "/opt/tools/claude")
         #expect(collector.callCount == 1)
         #expect(hostValidationEvaluator.callCount == 0)
         #expect(workspaceAvailabilityEvaluator.callCount == 0)
-        #expect(commandRunner.callCount == 0)
-    }
-
-    @Test func providerDetailUsesSingleRemoteProbePassForRemoteWorkspaceTarget() async throws {
-        let hostValidationEvaluator = CountingHostValidationEvaluator(
-            result: HostValidationResult(state: .available, summary: "Unexpected Host Validation", diagnostics: [])
-        )
-        let workspaceAvailabilityEvaluator = CountingWorkspaceAvailabilityEvaluator(
-            result: WorkspaceAvailabilityResult(state: .available, summary: "Unexpected Workspace Availability", diagnostics: [])
-        )
-        let commandRunner = FailingWorkspaceCatalogCommandRunner()
-        let codexReadinessProbe = RecordingWorkspaceCatalogRemoteCodexReadinessProbe()
-        let providerHealthEvaluator = ProviderHealthFacts(
-            commandRunner: commandRunner,
-            remoteCodexReadinessProbe: codexReadinessProbe
-        )
-        let collector = RecordingRemoteWorkspaceProbeCollector(
-            result: .collected(
-                RemoteWorkspaceProbeFacts(
-                    tmuxAvailable: true,
-                    workspacePath: .available,
-                    providerFacts: [
-                        .codex: RemoteProviderProbeFacts(
-                            executable: "/opt/tools/codex",
-                            version: "0.9.0",
-                            resolutionDetail: nil,
-                            probeDetail: nil
-                        )
-                    ]
-                )
-            )
-        )
-        let fixture = try WorkspaceCatalogFixture(
-            providerHealthEvaluator: providerHealthEvaluator,
-            hostValidationEvaluator: hostValidationEvaluator,
-            workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
-            remoteWorkspaceProbeCollector: collector
-        )
-        let host = try fixture.metadataStore.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
-        let remoteWorkspace = try fixture.metadataStore.createRemoteWorkspace(
-            name: "Remote API",
-            hostID: host.id,
-            remotePath: "/srv/api",
-            primaryGroupID: fixture.group.id
-        )
-
-        let detail = try await fixture.catalog.providerDetail(workspaceID: remoteWorkspace.id, providerID: .codex)
-
-        #expect(detail.health.summary == "Codex 0.9.0 is available")
-        #expect(collector.callCount == 1)
-        #expect(hostValidationEvaluator.callCount == 0)
-        #expect(workspaceAvailabilityEvaluator.callCount == 0)
-        #expect(commandRunner.callCount == 0)
-        #expect(await codexReadinessProbe.invocations == [WorkspaceCatalogReadinessInvocation(hostID: host.id, executable: "/opt/tools/codex", workingDirectory: "/srv/api")])
     }
 
     @Test func refreshWorkspaceOverviewUsesSingleRemoteProbePassForRemoteWorkspaceTarget() async throws {

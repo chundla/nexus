@@ -193,15 +193,10 @@ struct RemoteWorkspaceHealthContext {
 }
 
 protocol ProviderHealthEvaluating: Sendable {
-    func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> [WorkspaceProviderCard]
     func healthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> ProviderHealthSummary
 }
 
 extension ProviderHealthEvaluating {
-    func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) -> [WorkspaceProviderCard] {
-        (try? AsyncOperationSupport.blocking { await providerCards(for: workspace, remoteContext: remoteContext) }) ?? []
-    }
-
     func healthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) -> ProviderHealthSummary {
         (try? AsyncOperationSupport.blocking { await healthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext) })
             ?? ProviderHealthSummary(
@@ -243,24 +238,6 @@ struct ProviderHealthFacts: ProviderHealthEvaluating, CLIProviderHealthFactProvi
         self.remoteCodexReadinessProbe = remoteCodexReadinessProbe
         self.remotePiReadinessProbe = remotePiReadinessProbe
         self.providerModuleRegistry = providerModuleRegistry
-    }
-
-    func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext? = nil) async -> [WorkspaceProviderCard] {
-        var cards: [WorkspaceProviderCard] = []
-        for providerID in ProviderID.allCases {
-            cards.append(
-                WorkspaceProviderCard(
-                    provider: Provider(id: providerID),
-                    health: await healthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext),
-                    defaultSession: ProviderDefaultSessionSummary(
-                        state: .notCreated,
-                        summary: "No default session yet",
-                        actionTitle: "Launch"
-                    )
-                )
-            )
-        }
-        return cards
     }
 
     func healthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext? = nil) async -> ProviderHealthSummary {

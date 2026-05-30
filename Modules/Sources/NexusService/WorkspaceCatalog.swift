@@ -170,7 +170,7 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
             return try remoteWorkspaceHealthContext(for: workspace)
         }
 
-        guard supportsSharedRemoteProbeCollection(for: providerID) else {
+        guard providerModule(for: providerID).supportsSharedRemoteProbeFacts(with: dependencies.providerHealthEvaluator) else {
             return try remoteWorkspaceHealthContext(for: workspace)
         }
 
@@ -205,19 +205,6 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
             hostValidation: try dependencies.metadataStore.hostValidation(hostID: hostID),
             workspaceAvailability: workspaceAvailability
         )
-    }
-
-    private func supportsSharedRemoteProbeCollection(for providerID: ProviderID) -> Bool {
-        switch providerID {
-        case .claude:
-            dependencies.providerHealthEvaluator is any CLIProviderHealthFactProviding
-        case .codex:
-            dependencies.providerHealthEvaluator is any CodexProviderHealthFactProviding
-        case .pi:
-            dependencies.providerHealthEvaluator is any PiProviderHealthFactProviding
-        case .ibmBob:
-            dependencies.providerHealthEvaluator is any SharedRemoteIBMBobProviderHealthFactProviding
-        }
     }
 
     func remoteWorkspaceTargetOverview(

@@ -13,6 +13,7 @@ struct TestProviderModule: ProviderModule {
     private let terminationStatusMessageBuilder: (Int32) -> String
     private let remoteRuntimeRecoveryFailureEvaluator: (RemoteRuntimeRecoveryFailureContext) -> (state: Session.State, message: String)
     private let remoteHealthSnapshotReuseEvaluator: (ProviderHealthSummary, RemoteWorkspaceHealthContext?) -> Bool
+    private let sharedRemoteProbeFactsSupportEvaluator: (any ProviderHealthEvaluating) -> Bool
     private let interruptedSessionFailureMessageBuilder: (Session, Workspace?, SessionSurface) -> String
     private let runtimeConstructor: ((Session, Workspace, SessionRuntimeLaunchConfiguration, ProviderModuleRuntimeConstructionActions) async throws -> (any SessionRuntime)?)?
 
@@ -26,6 +27,7 @@ struct TestProviderModule: ProviderModule {
         terminationStatusMessageBuilder: ((Int32) -> String)? = nil,
         remoteRuntimeRecoveryFailureEvaluator: ((RemoteRuntimeRecoveryFailureContext) -> (state: Session.State, message: String))? = nil,
         remoteHealthSnapshotReuseEvaluator: @escaping (ProviderHealthSummary, RemoteWorkspaceHealthContext?) -> Bool = { _, _ in false },
+        sharedRemoteProbeFactsSupportEvaluator: @escaping (any ProviderHealthEvaluating) -> Bool = { _ in false },
         interruptedSessionFailureMessageBuilder: ((Session, Workspace?, SessionSurface) -> String)? = nil,
         runtimeConstructor: ((Session, Workspace, SessionRuntimeLaunchConfiguration, ProviderModuleRuntimeConstructionActions) async throws -> (any SessionRuntime)?)? = nil
     ) {
@@ -50,6 +52,7 @@ struct TestProviderModule: ProviderModule {
             providerModuleDefaultRemoteRuntimeRecoveryFailure(for: context)
         }
         self.remoteHealthSnapshotReuseEvaluator = remoteHealthSnapshotReuseEvaluator
+        self.sharedRemoteProbeFactsSupportEvaluator = sharedRemoteProbeFactsSupportEvaluator
         self.interruptedSessionFailureMessageBuilder = interruptedSessionFailureMessageBuilder ?? { _, _, _ in
             providerModuleDefaultInterruptedSessionFailureMessage()
         }
@@ -113,6 +116,12 @@ struct TestProviderModule: ProviderModule {
         remoteContext: RemoteWorkspaceHealthContext?
     ) -> Bool {
         remoteHealthSnapshotReuseEvaluator(snapshot, remoteContext)
+    }
+
+    func supportsSharedRemoteProbeFacts(
+        with providerHealthEvaluator: any ProviderHealthEvaluating
+    ) -> Bool {
+        sharedRemoteProbeFactsSupportEvaluator(providerHealthEvaluator)
     }
 
     func interruptedSessionFailureMessage(

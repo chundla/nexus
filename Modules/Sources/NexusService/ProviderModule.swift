@@ -147,6 +147,10 @@ protocol ProviderModule {
         for context: RemoteRuntimeRecoveryFailureContext
     ) -> (state: Session.State, message: String)
 
+    func supportsSharedRemoteProbeFacts(
+        with providerHealthEvaluator: any ProviderHealthEvaluating
+    ) -> Bool
+
     func reusesRemoteHealthSnapshot(
         _ snapshot: ProviderHealthSummary,
         remoteContext: RemoteWorkspaceHealthContext?
@@ -288,6 +292,12 @@ extension ProviderModule {
         storedMetadata: SessionRecordAdapterMetadata?
     ) -> SessionRecordAdapterMetadataLaunchSource {
         .stored
+    }
+
+    func supportsSharedRemoteProbeFacts(
+        with providerHealthEvaluator: any ProviderHealthEvaluating
+    ) -> Bool {
+        false
     }
 
     func sessionMayRemainReadyWithoutRuntime(
