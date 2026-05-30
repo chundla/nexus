@@ -73,8 +73,8 @@ struct WorkspaceAvailabilityEvaluator: WorkspaceAvailabilityEvaluating {
                 )
             }
 
-            let detail = firstDiagnosticLine(stdout: result.stdout, stderr: result.stderr)
-            let classification = classifyFailure(detail: detail)
+            let detail = providerCommandFirstDiagnosticLine(stdout: result.stdout, stderr: result.stderr)
+            let classification = classifyWorkspaceAvailabilityFailure(detail: detail)
             return WorkspaceAvailabilityResult(
                 state: classification.state,
                 summary: classification.summary,
@@ -101,34 +101,7 @@ struct WorkspaceAvailabilityEvaluator: WorkspaceAvailabilityEvaluating {
         }
     }
 
-    private func firstDiagnosticLine(stdout: String, stderr: String) -> String {
-        [stderr, stdout]
-            .joined(separator: "\n")
-            .split(whereSeparator: \.isNewline)
-            .map(String.init)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .first(where: { $0.isEmpty == false }) ?? ""
-    }
 
-    private func classifyFailure(detail: String) -> (state: WorkspaceAvailabilitySnapshot.State, summary: String, code: String) {
-        let normalized = detail.lowercased()
-
-        if normalized.contains("no such file")
-            || normalized.contains("not a directory")
-            || normalized.contains("permission denied") {
-            return (.broken, "Workspace requires repair", "workspaceTargetBroken")
-        }
-
-        if normalized.contains("connection timed out")
-            || normalized.contains("operation timed out")
-            || normalized.contains("connection refused")
-            || normalized.contains("network is unreachable")
-            || normalized.contains("no route to host") {
-            return (.unavailable, "Workspace is currently unavailable", "workspaceUnavailable")
-        }
-
-        return (.broken, "Workspace availability check failed", "workspaceAvailabilityFailed")
-    }
 
     private func shellQuoted(_ value: String) -> String {
         "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"

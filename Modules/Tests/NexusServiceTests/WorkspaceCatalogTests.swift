@@ -411,10 +411,20 @@ struct WorkspaceCatalogTests {
                 )
             ]
         )
+        let collector = RecordingRemoteWorkspaceBrowseFactCollector(
+            result: .collected(
+                RemoteWorkspaceBrowseFacts(
+                    tmuxAvailable: true,
+                    workspacePath: .available,
+                    providerFacts: [:]
+                )
+            )
+        )
         let fixture = try WorkspaceCatalogFixture(
             providerHealthEvaluator: providerHealthEvaluator,
             hostValidationEvaluator: hostValidationEvaluator,
             workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
+            remoteWorkspaceBrowseFactCollector: collector,
             providerModuleRegistry: ProviderModuleRegistry(
                 modules: [
                     ProviderID.claude: TestProviderModule(providerID: .claude) { workspace, remoteContext, providerHealthEvaluator in
@@ -465,13 +475,136 @@ struct WorkspaceCatalogTests {
         let refreshedRemoteTarget = try #require(refreshedOverview.remoteTarget)
         let refreshedCard = try #require(refreshedOverview.providerCards.first(where: { $0.provider.id == ProviderID.claude }))
 
-        #expect(refreshedRemoteTarget.hostValidation?.summary == "Fresh Host Validation")
-        #expect(refreshedRemoteTarget.workspaceAvailability.summary == "Fresh Workspace Availability")
+        #expect(refreshedRemoteTarget.hostValidation?.summary == "Host is available")
+        #expect(refreshedRemoteTarget.workspaceAvailability.summary == "Workspace is available")
         #expect(refreshedCard.health.summary == "Fresh Claude health")
         #expect(refreshedOverview.usesStaleBrowseFacts == false)
-        #expect(hostValidationEvaluator.callCount == 1)
-        #expect(workspaceAvailabilityEvaluator.callCount == 1)
+        #expect(collector.callCount == 1)
+        #expect(hostValidationEvaluator.callCount == 0)
+        #expect(workspaceAvailabilityEvaluator.callCount == 0)
         #expect(await providerHealthEvaluator.callCount(for: ProviderID.claude) == 1)
+    }
+
+    @Test func refreshWorkspaceOverviewUsesSingleRemoteBrowseFactPassForRemoteWorkspaceTarget() async throws {
+        let hostValidationEvaluator = CountingHostValidationEvaluator(
+            result: HostValidationResult(state: .available, summary: "Unexpected Host Validation", diagnostics: [])
+        )
+        let workspaceAvailabilityEvaluator = CountingWorkspaceAvailabilityEvaluator(
+            result: WorkspaceAvailabilityResult(state: .available, summary: "Unexpected Workspace Availability", diagnostics: [])
+        )
+        let commandRunner = FailingWorkspaceCatalogCommandRunner()
+        let codexReadinessProbe = RecordingWorkspaceCatalogRemoteCodexReadinessProbe()
+        let piReadinessProbe = RecordingWorkspaceCatalogRemotePiReadinessProbe()
+        let providerHealthEvaluator = ProviderHealthFacts(
+            commandRunner: commandRunner,
+            remoteCodexReadinessProbe: codexReadinessProbe,
+            remotePiReadinessProbe: piReadinessProbe
+        )
+        let collector = RecordingRemoteWorkspaceBrowseFactCollector(
+            result: .collected(
+                RemoteWorkspaceBrowseFacts(
+                    tmuxAvailable: true,
+                    workspacePath: .available,
+                    providerFacts: [
+                        .claude: RemoteProviderBrowseFact(
+                            executable: "/opt/tools/claude",
+                            version: "1.2.3",
+                            resolutionDetail: nil,
+                            probeDetail: nil
+                        ),
+                        .codex: RemoteProviderBrowseFact(
+                            executable: "/opt/tools/codex",
+                            version: "0.9.0",
+                            resolutionDetail: nil,
+                            probeDetail: nil
+                        ),
+                        .pi: RemoteProviderBrowseFact(
+                            executable: "/opt/tools/pi",
+                            version: "3.1.4",
+                            resolutionDetail: nil,
+                            probeDetail: nil
+                        ),
+                        .ibmBob: RemoteProviderBrowseFact(
+                            executable: "/opt/tools/bob",
+                            version: "2026.05",
+                            resolutionDetail: nil,
+                            probeDetail: nil
+                        )
+                    ]
+                )
+            )
+        )
+        let fixture = try WorkspaceCatalogFixture(
+            providerHealthEvaluator: providerHealthEvaluator,
+            hostValidationEvaluator: hostValidationEvaluator,
+            workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
+            remoteWorkspaceBrowseFactCollector: collector
+        )
+        let host = try fixture.metadataStore.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
+        let remoteWorkspace = try fixture.metadataStore.createRemoteWorkspace(
+            name: "Remote API",
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: fixture.group.id
+        )
+
+        let overview = try await fixture.catalog.refreshWorkspaceOverview(workspaceID: remoteWorkspace.id)
+        let remoteTarget = try #require(overview.remoteTarget)
+
+        #expect(remoteTarget.hostValidation?.summary == "Host is available")
+        #expect(remoteTarget.workspaceAvailability.summary == "Workspace is available")
+        #expect(overview.providerCards.first(where: { $0.provider.id == .claude })?.health.summary == "Claude 1.2.3 is available")
+        #expect(overview.providerCards.first(where: { $0.provider.id == .codex })?.health.summary == "Codex 0.9.0 is available")
+        #expect(overview.providerCards.first(where: { $0.provider.id == .pi })?.health.summary == "Pi 3.1.4 is available")
+        #expect(overview.providerCards.first(where: { $0.provider.id == .ibmBob })?.health.summary == "IBM Bob 2026.05 is available")
+        #expect(overview.usesStaleBrowseFacts == false)
+        #expect(collector.callCount == 1)
+        #expect(hostValidationEvaluator.callCount == 0)
+        #expect(workspaceAvailabilityEvaluator.callCount == 0)
+        #expect(commandRunner.callCount == 0)
+        #expect(await codexReadinessProbe.invocations == [WorkspaceCatalogReadinessInvocation(hostID: host.id, executable: "/opt/tools/codex", workingDirectory: "/srv/api")])
+        #expect(await piReadinessProbe.invocations == [WorkspaceCatalogReadinessInvocation(hostID: host.id, executable: "/opt/tools/pi", workingDirectory: "/srv/api")])
+    }
+
+    @Test func refreshWorkspaceOverviewClassifiesRemoteBrowseTransportFailureWithoutSeparateChecks() async throws {
+        let hostValidationEvaluator = CountingHostValidationEvaluator(
+            result: HostValidationResult(state: .available, summary: "Unexpected Host Validation", diagnostics: [])
+        )
+        let workspaceAvailabilityEvaluator = CountingWorkspaceAvailabilityEvaluator(
+            result: WorkspaceAvailabilityResult(state: .available, summary: "Unexpected Workspace Availability", diagnostics: [])
+        )
+        let commandRunner = FailingWorkspaceCatalogCommandRunner()
+        let collector = RecordingRemoteWorkspaceBrowseFactCollector(
+            result: .transportFailed("Permission denied (publickey).")
+        )
+        let fixture = try WorkspaceCatalogFixture(
+            providerHealthEvaluator: ProviderHealthFacts(commandRunner: commandRunner),
+            hostValidationEvaluator: hostValidationEvaluator,
+            workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
+            remoteWorkspaceBrowseFactCollector: collector
+        )
+        let host = try fixture.metadataStore.createHost(name: "Build Server", sshTarget: "build-box", port: nil)
+        let remoteWorkspace = try fixture.metadataStore.createRemoteWorkspace(
+            name: "Remote API",
+            hostID: host.id,
+            remotePath: "/srv/missing",
+            primaryGroupID: fixture.group.id
+        )
+
+        let overview = try await fixture.catalog.refreshWorkspaceOverview(workspaceID: remoteWorkspace.id)
+        let remoteTarget = try #require(overview.remoteTarget)
+        let claudeCard = try #require(overview.providerCards.first(where: { $0.provider.id == .claude }))
+
+        #expect(remoteTarget.hostValidation?.state == .broken)
+        #expect(remoteTarget.hostValidation?.summary == "Host requires configuration repair")
+        #expect(remoteTarget.workspaceAvailability.state == .blocked)
+        #expect(remoteTarget.workspaceAvailability.summary == "Workspace Availability is blocked by Host Validation")
+        #expect(claudeCard.health.state == .blocked)
+        #expect(claudeCard.health.summary == "Provider Health is blocked by Host Validation")
+        #expect(collector.callCount == 1)
+        #expect(hostValidationEvaluator.callCount == 0)
+        #expect(workspaceAvailabilityEvaluator.callCount == 0)
+        #expect(commandRunner.callCount == 0)
     }
 }
 
@@ -487,6 +620,7 @@ private struct WorkspaceCatalogFixture {
         providerHealthEvaluator: any ProviderHealthEvaluating = AvailableProviderHealthFacts(),
         hostValidationEvaluator: any HostValidationEvaluating = UnusedHostValidationEvaluator(),
         workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating = UnusedWorkspaceAvailabilityEvaluator(),
+        remoteWorkspaceBrowseFactCollector: any RemoteWorkspaceBrowseFactCollecting = UnusedRemoteWorkspaceBrowseFactCollector(),
         providerModuleRegistry: ProviderModuleRegistry? = nil,
         currentDate: @escaping () -> Date = Date.init
     ) throws {
@@ -521,6 +655,7 @@ private struct WorkspaceCatalogFixture {
                 providerHealthEvaluator: providerHealthEvaluator,
                 hostValidationEvaluator: hostValidationEvaluator,
                 workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
+                remoteWorkspaceBrowseFactCollector: remoteWorkspaceBrowseFactCollector,
                 sessionRuntimeManager: InMemorySessionRuntimeManager(),
                 providerModuleRegistry: providerModuleRegistry ?? ServiceSessionProviderRegistry.providerModules(),
                 currentDate: currentDate
@@ -709,6 +844,60 @@ private final class CountingWorkspaceAvailabilityEvaluator: WorkspaceAvailabilit
     func evaluate(workspace: Workspace, host: NexusDomain.Host, hostValidation: HostValidationSnapshot?) -> WorkspaceAvailabilityResult {
         callCount += 1
         return result
+    }
+}
+
+private struct UnusedRemoteWorkspaceBrowseFactCollector: RemoteWorkspaceBrowseFactCollecting {
+    func collect(workspace: Workspace, host: NexusDomain.Host) -> RemoteWorkspaceBrowseFactCollection {
+        Issue.record("Remote Workspace browse fact collection should not run for this test")
+        return .transportFailed("unused")
+    }
+}
+
+private final class RecordingRemoteWorkspaceBrowseFactCollector: RemoteWorkspaceBrowseFactCollecting, @unchecked Sendable {
+    let result: RemoteWorkspaceBrowseFactCollection
+    private(set) var callCount = 0
+
+    init(result: RemoteWorkspaceBrowseFactCollection) {
+        self.result = result
+    }
+
+    func collect(workspace: Workspace, host: NexusDomain.Host) -> RemoteWorkspaceBrowseFactCollection {
+        callCount += 1
+        return result
+    }
+}
+
+private final class FailingWorkspaceCatalogCommandRunner: ProviderCommandRunning, @unchecked Sendable {
+    private(set) var callCount = 0
+
+    func run(executable: String, arguments: [String], currentDirectoryURL: URL?) throws -> ProviderCommandResult {
+        callCount += 1
+        throw NSError(domain: "WorkspaceCatalogTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Unexpected command runner invocation."])
+    }
+}
+
+private struct WorkspaceCatalogReadinessInvocation: Equatable {
+    let hostID: UUID
+    let executable: String
+    let workingDirectory: String
+}
+
+private actor RecordingWorkspaceCatalogRemoteCodexReadinessProbe: RemoteCodexReadinessProbing {
+    private(set) var invocations: [WorkspaceCatalogReadinessInvocation] = []
+
+    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) async throws -> RemoteCodexReadinessOutcome {
+        invocations.append(WorkspaceCatalogReadinessInvocation(hostID: host.id, executable: executable, workingDirectory: workingDirectory))
+        return .ready
+    }
+}
+
+private actor RecordingWorkspaceCatalogRemotePiReadinessProbe: RemotePiReadinessProbing {
+    private(set) var invocations: [WorkspaceCatalogReadinessInvocation] = []
+
+    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) async throws -> RemotePiReadinessOutcome {
+        invocations.append(WorkspaceCatalogReadinessInvocation(hostID: host.id, executable: executable, workingDirectory: workingDirectory))
+        return .ready
     }
 }
 

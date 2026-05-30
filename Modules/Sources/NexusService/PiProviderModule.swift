@@ -284,7 +284,19 @@ private extension PiProviderModule {
             )
         }
 
-        switch await healthFacts.remotePiHealthProbe(workspace: workspace, host: host) {
+        let remoteProbeResult: RemotePiHealthProbeResult
+        if let browseFacts = remoteContext?.browseFacts,
+           let sharedHealthFacts = healthFacts as? any SharedRemotePiProviderHealthFactProviding {
+            remoteProbeResult = await sharedHealthFacts.remotePiHealthProbe(
+                workspace: workspace,
+                host: host,
+                browseFacts: browseFacts
+            )
+        } else {
+            remoteProbeResult = await healthFacts.remotePiHealthProbe(workspace: workspace, host: host)
+        }
+
+        switch remoteProbeResult {
         case let .sshResolutionLaunchFailed(message):
             return ProviderHealthSummary(
                 state: .unavailable,

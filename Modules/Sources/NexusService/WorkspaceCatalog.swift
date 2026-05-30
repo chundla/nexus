@@ -26,6 +26,7 @@ struct WorkspaceCatalogDependencies {
     let providerHealthEvaluator: any ProviderHealthEvaluating
     let hostValidationEvaluator: any HostValidationEvaluating
     let workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating
+    let remoteWorkspaceBrowseFactCollector: any RemoteWorkspaceBrowseFactCollecting
     let sessionRuntimeManager: any SessionRuntimeManaging
     let providerModuleRegistry: ProviderModuleRegistry
     let recordPerformanceDiagnostic: (PerformanceDiagnosticRecord) throws -> Void
@@ -38,6 +39,7 @@ struct WorkspaceCatalogDependencies {
         providerHealthEvaluator: any ProviderHealthEvaluating,
         hostValidationEvaluator: any HostValidationEvaluating,
         workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating,
+        remoteWorkspaceBrowseFactCollector: any RemoteWorkspaceBrowseFactCollecting = RemoteWorkspaceBrowseFactCollector(),
         sessionRuntimeManager: any SessionRuntimeManaging,
         providerModuleRegistry: ProviderModuleRegistry,
         recordPerformanceDiagnostic: @escaping (PerformanceDiagnosticRecord) throws -> Void = { _ in },
@@ -49,6 +51,7 @@ struct WorkspaceCatalogDependencies {
         self.providerHealthEvaluator = providerHealthEvaluator
         self.hostValidationEvaluator = hostValidationEvaluator
         self.workspaceAvailabilityEvaluator = workspaceAvailabilityEvaluator
+        self.remoteWorkspaceBrowseFactCollector = remoteWorkspaceBrowseFactCollector
         self.sessionRuntimeManager = sessionRuntimeManager
         self.providerModuleRegistry = providerModuleRegistry
         self.recordPerformanceDiagnostic = recordPerformanceDiagnostic
@@ -306,14 +309,15 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
                 throw NexusMetadataStoreError.workspaceNotFound
             }
 
-            let (remoteTarget, usesStaleRemoteFacts) = try trace.measure("loadRemoteTarget") {
+            let (remoteTarget, usesStaleRemoteFacts, remoteBrowseFacts) = try trace.measure("loadRemoteTarget") {
                 try workspaceOverviewRemoteTargetOverview(for: workspace, mode: mode)
             }
             let remoteContext = remoteTarget.map {
                 RemoteWorkspaceHealthContext(
                     host: $0.host,
                     hostValidation: $0.hostValidation,
-                    workspaceAvailability: $0.workspaceAvailability
+                    workspaceAvailability: $0.workspaceAvailability,
+                    browseFacts: remoteBrowseFacts
                 )
             }
 
@@ -347,34 +351,24 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
     private func workspaceOverviewRemoteTargetOverview(
         for workspace: Workspace,
         mode: WorkspaceOverviewLoadMode
-    ) throws -> (RemoteWorkspaceTargetOverview?, Bool) {
+    ) throws -> (RemoteWorkspaceTargetOverview?, Bool, RemoteWorkspaceBrowseFacts?) {
         guard workspace.kind == .remote,
               let hostID = workspace.remoteHostID,
               let host = try dependencies.metadataStore.host(id: hostID) else {
-            return (nil, false)
+            return (nil, false, nil)
         }
 
         let existingHostValidation = try dependencies.metadataStore.hostValidation(hostID: hostID)
-        let hostValidation: HostValidationSnapshot?
-        let usesStaleHostValidation: Bool
-        switch mode {
-        case .browse:
-            hostValidation = existingHostValidation
-            usesStaleHostValidation = existingHostValidation.map { isRecent($0.checkedAt) == false } ?? false
-        case .forceFresh:
-            hostValidation = try dependencies.metadataStore.saveHostValidation(
-                hostID: hostID,
-                result: dependencies.hostValidationEvaluator.validate(host: host),
-                checkedAt: dependencies.currentDate()
-            )
-            usesStaleHostValidation = false
-        }
+        let existingAvailability = try dependencies.metadataStore.workspaceAvailability(workspaceID: workspace.id)
 
-        let availability: WorkspaceAvailabilitySnapshot
-        let usesStaleAvailability: Bool
         switch mode {
         case .browse:
-            if let existingAvailability = try dependencies.metadataStore.workspaceAvailability(workspaceID: workspace.id) {
+            let hostValidation = existingHostValidation
+            let usesStaleHostValidation = existingHostValidation.map { isRecent($0.checkedAt) == false } ?? false
+
+            let availability: WorkspaceAvailabilitySnapshot
+            let usesStaleAvailability: Bool
+            if let existingAvailability {
                 if isRecent(existingAvailability.checkedAt) {
                     availability = existingAvailability
                     usesStaleAvailability = false
@@ -395,28 +389,51 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
                 )
                 usesStaleAvailability = false
             }
-        case .forceFresh:
-            let availabilityResult = dependencies.workspaceAvailabilityEvaluator.evaluate(
-                workspace: workspace,
-                host: host,
-                hostValidation: hostValidation
+
+            return (
+                RemoteWorkspaceTargetOverview(
+                    host: host,
+                    hostValidation: hostValidation,
+                    workspaceAvailability: availability
+                ),
+                usesStaleHostValidation || usesStaleAvailability,
+                nil
             )
-            availability = try dependencies.metadataStore.saveWorkspaceAvailability(
-                workspaceID: workspace.id,
-                result: availabilityResult,
+        case .forceFresh:
+            let browseFactsCollection = dependencies.remoteWorkspaceBrowseFactCollector.collect(workspace: workspace, host: host)
+            let hostValidation = try dependencies.metadataStore.saveHostValidation(
+                hostID: hostID,
+                result: hostValidationResult(from: browseFactsCollection, host: host),
                 checkedAt: dependencies.currentDate()
             )
-            usesStaleAvailability = false
-        }
+            let availability = try dependencies.metadataStore.saveWorkspaceAvailability(
+                workspaceID: workspace.id,
+                result: workspaceAvailabilityResult(
+                    from: browseFactsCollection,
+                    workspace: workspace,
+                    host: host,
+                    hostValidation: hostValidation
+                ),
+                checkedAt: dependencies.currentDate()
+            )
 
-        return (
-            RemoteWorkspaceTargetOverview(
-                host: host,
-                hostValidation: hostValidation,
-                workspaceAvailability: availability
-            ),
-            usesStaleHostValidation || usesStaleAvailability
-        )
+            let browseFacts: RemoteWorkspaceBrowseFacts? = switch browseFactsCollection {
+            case let .collected(facts):
+                facts
+            case .transportFailed:
+                nil
+            }
+
+            return (
+                RemoteWorkspaceTargetOverview(
+                    host: host,
+                    hostValidation: hostValidation,
+                    workspaceAvailability: availability
+                ),
+                false,
+                browseFacts
+            )
+        }
     }
 
     private func workspaceProviderCards(
@@ -546,6 +563,138 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
             summary: evaluated,
             checkedAt: dependencies.currentDate()
         )
+    }
+
+    private func hostValidationResult(
+        from browseFactsCollection: RemoteWorkspaceBrowseFactCollection,
+        host: NexusDomain.Host
+    ) -> HostValidationResult {
+        switch browseFactsCollection {
+        case let .transportFailed(detail):
+            let classification = classifyHostValidationFailure(detail: detail)
+            return HostValidationResult(
+                state: classification.state,
+                summary: classification.summary,
+                diagnostics: [
+                    HostValidationDiagnostic(
+                        severity: .error,
+                        code: classification.code,
+                        message: detail.isEmpty ? classification.summary : detail
+                    )
+                ]
+            )
+        case let .collected(facts):
+            if facts.tmuxAvailable {
+                return HostValidationResult(
+                    state: .available,
+                    summary: "Host is available",
+                    diagnostics: [
+                        HostValidationDiagnostic(severity: .info, code: "sshTarget", message: "Validated \(host.sshTarget)")
+                    ]
+                )
+            }
+
+            return HostValidationResult(
+                state: .broken,
+                summary: "Host is reachable but tmux is unavailable",
+                diagnostics: [
+                    HostValidationDiagnostic(
+                        severity: .error,
+                        code: "tmuxUnavailable",
+                        message: "The Host is reachable, but tmux is not available in the remote shell."
+                    )
+                ]
+            )
+        }
+    }
+
+    private func workspaceAvailabilityResult(
+        from browseFactsCollection: RemoteWorkspaceBrowseFactCollection,
+        workspace: Workspace,
+        host: NexusDomain.Host,
+        hostValidation: HostValidationSnapshot?
+    ) -> WorkspaceAvailabilityResult {
+        guard let hostValidation else {
+            return WorkspaceAvailabilityResult(
+                state: .blocked,
+                summary: "Workspace Availability is blocked by Host Validation",
+                diagnostics: [
+                    WorkspaceAvailabilityDiagnostic(
+                        severity: .warning,
+                        code: "hostValidationBlocked",
+                        message: "Workspace Availability is blocked until Host Validation runs for \(host.name)."
+                    )
+                ]
+            )
+        }
+
+        guard hostValidation.state == .available else {
+            return WorkspaceAvailabilityResult(
+                state: .blocked,
+                summary: "Workspace Availability is blocked by Host Validation",
+                diagnostics: [
+                    WorkspaceAvailabilityDiagnostic(
+                        severity: .warning,
+                        code: "hostValidationBlocked",
+                        message: "Workspace Availability is blocked by Host Validation: \(hostValidation.summary)."
+                    )
+                ]
+            )
+        }
+
+        guard case let .collected(facts) = browseFactsCollection else {
+            return WorkspaceAvailabilityResult(
+                state: .blocked,
+                summary: "Workspace Availability is blocked by Host Validation",
+                diagnostics: [
+                    WorkspaceAvailabilityDiagnostic(
+                        severity: .warning,
+                        code: "hostValidationBlocked",
+                        message: "Workspace Availability is blocked by Host Validation: \(hostValidation.summary)."
+                    )
+                ]
+            )
+        }
+
+        switch facts.workspacePath {
+        case .notChecked:
+            return WorkspaceAvailabilityResult(
+                state: .blocked,
+                summary: "Workspace Availability is blocked by Host Validation",
+                diagnostics: [
+                    WorkspaceAvailabilityDiagnostic(
+                        severity: .warning,
+                        code: "hostValidationBlocked",
+                        message: "Workspace Availability is blocked by Host Validation: \(hostValidation.summary)."
+                    )
+                ]
+            )
+        case .available:
+            return WorkspaceAvailabilityResult(
+                state: .available,
+                summary: "Workspace is available",
+                diagnostics: [
+                    WorkspaceAvailabilityDiagnostic(
+                        severity: .info,
+                        code: "remotePath",
+                        message: "Validated remote path \(workspace.folderPath) on \(host.name)."
+                    )
+                ]
+            )
+        case let .failed(detail):
+            let classification = classifyWorkspaceAvailabilityFailure(detail: detail)
+            return WorkspaceAvailabilityResult(
+                state: classification.state,
+                summary: classification.summary,
+                diagnostics: [
+                    WorkspaceAvailabilityDiagnostic(
+                        severity: .error,
+                        code: classification.code,
+                        message: detail.isEmpty ? classification.summary : detail
+                    )
+                ]
+            )
+        }
     }
 
     private func measuredStep<T>(_ name: String, _ block: () throws -> T) rethrows -> (T, PerformanceDiagnosticStep) {

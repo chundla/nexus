@@ -305,7 +305,19 @@ private extension IBMBobProviderModule {
             )
         }
 
-        switch await healthFacts.remoteIBMBobPassiveProbe(workspace: workspace, host: host) {
+        let remoteProbeResult: RemoteIBMBobPassiveProbeResult
+        if let browseFacts = remoteContext?.browseFacts,
+           let sharedHealthFacts = healthFacts as? any SharedRemoteIBMBobProviderHealthFactProviding {
+            remoteProbeResult = await sharedHealthFacts.remoteIBMBobPassiveProbe(
+                workspace: workspace,
+                host: host,
+                browseFacts: browseFacts
+            )
+        } else {
+            remoteProbeResult = await healthFacts.remoteIBMBobPassiveProbe(workspace: workspace, host: host)
+        }
+
+        switch remoteProbeResult {
         case let .sshResolutionLaunchFailed(message):
             return ProviderHealthSummary(
                 state: .unavailable,

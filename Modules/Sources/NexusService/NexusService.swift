@@ -1276,6 +1276,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 providerHealthEvaluator: providerHealthEvaluator,
                 hostValidationEvaluator: hostValidationEvaluator,
                 workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
+                remoteWorkspaceBrowseFactCollector: RemoteWorkspaceBrowseFactCollector(),
                 sessionRuntimeManager: sessionRuntimeManager,
                 providerModuleRegistry: self.providerModuleRegistry,
                 recordPerformanceDiagnostic: { [metadataStore] in

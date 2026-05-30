@@ -41,7 +41,7 @@ struct HostValidationEvaluator: HostValidationEvaluating {
                 )
             }
 
-            let detail = firstDiagnosticLine(stdout: result.stdout, stderr: result.stderr)
+            let detail = providerCommandFirstDiagnosticLine(stdout: result.stdout, stderr: result.stderr)
             if detail.isEmpty, result.exitStatus == 1 {
                 return HostValidationResult(
                     state: .broken,
@@ -56,7 +56,7 @@ struct HostValidationEvaluator: HostValidationEvaluating {
                 )
             }
 
-            let classification = classifyFailure(detail: detail)
+            let classification = classifyHostValidationFailure(detail: detail)
             return HostValidationResult(
                 state: classification.state,
                 summary: classification.summary,
@@ -75,34 +75,6 @@ struct HostValidationEvaluator: HostValidationEvaluating {
         }
     }
 
-    private func firstDiagnosticLine(stdout: String, stderr: String) -> String {
-        [stderr, stdout]
-            .joined(separator: "\n")
-            .split(whereSeparator: \.isNewline)
-            .map(String.init)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .first(where: { $0.isEmpty == false }) ?? ""
-    }
 
-    private func classifyFailure(detail: String) -> (state: HostValidationSnapshot.State, summary: String, code: String) {
-        let normalized = detail.lowercased()
-
-        if normalized.contains("permission denied")
-            || normalized.contains("could not resolve hostname")
-            || normalized.contains("bad configuration option")
-            || normalized.contains("no such host") {
-            return (.broken, "Host requires configuration repair", "sshConfigurationFailed")
-        }
-
-        if normalized.contains("connection timed out")
-            || normalized.contains("operation timed out")
-            || normalized.contains("connection refused")
-            || normalized.contains("network is unreachable")
-            || normalized.contains("no route to host") {
-            return (.unavailable, "Host is currently unavailable", "sshUnavailable")
-        }
-
-        return (.broken, "Host validation failed", "sshValidationFailed")
-    }
 }
 #endif

@@ -253,7 +253,19 @@ private extension CodexProviderModule {
             )
         }
 
-        switch await healthFacts.remoteCodexHealthProbe(workspace: workspace, host: host) {
+        let remoteProbeResult: RemoteCodexHealthProbeResult
+        if let browseFacts = remoteContext?.browseFacts,
+           let sharedHealthFacts = healthFacts as? any SharedRemoteCodexProviderHealthFactProviding {
+            remoteProbeResult = await sharedHealthFacts.remoteCodexHealthProbe(
+                workspace: workspace,
+                host: host,
+                browseFacts: browseFacts
+            )
+        } else {
+            remoteProbeResult = await healthFacts.remoteCodexHealthProbe(workspace: workspace, host: host)
+        }
+
+        switch remoteProbeResult {
         case let .sshResolutionLaunchFailed(message):
             return ProviderHealthSummary(
                 state: .unavailable,

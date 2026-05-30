@@ -244,12 +244,26 @@ private extension ClaudeProviderModule {
             )
         }
 
-        switch await healthFacts.remoteCLIHealthProbe(
-            commandName: "claude",
-            providerName: provider.displayName,
-            workspace: workspace,
-            host: host
-        ) {
+        let remoteProbeResult: RemoteCLIHealthProbeResult
+        if let browseFacts = remoteContext?.browseFacts,
+           let sharedHealthFacts = healthFacts as? any SharedRemoteCLIProviderHealthFactProviding {
+            remoteProbeResult = await sharedHealthFacts.remoteCLIHealthProbe(
+                commandName: "claude",
+                providerName: provider.displayName,
+                workspace: workspace,
+                host: host,
+                browseFacts: browseFacts
+            )
+        } else {
+            remoteProbeResult = await healthFacts.remoteCLIHealthProbe(
+                commandName: "claude",
+                providerName: provider.displayName,
+                workspace: workspace,
+                host: host
+            )
+        }
+
+        switch remoteProbeResult {
         case let .sshLaunchFailed(message):
             return ProviderHealthSummary(
                 state: .unavailable,

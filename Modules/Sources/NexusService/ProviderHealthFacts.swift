@@ -177,10 +177,57 @@ protocol IBMBobProviderHealthFactProviding: Sendable {
     func remoteIBMBobPassiveProbe(workspace: Workspace, host: NexusDomain.Host) async -> RemoteIBMBobPassiveProbeResult
 }
 
+protocol SharedRemoteCLIProviderHealthFactProviding: Sendable {
+    func remoteCLIHealthProbe(
+        commandName: String,
+        providerName: String,
+        workspace: Workspace,
+        host: NexusDomain.Host,
+        browseFacts: RemoteWorkspaceBrowseFacts
+    ) async -> RemoteCLIHealthProbeResult
+}
+
+protocol SharedRemoteCodexProviderHealthFactProviding: Sendable {
+    func remoteCodexHealthProbe(
+        workspace: Workspace,
+        host: NexusDomain.Host,
+        browseFacts: RemoteWorkspaceBrowseFacts
+    ) async -> RemoteCodexHealthProbeResult
+}
+
+protocol SharedRemotePiProviderHealthFactProviding: Sendable {
+    func remotePiHealthProbe(
+        workspace: Workspace,
+        host: NexusDomain.Host,
+        browseFacts: RemoteWorkspaceBrowseFacts
+    ) async -> RemotePiHealthProbeResult
+}
+
+protocol SharedRemoteIBMBobProviderHealthFactProviding: Sendable {
+    func remoteIBMBobPassiveProbe(
+        workspace: Workspace,
+        host: NexusDomain.Host,
+        browseFacts: RemoteWorkspaceBrowseFacts
+    ) async -> RemoteIBMBobPassiveProbeResult
+}
+
 struct RemoteWorkspaceHealthContext {
     let host: NexusDomain.Host
     let hostValidation: HostValidationSnapshot?
     let workspaceAvailability: WorkspaceAvailabilitySnapshot?
+    let browseFacts: RemoteWorkspaceBrowseFacts?
+
+    init(
+        host: NexusDomain.Host,
+        hostValidation: HostValidationSnapshot?,
+        workspaceAvailability: WorkspaceAvailabilitySnapshot?,
+        browseFacts: RemoteWorkspaceBrowseFacts? = nil
+    ) {
+        self.host = host
+        self.hostValidation = hostValidation
+        self.workspaceAvailability = workspaceAvailability
+        self.browseFacts = browseFacts
+    }
 }
 
 protocol ProviderHealthEvaluating: Sendable {
@@ -209,7 +256,7 @@ extension ProviderHealthEvaluating {
     }
 }
 
-struct ProviderHealthFacts: ProviderHealthEvaluating, CLIProviderHealthFactProviding, CodexProviderHealthFactProviding, PiProviderHealthFactProviding, IBMBobProviderHealthFactProviding, @unchecked Sendable {
+struct ProviderHealthFacts: ProviderHealthEvaluating, CLIProviderHealthFactProviding, CodexProviderHealthFactProviding, PiProviderHealthFactProviding, IBMBobProviderHealthFactProviding, SharedRemoteCLIProviderHealthFactProviding, SharedRemoteCodexProviderHealthFactProviding, SharedRemotePiProviderHealthFactProviding, SharedRemoteIBMBobProviderHealthFactProviding, @unchecked Sendable {
     let executableResolver: any ProviderExecutableResolving
     let commandRunner: any ProviderCommandRunning
     let localShellCommandBuilder: LocalShellCommandBuilder
@@ -303,6 +350,81 @@ struct ProviderHealthFacts: ProviderHealthEvaluating, CLIProviderHealthFactProvi
         }
     }
 
+    func remoteCLIHealthProbe(
+        commandName: String,
+        providerName: String,
+        workspace: Workspace,
+        host: NexusDomain.Host,
+        browseFacts: RemoteWorkspaceBrowseFacts
+    ) async -> RemoteCLIHealthProbeResult {
+        let providerID = providerID(forRemoteCommandName: commandName)
+        let fact = providerID.flatMap { browseFacts.providerFacts[$0] }
+
+        if let resolutionDetail = fact?.resolutionDetail {
+            return .probeFailed(resolutionDetail)
+        }
+
+        if let probeDetail = fact?.probeDetail {
+            return .probeFailed(probeDetail)
+        }
+
+        guard let executable = fact?.executable else {
+            return .probeFailed(remoteExecutableNotFoundMarker(commandName: commandName))
+        }
+
+        return .ready(
+            executable: executable,
+            version: fact?.version,
+            diagnostics: [
+                ProviderHealthDiagnostic(
+                    severity: .info,
+                    code: "remoteProbe",
+                    message: "Validated remote \(providerName) launch prerequisites on \(host.name) for \(workspace.folderPath)."
+                )
+            ]
+        )
+    }
+
+    func remoteCodexHealthProbe(workspace: Workspace, host: NexusDomain.Host, browseFacts: RemoteWorkspaceBrowseFacts) async -> RemoteCodexHealthProbeResult {
+        let fact = browseFacts.providerFacts[.codex]
+        if let resolutionDetail = fact?.resolutionDetail {
+            return .resolutionProbeFailed(resolutionDetail)
+        }
+        guard let executable = fact?.executable else {
+            return .resolutionReturnedNoExecutable
+        }
+        let version = fact?.version
+        let diagnostics = [
+            ProviderHealthDiagnostic(
+                severity: .info,
+                code: "remoteProbe",
+                message: "Validated remote Codex launch prerequisites on \(host.name) for \(workspace.folderPath)."
+            )
+        ]
+
+        do {
+            switch try await remoteCodexReadinessProbe.probe(host: host, executable: executable, workingDirectory: workspace.folderPath) {
+            case .ready:
+                return .ready(executable: executable, version: version, diagnostics: diagnostics)
+            case let .authenticationRequired(message):
+                return .authenticationRequired(executable: executable, version: version, message: message)
+            case let .authenticationUncertain(message):
+                return .authenticationUncertain(
+                    executable: executable,
+                    version: version,
+                    diagnostics: diagnostics,
+                    message: message
+                )
+            }
+        } catch {
+            return .readinessProbeFailed(
+                executable: executable,
+                version: version,
+                detail: error.localizedDescription
+            )
+        }
+    }
+
     func remoteCodexHealthProbe(workspace: Workspace, host: NexusDomain.Host) async -> RemoteCodexHealthProbeResult {
         let result: ProviderCommandResult
         do {
@@ -338,6 +460,46 @@ struct ProviderHealthFacts: ProviderHealthEvaluating, CLIProviderHealthFactProvi
 
         do {
             switch try await remoteCodexReadinessProbe.probe(host: host, executable: executable, workingDirectory: workspace.folderPath) {
+            case .ready:
+                return .ready(executable: executable, version: version, diagnostics: diagnostics)
+            case let .authenticationRequired(message):
+                return .authenticationRequired(executable: executable, version: version, message: message)
+            case let .authenticationUncertain(message):
+                return .authenticationUncertain(
+                    executable: executable,
+                    version: version,
+                    diagnostics: diagnostics,
+                    message: message
+                )
+            }
+        } catch {
+            return .readinessProbeFailed(
+                executable: executable,
+                version: version,
+                detail: error.localizedDescription
+            )
+        }
+    }
+
+    func remotePiHealthProbe(workspace: Workspace, host: NexusDomain.Host, browseFacts: RemoteWorkspaceBrowseFacts) async -> RemotePiHealthProbeResult {
+        let fact = browseFacts.providerFacts[.pi]
+        if let resolutionDetail = fact?.resolutionDetail {
+            return .resolutionProbeFailed(resolutionDetail)
+        }
+        guard let executable = fact?.executable else {
+            return .resolutionReturnedNoExecutable
+        }
+        let version = fact?.version
+        let diagnostics = [
+            ProviderHealthDiagnostic(
+                severity: .info,
+                code: "remoteProbe",
+                message: "Validated remote Pi launch prerequisites on \(host.name) for \(workspace.folderPath)."
+            )
+        ]
+
+        do {
+            switch try await remotePiReadinessProbe.probe(host: host, executable: executable, workingDirectory: workspace.folderPath) {
             case .ready:
                 return .ready(executable: executable, version: version, diagnostics: diagnostics)
             case let .authenticationRequired(message):
@@ -413,6 +575,21 @@ struct ProviderHealthFacts: ProviderHealthEvaluating, CLIProviderHealthFactProvi
                 detail: error.localizedDescription
             )
         }
+    }
+
+    func remoteIBMBobPassiveProbe(workspace: Workspace, host: NexusDomain.Host, browseFacts: RemoteWorkspaceBrowseFacts) async -> RemoteIBMBobPassiveProbeResult {
+        let fact = browseFacts.providerFacts[.ibmBob]
+        if let resolutionDetail = fact?.resolutionDetail {
+            return .resolutionProbeFailed(resolutionDetail)
+        }
+        guard let executable = fact?.executable else {
+            return .resolutionReturnedNoExecutable
+        }
+        return .passiveProbeCompleted(
+            executable: executable,
+            version: fact?.version,
+            detail: fact?.probeDetail
+        )
     }
 
     func remoteIBMBobPassiveProbe(workspace: Workspace, host: NexusDomain.Host) async -> RemoteIBMBobPassiveProbeResult {
@@ -855,6 +1032,21 @@ struct ProviderHealthFacts: ProviderHealthEvaluating, CLIProviderHealthFactProvi
         let shellCandidates = ShellSupport.remoteShellCandidateListScript()
 
         return "cd \(shellQuoted(workspace.folderPath)) || { echo 'NEXUS_REMOTE_WORKSPACE_UNAVAILABLE' >&2; exit 1; }; command -v tmux >/dev/null 2>&1 || { echo 'NEXUS_REMOTE_TMUX_UNAVAILABLE' >&2; exit 1; }; \(resolveFunctionName)() { for shell in \(shellCandidates); do [ -n \"$shell\" ] || continue; [ -x \"$shell\" ] || continue; case \"${shell##*/}\" in csh|tcsh) CANDIDATE=\"$(\"$shell\" -i -c \"if ( -f ~/.login ) source ~/.login; command -v \(commandName)\" 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -c \"if ( -f ~/.login ) source ~/.login; command -v \(commandName)\" 2>/dev/null)\" || continue ;; fish) CANDIDATE=\"$(\"$shell\" -i -c \"command -v \(commandName)\" 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -l -c \"command -v \(commandName)\" 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -c \"command -v \(commandName)\" 2>/dev/null)\" || continue ;; *) CANDIDATE=\"$(\"$shell\" -lic \(shellCommand) 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -lc \(shellCommand) 2>/dev/null)\" || continue ;; esac; [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; for CANDIDATE in \(fallbackCandidates); do [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; return 1; }; \(commandPathVariable)=\"$(\(resolveFunctionName))\" || { echo '\(notFoundMarker)' >&2; exit 1; }; [ -n \"$\(commandPathVariable)\" ] || { echo '\(notFoundMarker)' >&2; exit 1; }; printf '%s\\n' \"$\(commandPathVariable)\"; \"$\(commandPathVariable)\" --version; \"$\(commandPathVariable)\" --help >/dev/null 2>&1"
+    }
+
+    private func providerID(forRemoteCommandName commandName: String) -> ProviderID? {
+        switch commandName {
+        case "claude":
+            .claude
+        case "codex":
+            .codex
+        case "pi":
+            .pi
+        case "bob":
+            .ibmBob
+        default:
+            nil
+        }
     }
 
     private func firstDiagnosticLine(stdout: String, stderr: String) -> String {
