@@ -113,6 +113,50 @@ struct NexusServiceRemotePiStructuredSessionTests {
         #expect(promptedScreen.transcript == "> hello\nRemote hello")
     }
 
+    @Test func remoteControllerCanCyclePiThinkingLevelAndViewerSeesSharedStructuredActivity() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let transportHarness = RemotePiTransportHarness()
+        let service = try makeRemotePiService(rootURL: rootURL, transportHarness: transportHarness)
+
+        let group = try service.createWorkspaceGroup(name: "Remote")
+        let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
+        _ = try service.validateHost(hostID: host.id)
+        let workspace = try service.createRemoteWorkspace(
+            name: "Remote Pi",
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: group.id
+        )
+
+        let pairedDeviceID = UUID()
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+        _ = try service.takeRemoteSessionControl(
+            sessionID: session.id,
+            pairedDeviceID: pairedDeviceID,
+            columns: 44,
+            rows: 12
+        )
+        let controllerScreen = try service.sendRemoteSessionInput(
+            sessionID: session.id,
+            pairedDeviceID: pairedDeviceID,
+            text: "/cycle-thinking-level"
+        )
+        let viewerScreen = try service.getSessionScreen(sessionID: session.id)
+
+        #expect(controllerScreen.primarySurface == .structuredActivityFeed)
+        #expect(controllerScreen.controller == .pairedDevice(pairedDeviceID))
+        #expect(controllerScreen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "/cycle-thinking-level",
+            "Pi thinking level cycled to high"
+        ])
+        #expect(viewerScreen.controller == .pairedDevice(pairedDeviceID))
+        #expect(viewerScreen.activityItems == controllerScreen.activityItems)
+    }
+
     @Test func remoteControllerCanQueueFollowUpCommandThroughStructuredPiSessionAPI() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)
@@ -808,6 +852,14 @@ private final class RemotePiTransport: PiRPCTransporting, @unchecked Sendable {
                 "type": "queue_update",
                 "steering": [],
                 "followUp": [message]
+            ])
+        case "cycle_thinking_level":
+            emit([
+                "id": object["id"] as? String ?? "cycle-thinking-level",
+                "type": "response",
+                "command": "cycle_thinking_level",
+                "success": true,
+                "data": ["level": "high"]
             ])
         default:
             return

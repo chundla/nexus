@@ -108,6 +108,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     private var isStreaming = false
     private var assistantTranscriptIndex: Int?
     private var currentAssistantText = ""
+    private var lastAssistantStopReason: String?
     private var toolOutputByCallID: [String: String] = [:]
     private var toolNamesByCallID: [String: String] = [:]
     private var didRequestStop = false
@@ -543,6 +544,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             isStreaming = true
             assistantTranscriptIndex = nil
             currentAssistantText = ""
+            lastAssistantStopReason = nil
         }
         draft = ""
         transcriptEntries.append("> \(promptSummaryText(for: resolvedPrompt))")
@@ -1292,6 +1294,8 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         switch type {
         case "agent_start":
             notifyChange()
+        case "agent_end":
+            handleAgentEnd(object)
         case "message_update":
             handleMessageUpdate(object)
         case "message_end":
@@ -1614,6 +1618,36 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             }
             lock.unlock()
             notifyChange()
+        case "thinking_start":
+            lock.lock()
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi is thinking"))
+            lock.unlock()
+            notifyChange()
+        case "thinking_end":
+            let thinkingText = assistantThinkingText(from: assistantMessageEvent)
+            guard thinkingText.isEmpty == false else {
+                return
+            }
+
+            lock.lock()
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi thought: \(thinkingText)"))
+            lock.unlock()
+            notifyChange()
+        case "toolcall_end":
+            guard let toolCall = assistantMessageEvent["toolCall"] as? [String: Any],
+                  let toolName = string(for: "name", in: toolCall) else {
+                return
+            }
+
+            let callText = toolExecutionCallText(toolName: toolName, args: toolCall["arguments"] as? [String: Any])
+            guard callText.isEmpty == false else {
+                return
+            }
+
+            lock.lock()
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi prepared tool call: \(callText)"))
+            lock.unlock()
+            notifyChange()
         default:
             return
         }
@@ -1644,6 +1678,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         toolOutputByCallID.removeAll()
         toolNamesByCallID.removeAll()
         isStreaming = false
+        lastAssistantStopReason = stopReason
         appendActivityItemLocked(SessionActivityItem(kind: .error, text: errorText))
         lock.unlock()
         requestSlashCommands()
@@ -1748,8 +1783,26 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         toolOutputByCallID.removeAll()
         toolNamesByCallID.removeAll()
         isStreaming = false
+        lastAssistantStopReason = "stop"
         lock.unlock()
         requestSlashCommands()
+        notifyChange()
+    }
+
+    private func handleAgentEnd(_ object: [String: Any]) {
+        guard bool(for: "willRetry", in: object) != true else {
+            notifyChange()
+            return
+        }
+
+        let shouldAppendCompletion: Bool
+        lock.lock()
+        shouldAppendCompletion = lastAssistantStopReason != "aborted" && lastAssistantStopReason != "error"
+        if shouldAppendCompletion {
+            appendActivityItemLocked(SessionActivityItem(kind: .completion, text: "Pi turn complete"))
+        }
+        lock.unlock()
+
         notifyChange()
     }
 
@@ -2861,6 +2914,27 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             return "\(target) — \(name)"
         }
         return target
+    }
+
+    private func assistantThinkingText(from event: [String: Any]) -> String {
+        if let content = trimmedString(for: "content", in: event) {
+            return content
+        }
+
+        guard let partial = event["partial"] as? [String: Any],
+              let content = partial["content"] as? [[String: Any]] else {
+            return ""
+        }
+
+        return content
+            .compactMap { block -> String? in
+                guard string(for: "type", in: block) == "thinking" else {
+                    return nil
+                }
+                return trimmedString(for: "thinking", in: block)
+            }
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func toolExecutionCallText(toolName: String, args: [String: Any]?) -> String {

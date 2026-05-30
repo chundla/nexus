@@ -1520,6 +1520,173 @@ struct NexusServicePiSessionStreamTests {
         #expect(screen.transcript == "> hello\nworld")
     }
 
+    @Test func localPiRuntimeProjectsAssistantThinkingToolCallsAndCompletionIntoSharedSessionActivity() throws {
+        let transport = PromptEventPiRPCTransport(promptEvents: [
+            ["type": "agent_start", "agent": "pi"],
+            [
+                "type": "message_update",
+                "assistantMessageEvent": [
+                    "type": "thinking_start",
+                    "partial": [
+                        "content": [[
+                            "type": "thinking",
+                            "thinking": ""
+                        ]]
+                    ]
+                ]
+            ],
+            [
+                "type": "message_update",
+                "assistantMessageEvent": [
+                    "type": "thinking_end",
+                    "content": "Inspect the auth flow before running tools.",
+                    "partial": [
+                        "content": [[
+                            "type": "thinking",
+                            "thinking": "Inspect the auth flow before running tools."
+                        ]]
+                    ]
+                ]
+            ],
+            [
+                "type": "message_update",
+                "assistantMessageEvent": [
+                    "type": "toolcall_end",
+                    "toolCall": [
+                        "type": "toolCall",
+                        "id": "tool-1",
+                        "name": "subagent",
+                        "arguments": [
+                            "agent": "reviewer",
+                            "task": "Inspect the auth flow"
+                        ]
+                    ]
+                ]
+            ],
+            [
+                "type": "turn_end",
+                "message": [
+                    "content": [[
+                        "type": "text",
+                        "text": "Done"
+                    ]]
+                ]
+            ],
+            [
+                "type": "agent_end",
+                "messages": []
+            ]
+        ])
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("inspect auth")
+        let screen = runtime.sessionScreen(for: session)
+        let providerEvents = screen.providerEvents.filter { $0.family != .response }
+
+        #expect(providerEvents.map(\.type) == [
+            "agent_start",
+            "message_update",
+            "message_update",
+            "message_update",
+            "turn_end",
+            "agent_end"
+        ])
+        #expect(providerEvents.map(\.family) == [
+            .agent,
+            .message,
+            .message,
+            .message,
+            .turn,
+            .agent
+        ])
+        #expect(screen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "You: inspect auth",
+            "Pi is thinking",
+            "Pi thought: Inspect the auth flow before running tools.",
+            "Pi prepared tool call: subagent reviewer: Inspect the auth flow",
+            "Pi: Done",
+            "Pi turn complete"
+        ])
+        #expect(screen.activityItems.map(\.kind) == [
+            .status,
+            .message,
+            .status,
+            .status,
+            .status,
+            .message,
+            .completion
+        ])
+        #expect(screen.transcript == "> inspect auth\nDone")
+    }
+
+    @Test func localPiRuntimeProjectsAssistantMessageErrorsWithoutReportingFalseCompletion() throws {
+        let transport = PromptEventPiRPCTransport(promptEvents: [
+            [
+                "type": "message_update",
+                "assistantMessageEvent": [
+                    "type": "text_delta",
+                    "delta": "Partial answer"
+                ]
+            ],
+            [
+                "type": "message_end",
+                "message": [
+                    "role": "assistant",
+                    "stopReason": "error",
+                    "errorMessage": "Provider overloaded",
+                    "content": [[
+                        "type": "text",
+                        "text": "Partial answer"
+                    ]]
+                ]
+            ],
+            [
+                "type": "agent_end",
+                "messages": []
+            ]
+        ])
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("inspect auth")
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(screen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "You: inspect auth",
+            "Pi: Partial answer",
+            "Provider overloaded"
+        ])
+        #expect(screen.activityItems.contains(where: { $0.kind == .completion }) == false)
+        #expect(screen.transcript == "> inspect auth\nPartial answer")
+    }
+
     @Test func localPiRuntimeProjectsCompactionAndRetryLifecycleIntoSharedSessionActivity() throws {
         let transport = PromptEventPiRPCTransport(promptEvents: [
             ["type": "compaction_start", "reason": "manual"],
