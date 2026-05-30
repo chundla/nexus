@@ -277,6 +277,34 @@ struct NexusServicePiSessionStreamTests {
         #expect(screen.slashCommands?.contains(where: { $0.name == "thinking xhigh" }) == true)
     }
 
+    @Test func localPiRuntimePublishesCompactionAndRetryConvenienceCommands() throws {
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in TestPiRPCTransport() }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        let commandNames = runtime.sessionScreen(for: session).slashCommands?.map(\.name) ?? []
+
+        #expect(commandNames.contains("cycle-model"))
+        #expect(commandNames.contains("cycle-thinking-level"))
+        #expect(commandNames.contains("compact"))
+        #expect(commandNames.contains("auto-compaction on"))
+        #expect(commandNames.contains("auto-compaction off"))
+        #expect(commandNames.contains("auto-retry on"))
+        #expect(commandNames.contains("auto-retry off"))
+        #expect(commandNames.contains("abort-retry"))
+    }
+
     @Test func localPiRuntimeSwitchesModelsViaBuiltInModelCommand() throws {
         let transport = TestPiRPCTransport(
             availableModels: [
@@ -353,6 +381,159 @@ struct NexusServicePiSessionStreamTests {
             "Current Pi model: anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4 (thinking: high)"
         ])
         #expect(screen.activityItems.map(\.kind) == [.status, .status, .command, .status, .status])
+    }
+
+    @Test func localPiRuntimeCyclesModelsViaConvenienceCommand() throws {
+        let transport = TestPiRPCTransport(
+            stateModel: TestPiRPCModel(
+                provider: "anthropic",
+                id: "claude-sonnet-4-20250514",
+                name: "Claude Sonnet 4"
+            ),
+            stateThinkingLevel: "medium",
+            cycledModel: TestPiRPCModel(
+                provider: "openai",
+                id: "gpt-4o",
+                name: "GPT-4o"
+            ),
+            cycledThinkingLevel: "high"
+        )
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("/cycle-model")
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"cycle_model\"") }))
+        #expect(screen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "Current Pi model: anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4 (thinking: medium)",
+            "/cycle-model",
+            "Pi model cycled to openai/gpt-4o — GPT-4o",
+            "Current Pi model: openai/gpt-4o — GPT-4o (thinking: high)"
+        ])
+        #expect(screen.activityItems.map(\.kind) == [.status, .status, .command, .status, .status])
+    }
+
+    @Test func localPiRuntimeCyclesThinkingLevelsViaConvenienceCommand() throws {
+        let transport = TestPiRPCTransport(
+            stateModel: TestPiRPCModel(
+                provider: "anthropic",
+                id: "claude-sonnet-4-20250514",
+                name: "Claude Sonnet 4",
+                reasoning: true
+            ),
+            stateThinkingLevel: "medium",
+            cycledThinkingLevelResult: "high"
+        )
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("/cycle-thinking-level")
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"cycle_thinking_level\"") }))
+        #expect(screen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "Current Pi model: anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4 (thinking: medium)",
+            "/cycle-thinking-level",
+            "Pi thinking level cycled to high",
+            "Current Pi model: anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4 (thinking: high)"
+        ])
+        #expect(screen.activityItems.map(\.kind) == [.status, .status, .command, .status, .status])
+    }
+
+    @Test func localPiRuntimeCompactsViaConvenienceCommand() throws {
+        let transport = TestPiRPCTransport(compactionSummary: "Focus on the latest code changes", compactionTokensBefore: 150000)
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("/compact Focus on the latest code changes")
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(transport.sentLines.contains(where: {
+            $0.contains("\"type\":\"compact\"") && $0.contains("\"customInstructions\":\"Focus on the latest code changes\"")
+        }))
+        #expect(screen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "/compact Focus on the latest code changes",
+            "Pi compacted the Session context",
+            "Compaction summary: Focus on the latest code changes"
+        ])
+        #expect(screen.activityItems.map(\.kind) == [.status, .command, .status, .status])
+    }
+
+    @Test func localPiRuntimeUpdatesAutoCompactionAndRetryViaConvenienceCommands() throws {
+        let transport = TestPiRPCTransport()
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("/auto-compaction off")
+        try runtime.sendInput("/auto-retry on")
+        try runtime.sendInput("/abort-retry")
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"set_auto_compaction\"") && $0.contains("\"enabled\":false") }))
+        #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"set_auto_retry\"") && $0.contains("\"enabled\":true") }))
+        #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"abort_retry\"") }))
+        #expect(screen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "/auto-compaction off",
+            "Pi auto-compaction disabled",
+            "/auto-retry on",
+            "Pi auto-retry enabled",
+            "/abort-retry",
+            "Requested Pi retry cancellation"
+        ])
+        #expect(screen.activityItems.map(\.kind) == [.status, .command, .status, .command, .status, .command, .status])
     }
 
     @Test func localPiRuntimeSendsMultimodalPromptAndProjectsImageSummary() throws {
@@ -2636,6 +2817,11 @@ private final class TestPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
     private let lastAssistantText: String?
     private let stateModel: TestPiRPCModel?
     private let stateThinkingLevel: String?
+    private let cycledModel: TestPiRPCModel?
+    private let cycledThinkingLevel: String?
+    private let cycledThinkingLevelResult: String?
+    private let compactionSummary: String?
+    private let compactionTokensBefore: Int?
     private(set) var sentLines: [String] = []
     private var stdoutLineHandler: (@Sendable (String) -> Void)?
     private var terminationHandler: (@Sendable (Int32) -> Void)?
@@ -2651,7 +2837,12 @@ private final class TestPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
         sessionStats: [String: Any]? = nil,
         lastAssistantText: String? = nil,
         stateModel: TestPiRPCModel? = nil,
-        stateThinkingLevel: String? = nil
+        stateThinkingLevel: String? = nil,
+        cycledModel: TestPiRPCModel? = nil,
+        cycledThinkingLevel: String? = nil,
+        cycledThinkingLevelResult: String? = nil,
+        compactionSummary: String? = nil,
+        compactionTokensBefore: Int? = nil
     ) {
         self.promptResponseText = promptResponseText
         self.slashCommands = slashCommands
@@ -2664,6 +2855,11 @@ private final class TestPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
         self.lastAssistantText = lastAssistantText
         self.stateModel = stateModel
         self.stateThinkingLevel = stateThinkingLevel
+        self.cycledModel = cycledModel
+        self.cycledThinkingLevel = cycledThinkingLevel
+        self.cycledThinkingLevelResult = cycledThinkingLevelResult
+        self.compactionSummary = compactionSummary
+        self.compactionTokensBefore = compactionTokensBefore
     }
 
     func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
@@ -2753,11 +2949,74 @@ private final class TestPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
                     "error": "Model not found: \(provider)/\(modelID)"
                 ])
             }
+        case "cycle_model":
+            if let cycledModel {
+                emit([
+                    "id": object["id"] as? String ?? "cycle-model",
+                    "type": "response",
+                    "command": "cycle_model",
+                    "success": true,
+                    "data": [
+                        "model": cycledModel.responseObject(),
+                        "thinkingLevel": cycledThinkingLevel as Any
+                    ]
+                ])
+            } else {
+                emit([
+                    "id": object["id"] as? String ?? "cycle-model",
+                    "type": "response",
+                    "command": "cycle_model",
+                    "success": true,
+                    "data": NSNull()
+                ])
+            }
+        case "cycle_thinking_level":
+            emit([
+                "id": object["id"] as? String ?? "cycle-thinking-level",
+                "type": "response",
+                "command": "cycle_thinking_level",
+                "success": true,
+                "data": cycledThinkingLevelResult.map { ["level": $0] } ?? NSNull()
+            ])
         case "set_thinking_level":
             emit([
                 "id": object["id"] as? String ?? "set-thinking-level",
                 "type": "response",
                 "command": "set_thinking_level",
+                "success": true
+            ])
+        case "compact":
+            emit([
+                "id": object["id"] as? String ?? "compact",
+                "type": "response",
+                "command": "compact",
+                "success": true,
+                "data": [
+                    "summary": compactionSummary ?? "Summary of conversation...",
+                    "firstKeptEntryId": "entry-1",
+                    "tokensBefore": compactionTokensBefore ?? 0,
+                    "details": [:]
+                ]
+            ])
+        case "set_auto_compaction":
+            emit([
+                "id": object["id"] as? String ?? "auto-compaction",
+                "type": "response",
+                "command": "set_auto_compaction",
+                "success": true
+            ])
+        case "set_auto_retry":
+            emit([
+                "id": object["id"] as? String ?? "auto-retry",
+                "type": "response",
+                "command": "set_auto_retry",
+                "success": true
+            ])
+        case "abort_retry":
+            emit([
+                "id": object["id"] as? String ?? "abort-retry",
+                "type": "response",
+                "command": "abort_retry",
                 "success": true
             ])
         case "bash":

@@ -371,6 +371,45 @@ public func structuredSessionSlashCommands(for screen: SessionScreen) -> [Struct
                     summary: "Set Pi's thinking level."
                 ),
                 StructuredSessionSlashCommand(
+                    matchText: "cycle-model",
+                    displayText: "/cycle-model",
+                    insertionText: "/cycle-model",
+                    summary: "Cycle Pi to the next available model."
+                ),
+                StructuredSessionSlashCommand(
+                    matchText: "cycle-thinking-level",
+                    displayText: "/cycle-thinking-level",
+                    insertionText: "/cycle-thinking-level",
+                    summary: "Cycle Pi to the next available thinking level."
+                ),
+                StructuredSessionSlashCommand(
+                    matchText: "compact",
+                    displayText: "/compact [instructions]",
+                    insertionText: "/compact ",
+                    summary: "Compact the current Pi Session context.",
+                    acceptsArguments: true
+                ),
+                StructuredSessionSlashCommand(
+                    matchText: "auto-compaction",
+                    displayText: "/auto-compaction <on|off>",
+                    insertionText: "/auto-compaction ",
+                    summary: "Enable or disable Pi auto-compaction.",
+                    acceptsArguments: true
+                ),
+                StructuredSessionSlashCommand(
+                    matchText: "auto-retry",
+                    displayText: "/auto-retry <on|off>",
+                    insertionText: "/auto-retry ",
+                    summary: "Enable or disable Pi auto-retry.",
+                    acceptsArguments: true
+                ),
+                StructuredSessionSlashCommand(
+                    matchText: "abort-retry",
+                    displayText: "/abort-retry",
+                    insertionText: "/abort-retry",
+                    summary: "Abort the current Pi retry delay."
+                ),
+                StructuredSessionSlashCommand(
                     matchText: "steer",
                     displayText: "/steer <message>",
                     insertionText: "/steer ",

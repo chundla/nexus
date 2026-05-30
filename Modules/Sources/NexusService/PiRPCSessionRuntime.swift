@@ -118,6 +118,8 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     private var pendingSetSteeringModesByRequestID: [String: String] = [:]
     private var pendingSetFollowUpModesByRequestID: [String: String] = [:]
     private var pendingSetSessionNamesByRequestID: [String: String] = [:]
+    private var pendingAutoCompactionSettingsByRequestID: [String: Bool] = [:]
+    private var pendingAutoRetrySettingsByRequestID: [String: Bool] = [:]
     private var pendingBashCommandsByRequestID: [String: String] = [:]
     private var pendingExportHTMLPathsByRequestID: [String: String] = [:]
     private var pendingSessionTransitionStateRequestIDs: Set<String> = []
@@ -425,8 +427,38 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             return
         }
 
+        if trimmed == "/cycle-model" || trimmed == "/cycle_model" {
+            try submitCycleModelCommand(trimmed)
+            return
+        }
+
+        if trimmed == "/cycle-thinking-level" || trimmed == "/cycle_thinking_level" {
+            try submitCycleThinkingLevelCommand(trimmed)
+            return
+        }
+
         if trimmed == "/thinking" || trimmed.hasPrefix("/thinking ") {
             try submitThinkingCommand(trimmed)
+            return
+        }
+
+        if trimmed == "/compact" || trimmed.hasPrefix("/compact ") {
+            try submitCompactCommand(trimmed)
+            return
+        }
+
+        if trimmed == "/auto-compaction" || trimmed.hasPrefix("/auto-compaction ") || trimmed == "/auto_compaction" || trimmed.hasPrefix("/auto_compaction ") || trimmed == "/set-auto-compaction" || trimmed.hasPrefix("/set-auto-compaction ") || trimmed == "/set_auto_compaction" || trimmed.hasPrefix("/set_auto_compaction ") {
+            try submitAutoCompactionCommand(trimmed)
+            return
+        }
+
+        if trimmed == "/auto-retry" || trimmed.hasPrefix("/auto-retry ") || trimmed == "/auto_retry" || trimmed.hasPrefix("/auto_retry ") || trimmed == "/set-auto-retry" || trimmed.hasPrefix("/set-auto-retry ") || trimmed == "/set_auto_retry" || trimmed.hasPrefix("/set_auto_retry ") {
+            try submitAutoRetryCommand(trimmed)
+            return
+        }
+
+        if trimmed == "/abort-retry" || trimmed == "/abort_retry" {
+            try submitAbortRetryCommand(trimmed)
             return
         }
 
@@ -560,6 +592,94 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             activityPrefix: "Queued follow-up",
             payload: promptPayload(type: "follow_up", prompt: queuedPrompt)
         )
+    }
+
+    private func submitCompactCommand(_ commandText: String) throws {
+        let instructions = String(commandText.dropFirst("/compact".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+
+        lock.lock()
+        guard isStreaming == false else {
+            lock.unlock()
+            throw PiRPCSessionRuntimeError.busy
+        }
+        draft = ""
+        appendActivityItemLocked(SessionActivityItem(kind: .command, text: instructions.isEmpty ? "/compact" : "/compact \(instructions)"))
+        lock.unlock()
+        notifyChange()
+
+        var payload: [String: Any] = [
+            "id": "nexus-pi-compact-\(UUID().uuidString)",
+            "type": "compact"
+        ]
+        if instructions.isEmpty == false {
+            payload["customInstructions"] = instructions
+        }
+        try transport.sendLine(Self.jsonLine(payload))
+    }
+
+    private func submitAutoCompactionCommand(_ commandText: String) throws {
+        guard let enabled = parseEnabledSelection(from: commandText, preferredPrefixes: ["/auto_compaction", "/auto-compaction", "/set_auto_compaction", "/set-auto-compaction"]) else {
+            lock.lock()
+            draft = ""
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: "Usage: /auto-compaction <on|off>"))
+            lock.unlock()
+            notifyChange()
+            return
+        }
+
+        let requestID: String
+        lock.lock()
+        draft = ""
+        requestID = "nexus-pi-auto-compaction-\(UUID().uuidString)"
+        pendingAutoCompactionSettingsByRequestID[requestID] = enabled
+        appendActivityItemLocked(SessionActivityItem(kind: .command, text: "/auto-compaction \(enabled ? "on" : "off")"))
+        lock.unlock()
+        notifyChange()
+
+        try transport.sendLine(Self.jsonLine([
+            "id": requestID,
+            "type": "set_auto_compaction",
+            "enabled": enabled
+        ]))
+    }
+
+    private func submitAutoRetryCommand(_ commandText: String) throws {
+        guard let enabled = parseEnabledSelection(from: commandText, preferredPrefixes: ["/auto_retry", "/auto-retry", "/set_auto_retry", "/set-auto-retry"]) else {
+            lock.lock()
+            draft = ""
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: "Usage: /auto-retry <on|off>"))
+            lock.unlock()
+            notifyChange()
+            return
+        }
+
+        let requestID: String
+        lock.lock()
+        draft = ""
+        requestID = "nexus-pi-auto-retry-\(UUID().uuidString)"
+        pendingAutoRetrySettingsByRequestID[requestID] = enabled
+        appendActivityItemLocked(SessionActivityItem(kind: .command, text: "/auto-retry \(enabled ? "on" : "off")"))
+        lock.unlock()
+        notifyChange()
+
+        try transport.sendLine(Self.jsonLine([
+            "id": requestID,
+            "type": "set_auto_retry",
+            "enabled": enabled
+        ]))
+    }
+
+    private func submitAbortRetryCommand(_ commandText: String) throws {
+        lock.lock()
+        draft = ""
+        appendActivityItemLocked(SessionActivityItem(kind: .command, text: commandText == "/abort_retry" ? "/abort-retry" : commandText))
+        lock.unlock()
+        notifyChange()
+
+        try transport.sendLine(Self.jsonLine([
+            "id": "nexus-pi-abort-retry-\(UUID().uuidString)",
+            "type": "abort_retry"
+        ]))
     }
 
     private func submitAbortCommand() throws {
@@ -980,6 +1100,44 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         )
     }
 
+    private func submitCycleModelCommand(_ commandText: String) throws {
+        lock.lock()
+        guard isStreaming == false else {
+            lock.unlock()
+            throw PiRPCSessionRuntimeError.busy
+        }
+        draft = ""
+        appendActivityItemLocked(SessionActivityItem(kind: .command, text: commandText))
+        lock.unlock()
+        notifyChange()
+
+        try transport.sendLine(
+            Self.jsonLine([
+                "id": "nexus-pi-cycle-model-\(UUID().uuidString)",
+                "type": "cycle_model"
+            ])
+        )
+    }
+
+    private func submitCycleThinkingLevelCommand(_ commandText: String) throws {
+        lock.lock()
+        guard isStreaming == false else {
+            lock.unlock()
+            throw PiRPCSessionRuntimeError.busy
+        }
+        draft = ""
+        appendActivityItemLocked(SessionActivityItem(kind: .command, text: commandText))
+        lock.unlock()
+        notifyChange()
+
+        try transport.sendLine(
+            Self.jsonLine([
+                "id": "nexus-pi-cycle-thinking-\(UUID().uuidString)",
+                "type": "cycle_thinking_level"
+            ])
+        )
+    }
+
     private func handleResponse(
         _ response: [String: Any],
         startupState: StartupState,
@@ -1030,6 +1188,16 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             return
         }
 
+        if command == "cycle_model" {
+            handleCycleModelResponse(response)
+            return
+        }
+
+        if command == "cycle_thinking_level" {
+            handleCycleThinkingLevelResponse(response)
+            return
+        }
+
         if command == "set_thinking_level" {
             handleSetThinkingLevelResponse(response, requestID: id)
             return
@@ -1042,6 +1210,26 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
 
         if command == "set_follow_up_mode" {
             handleSetFollowUpModeResponse(response, requestID: id)
+            return
+        }
+
+        if command == "compact" {
+            handleCompactResponse(response)
+            return
+        }
+
+        if command == "set_auto_compaction" {
+            handleSetAutoCompactionResponse(response, requestID: id)
+            return
+        }
+
+        if command == "set_auto_retry" {
+            handleSetAutoRetryResponse(response, requestID: id)
+            return
+        }
+
+        if command == "abort_retry" {
+            handleAbortRetryResponse(response)
             return
         }
 
@@ -1651,6 +1839,58 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         notifyChange()
     }
 
+    private func handleCycleThinkingLevelResponse(_ response: [String: Any]) {
+        lock.lock()
+
+        if bool(for: "success", in: response) == true,
+           let data = response["data"] as? [String: Any],
+           let level = trimmedString(for: "level", in: data) {
+            currentThinkingLevel = clampThinkingLevel(level, for: currentModel)
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi thinking level cycled to \(currentThinkingLevel ?? level)"))
+            if let currentModelStatus = currentModelStatusTextLocked() {
+                appendActivityItemLocked(SessionActivityItem(kind: .status, text: currentModelStatus))
+            }
+        } else if bool(for: "success", in: response) == true {
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi thinking cycle kept the current level"))
+        } else {
+            let detail = string(for: "error", in: response) ?? "Pi failed to cycle thinking levels."
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: detail))
+        }
+
+        lock.unlock()
+        notifyChange()
+    }
+
+    private func handleCycleModelResponse(_ response: [String: Any]) {
+        lock.lock()
+
+        if bool(for: "success", in: response) == true {
+            if let data = response["data"] as? [String: Any],
+               let model = data["model"] as? [String: Any],
+               let descriptor = parseModelDescriptor(from: model) {
+                currentModel = descriptor
+                if let thinkingLevel = trimmedString(for: "thinkingLevel", in: data) {
+                    currentThinkingLevel = clampThinkingLevel(thinkingLevel, for: descriptor)
+                }
+                appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi model cycled to \(formattedModelTarget(for: descriptor))"))
+                if let currentModelStatus = currentModelStatusTextLocked() {
+                    appendActivityItemLocked(SessionActivityItem(kind: .status, text: currentModelStatus))
+                }
+                lock.unlock()
+                requestAvailableModels()
+            } else {
+                appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi model cycle kept the current model"))
+                lock.unlock()
+            }
+        } else {
+            let detail = string(for: "error", in: response) ?? "Pi failed to cycle models."
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: detail))
+            lock.unlock()
+        }
+
+        notifyChange()
+    }
+
     private func handleSetSteeringModeResponse(_ response: [String: Any], requestID: String?) {
         lock.lock()
         let requestedMode = requestID.flatMap { pendingSetSteeringModesByRequestID.removeValue(forKey: $0) }
@@ -1686,6 +1926,62 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
 
         lock.unlock()
         requestSlashCommands()
+        notifyChange()
+    }
+
+    private func handleCompactResponse(_ response: [String: Any]) {
+        lock.lock()
+        if bool(for: "success", in: response) == true {
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi compacted the Session context"))
+            if let data = response["data"] as? [String: Any],
+               let summary = trimmedString(for: "summary", in: data) {
+                appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Compaction summary: \(summary)"))
+            }
+        } else {
+            let detail = string(for: "error", in: response) ?? "Pi failed to compact the Session context."
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: detail))
+        }
+        lock.unlock()
+        notifyChange()
+    }
+
+    private func handleSetAutoCompactionResponse(_ response: [String: Any], requestID: String?) {
+        lock.lock()
+        let enabled = requestID.flatMap { pendingAutoCompactionSettingsByRequestID.removeValue(forKey: $0) }
+        if bool(for: "success", in: response) == true {
+            let stateText = enabled == false ? "disabled" : "enabled"
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi auto-compaction \(stateText)"))
+        } else {
+            let detail = string(for: "error", in: response) ?? "Pi failed to update auto-compaction."
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: detail))
+        }
+        lock.unlock()
+        notifyChange()
+    }
+
+    private func handleSetAutoRetryResponse(_ response: [String: Any], requestID: String?) {
+        lock.lock()
+        let enabled = requestID.flatMap { pendingAutoRetrySettingsByRequestID.removeValue(forKey: $0) }
+        if bool(for: "success", in: response) == true {
+            let stateText = enabled == false ? "disabled" : "enabled"
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi auto-retry \(stateText)"))
+        } else {
+            let detail = string(for: "error", in: response) ?? "Pi failed to update auto-retry."
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: detail))
+        }
+        lock.unlock()
+        notifyChange()
+    }
+
+    private func handleAbortRetryResponse(_ response: [String: Any]) {
+        lock.lock()
+        if bool(for: "success", in: response) == true {
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Requested Pi retry cancellation"))
+        } else {
+            let detail = string(for: "error", in: response) ?? "Pi failed to cancel retry."
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: detail))
+        }
+        lock.unlock()
         notifyChange()
     }
 
@@ -2033,6 +2329,21 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         }
     }
 
+    private func parseEnabledSelection(from commandText: String, preferredPrefixes: [String]) -> Bool? {
+        let trimmed = commandText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prefix = preferredPrefixes.first(where: { trimmed.hasPrefix($0) })
+        let suffix = prefix.map { String(trimmed.dropFirst($0.count)) } ?? trimmed
+        let normalized = suffix.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch normalized {
+        case "on", "true", "enabled":
+            return true
+        case "off", "false", "disabled":
+            return false
+        default:
+            return nil
+        }
+    }
+
     private func formattedModelTarget(fromResponse response: [String: Any]) -> String? {
         guard let data = response["data"] as? [String: Any] else {
             return nil
@@ -2152,6 +2463,72 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             return "Pi queue cleared"
         }
         return "Pi queue updated — \(segments.joined(separator: "; "))"
+    }
+
+    private func compactionAndRetrySlashCommandsLocked() -> [SessionSlashCommand] {
+        [
+            SessionSlashCommand(
+                name: "cycle-model",
+                displayName: "cycle-model",
+                insertionText: "cycle-model",
+                description: "Cycle Pi to the next available model.",
+                source: .builtIn
+            ),
+            SessionSlashCommand(
+                name: "cycle-thinking-level",
+                displayName: "cycle-thinking-level",
+                insertionText: "cycle-thinking-level",
+                description: "Cycle Pi to the next available thinking level.",
+                source: .builtIn
+            ),
+            SessionSlashCommand(
+                name: "compact",
+                displayName: "compact [instructions]",
+                insertionText: "compact ",
+                suggestionQueryPrefix: "compact ",
+                description: "Compact the current Pi Session context, optionally with custom instructions.",
+                source: .builtIn
+            ),
+            SessionSlashCommand(
+                name: "auto-compaction on",
+                displayName: "auto-compaction on",
+                insertionText: "auto-compaction on",
+                suggestionQueryPrefix: "auto-compaction ",
+                description: "Enable Pi auto-compaction.",
+                source: .builtIn
+            ),
+            SessionSlashCommand(
+                name: "auto-compaction off",
+                displayName: "auto-compaction off",
+                insertionText: "auto-compaction off",
+                suggestionQueryPrefix: "auto-compaction ",
+                description: "Disable Pi auto-compaction.",
+                source: .builtIn
+            ),
+            SessionSlashCommand(
+                name: "auto-retry on",
+                displayName: "auto-retry on",
+                insertionText: "auto-retry on",
+                suggestionQueryPrefix: "auto-retry ",
+                description: "Enable Pi auto-retry for transient failures.",
+                source: .builtIn
+            ),
+            SessionSlashCommand(
+                name: "auto-retry off",
+                displayName: "auto-retry off",
+                insertionText: "auto-retry off",
+                suggestionQueryPrefix: "auto-retry ",
+                description: "Disable Pi auto-retry for transient failures.",
+                source: .builtIn
+            ),
+            SessionSlashCommand(
+                name: "abort-retry",
+                displayName: "abort-retry",
+                insertionText: "abort-retry",
+                description: "Abort the current Pi retry delay.",
+                source: .builtIn
+            )
+        ]
     }
 
     private func queueControlSlashCommandsLocked() -> [SessionSlashCommand] {
@@ -2327,6 +2704,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             providerSlashCommands,
             availableModelCommands,
             thinkingSlashCommandsLocked(),
+            compactionAndRetrySlashCommandsLocked(),
             queueControlSlashCommandsLocked(),
             sessionGraphSlashCommandsLocked(),
             rpcUtilitySlashCommandsLocked()

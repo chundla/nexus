@@ -449,6 +449,28 @@ struct StructuredSessionPresentationTests {
         #expect(structuredSessionSlashCommandMenuPresentation(for: "/steering-mode o", screen: screen).commands.map(\.displayText) == ["/steering-mode one-at-a-time"])
     }
 
+    @Test func structuredSessionSlashCommandMenuUsesStaticPiCompactionAndRetryControls() {
+        let screen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            ),
+            transcript: ""
+        )
+
+        let rootCommands = structuredSessionSlashCommandMenuPresentation(for: "/", screen: screen).commands.map(\.displayText)
+
+        #expect(rootCommands.contains("/cycle-model"))
+        #expect(rootCommands.contains("/cycle-thinking-level"))
+        #expect(rootCommands.contains("/compact [instructions]"))
+        #expect(rootCommands.contains("/auto-compaction <on|off>"))
+        #expect(rootCommands.contains("/auto-retry <on|off>"))
+        #expect(rootCommands.contains("/abort-retry"))
+    }
+
     @Test func structuredSessionSlashCommandMenuUsesLiveCodexModelCommandsOnlyAfterModelPrefix() {
         let screen = SessionScreen(
             session: Session(
