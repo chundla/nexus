@@ -255,7 +255,7 @@ private struct WorkspaceCatalogFixture {
             dependencies: WorkspaceCatalogDependencies(
                 metadataStore: metadataStore,
                 sessionRecordStore: sessionRecordStore,
-                providerHealthEvaluator: AvailableProviderHealthEvaluator(),
+                providerHealthEvaluator: AvailableProviderHealthFacts(),
                 hostValidationEvaluator: UnusedHostValidationEvaluator(),
                 workspaceAvailabilityEvaluator: UnusedWorkspaceAvailabilityEvaluator(),
                 sessionRuntimeManager: InMemorySessionRuntimeManager(),
@@ -345,7 +345,7 @@ private struct StubProviderModule: ProviderModule {
     }
 }
 
-private struct AvailableProviderHealthEvaluator: ProviderHealthEvaluating {
+private struct AvailableProviderHealthFacts: ProviderHealthEvaluating {
     func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> [WorkspaceProviderCard] {
         ProviderID.allCases.map { providerID in
             WorkspaceProviderCard(

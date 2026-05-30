@@ -209,13 +209,14 @@ extension ProviderHealthEvaluating {
     }
 }
 
-struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactProviding, CodexProviderHealthFactProviding, PiProviderHealthFactProviding, IBMBobProviderHealthFactProviding, @unchecked Sendable {
+struct ProviderHealthFacts: ProviderHealthEvaluating, CLIProviderHealthFactProviding, CodexProviderHealthFactProviding, PiProviderHealthFactProviding, IBMBobProviderHealthFactProviding, @unchecked Sendable {
     let executableResolver: any ProviderExecutableResolving
     let commandRunner: any ProviderCommandRunning
     let localShellCommandBuilder: LocalShellCommandBuilder
     let codexReadinessProbe: any CodexReadinessProbing
     let remoteCodexReadinessProbe: any RemoteCodexReadinessProbing
     let remotePiReadinessProbe: any RemotePiReadinessProbing
+    let providerModuleRegistry: ProviderModuleRegistry
 
     init(
         executableResolver: any ProviderExecutableResolving = SystemProviderExecutableResolver(),
@@ -223,7 +224,8 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactP
         localShellCommandBuilder: LocalShellCommandBuilder = LocalShellCommandBuilder(),
         codexReadinessProbe: any CodexReadinessProbing = CodexAppServerReadinessProbe(),
         remoteCodexReadinessProbe: any RemoteCodexReadinessProbing = SSHRemoteCodexAppServerReadinessProbe(),
-        remotePiReadinessProbe: any RemotePiReadinessProbing = SSHRemotePiRPCReadinessProbe()
+        remotePiReadinessProbe: any RemotePiReadinessProbing = SSHRemotePiRPCReadinessProbe(),
+        providerModuleRegistry: ProviderModuleRegistry = ServiceSessionProviderRegistry.providerModules()
     ) {
         self.executableResolver = executableResolver
         self.commandRunner = commandRunner
@@ -231,6 +233,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactP
         self.codexReadinessProbe = codexReadinessProbe
         self.remoteCodexReadinessProbe = remoteCodexReadinessProbe
         self.remotePiReadinessProbe = remotePiReadinessProbe
+        self.providerModuleRegistry = providerModuleRegistry
     }
 
     func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext? = nil) async -> [WorkspaceProviderCard] {
@@ -252,32 +255,11 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactP
     }
 
     func healthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext? = nil) async -> ProviderHealthSummary {
-        switch providerID {
-        case .claude:
-            return await ClaudeProviderModule().providerHealthSummary(
-                for: workspace,
-                remoteContext: remoteContext,
-                providerHealthEvaluator: self
-            )
-        case .codex:
-            return await CodexProviderModule().providerHealthSummary(
-                for: workspace,
-                remoteContext: remoteContext,
-                providerHealthEvaluator: self
-            )
-        case .pi:
-            return await PiProviderModule().providerHealthSummary(
-                for: workspace,
-                remoteContext: remoteContext,
-                providerHealthEvaluator: self
-            )
-        case .ibmBob:
-            return await IBMBobProviderModule().providerHealthSummary(
-                for: workspace,
-                remoteContext: remoteContext,
-                providerHealthEvaluator: self
-            )
-        }
+        await providerModuleRegistry.module(for: providerID).providerHealthSummary(
+            for: workspace,
+            remoteContext: remoteContext,
+            providerHealthEvaluator: self
+        )
     }
 
     func remoteCLIHealthProbe(
@@ -318,61 +300,6 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactP
             )
         } catch {
             return .sshLaunchFailed(error.localizedDescription)
-        }
-    }
-
-    private func remoteCLIHealthSummary(
-        commandName: String,
-        providerName: String,
-        workspace: Workspace,
-        host: NexusDomain.Host
-    ) async -> ProviderHealthSummary {
-        switch await remoteCLIHealthProbe(
-            commandName: commandName,
-            providerName: providerName,
-            workspace: workspace,
-            host: host
-        ) {
-        case let .sshLaunchFailed(message):
-            return ProviderHealthSummary(
-                state: .unavailable,
-                summary: "Remote \(providerName) health check failed before the SSH probe completed",
-                launchability: .notLaunchable,
-                diagnostics: [
-                    ProviderHealthDiagnostic(
-                        severity: .error,
-                        code: "sshLaunchFailed",
-                        message: message
-                    )
-                ]
-            )
-        case let .probeFailed(detail):
-            let classification = classifyRemoteCLIProbeFailure(
-                detail: detail,
-                providerName: providerName,
-                notFoundMarker: remoteExecutableNotFoundMarker(commandName: commandName)
-            )
-            return ProviderHealthSummary(
-                state: classification.state,
-                summary: classification.summary,
-                launchability: .notLaunchable,
-                diagnostics: [
-                    ProviderHealthDiagnostic(
-                        severity: .error,
-                        code: classification.code,
-                        message: classification.message ?? (detail.isEmpty ? classification.summary : detail)
-                    )
-                ]
-            )
-        case let .ready(executable, version, diagnostics):
-            return ProviderHealthSummary(
-                state: .available,
-                summary: version.map { "\(providerName) \($0) is available" } ?? "\(providerName) is available",
-                resolvedExecutable: executable,
-                version: version,
-                launchability: .launchable,
-                diagnostics: diagnostics
-            )
         }
     }
 
@@ -640,63 +567,6 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactP
         )
     }
 
-    private func localCLIHealthSummary(commandName: String, providerName: String, workspace: Workspace) async -> ProviderHealthSummary {
-        switch await localCLIHealthProbe(commandName: commandName, providerName: providerName, workspace: workspace) {
-        case let .executableNotFound(resolution):
-            return ProviderHealthSummary(
-                state: .unavailable,
-                summary: "\(providerName) executable was not found",
-                launchability: .notLaunchable,
-                diagnostics: [
-                    ProviderHealthDiagnostic(
-                        severity: .error,
-                        code: "executableNotFound",
-                        message: "\(providerName) executable was not found in the service search paths."
-                    ),
-                    ProviderHealthDiagnostic(
-                        severity: .info,
-                        code: "searchedDirectories",
-                        message: "Searched directories: \(resolution.searchedDirectories.joined(separator: ", "))"
-                    ),
-                    ProviderHealthDiagnostic(
-                        severity: .info,
-                        code: "homeDirectories",
-                        message: "Resolved home directories: \(resolution.homeDirectories.joined(separator: ", "))"
-                    ),
-                    ProviderHealthDiagnostic(
-                        severity: .info,
-                        code: "pathEnvironment",
-                        message: "PATH: \(resolution.pathEnvironment ?? "<unset>")"
-                    )
-                ]
-            )
-        case let .launchProbeFailed(executable, version, diagnostics, detail):
-            return ProviderHealthSummary(
-                state: .misconfigured,
-                summary: "\(providerName) is installed but failed the launch probe",
-                resolvedExecutable: executable,
-                version: version,
-                launchability: .notLaunchable,
-                diagnostics: diagnostics + [
-                    ProviderHealthDiagnostic(
-                        severity: .error,
-                        code: "launchProbeFailed",
-                        message: detail
-                    )
-                ]
-            )
-        case let .ready(executable, version, diagnostics):
-            return ProviderHealthSummary(
-                state: .available,
-                summary: version.map { "\(providerName) \($0) is available" } ?? "\(providerName) is available",
-                resolvedExecutable: executable,
-                version: version,
-                launchability: .launchable,
-                diagnostics: diagnostics
-            )
-        }
-    }
-
     private func resolvedLocalExecutable(named commandName: String) -> ProviderExecutableResolution {
         let resolution = executableResolver.resolveExecutable(named: commandName)
         guard resolution.resolvedExecutable == nil else {
@@ -777,7 +647,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactP
         }
 
         throw lastError ?? NSError(
-            domain: "ProviderHealthEvaluator",
+            domain: "ProviderHealthFacts",
             code: 1,
             userInfo: [NSLocalizedDescriptionKey: "Local shell launch probe failed before the command completed."]
         )
@@ -999,134 +869,6 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactP
     private func remoteExecutableNotFoundMarker(commandName: String) -> String {
         "NEXUS_REMOTE_\(commandName.uppercased())_NOT_FOUND"
     }
-
-    private func classifyRemoteCLIProbeFailure(
-        detail: String,
-        providerName: String,
-        notFoundMarker: String
-    ) -> (state: ProviderHealthSummary.State, summary: String, code: String, message: String?) {
-        let normalized = detail.lowercased()
-
-        if normalized.contains("nexus_remote_workspace_unavailable") {
-            return (
-                .unavailable,
-                "\(providerName) is unavailable on the Remote Workspace",
-                "remoteWorkspaceUnavailable",
-                "The Remote Workspace path is unavailable on the Host."
-            )
-        }
-
-        if normalized.contains(notFoundMarker.lowercased())
-            || normalized.contains("command not found")
-            || normalized.contains("no such file") {
-            return (
-                .unavailable,
-                "\(providerName) is unavailable on the Remote Workspace",
-                "remoteExecutableNotFound",
-                "\(providerName) executable was not found in the remote shell environments Nexus checked."
-            )
-        }
-
-        if normalized.contains("nexus_remote_tmux_unavailable")
-            || normalized.contains("permission denied")
-            || normalized.contains("bad configuration option")
-            || normalized.contains("tmux") {
-            return (
-                .misconfigured,
-                "Remote \(providerName) launch prerequisites are misconfigured",
-                "remoteLaunchMisconfigured",
-                normalized.contains("nexus_remote_tmux_unavailable") ? "tmux is not available in the remote shell." : nil
-            )
-        }
-
-        if normalized.contains("connection timed out")
-            || normalized.contains("operation timed out")
-            || normalized.contains("connection refused")
-            || normalized.contains("network is unreachable")
-            || normalized.contains("no route to host") {
-            return (.unavailable, "Remote \(providerName) is currently unavailable", "remoteUnavailable", nil)
-        }
-
-        return (.misconfigured, "\(providerName) is installed but failed the remote launch probe", "remoteLaunchProbeFailed", nil)
-    }
-
-    private func remoteIBMBobBlockedSummary(for code: String) -> String {
-        switch code {
-        case "licenseRequired":
-            "IBM Bob requires license acceptance"
-        case "authenticationRequired":
-            "IBM Bob requires authentication on the Remote Workspace"
-        case "setupRequired":
-            "IBM Bob requires setup on the Remote Workspace"
-        default:
-            "IBM Bob is unavailable on the Remote Workspace"
-        }
-    }
-
-    private func classifyLocalIBMBobPassiveProbeFailure(detail: String) -> (
-        state: ProviderHealthSummary.State,
-        summary: (String?) -> String,
-        launchability: ProviderHealthSummary.Launchability,
-        severity: ProviderHealthDiagnostic.Severity,
-        code: String,
-        message: String
-    ) {
-        let normalized = detail.lowercased()
-
-        if normalized.contains("license") || normalized.contains("licence") {
-            return (
-                .misconfigured,
-                { _ in "IBM Bob requires license acceptance" },
-                .notLaunchable,
-                .error,
-                "licenseRequired",
-                detail
-            )
-        }
-
-        if isExplicitAuthenticationFailure(normalized) {
-            return (
-                .unavailable,
-                { _ in "IBM Bob requires authentication" },
-                .notLaunchable,
-                .error,
-                "authenticationRequired",
-                detail
-            )
-        }
-
-        if normalized.contains("setup")
-            || normalized.contains("configure")
-            || normalized.contains("configuration")
-            || normalized.contains("install") {
-            return (
-                .misconfigured,
-                { _ in "IBM Bob requires setup" },
-                .notLaunchable,
-                .error,
-                "setupRequired",
-                detail
-            )
-        }
-
-        return (
-            .available,
-            { version in version.map { "IBM Bob \($0) is available" } ?? "IBM Bob is available" },
-            .launchable,
-            .warning,
-            "passiveProbeInconclusive",
-            detail
-        )
-    }
-
-    private func isExplicitAuthenticationFailure(_ message: String) -> Bool {
-        let normalized = message.lowercased()
-        return normalized.contains("auth")
-            || normalized.contains("login")
-            || normalized.contains("not logged in")
-            || normalized.contains("not authenticated")
-            || normalized.contains("unauthorized")
-        }
 
     private func launchProbeFailureMessage(stdout: String, stderr: String, providerName: String) -> String {
         let detail = firstDiagnosticLine(stdout: stdout, stderr: stderr)

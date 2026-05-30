@@ -12,7 +12,7 @@ struct NexusServiceLocalCodexMigrationTests {
         let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
 
-        let healthEvaluator = ProviderHealthEvaluator(
+        let healthEvaluator = ProviderHealthFacts(
             executableResolver: MigrationStubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
             commandRunner: MigrationStubCommandRunner(results: [
                 .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-codex' '--version'"]): .success(stdout: "1.2.3\n")

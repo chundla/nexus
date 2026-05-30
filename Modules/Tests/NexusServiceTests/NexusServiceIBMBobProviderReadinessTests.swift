@@ -4,7 +4,7 @@ import NexusDomain
 @testable import NexusService
 import Testing
 
-struct ProviderHealthEvaluatorIBMBobPassiveProbeTests {
+struct ProviderHealthFactsIBMBobPassiveProbeTests {
     @Test func localIBMBobPassiveProbeReturnsReadyFactsAndUsesWorkspaceDirectory() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)
@@ -16,7 +16,7 @@ struct ProviderHealthEvaluatorIBMBobPassiveProbeTests {
             .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--version'"]): .success(stdout: "3.4.5\n"),
             .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--list-sessions'"]): .success(stdout: "[]\n")
         ])
-        let evaluator = ProviderHealthEvaluator(
+        let evaluator = ProviderHealthFacts(
             executableResolver: BobStubExecutableResolver(executables: ["bob": "/tmp/fake-bob"]),
             commandRunner: commandRunner,
             localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
@@ -42,7 +42,7 @@ struct ProviderHealthEvaluatorIBMBobPassiveProbeTests {
     }
 
     @Test func localIBMBobPassiveProbeReturnsRawFailureDetail() async {
-        let evaluator = ProviderHealthEvaluator(
+        let evaluator = ProviderHealthFacts(
             executableResolver: BobStubExecutableResolver(executables: ["bob": "/tmp/fake-bob"]),
             commandRunner: RecordingBobCommandRunner(results: [
                 .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--version'"]): .success(stdout: "3.4.5\n"),
@@ -79,7 +79,7 @@ struct ProviderHealthEvaluatorIBMBobPassiveProbeTests {
             .success(stdout: "/tmp/fake-bob\n3.4.5\n"),
             .success(stdout: "[]\n")
         ])
-        let evaluator = ProviderHealthEvaluator(
+        let evaluator = ProviderHealthFacts(
             executableResolver: BobStubExecutableResolver(executables: [:]),
             commandRunner: commandRunner,
             localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
@@ -113,7 +113,7 @@ struct ProviderHealthEvaluatorIBMBobPassiveProbeTests {
 
     @Test func remoteIBMBobPassiveProbeReturnsRawFailureDetail() async {
         let host = NexusDomain.Host(id: UUID(), name: "Build Server", sshTarget: "build-box")
-        let evaluator = ProviderHealthEvaluator(
+        let evaluator = ProviderHealthFacts(
             executableResolver: BobStubExecutableResolver(executables: [:]),
             commandRunner: SequentialBobCommandRunner(results: [
                 .success(stdout: "/tmp/fake-bob\n3.4.5\n"),

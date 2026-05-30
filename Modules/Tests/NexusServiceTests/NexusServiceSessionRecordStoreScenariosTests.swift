@@ -90,7 +90,7 @@ private struct NexusServiceSessionRecordStoreFixture {
         var trackingStore: TrackingServiceSessionRecordStore?
         service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(),
+            providerHealthEvaluator: ProviderHealthFacts(),
             sessionRuntimeManager: runtimeManager,
             sessionRecordStoreFactory: { metadataStore in
                 let store = TrackingServiceSessionRecordStore(metadataStore: metadataStore)

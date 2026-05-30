@@ -15,7 +15,7 @@ struct NexusServiceCodexProviderModuleLeakageTests {
         let launcher = RecordingCodexSessionRuntimeLauncher()
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: AlwaysReadyCodexProviderHealthEvaluator(),
+            providerHealthEvaluator: AlwaysReadyCodexProviderHealthFacts(),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
         )
 
@@ -40,7 +40,7 @@ struct NexusServiceCodexProviderModuleLeakageTests {
 
         let initialService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: AlwaysReadyCodexProviderHealthEvaluator(),
+            providerHealthEvaluator: AlwaysReadyCodexProviderHealthFacts(),
             hostValidationEvaluator: AlwaysAvailableCodexHostValidationEvaluator(),
             workspaceAvailabilityEvaluator: AlwaysAvailableCodexWorkspaceAvailabilityEvaluator(),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: RecordingCodexSessionRuntimeLauncher())
@@ -59,7 +59,7 @@ struct NexusServiceCodexProviderModuleLeakageTests {
 
         let relaunchedService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: AlwaysReadyCodexProviderHealthEvaluator(),
+            providerHealthEvaluator: AlwaysReadyCodexProviderHealthFacts(),
             hostValidationEvaluator: AlwaysAvailableCodexHostValidationEvaluator(),
             workspaceAvailabilityEvaluator: AlwaysAvailableCodexWorkspaceAvailabilityEvaluator(),
             sessionRuntimeManager: InMemorySessionRuntimeManager(
@@ -84,7 +84,7 @@ struct NexusServiceCodexProviderModuleLeakageTests {
     }
 }
 
-private struct AlwaysReadyCodexProviderHealthEvaluator: ProviderHealthEvaluating {
+private struct AlwaysReadyCodexProviderHealthFacts: ProviderHealthEvaluating {
     func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> [WorkspaceProviderCard] {
         ProviderID.allCases.map { providerID in
             WorkspaceProviderCard(

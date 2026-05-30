@@ -44,7 +44,7 @@ struct ClaudeProviderModuleTests {
         ))
     }
 
-    @Test func claudeProviderModuleHealthUsesProviderHealthEvaluatorInsteadOfAdapter() async {
+    @Test func claudeProviderModuleHealthUsesProviderHealthFactsInsteadOfAdapter() async {
         let module = ClaudeProviderModule()
         let workspace = Workspace(
             id: UUID(),
@@ -53,7 +53,7 @@ struct ClaudeProviderModuleTests {
             folderPath: "/tmp/local-claude",
             primaryGroupID: UUID()
         )
-        let providerHealthEvaluator = RecordingClaudeProviderHealthEvaluator(
+        let providerHealthEvaluator = RecordingClaudeProviderHealthFacts(
             summary: ProviderHealthSummary(
                 state: .available,
                 summary: "Claude health from evaluator",
@@ -362,7 +362,7 @@ struct ClaudeProviderModuleTests {
             primaryGroupID: UUID(),
             remoteHostID: hostID
         )
-        let providerHealthEvaluator = RecordingClaudeProviderHealthEvaluator(
+        let providerHealthEvaluator = RecordingClaudeProviderHealthFacts(
             summary: ProviderHealthSummary(
                 state: .available,
                 summary: "Claude module health",
@@ -460,7 +460,7 @@ struct ClaudeProviderModuleTests {
 
         let initialService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ReadyClaudeProviderHealthEvaluator(),
+            providerHealthEvaluator: ReadyClaudeProviderHealthFacts(),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: RecordingStaticClaudeRuntimeLauncher())
         )
         let group = try initialService.createWorkspaceGroup(name: "Solo Group")
@@ -474,7 +474,7 @@ struct ClaudeProviderModuleTests {
         let tracker = ProviderModuleSessionTransitionTracker()
         let relaunchedService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ReadyClaudeProviderHealthEvaluator(),
+            providerHealthEvaluator: ReadyClaudeProviderHealthFacts(),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: RecordingStaticClaudeRuntimeLauncher()),
             providerModuleRegistry: ProviderModuleRegistry(
                 modules: [
@@ -500,7 +500,7 @@ struct ClaudeProviderModuleTests {
         let tracker = ClaudeRuntimeConstructionTracker()
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ReadyClaudeProviderHealthEvaluator(),
+            providerHealthEvaluator: ReadyClaudeProviderHealthFacts(),
             providerModuleRegistry: ProviderModuleRegistry(
                 modules: [
                     .claude: RuntimeTrackingClaudeProviderModule(tracker: tracker)
@@ -712,7 +712,7 @@ private struct RuntimeTrackingClaudeProviderModule: ProviderModule {
     }
 }
 
-private struct ReadyClaudeProviderHealthEvaluator: ProviderHealthEvaluating {
+private struct ReadyClaudeProviderHealthFacts: ProviderHealthEvaluating {
     func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> [WorkspaceProviderCard] {
         ProviderID.allCases.map { providerID in
             WorkspaceProviderCard(
@@ -742,7 +742,7 @@ private struct ReadyClaudeProviderHealthEvaluator: ProviderHealthEvaluating {
     }
 }
 
-private final class RecordingClaudeProviderHealthEvaluator: @unchecked Sendable, ProviderHealthEvaluating {
+private final class RecordingClaudeProviderHealthFacts: @unchecked Sendable, ProviderHealthEvaluating {
     struct Request: Equatable {
         let providerID: ProviderID
         let workspaceID: UUID

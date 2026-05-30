@@ -14,7 +14,7 @@ struct NexusServiceTerminalProviderCompatibilityTests {
 
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: CompatibilityStubExecutableResolver(executables: [
                     "claude": "/tmp/fake-claude",
                     "codex": "/tmp/fake-codex",

@@ -15,7 +15,7 @@ struct ServiceSessionInteractionScenariosTests {
         let launcher = ObservationRuntimeLauncher()
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: StubProviderHealthEvaluator(
+            providerHealthEvaluator: StubProviderHealthFacts(
                 summariesByProvider: [
                     .claude: ProviderHealthSummary(
                         state: .available,
@@ -60,7 +60,7 @@ struct ServiceSessionInteractionScenariosTests {
         let launcher = StructuredControllerRuntimeLauncher()
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: StubProviderHealthEvaluator(
+            providerHealthEvaluator: StubProviderHealthFacts(
                 summariesByProvider: [
                     .pi: ProviderHealthSummary(
                         state: .available,
@@ -113,7 +113,7 @@ struct ServiceSessionInteractionScenariosTests {
         let launcher = StructuredControllerRuntimeLauncher()
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: StubProviderHealthEvaluator(
+            providerHealthEvaluator: StubProviderHealthFacts(
                 summariesByProvider: [
                     .pi: ProviderHealthSummary(
                         state: .available,
@@ -212,7 +212,7 @@ struct ServiceSessionInteractionScenariosTests {
         let launcher = TerminalControllerRuntimeLauncher()
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: StubProviderHealthEvaluator(
+            providerHealthEvaluator: StubProviderHealthFacts(
                 summariesByProvider: [
                     .claude: ProviderHealthSummary(
                         state: .available,
@@ -519,7 +519,7 @@ private final class StructuredControllerRuntime: SessionRuntime, @unchecked Send
     }
 }
 
-private struct StubProviderHealthEvaluator: ProviderHealthEvaluating {
+private struct StubProviderHealthFacts: ProviderHealthEvaluating {
     let summariesByProvider: [ProviderID: ProviderHealthSummary]
 
     func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> [WorkspaceProviderCard] {

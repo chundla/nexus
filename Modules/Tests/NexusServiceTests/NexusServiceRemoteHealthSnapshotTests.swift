@@ -12,7 +12,7 @@ struct NexusServiceRemoteHealthSnapshotTests {
 
         let firstService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: StubProviderHealthEvaluator(summariesByProvider: [
+            providerHealthEvaluator: StubProviderHealthFacts(summariesByProvider: [
                 .codex: ProviderHealthSummary(
                     state: .unavailable,
                     summary: "Codex is unavailable on the Remote Workspace",
@@ -46,7 +46,7 @@ struct NexusServiceRemoteHealthSnapshotTests {
 
         let secondService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: StubProviderHealthEvaluator(summariesByProvider: [
+            providerHealthEvaluator: StubProviderHealthFacts(summariesByProvider: [
                 .codex: ProviderHealthSummary(
                     state: .available,
                     summary: "Codex 1.2.3 is available",
@@ -73,7 +73,7 @@ struct NexusServiceRemoteHealthSnapshotTests {
 
         let firstService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: StubProviderHealthEvaluator(summariesByProvider: [
+            providerHealthEvaluator: StubProviderHealthFacts(summariesByProvider: [
                 .codex: ProviderHealthSummary(
                     state: .notChecked,
                     summary: "Remote Codex execution is not implemented yet",
@@ -107,7 +107,7 @@ struct NexusServiceRemoteHealthSnapshotTests {
 
         let secondService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: StubProviderHealthEvaluator(summariesByProvider: [
+            providerHealthEvaluator: StubProviderHealthFacts(summariesByProvider: [
                 .codex: ProviderHealthSummary(
                     state: .available,
                     summary: "Codex 1.2.3 is available",
@@ -129,7 +129,7 @@ struct NexusServiceRemoteHealthSnapshotTests {
     }
 }
 
-private struct StubProviderHealthEvaluator: ProviderHealthEvaluating {
+private struct StubProviderHealthFacts: ProviderHealthEvaluating {
     let summariesByProvider: [ProviderID: ProviderHealthSummary]
 
     func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> [WorkspaceProviderCard] {

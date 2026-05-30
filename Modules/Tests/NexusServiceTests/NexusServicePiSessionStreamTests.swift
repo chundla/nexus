@@ -20,7 +20,7 @@ struct NexusServicePiSessionStreamTests {
 
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: PiStreamStubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
                 commandRunner: PiStreamStubCommandRunner(results: [
                     .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
@@ -81,7 +81,7 @@ struct NexusServicePiSessionStreamTests {
 
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: PiStreamStubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
                 commandRunner: PiStreamStubCommandRunner(results: [
                     .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
@@ -135,7 +135,7 @@ struct NexusServicePiSessionStreamTests {
 
             return try NexusService.bootstrapForTests(
                 rootURL: rootURL,
-                providerHealthEvaluator: ProviderHealthEvaluator(
+                providerHealthEvaluator: ProviderHealthFacts(
                     executableResolver: PiStreamStubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
                     commandRunner: PiStreamStubCommandRunner(results: [
                         .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
@@ -183,7 +183,7 @@ struct NexusServicePiSessionStreamTests {
 
             return try NexusService.bootstrapForTests(
                 rootURL: rootURL,
-                providerHealthEvaluator: ProviderHealthEvaluator(
+                providerHealthEvaluator: ProviderHealthFacts(
                     executableResolver: PiStreamStubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
                     commandRunner: PiStreamStubCommandRunner(results: [
                         .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
@@ -248,7 +248,7 @@ struct NexusServicePiSessionStreamTests {
 
             return try NexusService.bootstrapForTests(
                 rootURL: rootURL,
-                providerHealthEvaluator: ProviderHealthEvaluator(
+                providerHealthEvaluator: ProviderHealthFacts(
                     executableResolver: PiStreamStubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
                     commandRunner: PiStreamStubCommandRunner(results: [
                         .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
@@ -519,7 +519,7 @@ struct NexusServicePiSessionStreamTests {
 
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: PiStreamStubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
                 commandRunner: PiStreamStubCommandRunner(results: [
                     .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),

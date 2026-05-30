@@ -146,7 +146,7 @@ struct NexusServiceIBMBobSessionLifecycleTests {
 private func makeIBMBobService(rootURL: URL) throws -> NexusService {
     try NexusService.bootstrapForTests(
         rootURL: rootURL,
-        providerHealthEvaluator: ProviderHealthEvaluator(
+        providerHealthEvaluator: ProviderHealthFacts(
             executableResolver: IBMBobSessionStubExecutableResolver(executables: ["bob": "/tmp/fake-bob"]),
             commandRunner: IBMBobSessionStubCommandRunner(results: [
                 .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--version'"]): .success(stdout: "3.4.5\n"),

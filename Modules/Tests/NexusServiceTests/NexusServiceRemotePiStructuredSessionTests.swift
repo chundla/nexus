@@ -522,7 +522,7 @@ private func makeRemotePiService(rootURL: URL, transportHarness: RemotePiTranspo
 
     return try NexusService.bootstrapForTests(
         rootURL: rootURL,
-        providerHealthEvaluator: ProviderHealthEvaluator(
+        providerHealthEvaluator: ProviderHealthFacts(
             executableResolver: RemotePiStructuredStubExecutableResolver(),
             commandRunner: RemotePiStructuredStubCommandRunner(),
             remotePiReadinessProbe: RemotePiStructuredReadyReadinessProbe()

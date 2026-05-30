@@ -1467,7 +1467,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
 
     private static func bootstrap(
         rootURL: URL,
-        providerHealthEvaluator: any ProviderHealthEvaluating = ProviderHealthEvaluator(),
+        providerHealthEvaluator: any ProviderHealthEvaluating = ProviderHealthFacts(),
         hostValidationEvaluator: any HostValidationEvaluating = HostValidationEvaluator(),
         workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating = WorkspaceAvailabilityEvaluator(),
         sessionRuntimeManager: (any SessionRuntimeManaging)? = nil,

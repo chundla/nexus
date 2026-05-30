@@ -227,7 +227,7 @@ private func makeIBMBobDeletionService(
     })
     return try NexusService.bootstrapForTests(
         rootURL: rootURL,
-        providerHealthEvaluator: ProviderHealthEvaluator(
+        providerHealthEvaluator: ProviderHealthFacts(
             executableResolver: IBMBobDeletionStubExecutableResolver(executables: ["bob": "/tmp/fake-bob"]),
             commandRunner: commandRunner,
             localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
@@ -256,7 +256,7 @@ private func makeRemoteIBMBobDeletionService(
     })
     return try NexusService.bootstrapForTests(
         rootURL: rootURL,
-        providerHealthEvaluator: ProviderHealthEvaluator(
+        providerHealthEvaluator: ProviderHealthFacts(
             executableResolver: IBMBobDeletionStubExecutableResolver(executables: [:]),
             commandRunner: commandRunner,
             localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])

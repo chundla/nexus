@@ -19,7 +19,7 @@ struct NexusServiceStructuredSessionCopyTests {
         func makeService(sessionRuntimeManager: any SessionRuntimeManaging) throws -> NexusService {
             try NexusService.bootstrapForTests(
                 rootURL: rootURL,
-                providerHealthEvaluator: StructuredCodexProviderHealthEvaluator(),
+                providerHealthEvaluator: StructuredCodexProviderHealthFacts(),
                 sessionRuntimeManager: sessionRuntimeManager
             )
         }
@@ -48,7 +48,7 @@ struct NexusServiceStructuredSessionCopyTests {
     }
 }
 
-private struct StructuredCodexProviderHealthEvaluator: ProviderHealthEvaluating {
+private struct StructuredCodexProviderHealthFacts: ProviderHealthEvaluating {
     func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> [WorkspaceProviderCard] {
         ProviderID.allCases.map { providerID in
             WorkspaceProviderCard(

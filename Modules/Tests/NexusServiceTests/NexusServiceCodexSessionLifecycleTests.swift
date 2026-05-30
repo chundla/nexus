@@ -145,7 +145,7 @@ private func makeCodexLifecycleService(rootURL: URL, transportHarness: Persisten
 
     return try NexusService.bootstrapForTests(
         rootURL: rootURL,
-        providerHealthEvaluator: ProviderHealthEvaluator(
+        providerHealthEvaluator: ProviderHealthFacts(
             executableResolver: CodexLifecycleStubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
             commandRunner: CodexLifecycleStubCommandRunner(results: [
                 .init(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n")

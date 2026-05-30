@@ -16,7 +16,7 @@ struct NexusServiceSessionInteractionDelegationTests {
         let spy = SessionInteractionSpy()
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(),
+            providerHealthEvaluator: ProviderHealthFacts(),
             sessionInteraction: spy
         )
         let group = try service.createWorkspaceGroup(name: "Solo Group")
@@ -53,7 +53,7 @@ struct NexusServiceSessionInteractionDelegationTests {
         let spy = SessionInteractionSpy()
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(),
+            providerHealthEvaluator: ProviderHealthFacts(),
             sessionInteraction: spy
         )
         let group = try service.createWorkspaceGroup(name: "Solo Group")
@@ -97,7 +97,7 @@ struct NexusServiceSessionInteractionDelegationTests {
         let spy = SessionInteractionSpy()
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(),
+            providerHealthEvaluator: ProviderHealthFacts(),
             sessionInteraction: spy
         )
         let group = try service.createWorkspaceGroup(name: "Solo Group")
@@ -138,7 +138,7 @@ struct NexusServiceSessionInteractionDelegationTests {
         let spy = SessionInteractionSpy()
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(),
+            providerHealthEvaluator: ProviderHealthFacts(),
             sessionInteraction: spy
         )
         let group = try service.createWorkspaceGroup(name: "Solo Group")
@@ -183,7 +183,7 @@ struct NexusServiceSessionInteractionDelegationTests {
         let spy = SessionInteractionSpy()
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(),
+            providerHealthEvaluator: ProviderHealthFacts(),
             sessionInteraction: spy
         )
         let group = try service.createWorkspaceGroup(name: "Solo Group")
@@ -229,7 +229,7 @@ struct NexusServiceSessionInteractionDelegationTests {
         let spy = SessionInteractionSpy()
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(),
+            providerHealthEvaluator: ProviderHealthFacts(),
             sessionInteraction: spy
         )
         let group = try service.createWorkspaceGroup(name: "Solo Group")
@@ -274,7 +274,7 @@ struct NexusServiceSessionInteractionDelegationTests {
         let spy = SessionInteractionSpy()
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(),
+            providerHealthEvaluator: ProviderHealthFacts(),
             sessionInteraction: spy
         )
         let group = try service.createWorkspaceGroup(name: "Solo Group")
@@ -327,7 +327,7 @@ struct NexusServiceSessionInteractionDelegationTests {
         let spy = SessionInteractionSpy()
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(),
+            providerHealthEvaluator: ProviderHealthFacts(),
             sessionInteraction: spy
         )
         let group = try service.createWorkspaceGroup(name: "Solo Group")

@@ -414,7 +414,7 @@ struct IBMBobProviderModuleTests {
             folderPath: "/tmp/local-ibm-bob",
             primaryGroupID: UUID()
         )
-        let providerHealthEvaluator = RecordingIBMBobProviderHealthEvaluator(
+        let providerHealthEvaluator = RecordingIBMBobProviderHealthFacts(
             summary: ProviderHealthSummary(
                 state: .available,
                 summary: "IBM Bob module health",
@@ -457,7 +457,7 @@ struct IBMBobProviderModuleTests {
 
         let initialService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ReadyIBMBobProviderHealthEvaluator(),
+            providerHealthEvaluator: ReadyIBMBobProviderHealthFacts(),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: RecordingStaticIBMBobRuntimeLauncher())
         )
         let group = try initialService.createWorkspaceGroup(name: "Solo Group")
@@ -471,7 +471,7 @@ struct IBMBobProviderModuleTests {
         let tracker = IBMBobProviderModuleSessionTransitionTracker()
         let relaunchedService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ReadyIBMBobProviderHealthEvaluator(),
+            providerHealthEvaluator: ReadyIBMBobProviderHealthFacts(),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: RecordingStaticIBMBobRuntimeLauncher()),
             providerModuleRegistry: ProviderModuleRegistry(
                 modules: [
@@ -495,7 +495,7 @@ struct IBMBobProviderModuleTests {
         let tracker = IBMBobRuntimeConstructionTracker()
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ReadyIBMBobProviderHealthEvaluator(),
+            providerHealthEvaluator: ReadyIBMBobProviderHealthFacts(),
             providerModuleRegistry: ProviderModuleRegistry(
                 modules: [
                     .ibmBob: RuntimeTrackingIBMBobProviderModule(tracker: tracker)
@@ -523,7 +523,7 @@ struct IBMBobProviderModuleTests {
 
         let initialService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ReadyIBMBobProviderHealthEvaluator(),
+            providerHealthEvaluator: ReadyIBMBobProviderHealthFacts(),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: RecordingStaticIBMBobRuntimeLauncher())
         )
         let group = try initialService.createWorkspaceGroup(name: "Solo Group")
@@ -537,7 +537,7 @@ struct IBMBobProviderModuleTests {
         let tracker = IBMBobProviderModuleSessionTransitionTracker()
         let relaunchedService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ReadyIBMBobProviderHealthEvaluator(),
+            providerHealthEvaluator: ReadyIBMBobProviderHealthFacts(),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: RecordingStaticIBMBobRuntimeLauncher()),
             providerModuleRegistry: ProviderModuleRegistry(
                 modules: [
@@ -805,7 +805,7 @@ private final class RecordingStaticIBMBobRuntimeLauncher: SessionRuntimeLaunchin
     }
 }
 
-private struct ReadyIBMBobProviderHealthEvaluator: ProviderHealthEvaluating {
+private struct ReadyIBMBobProviderHealthFacts: ProviderHealthEvaluating {
     func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> [WorkspaceProviderCard] {
         ProviderID.allCases.map { providerID in
             WorkspaceProviderCard(
@@ -874,7 +874,7 @@ private final class RecordingIBMBobHealthFactProvider: @unchecked Sendable, Prov
     }
 }
 
-private final class RecordingIBMBobProviderHealthEvaluator: @unchecked Sendable, ProviderHealthEvaluating {
+private final class RecordingIBMBobProviderHealthFacts: @unchecked Sendable, ProviderHealthEvaluating {
     struct Request: Equatable {
         let providerID: ProviderID
         let workspaceID: UUID

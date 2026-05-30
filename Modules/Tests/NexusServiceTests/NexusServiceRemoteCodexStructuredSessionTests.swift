@@ -447,7 +447,7 @@ private func makeRemoteCodexService(rootURL: URL, transportHarness: RemoteCodexT
 
     return try NexusService.bootstrapForTests(
         rootURL: rootURL,
-        providerHealthEvaluator: ProviderHealthEvaluator(
+        providerHealthEvaluator: ProviderHealthFacts(
             executableResolver: RemoteCodexStubExecutableResolver(),
             commandRunner: RemoteCodexStubCommandRunner(),
             remoteCodexReadinessProbe: RemoteCodexReadyReadinessProbe()
@@ -461,7 +461,7 @@ private func makeRemoteCodexService(rootURL: URL, transportHarness: RemoteCodexT
 private func makeLegacyRemoteTerminalCodexService(rootURL: URL) throws -> NexusService {
     try NexusService.bootstrapForTests(
         rootURL: rootURL,
-        providerHealthEvaluator: ProviderHealthEvaluator(
+        providerHealthEvaluator: ProviderHealthFacts(
             executableResolver: RemoteCodexStubExecutableResolver(),
             commandRunner: RemoteCodexStubCommandRunner(),
             remoteCodexReadinessProbe: RemoteCodexReadyReadinessProbe()

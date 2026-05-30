@@ -20,7 +20,7 @@ struct NexusServiceIBMBobPromptFlowTests {
         })
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: IBMBobPromptStubExecutableResolver(executables: ["bob": "/tmp/fake-bob"]),
                 commandRunner: IBMBobPromptStubCommandRunner(results: [
                     .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--version'"]): .success(stdout: "3.4.5\n"),
@@ -73,7 +73,7 @@ struct NexusServiceIBMBobPromptFlowTests {
         })
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: IBMBobPromptStubExecutableResolver(executables: ["bob": "/tmp/fake-bob"]),
                 commandRunner: IBMBobPromptStubCommandRunner(results: [
                     .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--version'"]): .success(stdout: "3.4.5\n"),
@@ -124,7 +124,7 @@ struct NexusServiceIBMBobPromptFlowTests {
         })
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: IBMBobPromptStubExecutableResolver(executables: ["bob": "/tmp/fake-bob"]),
                 commandRunner: IBMBobPromptStubCommandRunner(results: [
                     .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--version'"]): .success(stdout: "3.4.5\n"),
@@ -175,7 +175,7 @@ struct NexusServiceIBMBobPromptFlowTests {
         })
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: IBMBobPromptStubExecutableResolver(executables: ["bob": "/tmp/fake-bob"]),
                 commandRunner: IBMBobPromptStubCommandRunner(results: [
                     .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--version'"]): .success(stdout: "3.4.5\n"),
@@ -240,7 +240,7 @@ struct NexusServiceIBMBobPromptFlowTests {
         })
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: IBMBobPromptStubExecutableResolver(executables: ["bob": "/tmp/fake-bob"]),
                 commandRunner: IBMBobPromptStubCommandRunner(results: [
                     .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--version'"]): .success(stdout: "3.4.5\n"),
@@ -305,7 +305,7 @@ struct NexusServiceIBMBobPromptFlowTests {
             })
             return try NexusService.bootstrapForTests(
                 rootURL: rootURL,
-                providerHealthEvaluator: ProviderHealthEvaluator(
+                providerHealthEvaluator: ProviderHealthFacts(
                     executableResolver: IBMBobPromptStubExecutableResolver(executables: ["bob": "/tmp/fake-bob"]),
                     commandRunner: IBMBobPromptStubCommandRunner(results: [
                         .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--version'"]): .success(stdout: "3.4.5\n"),
@@ -363,7 +363,7 @@ struct NexusServiceIBMBobPromptFlowTests {
             })
             return try NexusService.bootstrapForTests(
                 rootURL: rootURL,
-                providerHealthEvaluator: ProviderHealthEvaluator(
+                providerHealthEvaluator: ProviderHealthFacts(
                     executableResolver: IBMBobPromptStubExecutableResolver(executables: ["bob": "/tmp/fake-bob"]),
                     commandRunner: IBMBobPromptStubCommandRunner(results: [
                         .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--version'"]): .success(stdout: "3.4.5\n"),
@@ -419,7 +419,7 @@ struct NexusServiceIBMBobPromptFlowTests {
         })
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: IBMBobPromptStubExecutableResolver(executables: ["bob": "/tmp/fake-bob"]),
                 commandRunner: IBMBobPromptStubCommandRunner(results: [
                     .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--version'"]): .success(stdout: "3.4.5\n"),
@@ -476,7 +476,7 @@ struct NexusServiceIBMBobPromptFlowTests {
         })
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: IBMBobPromptStubExecutableResolver(executables: ["bob": "/tmp/fake-bob"]),
                 commandRunner: IBMBobPromptStubCommandRunner(results: [
                     .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--version'"]): .success(stdout: "3.4.5\n"),
@@ -542,7 +542,7 @@ struct NexusServiceIBMBobPromptFlowTests {
             })
             return try NexusService.bootstrapForTests(
                 rootURL: rootURL,
-                providerHealthEvaluator: ProviderHealthEvaluator(
+                providerHealthEvaluator: ProviderHealthFacts(
                     executableResolver: IBMBobPromptStubExecutableResolver(executables: ["bob": "/tmp/fake-bob"]),
                     commandRunner: IBMBobPromptStubCommandRunner(results: [
                         .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--version'"]): .success(stdout: "3.4.5\n"),
@@ -604,7 +604,7 @@ struct NexusServiceIBMBobPromptFlowTests {
             })
             return try NexusService.bootstrapForTests(
                 rootURL: rootURL,
-                providerHealthEvaluator: ProviderHealthEvaluator(
+                providerHealthEvaluator: ProviderHealthFacts(
                     executableResolver: IBMBobPromptStubExecutableResolver(executables: ["bob": "/tmp/fake-bob"]),
                     commandRunner: IBMBobPromptStubCommandRunner(results: [
                         .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--version'"]): .success(stdout: "3.4.5\n"),
@@ -668,7 +668,7 @@ struct NexusServiceIBMBobPromptFlowTests {
         })
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: IBMBobPromptStubExecutableResolver(executables: ["bob": "/tmp/fake-bob"]),
                 commandRunner: IBMBobPromptStubCommandRunner(results: [
                     .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--version'"]): .success(stdout: "3.4.5\n"),

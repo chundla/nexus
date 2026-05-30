@@ -44,7 +44,7 @@ struct CodexProviderModuleTests {
         ))
     }
 
-    @Test func codexProviderModuleHealthUsesProviderHealthEvaluatorInsteadOfAdapter() async {
+    @Test func codexProviderModuleHealthUsesProviderHealthFactsInsteadOfAdapter() async {
         let module = CodexProviderModule()
         let workspace = Workspace(
             id: UUID(),
@@ -53,7 +53,7 @@ struct CodexProviderModuleTests {
             folderPath: "/tmp/local-codex",
             primaryGroupID: UUID()
         )
-        let providerHealthEvaluator = RecordingCodexProviderHealthEvaluator(
+        let providerHealthEvaluator = RecordingCodexProviderHealthFacts(
             summary: ProviderHealthSummary(
                 state: .available,
                 summary: "Codex health from evaluator",
@@ -368,7 +368,7 @@ struct CodexProviderModuleTests {
             primaryGroupID: UUID(),
             remoteHostID: hostID
         )
-        let providerHealthEvaluator = RecordingCodexProviderHealthEvaluator(
+        let providerHealthEvaluator = RecordingCodexProviderHealthFacts(
             summary: ProviderHealthSummary(
                 state: .available,
                 summary: "Codex module health",
@@ -577,7 +577,7 @@ struct CodexProviderModuleTests {
 
         let initialService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ReadyCodexProviderHealthEvaluator(),
+            providerHealthEvaluator: ReadyCodexProviderHealthFacts(),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: RecordingStaticCodexRuntimeLauncher())
         )
         let group = try initialService.createWorkspaceGroup(name: "Solo Group")
@@ -591,7 +591,7 @@ struct CodexProviderModuleTests {
         let tracker = CodexProviderModuleSessionTransitionTracker()
         let relaunchedService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ReadyCodexProviderHealthEvaluator(),
+            providerHealthEvaluator: ReadyCodexProviderHealthFacts(),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: RecordingStaticCodexRuntimeLauncher()),
             providerModuleRegistry: ProviderModuleRegistry(
                 modules: [
@@ -630,7 +630,7 @@ private final class FreshOpenActionTracker: @unchecked Sendable {
     var healthRequests: [SessionRequest] = []
 }
 
-private final class RecordingCodexProviderHealthEvaluator: @unchecked Sendable, ProviderHealthEvaluating {
+private final class RecordingCodexProviderHealthFacts: @unchecked Sendable, ProviderHealthEvaluating {
     struct Request: Equatable {
         let providerID: ProviderID
         let workspaceID: UUID
@@ -785,7 +785,7 @@ private struct TrackingCodexSessionTransitionProviderModule: ProviderModule {
     }
 }
 
-private struct ReadyCodexProviderHealthEvaluator: ProviderHealthEvaluating {
+private struct ReadyCodexProviderHealthFacts: ProviderHealthEvaluating {
     func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> [WorkspaceProviderCard] {
         ProviderID.allCases.map { providerID in
             WorkspaceProviderCard(

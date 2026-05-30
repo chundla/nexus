@@ -93,7 +93,7 @@ struct PiProviderModuleTests {
         #expect(module.supportsNamedSessions(in: workspace))
     }
 
-    @Test func piProviderModuleHealthUsesProviderHealthEvaluatorInsteadOfAdapter() async {
+    @Test func piProviderModuleHealthUsesProviderHealthFactsInsteadOfAdapter() async {
         let module = PiProviderModule()
         let workspace = Workspace(
             id: UUID(),
@@ -102,7 +102,7 @@ struct PiProviderModuleTests {
             folderPath: "/tmp/local-pi",
             primaryGroupID: UUID()
         )
-        let providerHealthEvaluator = RecordingPiProviderHealthEvaluator(
+        let providerHealthEvaluator = RecordingPiProviderHealthFacts(
             summary: ProviderHealthSummary(
                 state: .available,
                 summary: "Pi health from evaluator",
@@ -653,7 +653,7 @@ struct PiProviderModuleTests {
             folderPath: "/tmp/local-pi",
             primaryGroupID: UUID()
         )
-        let providerHealthEvaluator = RecordingPiProviderHealthEvaluator(
+        let providerHealthEvaluator = RecordingPiProviderHealthFacts(
             summary: ProviderHealthSummary(
                 state: .available,
                 summary: "Pi module health",
@@ -831,7 +831,7 @@ private final class FreshOpenActionTracker: @unchecked Sendable {
     var healthRequests: [SessionRequest] = []
 }
 
-private final class RecordingPiProviderHealthEvaluator: @unchecked Sendable, ProviderHealthEvaluating {
+private final class RecordingPiProviderHealthFacts: @unchecked Sendable, ProviderHealthEvaluating {
     struct Request: Equatable {
         let providerID: ProviderID
         let workspaceID: UUID

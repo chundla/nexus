@@ -666,7 +666,7 @@ private func makeRemoteIBMBobService(rootURL: URL, transportFactory: @escaping I
 
     return try NexusService.bootstrapForTests(
         rootURL: rootURL,
-        providerHealthEvaluator: ProviderHealthEvaluator(
+        providerHealthEvaluator: ProviderHealthFacts(
             executableResolver: RemoteIBMBobStubExecutableResolver(executables: [:]),
             commandRunner: RemoteIBMBobCommandRunner(),
             localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])

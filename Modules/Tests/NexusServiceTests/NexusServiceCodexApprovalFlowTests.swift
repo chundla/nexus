@@ -19,7 +19,7 @@ struct NexusServiceCodexApprovalFlowTests {
 
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: CodexApprovalStubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
                 commandRunner: CodexApprovalStubCommandRunner(results: [
                     .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-codex' '--version'"]): .success(stdout: "1.2.3\n")

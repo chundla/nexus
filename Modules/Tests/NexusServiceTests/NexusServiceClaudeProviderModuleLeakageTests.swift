@@ -15,7 +15,7 @@ struct NexusServiceClaudeProviderModuleLeakageTests {
         let launcher = RecordingClaudeSessionRuntimeLauncher()
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: AlwaysReadyClaudeProviderHealthEvaluator(),
+            providerHealthEvaluator: AlwaysReadyClaudeProviderHealthFacts(),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
         )
 
@@ -40,7 +40,7 @@ struct NexusServiceClaudeProviderModuleLeakageTests {
 
         let initialService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: AlwaysReadyClaudeProviderHealthEvaluator(),
+            providerHealthEvaluator: AlwaysReadyClaudeProviderHealthFacts(),
             hostValidationEvaluator: AlwaysAvailableClaudeHostValidationEvaluator(),
             workspaceAvailabilityEvaluator: AlwaysAvailableClaudeWorkspaceAvailabilityEvaluator(),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: RecordingClaudeSessionRuntimeLauncher())
@@ -59,7 +59,7 @@ struct NexusServiceClaudeProviderModuleLeakageTests {
 
         let relaunchedService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: AlwaysReadyClaudeProviderHealthEvaluator(),
+            providerHealthEvaluator: AlwaysReadyClaudeProviderHealthFacts(),
             hostValidationEvaluator: AlwaysAvailableClaudeHostValidationEvaluator(),
             workspaceAvailabilityEvaluator: AlwaysAvailableClaudeWorkspaceAvailabilityEvaluator(),
             sessionRuntimeManager: InMemorySessionRuntimeManager(
@@ -84,7 +84,7 @@ struct NexusServiceClaudeProviderModuleLeakageTests {
     }
 }
 
-private struct AlwaysReadyClaudeProviderHealthEvaluator: ProviderHealthEvaluating {
+private struct AlwaysReadyClaudeProviderHealthFacts: ProviderHealthEvaluating {
     func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> [WorkspaceProviderCard] {
         ProviderID.allCases.map { providerID in
             WorkspaceProviderCard(

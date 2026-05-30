@@ -5,10 +5,40 @@ import NexusDomain
 @testable import NexusService
 import Testing
 
-struct ProviderHealthEvaluatorLocalShellResolutionTests {
+struct ProviderHealthFactsLocalShellResolutionTests {
+    @Test func healthSummaryUsesProviderModuleRegistryInsteadOfCentralProviderSwitch() async {
+        let expected = ProviderHealthSummary(
+            state: .available,
+            summary: "Module-owned Claude health",
+            launchability: .launchable,
+            diagnostics: []
+        )
+        let evaluator = ProviderHealthFacts(
+            providerModuleRegistry: ProviderModuleRegistry(
+                modules: [
+                    .claude: TestProviderModule(providerID: .claude) { _, _, _ in expected }
+                ]
+            )
+        )
+
+        let health = await evaluator.healthSummary(
+            for: .claude,
+            workspace: Workspace(
+                id: UUID(),
+                name: "Local",
+                kind: .local,
+                folderPath: "/tmp/workspace",
+                primaryGroupID: UUID()
+            ),
+            remoteContext: nil
+        )
+
+        #expect(health == expected)
+    }
+
     @Test func localCodexHealthResolvesExecutableFromLoginShellWhenServicePathsMissIt() throws {
         let tempRoot = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ProviderHealthEvaluatorLocalShellResolutionTests", isDirectory: true)
+            .appendingPathComponent("ProviderHealthFactsLocalShellResolutionTests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
 
@@ -28,7 +58,7 @@ struct ProviderHealthEvaluatorLocalShellResolutionTests {
 
         let shellBuilder = LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
         let readinessProbe = RecordingCodexReadinessProbe()
-        let evaluator = ProviderHealthEvaluator(
+        let evaluator = ProviderHealthFacts(
             executableResolver: TestExecutableResolver(executables: [:]),
             commandRunner: TestCommandRunner(results: [
                 .init(executable: "/bin/zsh", arguments: ["-lic", "command -v codex"]): .success(stdout: "\(executablePath.path(percentEncoded: false))\n"),
@@ -78,7 +108,7 @@ struct ProviderHealthEvaluatorLocalShellResolutionTests {
 
     @Test func localShellCommandBuilderUsesLoginFishWithoutInteractiveModeForLaunches() throws {
         let tempRoot = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ProviderHealthEvaluatorLocalShellResolutionTests", isDirectory: true)
+            .appendingPathComponent("ProviderHealthFactsLocalShellResolutionTests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
 
@@ -95,7 +125,7 @@ struct ProviderHealthEvaluatorLocalShellResolutionTests {
 
     @Test func localCodexHealthResolvesExecutableFromInteractiveCShellWhenServicePathsMissIt() throws {
         let tempRoot = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ProviderHealthEvaluatorLocalShellResolutionTests", isDirectory: true)
+            .appendingPathComponent("ProviderHealthFactsLocalShellResolutionTests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
 
@@ -113,7 +143,7 @@ struct ProviderHealthEvaluatorLocalShellResolutionTests {
         let wrappedVersionCommand = "if ( -f ~/.login ) source ~/.login; '\(executablePath.path(percentEncoded: false))' '--version'"
         let shellBuilder = LocalShellCommandBuilder(environment: ["SHELL": "/bin/csh"])
         let readinessProbe = RecordingCodexReadinessProbe()
-        let evaluator = ProviderHealthEvaluator(
+        let evaluator = ProviderHealthFacts(
             executableResolver: TestExecutableResolver(executables: [:]),
             commandRunner: TestCommandRunner(results: [
                 .init(executable: "/bin/csh", arguments: ["-i", "-c", wrappedCommand]): .success(stdout: "\(executablePath.path(percentEncoded: false))\n"),
@@ -153,7 +183,7 @@ struct ProviderHealthEvaluatorLocalShellResolutionTests {
             stdout: "/home/tester/.local/bin/codex\n1.2.3\n"
         )
         let readinessProbe = RecordingRemoteCodexReadinessProbe()
-        let evaluator = ProviderHealthEvaluator(
+        let evaluator = ProviderHealthFacts(
             executableResolver: TestExecutableResolver(executables: [:]),
             commandRunner: runner,
             remoteCodexReadinessProbe: readinessProbe
@@ -234,7 +264,7 @@ struct ProviderHealthEvaluatorLocalShellResolutionTests {
             stdout: "/home/tester/.local/bin/pi\n0.9.0\n"
         )
         let readinessProbe = RecordingRemotePiReadinessProbe()
-        let evaluator = ProviderHealthEvaluator(
+        let evaluator = ProviderHealthFacts(
             executableResolver: TestExecutableResolver(executables: [:]),
             commandRunner: runner,
             remotePiReadinessProbe: readinessProbe
@@ -310,7 +340,7 @@ struct ProviderHealthEvaluatorLocalShellResolutionTests {
         let hostID = UUID()
         let host = NexusDomain.Host(id: hostID, name: "Build Server", sshTarget: "build-box")
         let runner = RecordingRemoteCommandRunner(stdout: "/home/tester/.local/bin/pi\n0.9.0\n")
-        let evaluator = ProviderHealthEvaluator(
+        let evaluator = ProviderHealthFacts(
             executableResolver: TestExecutableResolver(executables: [:]),
             commandRunner: runner,
             remotePiReadinessProbe: StubRemotePiReadinessProbe(outcome: .authenticationRequired("Run `pi auth login` on the Host."))
@@ -362,7 +392,7 @@ struct ProviderHealthEvaluatorLocalShellResolutionTests {
         let hostID = UUID()
         let host = NexusDomain.Host(id: hostID, name: "Build Server", sshTarget: "build-box")
         let runner = RecordingRemoteCommandRunner(stdout: "/home/tester/.local/bin/pi\n0.9.0\n")
-        let evaluator = ProviderHealthEvaluator(
+        let evaluator = ProviderHealthFacts(
             executableResolver: TestExecutableResolver(executables: [:]),
             commandRunner: runner,
             remotePiReadinessProbe: StubRemotePiReadinessProbe(outcome: .authenticationUncertain("Pi auth readiness could not be confirmed."))
@@ -419,7 +449,7 @@ struct ProviderHealthEvaluatorLocalShellResolutionTests {
         let hostID = UUID()
         let host = NexusDomain.Host(id: hostID, name: "Build Server", sshTarget: "build-box")
         let runner = RecordingRemoteCommandRunner(stdout: "/home/tester/.local/bin/codex\n1.2.3\n")
-        let evaluator = ProviderHealthEvaluator(
+        let evaluator = ProviderHealthFacts(
             executableResolver: TestExecutableResolver(executables: [:]),
             commandRunner: runner,
             remoteCodexReadinessProbe: StubRemoteCodexReadinessProbe(outcome: .authenticationRequired("Run `codex login` on the Host."))
@@ -471,7 +501,7 @@ struct ProviderHealthEvaluatorLocalShellResolutionTests {
         let hostID = UUID()
         let host = NexusDomain.Host(id: hostID, name: "Build Server", sshTarget: "build-box")
         let runner = RecordingRemoteCommandRunner(stdout: "/home/tester/.local/bin/codex\n1.2.3\n")
-        let evaluator = ProviderHealthEvaluator(
+        let evaluator = ProviderHealthFacts(
             executableResolver: TestExecutableResolver(executables: [:]),
             commandRunner: runner,
             remoteCodexReadinessProbe: ThrowingRemoteCodexReadinessProbe()
@@ -523,7 +553,7 @@ struct ProviderHealthEvaluatorLocalShellResolutionTests {
         let hostID = UUID()
         let host = NexusDomain.Host(id: hostID, name: "Build Server", sshTarget: "build-box")
         let runner = RecordingRemoteCommandRunner(stdout: "/home/tester/.local/bin/codex\n1.2.3\n")
-        let evaluator = ProviderHealthEvaluator(
+        let evaluator = ProviderHealthFacts(
             executableResolver: TestExecutableResolver(executables: [:]),
             commandRunner: runner,
             remoteCodexReadinessProbe: StubRemoteCodexReadinessProbe(outcome: .authenticationUncertain("Codex auth readiness could not be confirmed."))

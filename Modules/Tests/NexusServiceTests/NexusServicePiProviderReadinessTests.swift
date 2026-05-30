@@ -14,7 +14,7 @@ struct NexusServicePiProviderReadinessTests {
 
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: PiStubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
                 commandRunner: PiStubCommandRunner(results: [
                     .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
@@ -58,7 +58,7 @@ struct NexusServicePiProviderReadinessTests {
 
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: PiStubExecutableResolver(executables: [:]),
                 commandRunner: PiStubCommandRunner(results: [:]),
                 localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
@@ -95,7 +95,7 @@ struct NexusServicePiProviderReadinessTests {
 
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: PiStubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
                 commandRunner: RemotePiStubCommandRunner(),
                 localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),

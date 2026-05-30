@@ -15,7 +15,7 @@ struct NexusServicePiProviderModuleLeakageTests {
         let launcher = RecordingPiSessionRuntimeLauncher()
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: AlwaysReadyProviderHealthEvaluator(),
+            providerHealthEvaluator: AlwaysReadyProviderHealthFacts(),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
         )
 
@@ -40,7 +40,7 @@ struct NexusServicePiProviderModuleLeakageTests {
 
         let initialService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: AlwaysReadyProviderHealthEvaluator(),
+            providerHealthEvaluator: AlwaysReadyProviderHealthFacts(),
             hostValidationEvaluator: AlwaysAvailableHostValidationEvaluator(),
             workspaceAvailabilityEvaluator: AlwaysAvailableWorkspaceAvailabilityEvaluator(),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: RecordingPiSessionRuntimeLauncher())
@@ -59,7 +59,7 @@ struct NexusServicePiProviderModuleLeakageTests {
 
         let relaunchedService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: AlwaysReadyProviderHealthEvaluator(),
+            providerHealthEvaluator: AlwaysReadyProviderHealthFacts(),
             hostValidationEvaluator: AlwaysAvailableHostValidationEvaluator(),
             workspaceAvailabilityEvaluator: AlwaysAvailableWorkspaceAvailabilityEvaluator(),
             sessionRuntimeManager: InMemorySessionRuntimeManager(
@@ -84,7 +84,7 @@ struct NexusServicePiProviderModuleLeakageTests {
     }
 }
 
-private struct AlwaysReadyProviderHealthEvaluator: ProviderHealthEvaluating {
+private struct AlwaysReadyProviderHealthFacts: ProviderHealthEvaluating {
     func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> [WorkspaceProviderCard] {
         ProviderID.allCases.map { providerID in
             WorkspaceProviderCard(
