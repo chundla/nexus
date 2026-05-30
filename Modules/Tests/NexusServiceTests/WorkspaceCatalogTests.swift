@@ -411,9 +411,9 @@ struct WorkspaceCatalogTests {
                 )
             ]
         )
-        let collector = RecordingRemoteWorkspaceBrowseFactCollector(
+        let collector = RecordingRemoteWorkspaceProbeCollector(
             result: .collected(
-                RemoteWorkspaceBrowseFacts(
+                RemoteWorkspaceProbeFacts(
                     tmuxAvailable: true,
                     workspacePath: .available,
                     providerFacts: [:]
@@ -424,7 +424,7 @@ struct WorkspaceCatalogTests {
             providerHealthEvaluator: providerHealthEvaluator,
             hostValidationEvaluator: hostValidationEvaluator,
             workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
-            remoteWorkspaceBrowseFactCollector: collector,
+            remoteWorkspaceProbeCollector: collector,
             providerModuleRegistry: ProviderModuleRegistry(
                 modules: [
                     ProviderID.claude: TestProviderModule(providerID: .claude) { workspace, remoteContext, providerHealthEvaluator in
@@ -485,7 +485,7 @@ struct WorkspaceCatalogTests {
         #expect(await providerHealthEvaluator.callCount(for: ProviderID.claude) == 1)
     }
 
-    @Test func providerDetailUsesSingleRemoteBrowseFactPassForRemoteWorkspaceTarget() async throws {
+    @Test func providerDetailUsesSingleRemoteProbePassForRemoteWorkspaceTarget() async throws {
         let hostValidationEvaluator = CountingHostValidationEvaluator(
             result: HostValidationResult(state: .available, summary: "Unexpected Host Validation", diagnostics: [])
         )
@@ -498,13 +498,13 @@ struct WorkspaceCatalogTests {
             commandRunner: commandRunner,
             remoteCodexReadinessProbe: codexReadinessProbe
         )
-        let collector = RecordingRemoteWorkspaceBrowseFactCollector(
+        let collector = RecordingRemoteWorkspaceProbeCollector(
             result: .collected(
-                RemoteWorkspaceBrowseFacts(
+                RemoteWorkspaceProbeFacts(
                     tmuxAvailable: true,
                     workspacePath: .available,
                     providerFacts: [
-                        .codex: RemoteProviderBrowseFact(
+                        .codex: RemoteProviderProbeFacts(
                             executable: "/opt/tools/codex",
                             version: "0.9.0",
                             resolutionDetail: nil,
@@ -518,7 +518,7 @@ struct WorkspaceCatalogTests {
             providerHealthEvaluator: providerHealthEvaluator,
             hostValidationEvaluator: hostValidationEvaluator,
             workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
-            remoteWorkspaceBrowseFactCollector: collector
+            remoteWorkspaceProbeCollector: collector
         )
         let host = try fixture.metadataStore.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
         let remoteWorkspace = try fixture.metadataStore.createRemoteWorkspace(
@@ -538,7 +538,7 @@ struct WorkspaceCatalogTests {
         #expect(await codexReadinessProbe.invocations == [WorkspaceCatalogReadinessInvocation(hostID: host.id, executable: "/opt/tools/codex", workingDirectory: "/srv/api")])
     }
 
-    @Test func refreshWorkspaceOverviewUsesSingleRemoteBrowseFactPassForRemoteWorkspaceTarget() async throws {
+    @Test func refreshWorkspaceOverviewUsesSingleRemoteProbePassForRemoteWorkspaceTarget() async throws {
         let hostValidationEvaluator = CountingHostValidationEvaluator(
             result: HostValidationResult(state: .available, summary: "Unexpected Host Validation", diagnostics: [])
         )
@@ -553,31 +553,31 @@ struct WorkspaceCatalogTests {
             remoteCodexReadinessProbe: codexReadinessProbe,
             remotePiReadinessProbe: piReadinessProbe
         )
-        let collector = RecordingRemoteWorkspaceBrowseFactCollector(
+        let collector = RecordingRemoteWorkspaceProbeCollector(
             result: .collected(
-                RemoteWorkspaceBrowseFacts(
+                RemoteWorkspaceProbeFacts(
                     tmuxAvailable: true,
                     workspacePath: .available,
                     providerFacts: [
-                        .claude: RemoteProviderBrowseFact(
+                        .claude: RemoteProviderProbeFacts(
                             executable: "/opt/tools/claude",
                             version: "1.2.3",
                             resolutionDetail: nil,
                             probeDetail: nil
                         ),
-                        .codex: RemoteProviderBrowseFact(
+                        .codex: RemoteProviderProbeFacts(
                             executable: "/opt/tools/codex",
                             version: "0.9.0",
                             resolutionDetail: nil,
                             probeDetail: nil
                         ),
-                        .pi: RemoteProviderBrowseFact(
+                        .pi: RemoteProviderProbeFacts(
                             executable: "/opt/tools/pi",
                             version: "3.1.4",
                             resolutionDetail: nil,
                             probeDetail: nil
                         ),
-                        .ibmBob: RemoteProviderBrowseFact(
+                        .ibmBob: RemoteProviderProbeFacts(
                             executable: "/opt/tools/bob",
                             version: "2026.05",
                             resolutionDetail: nil,
@@ -591,7 +591,7 @@ struct WorkspaceCatalogTests {
             providerHealthEvaluator: providerHealthEvaluator,
             hostValidationEvaluator: hostValidationEvaluator,
             workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
-            remoteWorkspaceBrowseFactCollector: collector
+            remoteWorkspaceProbeCollector: collector
         )
         let host = try fixture.metadataStore.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
         let remoteWorkspace = try fixture.metadataStore.createRemoteWorkspace(
@@ -619,7 +619,7 @@ struct WorkspaceCatalogTests {
         #expect(await piReadinessProbe.invocations == [WorkspaceCatalogReadinessInvocation(hostID: host.id, executable: "/opt/tools/pi", workingDirectory: "/srv/api")])
     }
 
-    @Test func refreshWorkspaceOverviewClassifiesRemoteBrowseTransportFailureWithoutSeparateChecks() async throws {
+    @Test func refreshWorkspaceOverviewClassifiesRemoteProbeTransportFailureWithoutSeparateChecks() async throws {
         let hostValidationEvaluator = CountingHostValidationEvaluator(
             result: HostValidationResult(state: .available, summary: "Unexpected Host Validation", diagnostics: [])
         )
@@ -627,14 +627,14 @@ struct WorkspaceCatalogTests {
             result: WorkspaceAvailabilityResult(state: .available, summary: "Unexpected Workspace Availability", diagnostics: [])
         )
         let commandRunner = FailingWorkspaceCatalogCommandRunner()
-        let collector = RecordingRemoteWorkspaceBrowseFactCollector(
+        let collector = RecordingRemoteWorkspaceProbeCollector(
             result: .transportFailed("Permission denied (publickey).")
         )
         let fixture = try WorkspaceCatalogFixture(
             providerHealthEvaluator: ProviderHealthFacts(commandRunner: commandRunner),
             hostValidationEvaluator: hostValidationEvaluator,
             workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
-            remoteWorkspaceBrowseFactCollector: collector
+            remoteWorkspaceProbeCollector: collector
         )
         let host = try fixture.metadataStore.createHost(name: "Build Server", sshTarget: "build-box", port: nil)
         let remoteWorkspace = try fixture.metadataStore.createRemoteWorkspace(
@@ -660,7 +660,7 @@ struct WorkspaceCatalogTests {
         #expect(commandRunner.callCount == 0)
     }
 
-    @Test func refreshWorkspaceOverviewClassifiesRemoteBrowseRawProbeFailureWithoutSeparateChecks() async throws {
+    @Test func refreshWorkspaceOverviewClassifiesRemoteProbeRawFailureWithoutSeparateChecks() async throws {
         let hostValidationEvaluator = CountingHostValidationEvaluator(
             result: HostValidationResult(state: .available, summary: "Unexpected Host Validation", diagnostics: [])
         )
@@ -668,14 +668,14 @@ struct WorkspaceCatalogTests {
             result: WorkspaceAvailabilityResult(state: .available, summary: "Unexpected Workspace Availability", diagnostics: [])
         )
         let commandRunner = FailingWorkspaceCatalogCommandRunner()
-        let collector = RecordingRemoteWorkspaceBrowseFactCollector(
+        let collector = RecordingRemoteWorkspaceProbeCollector(
             result: .rawProbeFailed("Unsupported remote probe protocol: v2")
         )
         let fixture = try WorkspaceCatalogFixture(
             providerHealthEvaluator: ProviderHealthFacts(commandRunner: commandRunner),
             hostValidationEvaluator: hostValidationEvaluator,
             workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
-            remoteWorkspaceBrowseFactCollector: collector
+            remoteWorkspaceProbeCollector: collector
         )
         let host = try fixture.metadataStore.createHost(name: "Build Server", sshTarget: "build-box", port: nil)
         let remoteWorkspace = try fixture.metadataStore.createRemoteWorkspace(
@@ -714,7 +714,7 @@ private struct WorkspaceCatalogFixture {
         providerHealthEvaluator: any ProviderHealthEvaluating = AvailableProviderHealthFacts(),
         hostValidationEvaluator: any HostValidationEvaluating = UnusedHostValidationEvaluator(),
         workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating = UnusedWorkspaceAvailabilityEvaluator(),
-        remoteWorkspaceBrowseFactCollector: any RemoteWorkspaceBrowseFactCollecting = UnusedRemoteWorkspaceBrowseFactCollector(),
+        remoteWorkspaceProbeCollector: any RemoteWorkspaceProbeCollecting = UnusedRemoteWorkspaceProbeCollector(),
         providerModuleRegistry: ProviderModuleRegistry? = nil,
         currentDate: @escaping () -> Date = Date.init
     ) throws {
@@ -749,7 +749,7 @@ private struct WorkspaceCatalogFixture {
                 providerHealthEvaluator: providerHealthEvaluator,
                 hostValidationEvaluator: hostValidationEvaluator,
                 workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
-                remoteWorkspaceBrowseFactCollector: remoteWorkspaceBrowseFactCollector,
+                remoteWorkspaceProbeCollector: remoteWorkspaceProbeCollector,
                 sessionRuntimeManager: InMemorySessionRuntimeManager(),
                 providerModuleRegistry: providerModuleRegistry ?? ServiceSessionProviderRegistry.providerModules(),
                 currentDate: currentDate
@@ -941,22 +941,22 @@ private final class CountingWorkspaceAvailabilityEvaluator: WorkspaceAvailabilit
     }
 }
 
-private struct UnusedRemoteWorkspaceBrowseFactCollector: RemoteWorkspaceBrowseFactCollecting {
-    func collect(workspace: Workspace, host: NexusDomain.Host) -> RemoteWorkspaceBrowseFactCollection {
-        Issue.record("Remote Workspace browse fact collection should not run for this test")
+private struct UnusedRemoteWorkspaceProbeCollector: RemoteWorkspaceProbeCollecting {
+    func collect(workspace: Workspace, host: NexusDomain.Host) -> RemoteWorkspaceProbeCollection {
+        Issue.record("Remote Workspace probe collection should not run for this test")
         return .transportFailed("unused")
     }
 }
 
-private final class RecordingRemoteWorkspaceBrowseFactCollector: RemoteWorkspaceBrowseFactCollecting, @unchecked Sendable {
-    let result: RemoteWorkspaceBrowseFactCollection
+private final class RecordingRemoteWorkspaceProbeCollector: RemoteWorkspaceProbeCollecting, @unchecked Sendable {
+    let result: RemoteWorkspaceProbeCollection
     private(set) var callCount = 0
 
-    init(result: RemoteWorkspaceBrowseFactCollection) {
+    init(result: RemoteWorkspaceProbeCollection) {
         self.result = result
     }
 
-    func collect(workspace: Workspace, host: NexusDomain.Host) -> RemoteWorkspaceBrowseFactCollection {
+    func collect(workspace: Workspace, host: NexusDomain.Host) -> RemoteWorkspaceProbeCollection {
         callCount += 1
         return result
     }

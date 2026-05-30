@@ -26,7 +26,7 @@ struct WorkspaceCatalogDependencies {
     let providerHealthEvaluator: any ProviderHealthEvaluating
     let hostValidationEvaluator: any HostValidationEvaluating
     let workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating
-    let remoteWorkspaceBrowseFactCollector: any RemoteWorkspaceBrowseFactCollecting
+    let remoteWorkspaceProbeCollector: any RemoteWorkspaceProbeCollecting
     let sessionRuntimeManager: any SessionRuntimeManaging
     let providerModuleRegistry: ProviderModuleRegistry
     let recordPerformanceDiagnostic: (PerformanceDiagnosticRecord) throws -> Void
@@ -39,7 +39,7 @@ struct WorkspaceCatalogDependencies {
         providerHealthEvaluator: any ProviderHealthEvaluating,
         hostValidationEvaluator: any HostValidationEvaluating,
         workspaceAvailabilityEvaluator: any WorkspaceAvailabilityEvaluating,
-        remoteWorkspaceBrowseFactCollector: any RemoteWorkspaceBrowseFactCollecting = RemoteWorkspaceBrowseFactCollector(),
+        remoteWorkspaceProbeCollector: any RemoteWorkspaceProbeCollecting = RemoteWorkspaceProbeCollector(),
         sessionRuntimeManager: any SessionRuntimeManaging,
         providerModuleRegistry: ProviderModuleRegistry,
         recordPerformanceDiagnostic: @escaping (PerformanceDiagnosticRecord) throws -> Void = { _ in },
@@ -51,7 +51,7 @@ struct WorkspaceCatalogDependencies {
         self.providerHealthEvaluator = providerHealthEvaluator
         self.hostValidationEvaluator = hostValidationEvaluator
         self.workspaceAvailabilityEvaluator = workspaceAvailabilityEvaluator
-        self.remoteWorkspaceBrowseFactCollector = remoteWorkspaceBrowseFactCollector
+        self.remoteWorkspaceProbeCollector = remoteWorkspaceProbeCollector
         self.sessionRuntimeManager = sessionRuntimeManager
         self.providerModuleRegistry = providerModuleRegistry
         self.recordPerformanceDiagnostic = recordPerformanceDiagnostic
@@ -170,7 +170,7 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
             return try remoteWorkspaceHealthContext(for: workspace)
         }
 
-        guard supportsSharedRemoteBrowseFactCollection(for: providerID) else {
+        guard supportsSharedRemoteProbeCollection(for: providerID) else {
             return try remoteWorkspaceHealthContext(for: workspace)
         }
 
@@ -207,7 +207,7 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
         )
     }
 
-    private func supportsSharedRemoteBrowseFactCollection(for providerID: ProviderID) -> Bool {
+    private func supportsSharedRemoteProbeCollection(for providerID: ProviderID) -> Bool {
         switch providerID {
         case .claude:
             dependencies.providerHealthEvaluator is any SharedRemoteCLIProviderHealthFactProviding
@@ -453,7 +453,7 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
                 nil
             )
         case .forceFresh:
-            let probeFactsCollection = dependencies.remoteWorkspaceBrowseFactCollector.collect(workspace: workspace, host: host)
+            let probeFactsCollection = dependencies.remoteWorkspaceProbeCollector.collect(workspace: workspace, host: host)
             let hostValidation = try dependencies.metadataStore.saveHostValidation(
                 hostID: hostID,
                 result: hostValidationResult(from: probeFactsCollection, host: host),
@@ -619,10 +619,10 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
     }
 
     private func hostValidationResult(
-        from browseFactsCollection: RemoteWorkspaceBrowseFactCollection,
+        from probeFactsCollection: RemoteWorkspaceProbeCollection,
         host: NexusDomain.Host
     ) -> HostValidationResult {
-        switch browseFactsCollection {
+        switch probeFactsCollection {
         case let .transportFailed(detail), let .rawProbeFailed(detail):
             let classification = classifyHostValidationFailure(detail: detail)
             return HostValidationResult(
@@ -662,7 +662,7 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
     }
 
     private func workspaceAvailabilityResult(
-        from browseFactsCollection: RemoteWorkspaceBrowseFactCollection,
+        from probeFactsCollection: RemoteWorkspaceProbeCollection,
         workspace: Workspace,
         host: NexusDomain.Host,
         hostValidation: HostValidationSnapshot?
@@ -695,7 +695,7 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
             )
         }
 
-        guard case let .collected(facts) = browseFactsCollection else {
+        guard case let .collected(facts) = probeFactsCollection else {
             return WorkspaceAvailabilityResult(
                 state: .blocked,
                 summary: "Workspace Availability is blocked by Host Validation",

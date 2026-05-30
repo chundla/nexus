@@ -229,21 +229,6 @@ struct RemoteWorkspaceHealthContext {
         self.probeFacts = probeFacts
     }
 
-    init(
-        host: NexusDomain.Host,
-        hostValidation: HostValidationSnapshot?,
-        workspaceAvailability: WorkspaceAvailabilitySnapshot?,
-        browseFacts: RemoteWorkspaceBrowseFacts?
-    ) {
-        self.init(
-            host: host,
-            hostValidation: hostValidation,
-            workspaceAvailability: workspaceAvailability,
-            probeFacts: browseFacts
-        )
-    }
-
-    var browseFacts: RemoteWorkspaceBrowseFacts? { probeFacts }
 }
 
 protocol ProviderHealthEvaluating: Sendable {

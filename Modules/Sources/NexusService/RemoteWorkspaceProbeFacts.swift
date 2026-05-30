@@ -340,13 +340,6 @@ struct RemoteWorkspaceProbeCollector: RemoteWorkspaceProbeCollecting {
     }
 }
 
-typealias RemoteWorkspaceBrowseFactCollecting = RemoteWorkspaceProbeCollecting
-typealias RemoteWorkspaceBrowseFactCollection = RemoteWorkspaceProbeCollection
-typealias RemoteWorkspacePathBrowseFact = RemoteWorkspacePathProbeFact
-typealias RemoteProviderBrowseFact = RemoteProviderProbeFacts
-typealias RemoteWorkspaceBrowseFacts = RemoteWorkspaceProbeFacts
-typealias RemoteWorkspaceBrowseFactCollector = RemoteWorkspaceProbeCollector
-
 func providerCommandFirstDiagnosticLine(stdout: String, stderr: String) -> String {
     [stderr, stdout]
         .joined(separator: "\n")

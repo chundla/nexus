@@ -4,9 +4,9 @@ import NexusDomain
 @testable import NexusService
 import Testing
 
-struct RemoteWorkspaceBrowseFactCollectorTests {
-    @Test func collectBuildsSingleSSHFactPassAndParsesRemoteBrowseFacts() throws {
-        let runner = RecordingRemoteWorkspaceBrowseFactCommandRunner(
+struct RemoteWorkspaceProbeCollectorTests {
+    @Test func collectBuildsSingleSSHFactPassAndParsesRemoteProbeFacts() throws {
+        let runner = RecordingRemoteWorkspaceProbeCommandRunner(
             result: ProviderCommandResult(
                 exitStatus: 0,
                 stdout: """
@@ -25,7 +25,7 @@ struct RemoteWorkspaceBrowseFactCollectorTests {
                 stderr: ""
             )
         )
-        let collector = RemoteWorkspaceBrowseFactCollector(commandRunner: runner)
+        let collector = RemoteWorkspaceProbeCollector(commandRunner: runner)
         let host = NexusDomain.Host(id: UUID(), name: "Build Server", sshTarget: "build-box", port: 2222)
         let workspace = Workspace(
             id: UUID(),
@@ -40,14 +40,14 @@ struct RemoteWorkspaceBrowseFactCollectorTests {
         let invocation = try #require(runner.invocation)
 
         #expect(facts == .collected(
-            RemoteWorkspaceBrowseFacts(
+            RemoteWorkspaceProbeFacts(
                 tmuxAvailable: true,
                 workspacePath: .available,
                 providerFacts: [
-                    .claude: RemoteProviderBrowseFact(executable: "/opt/tools/claude", version: "1.2.3", resolutionDetail: nil, probeDetail: nil),
-                    .codex: RemoteProviderBrowseFact(executable: "/opt/tools/codex", version: "0.9.0", resolutionDetail: nil, probeDetail: nil),
-                    .pi: RemoteProviderBrowseFact(executable: "/opt/tools/pi", version: "3.1.4", resolutionDetail: nil, probeDetail: nil),
-                    .ibmBob: RemoteProviderBrowseFact(executable: "/opt/tools/bob", version: "2026.05", resolutionDetail: nil, probeDetail: nil)
+                    .claude: RemoteProviderProbeFacts(executable: "/opt/tools/claude", version: "1.2.3", resolutionDetail: nil, probeDetail: nil),
+                    .codex: RemoteProviderProbeFacts(executable: "/opt/tools/codex", version: "0.9.0", resolutionDetail: nil, probeDetail: nil),
+                    .pi: RemoteProviderProbeFacts(executable: "/opt/tools/pi", version: "3.1.4", resolutionDetail: nil, probeDetail: nil),
+                    .ibmBob: RemoteProviderProbeFacts(executable: "/opt/tools/bob", version: "2026.05", resolutionDetail: nil, probeDetail: nil)
                 ]
             )
         ))
@@ -58,15 +58,15 @@ struct RemoteWorkspaceBrowseFactCollectorTests {
         #expect(invocation.arguments.last?.contains("collect_cli_provider claude claude") == true)
     }
 
-    @Test func collectReturnsTransportFailureWhenSSHFactsDoNotArrive() throws {
-        let runner = RecordingRemoteWorkspaceBrowseFactCommandRunner(
+    @Test func collectReturnsTransportFailureWhenSSHProbeFactsDoNotArrive() throws {
+        let runner = RecordingRemoteWorkspaceProbeCommandRunner(
             result: ProviderCommandResult(
                 exitStatus: 255,
                 stdout: "",
                 stderr: "Permission denied (publickey)."
             )
         )
-        let collector = RemoteWorkspaceBrowseFactCollector(commandRunner: runner)
+        let collector = RemoteWorkspaceProbeCollector(commandRunner: runner)
         let host = NexusDomain.Host(id: UUID(), name: "Build Server", sshTarget: "build-box")
         let workspace = Workspace(
             id: UUID(),
@@ -84,7 +84,7 @@ struct RemoteWorkspaceBrowseFactCollectorTests {
     }
 
     @Test func collectReturnsRawProbeFailureWhenSSHReturnsUnsupportedProbeEnvelope() throws {
-        let runner = RecordingRemoteWorkspaceBrowseFactCommandRunner(
+        let runner = RecordingRemoteWorkspaceProbeCommandRunner(
             result: ProviderCommandResult(
                 exitStatus: 0,
                 stdout: """
@@ -111,7 +111,7 @@ struct RemoteWorkspaceBrowseFactCollectorTests {
     }
 }
 
-private final class RecordingRemoteWorkspaceBrowseFactCommandRunner: ProviderCommandRunning, @unchecked Sendable {
+private final class RecordingRemoteWorkspaceProbeCommandRunner: ProviderCommandRunning, @unchecked Sendable {
     let result: ProviderCommandResult
     private(set) var invocation: (executable: String, arguments: [String])?
 
