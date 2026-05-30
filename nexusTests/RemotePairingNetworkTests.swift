@@ -1927,6 +1927,104 @@ struct RemotePairingNetworkTests {
         ])
     }
 
+    @Test func remotePiNetworkControllerCanSendImageBearingPromptThroughDedicatedAPI() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let transport = RemotePairingRecordingPiRPCTransport(promptResponseText: "world")
+        let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
+            transport
+        })
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthFacts(
+                executableResolver: RemotePairingTestExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
+                commandRunner: RemotePairingTestCommandRunner(results: [
+                    RemotePairingTestCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
+                    RemotePairingTestCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                ]),
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+            ),
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
+
+        _ = try await client.setRemoteAccessEnabled(true)
+        let pairing = try await client.startPairing()
+        let group = try await client.createWorkspaceGroup(name: "Client Work")
+        let workspace = try await client.createLocalWorkspace(
+            name: "Nexus",
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+
+        let remoteClient = RemotePairingHTTPClient()
+        let pairedMac = try await remoteClient.completePairing(
+            host: server.displayHost,
+            port: server.port,
+            pairingCode: pairing.code,
+            deviceName: "Chris’s iPhone"
+        )
+        let session = try await remoteClient.launchOrResumeDefaultSession(
+            for: pairedMac,
+            workspaceID: workspace.id,
+            providerID: .pi
+        )
+
+        var observedScreens: [SessionScreen] = []
+        let observation = try await remoteClient.observeSessionScreen(
+            for: pairedMac,
+            sessionID: session.id,
+            onUpdate: { screen in
+                Task { @MainActor in
+                    observedScreens.append(screen)
+                }
+            },
+            onDisconnect: { _ in }
+        )
+        defer {
+            Task {
+                await observation.cancel()
+            }
+        }
+
+        _ = try await waitForObservedScreen {
+            observedScreens.last
+        }
+
+        _ = try await remoteClient.takeSessionControl(for: pairedMac, sessionID: session.id, columns: 44, rows: 12)
+        let prompt = SessionPrompt(
+            text: "What changed in this screenshot?",
+            images: [SessionPromptImage(data: Data([0x89, 0x50, 0x4E, 0x47]), mimeType: "image/png")]
+        )
+        let responseScreen = try await remoteClient.sendSessionInput(for: pairedMac, sessionID: session.id, prompt: prompt)
+        let observedScreen = try await waitForObservedScreen {
+            observedScreens.last { $0.activityItems.contains(where: { $0.text == "Pi: world" }) }
+        }
+        let fetchedScreen = try await remoteClient.fetchSessionScreen(for: pairedMac, sessionID: session.id)
+        let promptLine = try #require(transport.sentLines.first(where: { $0.contains("\"type\":\"prompt\"") }))
+        let promptData = try #require(promptLine.data(using: .utf8))
+        let promptPayload = try #require(JSONSerialization.jsonObject(with: promptData) as? [String: Any])
+        let images = try #require(promptPayload["images"] as? [[String: Any]])
+
+        #expect(promptPayload["message"] as? String == "What changed in this screenshot?")
+        #expect(images[0]["data"] as? String == "iVBORw==")
+        #expect(images[0]["mimeType"] as? String == "image/png")
+        #expect(responseScreen.activityItems[1].prompt == prompt)
+        #expect(observedScreen.activityItems[1].prompt == prompt)
+        #expect(fetchedScreen.activityItems[1].prompt == prompt)
+        #expect(fetchedScreen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "You: What changed in this screenshot? [1 image]",
+            "Pi: world"
+        ])
+    }
+
     @Test func remotePiReconnectRecoversProviderEventsAndExtensionUIWhileControllerOwnsDialogResponses() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)
@@ -2264,6 +2362,86 @@ private final class RemotePairingStreamingPiRPCTransport: PiRPCTransporting, @un
                     ]
                 ])
             }
+        default:
+            return
+        }
+    }
+
+    func terminate() throws {
+        terminationHandler?(0)
+    }
+
+    private func emit(_ object: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: object),
+              let line = String(data: data, encoding: .utf8) else {
+            return
+        }
+        stdoutLineHandler?(line)
+    }
+}
+
+private final class RemotePairingRecordingPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
+    private let promptResponseText: String
+    private var stdoutLineHandler: (@Sendable (String) -> Void)?
+    private var terminationHandler: (@Sendable (Int32) -> Void)?
+    private(set) var sentLines: [String] = []
+
+    init(promptResponseText: String = "") {
+        self.promptResponseText = promptResponseText
+    }
+
+    func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
+        stdoutLineHandler = handler
+    }
+
+    func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?) {
+        terminationHandler = handler
+    }
+
+    func start() throws {}
+
+    func sendLine(_ line: String) throws {
+        sentLines.append(line)
+        guard let data = line.data(using: .utf8),
+              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = object["type"] as? String else {
+            return
+        }
+
+        switch type {
+        case "get_state":
+            emit([
+                "id": object["id"] as? String ?? "state",
+                "type": "response",
+                "command": "get_state",
+                "success": true,
+                "data": ["sessionId": "pi-session-1"]
+            ])
+        case "prompt":
+            emit([
+                "type": "response",
+                "command": "prompt",
+                "success": true
+            ])
+            guard promptResponseText.isEmpty == false else {
+                return
+            }
+            emit([
+                "type": "message_update",
+                "assistantMessageEvent": [
+                    "type": "text_delta",
+                    "delta": promptResponseText
+                ]
+            ])
+            emit([
+                "type": "turn_end",
+                "message": [
+                    "content": [[
+                        "type": "text",
+                        "text": promptResponseText
+                    ]]
+                ]
+            ])
         default:
             return
         }

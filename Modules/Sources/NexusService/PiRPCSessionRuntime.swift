@@ -303,7 +303,11 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     }
 
     func sendInput(_ text: String) throws {
-        try submitPrompt(text)
+        try sendInput(SessionPrompt(text: text))
+    }
+
+    func sendInput(_ prompt: SessionPrompt) throws {
+        try submitPrompt(prompt)
     }
 
     func sendText(_ text: String) throws {
@@ -324,7 +328,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             lock.lock()
             prompt = draft
             lock.unlock()
-            try submitPrompt(prompt)
+            try submitPrompt(SessionPrompt(text: prompt))
         case .backspace, .deleteForward:
             lock.lock()
             if draft.isEmpty == false {
@@ -405,9 +409,10 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         notifyChange()
     }
 
-    private func submitPrompt(_ text: String) throws {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.isEmpty == false else {
+    private func submitPrompt(_ prompt: SessionPrompt) throws {
+        let trimmed = prompt.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedPrompt = SessionPrompt(text: trimmed, images: prompt.images)
+        guard trimmed.isEmpty == false || prompt.images.isEmpty == false else {
             lock.lock()
             draft = ""
             lock.unlock()
@@ -471,12 +476,12 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         }
 
         if trimmed == "/steer" || trimmed.hasPrefix("/steer ") {
-            try submitSteeringCommand(trimmed)
+            try submitSteeringCommand(resolvedPrompt)
             return
         }
 
         if trimmed == "/follow-up" || trimmed.hasPrefix("/follow-up ") || trimmed == "/follow_up" || trimmed.hasPrefix("/follow_up ") {
-            try submitFollowUpCommand(trimmed)
+            try submitFollowUpCommand(resolvedPrompt)
             return
         }
 
@@ -508,56 +513,52 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             currentAssistantText = ""
         }
         draft = ""
-        transcriptEntries.append("> \(trimmed)")
+        transcriptEntries.append("> \(promptSummaryText(for: resolvedPrompt))")
         appendActivityItemLocked(
             SessionActivityItem(
                 kind: .message,
-                text: isCurrentlyStreaming ? "Queued steering: \(trimmed)" : "You: \(trimmed)"
+                text: isCurrentlyStreaming
+                    ? "Queued steering: \(promptSummaryText(for: resolvedPrompt))"
+                    : "You: \(promptSummaryText(for: resolvedPrompt))",
+                prompt: resolvedPrompt
             )
         )
         lock.unlock()
         notifyChange()
 
-        var payload: [String: Any] = [
-            "type": "prompt",
-            "message": trimmed
-        ]
+        var payload = promptPayload(type: "prompt", prompt: resolvedPrompt)
         if isCurrentlyStreaming {
             payload["streamingBehavior"] = "steer"
         }
         try transport.sendLine(Self.jsonLine(payload))
     }
 
-    private func submitSteeringCommand(_ commandText: String) throws {
-        let message = String(commandText.dropFirst("/steer".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+    private func submitSteeringCommand(_ prompt: SessionPrompt) throws {
+        let message = String(prompt.text.dropFirst("/steer".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        let queuedPrompt = SessionPrompt(text: message, images: prompt.images)
         try submitQueuedCommand(
-            message: message,
+            prompt: queuedPrompt,
             usageText: "Usage: /steer <message>",
-            activityText: "Queued steering: \(message)",
-            payload: [
-                "type": "steer",
-                "message": message
-            ]
+            activityPrefix: "Queued steering",
+            payload: promptPayload(type: "steer", prompt: queuedPrompt)
         )
     }
 
-    private func submitFollowUpCommand(_ commandText: String) throws {
-        let trimmed = commandText.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func submitFollowUpCommand(_ prompt: SessionPrompt) throws {
+        let trimmed = prompt.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let message: String
         if trimmed.hasPrefix("/follow_up") {
             message = String(trimmed.dropFirst("/follow_up".count)).trimmingCharacters(in: .whitespacesAndNewlines)
         } else {
             message = String(trimmed.dropFirst("/follow-up".count)).trimmingCharacters(in: .whitespacesAndNewlines)
         }
+        let queuedPrompt = SessionPrompt(text: message, images: prompt.images)
 
         try submitQueuedCommand(
-            message: message,
+            prompt: queuedPrompt,
             usageText: "Usage: /follow-up <message>",
-            activityText: "Queued follow-up: \(message)",
-            payload: [
-                "type": "follow_up",
-                "message": message
-            ]
+            activityPrefix: "Queued follow-up",
+            payload: promptPayload(type: "follow_up", prompt: queuedPrompt)
         )
     }
 
@@ -856,12 +857,12 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     }
 
     private func submitQueuedCommand(
-        message: String,
+        prompt: SessionPrompt,
         usageText: String,
-        activityText: String,
+        activityPrefix: String,
         payload: [String: Any]
     ) throws {
-        guard message.isEmpty == false else {
+        guard prompt.text.isEmpty == false || prompt.images.isEmpty == false else {
             lock.lock()
             draft = ""
             appendActivityItemLocked(SessionActivityItem(kind: .error, text: usageText))
@@ -870,14 +871,44 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             return
         }
 
+        let summary = promptSummaryText(for: prompt)
         lock.lock()
         draft = ""
-        transcriptEntries.append("> \(message)")
-        appendActivityItemLocked(SessionActivityItem(kind: .message, text: activityText))
+        transcriptEntries.append("> \(summary)")
+        appendActivityItemLocked(SessionActivityItem(kind: .message, text: "\(activityPrefix): \(summary)", prompt: prompt))
         lock.unlock()
         notifyChange()
 
         try transport.sendLine(Self.jsonLine(payload))
+    }
+
+    private func promptPayload(type: String, prompt: SessionPrompt) -> [String: Any] {
+        var payload: [String: Any] = [
+            "type": type,
+            "message": prompt.text
+        ]
+        if prompt.images.isEmpty == false {
+            payload["images"] = prompt.images.map {
+                [
+                    "type": "image",
+                    "data": $0.data.base64EncodedString(),
+                    "mimeType": $0.mimeType
+                ]
+            }
+        }
+        return payload
+    }
+
+    private func promptSummaryText(for prompt: SessionPrompt) -> String {
+        guard prompt.images.isEmpty == false else {
+            return prompt.text
+        }
+
+        let imageSummary = "[\(prompt.images.count) image\(prompt.images.count == 1 ? "" : "s")]"
+        if prompt.text.isEmpty {
+            return imageSummary
+        }
+        return "\(prompt.text) \(imageSummary)"
     }
 
     private func submitModelCommand(_ commandText: String) throws {
@@ -2532,7 +2563,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             return
         }
 
-        activityItems.append(SessionActivityItem(id: item.id, kind: item.kind, text: trimmedText))
+        activityItems.append(SessionActivityItem(id: item.id, kind: item.kind, text: trimmedText, prompt: item.prompt))
         if activityItems.count > 200 {
             activityItems.removeFirst(activityItems.count - 200)
         }

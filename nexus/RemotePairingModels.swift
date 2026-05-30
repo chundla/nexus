@@ -221,13 +221,17 @@ nonisolated struct RemotePairingHTTPClient {
     }
 
     func sendSessionInput(for pairedMac: PairedMac, sessionID: UUID, text: String) async throws -> SessionScreen {
+        try await sendSessionInput(for: pairedMac, sessionID: sessionID, prompt: SessionPrompt(text: text))
+    }
+
+    func sendSessionInput(for pairedMac: PairedMac, sessionID: UUID, prompt: SessionPrompt) async throws -> SessionScreen {
         var request = try authenticatedRequest(
             for: pairedMac,
             path: "/remote-client/sessions/\(sessionID.uuidString)/input"
         )
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(RemoteSessionInputRequest(text: text))
+        request.httpBody = try JSONEncoder().encode(RemoteSessionInputRequest(prompt: prompt))
         let data = try await send(request)
         return try JSONDecoder().decode(SessionScreen.self, from: data)
     }
@@ -531,7 +535,15 @@ nonisolated struct RemoteSessionControlRequest: Codable, Sendable {
 }
 
 nonisolated struct RemoteSessionInputRequest: Codable, Sendable {
-    let text: String
+    let prompt: SessionPrompt
+
+    init(text: String) {
+        self.prompt = SessionPrompt(text: text)
+    }
+
+    init(prompt: SessionPrompt) {
+        self.prompt = prompt
+    }
 }
 
 nonisolated struct RemoteSessionTextRequest: Codable, Sendable {

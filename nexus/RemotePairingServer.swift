@@ -343,7 +343,7 @@ nonisolated final class RemotePairingServer: @unchecked Sendable {
                 return try await self.client.sendRemoteSessionInput(
                     sessionID: sessionInputRequest.sessionID,
                     pairedDeviceID: pairedDeviceID,
-                    text: body.text
+                    prompt: body.prompt
                 )
             }
             return

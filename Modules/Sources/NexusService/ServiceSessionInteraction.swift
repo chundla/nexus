@@ -6,6 +6,7 @@ import NexusIPC
 protocol SessionInteractionManaging: AnyObject {
     func getSessionScreen(sessionID: UUID) throws -> SessionScreen
     func sendSessionInput(sessionID: UUID, text: String) async throws -> SessionScreen
+    func sendSessionInput(sessionID: UUID, prompt: SessionPrompt) async throws -> SessionScreen
     func respondToApprovalRequest(
         sessionID: UUID,
         approvalRequestID: UUID,
@@ -23,6 +24,7 @@ protocol SessionInteractionManaging: AnyObject {
     ) throws -> SessionScreenObservationStart
     func cancelSessionScreenObservation(observationID: UUID)
     func sendRemoteSessionInput(sessionID: UUID, pairedDeviceID: UUID, text: String) async throws -> SessionScreen
+    func sendRemoteSessionInput(sessionID: UUID, pairedDeviceID: UUID, prompt: SessionPrompt) async throws -> SessionScreen
     func respondToRemoteApprovalRequest(
         sessionID: UUID,
         pairedDeviceID: UUID,
@@ -44,6 +46,17 @@ protocol SessionInteractionManaging: AnyObject {
 }
 
 extension SessionInteractionManaging {
+    func sendSessionInput(sessionID: UUID, prompt: SessionPrompt) async throws -> SessionScreen {
+        if prompt.images.isEmpty == false {
+            throw NSError(
+                domain: "NexusService",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "This Session interaction does not support image-bearing prompts."]
+            )
+        }
+        return try await sendSessionInput(sessionID: sessionID, text: prompt.text)
+    }
+
     func respondToExtensionDialog(
         sessionID: UUID,
         dialogID: String,
@@ -53,6 +66,17 @@ extension SessionInteractionManaging {
         _ = dialogID
         _ = response
         throw NexusSessionExtensionUIError.extensionDialogsUnavailable
+    }
+
+    func sendRemoteSessionInput(sessionID: UUID, pairedDeviceID: UUID, prompt: SessionPrompt) async throws -> SessionScreen {
+        if prompt.images.isEmpty == false {
+            throw NSError(
+                domain: "NexusService",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "This remote Session interaction does not support image-bearing prompts."]
+            )
+        }
+        return try await sendRemoteSessionInput(sessionID: sessionID, pairedDeviceID: pairedDeviceID, text: prompt.text)
     }
 }
 
@@ -68,7 +92,7 @@ struct ServiceSessionInteractionDependencies {
     let removeUpdateObserver: (UUID) -> Void
     let claimMacController: (Session) throws -> SessionScreen
     let isRemoteController: (UUID, UUID) -> Bool
-    let sendInput: (String, Session) throws -> SessionScreen
+    let sendInput: (SessionPrompt, Session) throws -> SessionScreen
     let sendText: (String, Session) throws -> SessionScreen
     let sendInputKey: (SessionInputKey, Bool, Session) throws -> SessionScreen
     let respondToApprovalRequest: (UUID, ApprovalRequestDecision, Session) throws -> SessionScreen
@@ -143,8 +167,12 @@ final class ServiceSessionInteraction: SessionInteractionManaging, @unchecked Se
     }
 
     func sendSessionInput(sessionID: UUID, text: String) async throws -> SessionScreen {
+        try await sendSessionInput(sessionID: sessionID, prompt: SessionPrompt(text: text))
+    }
+
+    func sendSessionInput(sessionID: UUID, prompt: SessionPrompt) async throws -> SessionScreen {
         let resolvedSession = try await readyMacControlledSession(sessionID: sessionID)
-        return dependencies.normalizedSessionScreen(try dependencies.sendInput(text, resolvedSession))
+        return dependencies.normalizedSessionScreen(try dependencies.sendInput(prompt, resolvedSession))
     }
 
     func respondToApprovalRequest(
@@ -170,12 +198,20 @@ final class ServiceSessionInteraction: SessionInteractionManaging, @unchecked Se
     }
 
     func sendRemoteSessionInput(sessionID: UUID, pairedDeviceID: UUID, text: String) async throws -> SessionScreen {
+        try await sendRemoteSessionInput(
+            sessionID: sessionID,
+            pairedDeviceID: pairedDeviceID,
+            prompt: SessionPrompt(text: text)
+        )
+    }
+
+    func sendRemoteSessionInput(sessionID: UUID, pairedDeviceID: UUID, prompt: SessionPrompt) async throws -> SessionScreen {
         let resolvedSession = try await readyRemoteControlledSession(
             sessionID: sessionID,
             pairedDeviceID: pairedDeviceID,
             controllerError: .remoteSessionInputControllerRequired
         )
-        return dependencies.normalizedSessionScreen(try dependencies.sendInput(text, resolvedSession))
+        return dependencies.normalizedSessionScreen(try dependencies.sendInput(prompt, resolvedSession))
     }
 
     func respondToRemoteApprovalRequest(

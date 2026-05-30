@@ -16,6 +16,26 @@ public enum SessionInputKey: String, Codable, CaseIterable, Sendable {
     case rightArrow
 }
 
+public struct SessionPromptImage: Codable, Equatable, Sendable {
+    public let data: Data
+    public let mimeType: String
+
+    public init(data: Data, mimeType: String) {
+        self.data = data
+        self.mimeType = mimeType
+    }
+}
+
+public struct SessionPrompt: Codable, Equatable, Sendable {
+    public let text: String
+    public let images: [SessionPromptImage]
+
+    public init(text: String, images: [SessionPromptImage] = []) {
+        self.text = text
+        self.images = images
+    }
+}
+
 public struct Session: Codable, Equatable, Hashable, Identifiable, Sendable {
     public let id: UUID
     public let workspaceID: UUID
@@ -183,11 +203,17 @@ public struct SessionActivityItem: Codable, Equatable, Identifiable, Sendable {
     public let id: UUID
     public let kind: Kind
     public let text: String
+    public let prompt: SessionPrompt?
 
-    public init(id: UUID = UUID(), kind: Kind, text: String) {
+    public init(id: UUID = UUID(), kind: Kind, text: String, prompt: SessionPrompt? = nil) {
         self.id = id
         self.kind = kind
         self.text = text
+        self.prompt = prompt
+    }
+
+    public init(id: UUID = UUID(), kind: Kind, text: String) {
+        self.init(id: id, kind: kind, text: text, prompt: nil)
     }
 }
 

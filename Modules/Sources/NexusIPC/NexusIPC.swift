@@ -58,6 +58,7 @@ public protocol SessionScreenObservation: Sendable {
     func observeSessionScreen(sessionID: String, reply: @escaping (Data?, NSString?) -> Void)
     func cancelSessionScreenObservation(observationID: String, reply: @escaping (Data?, NSString?) -> Void)
     func sendSessionInput(sessionID: String, text: String, reply: @escaping (Data?, NSString?) -> Void)
+    func sendSessionPrompt(sessionID: String, promptPayload: Data, reply: @escaping (Data?, NSString?) -> Void)
     func sendSessionText(sessionID: String, text: String, reply: @escaping (Data?, NSString?) -> Void)
     func sendSessionInputKey(sessionID: String, key: String, reply: @escaping (Data?, NSString?) -> Void)
     func respondToApprovalRequest(sessionID: String, approvalRequestID: String, decision: String, reply: @escaping (Data?, NSString?) -> Void)
@@ -66,6 +67,7 @@ public protocol SessionScreenObservation: Sendable {
     func takeRemoteSessionControl(sessionID: String, pairedDeviceID: String, columns: Int, rows: Int, reply: @escaping (Data?, NSString?) -> Void)
     func releaseRemoteSessionControl(sessionID: String, pairedDeviceID: String, reply: @escaping (Data?, NSString?) -> Void)
     func sendRemoteSessionInput(sessionID: String, pairedDeviceID: String, text: String, reply: @escaping (Data?, NSString?) -> Void)
+    func sendRemoteSessionPrompt(sessionID: String, pairedDeviceID: String, promptPayload: Data, reply: @escaping (Data?, NSString?) -> Void)
     func respondToRemoteApprovalRequest(sessionID: String, pairedDeviceID: String, approvalRequestID: String, decision: String, reply: @escaping (Data?, NSString?) -> Void)
     func respondToRemoteExtensionDialog(sessionID: String, pairedDeviceID: String, dialogID: String, responsePayload: Data, reply: @escaping (Data?, NSString?) -> Void)
     func sendRemoteSessionText(sessionID: String, pairedDeviceID: String, text: String, reply: @escaping (Data?, NSString?) -> Void)
@@ -109,6 +111,7 @@ public protocol NexusServiceClient: Sendable {
     func getSessionScreen(sessionID: UUID) async throws -> SessionScreen
     func observeSessionScreen(sessionID: UUID, onUpdate: @escaping @Sendable (SessionScreen) -> Void) async throws -> any SessionScreenObservation
     func sendSessionInput(sessionID: UUID, text: String) async throws -> SessionScreen
+    func sendSessionInput(sessionID: UUID, prompt: SessionPrompt) async throws -> SessionScreen
     func sendSessionText(sessionID: UUID, text: String) async throws -> SessionScreen
     func sendSessionInputKey(sessionID: UUID, key: SessionInputKey) async throws -> SessionScreen
     func respondToApprovalRequest(sessionID: UUID, approvalRequestID: UUID, decision: ApprovalRequestDecision) async throws -> SessionScreen
@@ -117,6 +120,7 @@ public protocol NexusServiceClient: Sendable {
     func takeRemoteSessionControl(sessionID: UUID, pairedDeviceID: UUID, columns: Int, rows: Int) async throws -> SessionScreen
     func releaseRemoteSessionControl(sessionID: UUID, pairedDeviceID: UUID) async throws -> SessionScreen
     func sendRemoteSessionInput(sessionID: UUID, pairedDeviceID: UUID, text: String) async throws -> SessionScreen
+    func sendRemoteSessionInput(sessionID: UUID, pairedDeviceID: UUID, prompt: SessionPrompt) async throws -> SessionScreen
     func respondToRemoteApprovalRequest(sessionID: UUID, pairedDeviceID: UUID, approvalRequestID: UUID, decision: ApprovalRequestDecision) async throws -> SessionScreen
     func respondToRemoteExtensionDialog(sessionID: UUID, pairedDeviceID: UUID, dialogID: String, response: SessionExtensionUIDialogResponse) async throws -> SessionScreen
     func sendRemoteSessionText(sessionID: UUID, pairedDeviceID: UUID, text: String) async throws -> SessionScreen
@@ -124,6 +128,17 @@ public protocol NexusServiceClient: Sendable {
 }
 
 public extension NexusServiceClient {
+    func sendSessionInput(sessionID: UUID, prompt: SessionPrompt) async throws -> SessionScreen {
+        if prompt.images.isEmpty == false {
+            throw NSError(
+                domain: "NexusIPC",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "This client does not support image-bearing Session prompts."]
+            )
+        }
+        return try await sendSessionInput(sessionID: sessionID, text: prompt.text)
+    }
+
     func respondToExtensionDialog(sessionID: UUID, dialogID: String, response: SessionExtensionUIDialogResponse) async throws -> SessionScreen {
         _ = sessionID
         _ = dialogID
@@ -150,6 +165,17 @@ public extension NexusServiceClient {
             code: 1,
             userInfo: [NSLocalizedDescriptionKey: "This client does not support remote Extension UI dialogs."]
         )
+    }
+
+    func sendRemoteSessionInput(sessionID: UUID, pairedDeviceID: UUID, prompt: SessionPrompt) async throws -> SessionScreen {
+        if prompt.images.isEmpty == false {
+            throw NSError(
+                domain: "NexusIPC",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "This client does not support image-bearing remote Session prompts."]
+            )
+        }
+        return try await sendRemoteSessionInput(sessionID: sessionID, pairedDeviceID: pairedDeviceID, text: prompt.text)
     }
 }
 
@@ -446,6 +472,13 @@ public final class NexusIPCClient: NexusServiceClient, @unchecked Sendable {
         }
     }
 
+    nonisolated public func sendSessionInput(sessionID: UUID, prompt: SessionPrompt) async throws -> SessionScreen {
+        let payload = try JSONEncoder().encode(prompt)
+        return try await requestDecodable { proxy, reply in
+            proxy.sendSessionPrompt(sessionID: sessionID.uuidString, promptPayload: payload, reply: reply)
+        }
+    }
+
     nonisolated public func sendSessionText(sessionID: UUID, text: String) async throws -> SessionScreen {
         try await requestDecodable { proxy, reply in
             proxy.sendSessionText(sessionID: sessionID.uuidString, text: text, reply: reply)
@@ -523,6 +556,18 @@ public final class NexusIPCClient: NexusServiceClient, @unchecked Sendable {
                 sessionID: sessionID.uuidString,
                 pairedDeviceID: pairedDeviceID.uuidString,
                 text: text,
+                reply: reply
+            )
+        }
+    }
+
+    nonisolated public func sendRemoteSessionInput(sessionID: UUID, pairedDeviceID: UUID, prompt: SessionPrompt) async throws -> SessionScreen {
+        let payload = try JSONEncoder().encode(prompt)
+        return try await requestDecodable { proxy, reply in
+            proxy.sendRemoteSessionPrompt(
+                sessionID: sessionID.uuidString,
+                pairedDeviceID: pairedDeviceID.uuidString,
+                promptPayload: payload,
                 reply: reply
             )
         }

@@ -6703,6 +6703,75 @@ struct nexusTests {
         ])
     }
 
+    @Test func localXPCPiSessionInputCarriesImagesThroughObservation() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let transport = RecordingNexusTestsPiRPCTransport(promptResponseText: "world")
+        let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in transport })
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthFacts(
+                executableResolver: StubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
+                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                ]),
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+            ),
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+        let collector = SessionScreenCollector()
+        let observation = try await client.observeSessionScreen(sessionID: session.id) { screen in
+            Task {
+                await collector.record(screen)
+            }
+        }
+        defer {
+            Task {
+                await observation.cancel()
+            }
+        }
+
+        let prompt = SessionPrompt(
+            text: "What changed in this screenshot?",
+            images: [SessionPromptImage(data: Data([0x89, 0x50, 0x4E, 0x47]), mimeType: "image/png")]
+        )
+        let responseScreen = try await client.sendSessionInput(sessionID: session.id, prompt: prompt)
+        let observedScreen = try await collector.waitForScreen { screen in
+            screen.activityItems.contains(where: { $0.text == "Pi: world" })
+        }
+        let fetchedScreen = try await client.getSessionScreen(sessionID: session.id)
+        let promptLine = try #require(transport.sentLines.first(where: { $0.contains("\"type\":\"prompt\"") }))
+        let promptData = try #require(promptLine.data(using: .utf8))
+        let promptPayload = try #require(JSONSerialization.jsonObject(with: promptData) as? [String: Any])
+        let images = try #require(promptPayload["images"] as? [[String: Any]])
+
+        #expect(promptPayload["message"] as? String == "What changed in this screenshot?")
+        #expect(images[0]["data"] as? String == "iVBORw==")
+        #expect(images[0]["mimeType"] as? String == "image/png")
+        #expect(responseScreen.activityItems[1].prompt == prompt)
+        #expect(observedScreen.activityItems[1].prompt == prompt)
+        #expect(fetchedScreen.activityItems[1].prompt == prompt)
+        #expect(fetchedScreen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "You: What changed in this screenshot? [1 image]",
+            "Pi: world"
+        ])
+    }
+
     @MainActor
     @Test func appModelStreamsPiToolAndSubagentActivityBeforeFinalTurnCompletion() async throws {
         let workspaceFolderURL = FileManager.default.temporaryDirectory
@@ -8379,6 +8448,66 @@ private final class NexusTestsPiRPCTransport: NexusTestsBasePiRPCTransport, @unc
     }
 
     override func sendLine(_ line: String) throws {
+        guard let data = line.data(using: .utf8),
+              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = object["type"] as? String else {
+            return
+        }
+
+        switch type {
+        case "get_state":
+            emit([
+                "id": object["id"] as? String ?? "state",
+                "type": "response",
+                "command": "get_state",
+                "success": true,
+                "data": [
+                    "sessionId": "pi-session-1"
+                ]
+            ])
+        case "prompt":
+            emit([
+                "type": "response",
+                "command": "prompt",
+                "success": true
+            ])
+            guard promptResponseText.isEmpty == false else {
+                return
+            }
+            emit([
+                "type": "message_update",
+                "assistantMessageEvent": [
+                    "type": "text_delta",
+                    "delta": promptResponseText
+                ]
+            ])
+            emit([
+                "type": "turn_end",
+                "message": [
+                    "content": [
+                        [
+                            "type": "text",
+                            "text": promptResponseText
+                        ]
+                    ]
+                ]
+            ])
+        default:
+            return
+        }
+    }
+}
+
+private final class RecordingNexusTestsPiRPCTransport: NexusTestsBasePiRPCTransport, @unchecked Sendable {
+    private let promptResponseText: String
+    private(set) var sentLines: [String] = []
+
+    init(promptResponseText: String = "") {
+        self.promptResponseText = promptResponseText
+    }
+
+    override func sendLine(_ line: String) throws {
+        sentLines.append(line)
         guard let data = line.data(using: .utf8),
               let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let type = object["type"] as? String else {

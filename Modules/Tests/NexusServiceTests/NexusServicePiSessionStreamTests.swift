@@ -355,6 +355,87 @@ struct NexusServicePiSessionStreamTests {
         #expect(screen.activityItems.map(\.kind) == [.status, .status, .command, .status, .status])
     }
 
+    @Test func localPiRuntimeSendsMultimodalPromptAndProjectsImageSummary() throws {
+        let transport = QueueControlPiRPCTransport()
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let prompt = SessionPrompt(
+            text: "What changed in this screenshot?",
+            images: [SessionPromptImage(data: Data([0x89, 0x50, 0x4E, 0x47]), mimeType: "image/png")]
+        )
+
+        try runtime.sendInput(prompt)
+        let screen = runtime.sessionScreen(for: session)
+        let payloadLine = try #require(transport.sentLines.first(where: { $0.contains("\"type\":\"prompt\"") }))
+        let payloadData = try #require(payloadLine.data(using: .utf8))
+        let payload = try #require(JSONSerialization.jsonObject(with: payloadData) as? [String: Any])
+        let images = try #require(payload["images"] as? [[String: Any]])
+
+        #expect(payload["message"] as? String == "What changed in this screenshot?")
+        #expect(images.count == 1)
+        #expect(images[0]["type"] as? String == "image")
+        #expect(images[0]["data"] as? String == "iVBORw==")
+        #expect(images[0]["mimeType"] as? String == "image/png")
+        #expect(screen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "You: What changed in this screenshot? [1 image]"
+        ])
+        #expect(screen.activityItems.last?.prompt == prompt)
+        #expect(screen.transcript == "> What changed in this screenshot? [1 image]")
+    }
+
+    @Test func localPiRuntimeQueuesMultimodalSteeringCommandAndProjectsImageSummary() throws {
+        let transport = QueueControlPiRPCTransport()
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let prompt = SessionPrompt(
+            text: "/steer Focus on this image instead",
+            images: [SessionPromptImage(data: Data([0x47, 0x49, 0x46]), mimeType: "image/gif")]
+        )
+
+        try runtime.sendInput(prompt)
+        let screen = runtime.sessionScreen(for: session)
+        let payloadLine = try #require(transport.sentLines.first(where: { $0.contains("\"type\":\"steer\"") }))
+        let payloadData = try #require(payloadLine.data(using: .utf8))
+        let payload = try #require(JSONSerialization.jsonObject(with: payloadData) as? [String: Any])
+        let images = try #require(payload["images"] as? [[String: Any]])
+
+        #expect(payload["message"] as? String == "Focus on this image instead")
+        #expect(images[0]["data"] as? String == "R0lG")
+        #expect(images[0]["mimeType"] as? String == "image/gif")
+        #expect(screen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "Queued steering: Focus on this image instead [1 image]",
+            "Pi queue updated — steering: Focus on this image instead"
+        ])
+        #expect(screen.activityItems[1].prompt == SessionPrompt(text: "Focus on this image instead", images: prompt.images))
+        #expect(screen.transcript == "> Focus on this image instead [1 image]")
+    }
+
     @Test func localPiRuntimeQueuesSteeringCommandAndProjectsQueueUpdates() throws {
         let transport = QueueControlPiRPCTransport()
         let runtime = try PiRPCSessionRuntime(
@@ -385,6 +466,46 @@ struct NexusServicePiSessionStreamTests {
             "Pi queue updated — steering: Focus on error handling"
         ])
         #expect(screen.transcript == "> Focus on error handling")
+    }
+
+    @Test func localPiRuntimeQueuesMultimodalFollowUpCommandAndProjectsImageSummary() throws {
+        let transport = QueueControlPiRPCTransport()
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let prompt = SessionPrompt(
+            text: "/follow-up Also check this screenshot",
+            images: [SessionPromptImage(data: Data([0xFF, 0xD8, 0xFF]), mimeType: "image/jpeg")]
+        )
+
+        try runtime.sendInput(prompt)
+        let screen = runtime.sessionScreen(for: session)
+        let payloadLine = try #require(transport.sentLines.first(where: { $0.contains("\"type\":\"follow_up\"") }))
+        let payloadData = try #require(payloadLine.data(using: .utf8))
+        let payload = try #require(JSONSerialization.jsonObject(with: payloadData) as? [String: Any])
+        let images = try #require(payload["images"] as? [[String: Any]])
+
+        #expect(payload["message"] as? String == "Also check this screenshot")
+        #expect(images[0]["data"] as? String == "/9j/")
+        #expect(images[0]["mimeType"] as? String == "image/jpeg")
+        #expect(screen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "Queued follow-up: Also check this screenshot [1 image]",
+            "Pi queue updated — follow-up: Also check this screenshot"
+        ])
+        #expect(screen.activityItems[1].prompt == SessionPrompt(text: "Also check this screenshot", images: prompt.images))
+        #expect(screen.transcript == "> Also check this screenshot [1 image]")
     }
 
     @Test func localPiRuntimeQueuesFollowUpCommandAndProjectsQueueUpdates() throws {

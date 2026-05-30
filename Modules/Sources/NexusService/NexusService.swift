@@ -41,6 +41,7 @@ protocol SessionRuntimeManaging: AnyObject {
     func addUpdateObserver(id: UUID, for session: Session, observer: @escaping @Sendable () -> Void)
     func removeUpdateObserver(id: UUID)
     func sendInput(_ text: String, to session: Session) throws -> SessionScreen
+    func sendInput(_ prompt: SessionPrompt, to session: Session) throws -> SessionScreen
     func sendText(_ text: String, to session: Session) throws -> SessionScreen
     func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool, to session: Session) throws -> SessionScreen
     func respondToApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision, to session: Session) throws -> SessionScreen
@@ -64,6 +65,17 @@ extension SessionRuntimeManaging {
         _ = response
         _ = session
         throw NexusSessionExtensionUIError.extensionDialogsUnavailable
+    }
+
+    func sendInput(_ prompt: SessionPrompt, to session: Session) throws -> SessionScreen {
+        if prompt.images.isEmpty == false {
+            throw NSError(
+                domain: "NexusService",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "This Session runtime does not support image-bearing prompts."]
+            )
+        }
+        return try sendInput(prompt.text, to: session)
     }
 }
 
@@ -123,6 +135,7 @@ protocol SessionRuntime: AnyObject {
     func setChangeHandler(_ handler: (@Sendable () -> Void)?)
     func stop() throws
     func sendInput(_ text: String) throws
+    func sendInput(_ prompt: SessionPrompt) throws
     func sendText(_ text: String) throws
     func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool) throws
     func respondToApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision) throws
@@ -139,6 +152,17 @@ extension SessionRuntime {
         _ = dialogID
         _ = response
         throw NexusSessionExtensionUIError.extensionDialogsUnavailable
+    }
+
+    func sendInput(_ prompt: SessionPrompt) throws {
+        if prompt.images.isEmpty == false {
+            throw NSError(
+                domain: "NexusService",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "This Session runtime does not support image-bearing prompts."]
+            )
+        }
+        try sendInput(prompt.text)
     }
 }
 
@@ -404,6 +428,10 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Se
     }
 
     func sendInput(_ text: String, to session: Session) throws -> SessionScreen {
+        try sendInput(SessionPrompt(text: text), to: session)
+    }
+
+    func sendInput(_ prompt: SessionPrompt, to session: Session) throws -> SessionScreen {
         let runtime = try withLock {
             guard let runtime = runtimes[session.id] else {
                 throw NexusMetadataStoreError.sessionNotFound
@@ -411,7 +439,7 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Se
             return runtime
         }
 
-        try runtime.sendInput(text)
+        try runtime.sendInput(prompt)
         return runtime.sessionScreen(for: session)
     }
 
@@ -1946,9 +1974,17 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     func sendSessionInput(sessionID: UUID, text: String) async throws -> SessionScreen {
+        try await sendSessionInput(sessionID: sessionID, prompt: SessionPrompt(text: text))
+    }
+
+    func sendSessionInput(sessionID: UUID, prompt: SessionPrompt) throws -> SessionScreen {
+        try AsyncOperationSupport.blocking { try await self.sendSessionInput(sessionID: sessionID, prompt: prompt) }
+    }
+
+    func sendSessionInput(sessionID: UUID, prompt: SessionPrompt) async throws -> SessionScreen {
         sessionScreenAfterPiRedirectIfNeeded(
             sourceSessionID: sessionID,
-            fallback: try await sessionInteraction.sendSessionInput(sessionID: sessionID, text: text)
+            fallback: try await sessionInteraction.sendSessionInput(sessionID: sessionID, prompt: prompt)
         )
     }
 
@@ -2136,12 +2172,26 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     func sendRemoteSessionInput(sessionID: UUID, pairedDeviceID: UUID, text: String) async throws -> SessionScreen {
+        try await sendRemoteSessionInput(
+            sessionID: sessionID,
+            pairedDeviceID: pairedDeviceID,
+            prompt: SessionPrompt(text: text)
+        )
+    }
+
+    func sendRemoteSessionInput(sessionID: UUID, pairedDeviceID: UUID, prompt: SessionPrompt) throws -> SessionScreen {
+        try AsyncOperationSupport.blocking {
+            try await self.sendRemoteSessionInput(sessionID: sessionID, pairedDeviceID: pairedDeviceID, prompt: prompt)
+        }
+    }
+
+    func sendRemoteSessionInput(sessionID: UUID, pairedDeviceID: UUID, prompt: SessionPrompt) async throws -> SessionScreen {
         sessionScreenAfterPiRedirectIfNeeded(
             sourceSessionID: sessionID,
             fallback: try await sessionInteraction.sendRemoteSessionInput(
                 sessionID: sessionID,
                 pairedDeviceID: pairedDeviceID,
-                text: text
+                prompt: prompt
             )
         )
     }
@@ -4284,6 +4334,16 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol, @unchecked Senda
         )
     }
 
+    func sendSessionPrompt(sessionID: String, promptPayload: Data, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(
+            with: { [self] in
+                let prompt = try JSONDecoder().decode(SessionPrompt.self, from: promptPayload)
+                return try await self.service.sendSessionInput(sessionID: self.resolveUUID(sessionID), prompt: prompt)
+            },
+            reply: reply
+        )
+    }
+
     func sendSessionText(sessionID: String, text: String, reply: @escaping (Data?, NSString?) -> Void) {
         sendReply(
             with: { [self] in try await self.service.sendSessionText(sessionID: self.resolveUUID(sessionID), text: text) },
@@ -4375,6 +4435,20 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol, @unchecked Senda
                     sessionID: self.resolveUUID(sessionID),
                     pairedDeviceID: self.resolveUUID(pairedDeviceID),
                     text: text
+                )
+            },
+            reply: reply
+        )
+    }
+
+    func sendRemoteSessionPrompt(sessionID: String, pairedDeviceID: String, promptPayload: Data, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(
+            with: { [self] in
+                let prompt = try JSONDecoder().decode(SessionPrompt.self, from: promptPayload)
+                return try await self.service.sendRemoteSessionInput(
+                    sessionID: self.resolveUUID(sessionID),
+                    pairedDeviceID: self.resolveUUID(pairedDeviceID),
+                    prompt: prompt
                 )
             },
             reply: reply

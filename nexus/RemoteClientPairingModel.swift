@@ -17,6 +17,7 @@ protocol RemotePairingClient {
     func takeSessionControl(for pairedMac: PairedMac, sessionID: UUID, columns: Int, rows: Int) async throws -> SessionScreen
     func releaseSessionControl(for pairedMac: PairedMac, sessionID: UUID) async throws -> SessionScreen
     func sendSessionInput(for pairedMac: PairedMac, sessionID: UUID, text: String) async throws -> SessionScreen
+    func sendSessionInput(for pairedMac: PairedMac, sessionID: UUID, prompt: SessionPrompt) async throws -> SessionScreen
     func respondToApprovalRequest(for pairedMac: PairedMac, sessionID: UUID, approvalRequestID: UUID, decision: ApprovalRequestDecision) async throws -> SessionScreen
     func respondToExtensionDialog(for pairedMac: PairedMac, sessionID: UUID, dialogID: String, response: SessionExtensionUIDialogResponse) async throws -> SessionScreen
     func sendSessionText(for pairedMac: PairedMac, sessionID: UUID, text: String) async throws -> SessionScreen
@@ -27,6 +28,19 @@ protocol RemotePairingClient {
         onUpdate: @escaping @Sendable (SessionScreen) -> Void,
         onDisconnect: @escaping @Sendable (any Error) -> Void
     ) async throws -> any SessionScreenObservation
+}
+
+extension RemotePairingClient {
+    func sendSessionInput(for pairedMac: PairedMac, sessionID: UUID, prompt: SessionPrompt) async throws -> SessionScreen {
+        if prompt.images.isEmpty == false {
+            throw NSError(
+                domain: "RemotePairingClient",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "This remote pairing client does not support image-bearing Session prompts."]
+            )
+        }
+        return try await sendSessionInput(for: pairedMac, sessionID: sessionID, text: prompt.text)
+    }
 }
 
 extension RemotePairingHTTPClient: RemotePairingClient {}
