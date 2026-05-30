@@ -156,7 +156,7 @@ struct CodexProviderModuleTests {
         ])
     }
 
-    @Test func codexProviderModulePreservesCodexCatalogReadBehavior() async {
+    @Test func codexProviderModulePreservesCodexCatalogReadBehavior() async throws {
         let module = CodexProviderModule()
         let workspaceID = UUID()
         let hostID = UUID()
@@ -192,20 +192,30 @@ struct CodexProviderModuleTests {
             )
         )
 
-        let health = await module.providerHealthSummary(
-            for: workspace,
-            remoteContext: remoteContext,
-            providerHealthEvaluator: providerHealthEvaluator
+        let catalogRead = try await module.readCatalog(
+            ProviderModuleCatalogReadRequest(
+                workspace: workspace,
+                remoteContext: remoteContext,
+                defaultSession: nil
+            ),
+            actions: ProviderModuleCatalogReadActions(
+                providerHealthSummary: {
+                    await module.providerHealthSummary(
+                        for: workspace,
+                        remoteContext: remoteContext,
+                        providerHealthEvaluator: providerHealthEvaluator
+                    )
+                }
+            )
         )
-        let capabilities = module.providerCapabilities(in: workspace, health: health, defaultSession: nil)
 
-        #expect(health.summary == "Codex module health")
+        #expect(catalogRead.health.summary == "Codex module health")
         #expect(providerHealthEvaluator.requests == [
             .init(providerID: .codex, workspaceID: workspace.id)
         ])
-        #expect(capabilities.launchDefaultSession.isEnabled)
-        #expect(capabilities.createNamedSession.isEnabled)
-        #expect(module.prelaunchPrimarySurface(in: workspace) == .structuredActivityFeed)
+        #expect(catalogRead.capabilities.launchDefaultSession.isEnabled)
+        #expect(catalogRead.capabilities.createNamedSession.isEnabled)
+        #expect(catalogRead.prelaunchPrimarySurface == .structuredActivityFeed)
         #expect(module.reusesRemoteHealthSnapshot(
             ProviderHealthSummary(state: .available, summary: "reuse me", checkedAt: Date()),
             remoteContext: remoteContext
@@ -245,6 +255,148 @@ struct CodexProviderModuleTests {
         )
 
         #expect(module.planPersistedSessionRelaunch(.init(execution: execution)) == .sharedLaunch)
+    }
+
+    @Test func codexProviderModuleChoosesLocalProtocolNativeRuntimeConstructionThroughProviderModuleSeam() async throws {
+        let module = CodexProviderModule()
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Local Codex",
+            kind: .local,
+            folderPath: "/tmp/local-codex",
+            primaryGroupID: UUID()
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .codex,
+            isDefault: true,
+            state: .ready
+        )
+        let tracker = CodexRuntimeConstructionTracker()
+
+        let runtime = try await module.constructRuntime(
+            for: session,
+            workspace: workspace,
+            launchConfiguration: SessionRuntimeLaunchConfiguration(
+                executable: "/tmp/fake-codex",
+                workingDirectory: workspace.folderPath,
+                remoteHost: nil
+            ),
+            actions: ProviderModuleRuntimeConstructionActions(
+                makeLocalTerminalRuntime: {
+                    Issue.record("Codex should not choose a terminal runtime for local structured Sessions")
+                    return StaticCodexRuntime()
+                },
+                makeRemoteTerminalRuntime: {
+                    Issue.record("Codex should not choose a terminal runtime for local structured Sessions")
+                    return StaticCodexRuntime()
+                },
+                makeLocalProtocolNativeRuntime: {
+                    tracker.requests.append(.localProtocolNative)
+                    return StaticCodexRuntime()
+                },
+                makeRemoteProtocolNativeRuntime: {
+                    Issue.record("Codex should not choose a remote runtime for local structured Sessions")
+                    return StaticCodexRuntime()
+                }
+            )
+        )
+
+        #expect(tracker.requests == [.localProtocolNative])
+        #expect(runtime?.sessionScreen(for: session).primarySurface == .structuredActivityFeed)
+    }
+
+    @Test func codexProviderModuleChoosesRemoteProtocolNativeRuntimeConstructionThroughProviderModuleSeam() async throws {
+        let module = CodexProviderModule()
+        let host = NexusDomain.Host(id: UUID(), name: "Build Server", sshTarget: "build-box")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Remote Codex",
+            kind: .remote,
+            folderPath: "/srv/api",
+            primaryGroupID: UUID(),
+            remoteHostID: host.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .codex,
+            isDefault: true,
+            state: .ready
+        )
+        let tracker = CodexRuntimeConstructionTracker()
+
+        let runtime = try await module.constructRuntime(
+            for: session,
+            workspace: workspace,
+            launchConfiguration: SessionRuntimeLaunchConfiguration(
+                executable: "/home/tester/.local/bin/codex",
+                workingDirectory: workspace.folderPath,
+                remoteHost: host,
+                remoteRuntimeIdentifier: "nexus-runtime-1"
+            ),
+            actions: ProviderModuleRuntimeConstructionActions(
+                makeLocalTerminalRuntime: {
+                    Issue.record("Codex should not choose a terminal runtime for remote structured Sessions")
+                    return StaticCodexRuntime()
+                },
+                makeRemoteTerminalRuntime: {
+                    Issue.record("Codex should not choose a terminal runtime for remote structured Sessions")
+                    return StaticCodexRuntime()
+                },
+                makeLocalProtocolNativeRuntime: {
+                    Issue.record("Codex should not choose a local runtime for remote structured Sessions")
+                    return StaticCodexRuntime()
+                },
+                makeRemoteProtocolNativeRuntime: {
+                    tracker.requests.append(.remoteProtocolNative)
+                    return StaticCodexRuntime()
+                }
+            )
+        )
+
+        #expect(tracker.requests == [.remoteProtocolNative])
+        #expect(runtime?.sessionScreen(for: session).primarySurface == .structuredActivityFeed)
+    }
+
+    @Test func persistedCodexRelaunchUsesProviderModuleSessionTransitionPlan() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodexProviderModuleTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
+
+        let initialService = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ReadyCodexProviderHealthEvaluator(),
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: RecordingStaticCodexRuntimeLauncher())
+        )
+        let group = try initialService.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try initialService.createLocalWorkspace(
+            name: "Local Codex",
+            folderPath: workspaceFolder.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+        let session = try initialService.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .codex)
+
+        let tracker = CodexProviderModuleSessionTransitionTracker()
+        let relaunchedService = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ReadyCodexProviderHealthEvaluator(),
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: RecordingStaticCodexRuntimeLauncher()),
+            providerModuleRegistry: ProviderModuleRegistry(
+                modules: [
+                    .codex: TrackingCodexSessionTransitionProviderModule(tracker: tracker)
+                ]
+            )
+        )
+
+        _ = try relaunchedService.launchOrResumeSession(sessionID: session.id)
+
+        #expect(tracker.requests == [
+            .relaunchPersisted(sessionID: session.id)
+        ])
     }
 }
 
@@ -291,5 +443,150 @@ private final class RecordingCodexProviderHealthEvaluator: @unchecked Sendable, 
         requests.append(.init(providerID: providerID, workspaceID: workspace.id))
         return summary
     }
+}
+
+private enum CodexRuntimeConstructionRequest: Equatable {
+    case localProtocolNative
+    case remoteProtocolNative
+}
+
+private final class CodexRuntimeConstructionTracker: @unchecked Sendable {
+    var requests: [CodexRuntimeConstructionRequest] = []
+}
+
+private enum CodexProviderModuleSessionTransitionRequestExpectation: Equatable {
+    case openFresh
+    case relaunchPersisted(sessionID: UUID)
+
+    init(request: ProviderModuleSessionTransitionRequest) {
+        switch request {
+        case .openFresh:
+            self = .openFresh
+        case let .relaunchPersisted(relaunchRequest):
+            self = .relaunchPersisted(sessionID: relaunchRequest.execution.session.id)
+        }
+    }
+}
+
+private final class CodexProviderModuleSessionTransitionTracker: @unchecked Sendable {
+    var requests: [CodexProviderModuleSessionTransitionRequestExpectation] = []
+}
+
+private struct TrackingCodexSessionTransitionProviderModule: ProviderModule {
+    let provider = Provider(id: .codex)
+    let tracker: CodexProviderModuleSessionTransitionTracker
+
+    func supportsDefaultSessionLaunch(in workspace: Workspace) -> Bool { true }
+    func supportsNamedSessions(in workspace: Workspace) -> Bool { true }
+
+    func providerHealthSummary(
+        for workspace: Workspace,
+        remoteContext: RemoteWorkspaceHealthContext?,
+        providerHealthEvaluator: any ProviderHealthEvaluating
+    ) async -> ProviderHealthSummary {
+        await providerHealthEvaluator.healthSummary(for: .codex, workspace: workspace, remoteContext: remoteContext)
+    }
+
+    func providerCapabilities(
+        in workspace: Workspace,
+        health: ProviderHealthSummary,
+        defaultSession: Session?
+    ) -> ProviderCapabilities {
+        makeProviderCapabilities(
+            provider: provider,
+            supportsDefaultSessionLaunch: true,
+            supportsNamedSessions: true,
+            health: health,
+            defaultSession: defaultSession
+        )
+    }
+
+    func prelaunchPrimarySurface(in workspace: Workspace) -> SessionSurface {
+        .structuredActivityFeed
+    }
+
+    func reusesRemoteHealthSnapshot(
+        _ snapshot: ProviderHealthSummary,
+        remoteContext: RemoteWorkspaceHealthContext?
+    ) -> Bool {
+        false
+    }
+
+    func planSessionTransition(
+        _ request: ProviderModuleSessionTransitionRequest
+    ) async throws -> ProviderModuleSessionTransitionPlan {
+        tracker.requests.append(.init(request: request))
+        switch request {
+        case .openFresh:
+            Issue.record("Persisted relaunch test should not open a fresh Session")
+            return .openFresh(.failed("unexpected"))
+        case .relaunchPersisted:
+            return .relaunchPersisted(.sharedLaunch)
+        }
+    }
+
+    func planPersistedSessionRelaunch(
+        _ request: ProviderModulePersistedSessionRelaunchRequest
+    ) -> ProviderModulePersistedSessionRelaunchPlan {
+        Issue.record("Persisted relaunch should route through planSessionTransition")
+        return .sharedLaunch
+    }
+}
+
+private struct ReadyCodexProviderHealthEvaluator: ProviderHealthEvaluating {
+    func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> [WorkspaceProviderCard] {
+        ProviderID.allCases.map { providerID in
+            WorkspaceProviderCard(
+                provider: Provider(id: providerID),
+                health: ProviderHealthSummary(
+                    state: .available,
+                    summary: "Ready",
+                    resolvedExecutable: "/tmp/fake-\(providerID.rawValue)",
+                    launchability: .launchable
+                ),
+                defaultSession: ProviderDefaultSessionSummary(
+                    state: .notCreated,
+                    summary: "No default session yet",
+                    actionTitle: "Launch"
+                )
+            )
+        }
+    }
+
+    func healthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> ProviderHealthSummary {
+        ProviderHealthSummary(
+            state: .available,
+            summary: "Ready",
+            resolvedExecutable: "/tmp/fake-\(providerID.rawValue)",
+            launchability: .launchable
+        )
+    }
+}
+
+private final class RecordingStaticCodexRuntimeLauncher: SessionRuntimeLaunching, @unchecked Sendable {
+    func makeRuntime(
+        session: Session,
+        workspace: Workspace,
+        launchConfiguration: SessionRuntimeLaunchConfiguration
+    ) async throws -> any SessionRuntime {
+        StaticCodexRuntime()
+    }
+}
+
+private final class StaticCodexRuntime: SessionRuntime, @unchecked Sendable {
+    var state: Session.State = .ready
+    var sessionRecordAdapterMetadata: SessionRecordAdapterMetadata? { nil }
+
+    func sessionScreen(for session: Session) -> SessionScreen {
+        SessionScreen(session: session, primarySurface: .structuredActivityFeed, transcript: "Codex ready")
+    }
+
+    func setChangeHandler(_ handler: (@Sendable () -> Void)?) {}
+    func stop() throws {}
+    func sendInput(_ text: String) throws {}
+    func sendText(_ text: String) throws {}
+    func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool) throws {}
+    func respondToApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision) throws {}
+    func resize(columns: Int, rows: Int) throws {}
 }
 #endif
