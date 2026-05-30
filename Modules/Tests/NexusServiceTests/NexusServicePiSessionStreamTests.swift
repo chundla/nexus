@@ -462,6 +462,50 @@ struct NexusServicePiSessionStreamTests {
         ])
     }
 
+    @Test func localPiRuntimeStreamsToolExecutionUpdatesFromDeltaContentBlocksBeforeTurnEnds() throws {
+        let transport = StreamingToolPiRPCTransport()
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("delegate")
+        transport.emitToolExecutionStart(
+            toolCallID: "tool-1",
+            toolName: "subagent",
+            args: ["agent": "reviewer", "task": "Review the latest diff and summarize issues"]
+        )
+        transport.emitToolExecutionUpdate(
+            toolCallID: "tool-1",
+            partialResult: [
+                "content": [[
+                    "type": "text_delta",
+                    "delta": "Looks good overall. Watch the new error path."
+                ]]
+            ]
+        )
+
+        let streamedScreen = runtime.sessionScreen(for: session)
+
+        #expect(streamedScreen.isAgentTurnInProgress)
+        #expect(streamedScreen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "You: delegate",
+            "subagent reviewer: Review the latest diff and summarize issues",
+            "subagent: Looks good overall. Watch the new error path."
+        ])
+    }
+
     @Test func localPiSessionScreenShowsPendingApprovalRequestInSharedSessionStream() throws {
         let runtime = try PiRPCSessionRuntime(
             executable: "/tmp/fake-pi",
@@ -930,6 +974,14 @@ private final class StreamingToolPiRPCTransport: PiRPCTransporting, @unchecked S
             "toolCallId": toolCallID,
             "toolName": toolName,
             "args": args
+        ])
+    }
+
+    func emitToolExecutionUpdate(toolCallID: String, partialResult: [String: Any]) {
+        emit([
+            "type": "tool_execution_update",
+            "toolCallId": toolCallID,
+            "partialResult": partialResult
         ])
     }
 

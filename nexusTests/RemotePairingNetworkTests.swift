@@ -1814,6 +1814,126 @@ struct RemotePairingNetworkTests {
         #expect(observedScreen.transcript.contains("ayyyyooo"))
     }
 
+    @Test func remotePiStructuredSessionStreamsToolAndSubagentUpdatesBeforeTurnEndOverDedicatedNetworkAPI() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let launcher = ProcessSessionRuntimeLauncher(localProtocolNativeRuntimeFactories: [.pi: { launchConfiguration, _, _ in
+            try PiRPCSessionRuntime(
+                executable: launchConfiguration.executable,
+                workingDirectory: launchConfiguration.workingDirectory,
+                terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
+                transportFactory: { _, _, _ in
+                    RemotePairingStreamingPiRPCTransport()
+                }
+            )
+        }])
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: RemotePairingTestExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
+                commandRunner: RemotePairingTestCommandRunner(results: [
+                    RemotePairingTestCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
+                    RemotePairingTestCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                ]),
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+            ),
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
+
+        _ = try await client.setRemoteAccessEnabled(true)
+        let pairing = try await client.startPairing()
+        let group = try await client.createWorkspaceGroup(name: "Client Work")
+        let workspace = try await client.createLocalWorkspace(
+            name: "Nexus",
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+
+        let remoteClient = RemotePairingHTTPClient()
+        let pairedMac = try await remoteClient.completePairing(
+            host: server.displayHost,
+            port: server.port,
+            pairingCode: pairing.code,
+            deviceName: "Chris’s iPhone"
+        )
+        let session = try await remoteClient.launchOrResumeDefaultSession(
+            for: pairedMac,
+            workspaceID: workspace.id,
+            providerID: .pi
+        )
+
+        var observedScreens: [SessionScreen] = []
+        let observation = try await remoteClient.observeSessionScreen(
+            for: pairedMac,
+            sessionID: session.id,
+            onUpdate: { screen in
+                Task { @MainActor in
+                    observedScreens.append(screen)
+                }
+            },
+            onDisconnect: { _ in }
+        )
+        defer {
+            Task {
+                await observation.cancel()
+            }
+        }
+
+        _ = try await waitForObservedScreen {
+            observedScreens.last
+        }
+
+        do {
+            _ = try await remoteClient.sendSessionInput(for: pairedMac, sessionID: session.id, text: "delegate")
+            Issue.record("Expected Pi structured prompt submission on iPhone to require Controller first")
+        } catch {
+            #expect(error.localizedDescription == "Take Controller on this iPhone before sending Session input.")
+        }
+
+        _ = try await remoteClient.takeSessionControl(for: pairedMac, sessionID: session.id, columns: 44, rows: 12)
+        let responseScreen = try await remoteClient.sendSessionInput(for: pairedMac, sessionID: session.id, text: "delegate")
+
+        let streamedScreen = try await waitForObservedScreen {
+            observedScreens.last {
+                $0.session.id == session.id
+                    && $0.isAgentTurnInProgress
+                    && $0.activityItems.contains(where: { $0.text == "subagent: Looks good overall. Watch the new error path." })
+            }
+        }
+        let completedScreen = try await waitForObservedScreen {
+            observedScreens.last {
+                $0.session.id == session.id
+                    && $0.isAgentTurnInProgress == false
+                    && $0.activityItems.contains(where: { $0.text == "Pi: Done" })
+            }
+        }
+
+        #expect(responseScreen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "You: delegate"
+        ])
+        #expect(streamedScreen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "You: delegate",
+            "subagent reviewer: Review the latest diff and summarize issues",
+            "subagent: Looks good overall. Watch the new error path."
+        ])
+        #expect(completedScreen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "You: delegate",
+            "subagent reviewer: Review the latest diff and summarize issues",
+            "subagent: Looks good overall. Watch the new error path.",
+            "Pi: Done"
+        ])
+    }
+
     @Test func completesFirstTimePairingOverDedicatedNetworkAPI() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)
@@ -1920,6 +2040,98 @@ private final class RemotePairingSynchronousIBMBobTransport: IBMBobTransporting,
 
     func terminate() throws {
         terminationHandler?(terminationStatus)
+    }
+}
+
+private final class RemotePairingStreamingPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
+    private var stdoutLineHandler: (@Sendable (String) -> Void)?
+    private var terminationHandler: (@Sendable (Int32) -> Void)?
+
+    func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
+        stdoutLineHandler = handler
+    }
+
+    func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?) {
+        terminationHandler = handler
+    }
+
+    func start() throws {}
+
+    func sendLine(_ line: String) throws {
+        guard let data = line.data(using: .utf8),
+              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = object["type"] as? String else {
+            return
+        }
+
+        switch type {
+        case "get_state":
+            emit([
+                "id": object["id"] as? String ?? "state",
+                "type": "response",
+                "command": "get_state",
+                "success": true,
+                "data": ["sessionId": "pi-session-1"]
+            ])
+        case "prompt":
+            emit([
+                "type": "response",
+                "command": "prompt",
+                "success": true
+            ])
+
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                self?.emit([
+                    "type": "tool_execution_start",
+                    "toolCallId": "tool-1",
+                    "toolName": "subagent",
+                    "args": [
+                        "agent": "reviewer",
+                        "task": "Review the latest diff and summarize issues"
+                    ]
+                ])
+            }
+
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.10) { [weak self] in
+                self?.emit([
+                    "type": "tool_execution_end",
+                    "toolCallId": "tool-1",
+                    "toolName": "subagent",
+                    "result": [
+                        "content": [[
+                            "type": "text",
+                            "text": "Looks good overall. Watch the new error path."
+                        ]]
+                    ]
+                ])
+            }
+
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                self?.emit([
+                    "type": "turn_end",
+                    "message": [
+                        "content": [[
+                            "type": "text",
+                            "text": "Done"
+                        ]]
+                    ]
+                ])
+            }
+        default:
+            return
+        }
+    }
+
+    func terminate() throws {
+        terminationHandler?(0)
+    }
+
+    private func emit(_ object: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: object),
+              let line = String(data: data, encoding: .utf8) else {
+            return
+        }
+        stdoutLineHandler?(line)
     }
 }
 

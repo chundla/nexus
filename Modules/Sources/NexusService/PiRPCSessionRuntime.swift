@@ -715,26 +715,39 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     }
 
     private func toolExecutionResultText(_ object: [String: Any]?) -> String {
-        guard let object else {
-            return ""
-        }
+        toolExecutionResultText(from: object)
+    }
 
-        if let content = object["content"] as? [[String: Any]] {
-            let text = content.compactMap { block -> String? in
-                guard string(for: "type", in: block) == "text" else {
-                    return nil
-                }
-                return string(for: "text", in: block)
-            }.joined()
-            if text.isEmpty == false {
+    private func toolExecutionResultText(from value: Any?) -> String {
+        switch value {
+        case let string as String:
+            return string.trimmingCharacters(in: .whitespacesAndNewlines)
+        case let object as [String: Any]:
+            if let text = string(for: "text", in: object)
+                ?? string(for: "delta", in: object)
+                ?? string(for: "message", in: object)
+                ?? string(for: "output", in: object)
+                ?? string(for: "summary", in: object) {
                 return text
             }
-        }
 
-        return string(for: "text", in: object)
-            ?? string(for: "message", in: object)
-            ?? string(for: "output", in: object)
-            ?? ""
+            for key in ["content", "result", "partialResult"] {
+                let text = toolExecutionResultText(from: object[key])
+                if text.isEmpty == false {
+                    return text
+                }
+            }
+
+            return ""
+        case let array as [Any]:
+            let text = array
+                .map { toolExecutionResultText(from: $0) }
+                .filter { $0.isEmpty == false }
+                .joined()
+            return text.trimmingCharacters(in: .whitespacesAndNewlines)
+        default:
+            return ""
+        }
     }
 
     private func incrementalToolOutput(from previousText: String, to nextText: String) -> String {

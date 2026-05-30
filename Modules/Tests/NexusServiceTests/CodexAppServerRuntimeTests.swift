@@ -261,6 +261,49 @@ struct CodexAppServerRuntimeTests {
         ])
     }
 
+    @Test func streamsCodexToolUpdatesFromDeltaContentBlocksBeforeFinalAgentMessageArrives() throws {
+        let transport = TestCodexAppServerTransport(threadID: "codex-thread-1")
+        let runtime = try CodexAppServerRuntime(
+            executable: "/tmp/fake-codex",
+            workingDirectory: "/tmp/workspace",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .codex,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("Ship it")
+        transport.emitItemStarted(item: [
+            "type": "subagent",
+            "id": "subagent-1",
+            "agent": "reviewer",
+            "task": "Check the diff and summarize follow-up work"
+        ])
+        transport.emitItemUpdated(item: [
+            "type": "subagent",
+            "id": "subagent-1",
+            "content": [[
+                "type": "text_delta",
+                "delta": "Looks good overall. Follow up on the retry path."
+            ]]
+        ])
+
+        let streamedScreen = runtime.sessionScreen(for: session)
+
+        #expect(streamedScreen.isAgentTurnInProgress)
+        #expect(streamedScreen.activityItems.map(\.text) == [
+            "Codex shared Session stream connected",
+            "You: Ship it",
+            "subagent reviewer: Check the diff and summarize follow-up work",
+            "subagent: Looks good overall. Follow up on the retry path."
+        ])
+    }
+
     @Test func surfacesPendingCommandApprovalRequestInSharedSessionStream() throws {
         let transport = TestCodexAppServerTransport(threadID: "codex-thread-1")
         let runtime = try CodexAppServerRuntime(
@@ -828,6 +871,18 @@ private final class TestCodexAppServerTransport: CodexAppServerTransporting, @un
         stdoutLineHandler?(jsonLine([
             "jsonrpc": "2.0",
             "method": "item/started",
+            "params": [
+                "item": item,
+                "threadId": threadID,
+                "turnId": "turn-1"
+            ]
+        ]))
+    }
+
+    func emitItemUpdated(item: [String: Any]) {
+        stdoutLineHandler?(jsonLine([
+            "jsonrpc": "2.0",
+            "method": "item/updated",
             "params": [
                 "item": item,
                 "threadId": threadID,

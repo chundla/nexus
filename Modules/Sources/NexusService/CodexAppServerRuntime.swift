@@ -852,30 +852,35 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
     }
 
     private func codexToolOutputText(from item: [String: Any]) -> String {
-        if let text = codexString(in: item, keys: ["output", "text", "message", "summary"]) {
-            return text
-        }
+        codexToolOutputText(from: item as Any)
+    }
 
-        if let result = item["result"] as? [String: Any] {
-            let text = codexToolOutputText(from: result)
-            if text.isEmpty == false {
+    private func codexToolOutputText(from value: Any?) -> String {
+        switch value {
+        case let string as String:
+            return string.trimmingCharacters(in: .whitespacesAndNewlines)
+        case let object as [String: Any]:
+            if let text = codexString(in: object, keys: ["output", "text", "delta", "message", "summary"]) {
                 return text
             }
-        }
 
-        if let content = item["content"] as? [[String: Any]] {
-            let text = content.compactMap { block -> String? in
-                guard string(for: "type", in: block)?.lowercased() == "text" else {
-                    return nil
+            for key in ["content", "result"] {
+                let text = codexToolOutputText(from: object[key])
+                if text.isEmpty == false {
+                    return text
                 }
-                return string(for: "text", in: block)
-            }.joined()
-            if text.isEmpty == false {
-                return text.trimmingCharacters(in: .whitespacesAndNewlines)
             }
-        }
 
-        return ""
+            return ""
+        case let array as [Any]:
+            let text = array
+                .map { codexToolOutputText(from: $0) }
+                .filter { $0.isEmpty == false }
+                .joined()
+            return text.trimmingCharacters(in: .whitespacesAndNewlines)
+        default:
+            return ""
+        }
     }
 
     private func codexItemIsError(_ item: [String: Any]) -> Bool {

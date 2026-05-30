@@ -470,7 +470,8 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
             return BobEvent(kind: .command, text: text)
         case "tool_result":
             if stringValue(in: object, keys: ["status"])?.lowercased() == "success" {
-                guard let text = stringValue(in: object, keys: ["output", "text", "message", "result"]), text.isEmpty == false else {
+                guard let text = messageText(in: object) ?? stringValue(in: object, keys: ["output", "result"]),
+                      text.isEmpty == false else {
                     return nil
                 }
                 return BobEvent(kind: .message, text: text)
@@ -544,10 +545,11 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
         }
 
         let text = content.compactMap { block -> String? in
-            guard stringValue(in: block, keys: ["type"])?.lowercased() == "text" else {
+            if let type = stringValue(in: block, keys: ["type"])?.lowercased(),
+               type.contains("text") == false {
                 return nil
             }
-            return stringValue(in: block, keys: ["text", "delta", "content"])
+            return stringValue(in: block, keys: ["text", "delta", "content", "message", "output"])
         }.joined()
 
         return text.isEmpty ? nil : text

@@ -316,6 +316,42 @@ struct IBMBobSessionRuntimeTests {
             "Watch the retry path."
         ])
     }
+
+    @Test func surfacesBobToolResultsFromNestedDeltaContentBlocks() throws {
+        let runtime = try IBMBobSessionRuntime(
+            executable: "/tmp/fake-bob",
+            workingDirectory: "/tmp/workspace",
+            terminationStatusMessageBuilder: { status in "IBM Bob exited with status \(status)." },
+            transportFactory: { _, _, _ in
+                SynchronousIBMBobTransport(
+                    stdoutLines: [
+                        #"{"type":"tool_use","tool_name":"subagent","tool_id":"tool-1","parameters":{"agent":"reviewer","task":"Summarize the latest diff"}}"#,
+                        #"{"type":"tool_result","tool_id":"tool-1","status":"success","content":[{"type":"text_delta","delta":"Watch the retry path."}]}"#,
+                        #"{"type":"result","status":"success"}"#
+                    ],
+                    terminationStatus: 0
+                )
+            }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .ibmBob,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("delegate")
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(screen.activityItems.map(\.text) == [
+            "IBM Bob Session ready. Send a prompt to start IBM Bob.",
+            "You: delegate",
+            "subagent: reviewer: Summarize the latest diff",
+            "Watch the retry path."
+        ])
+    }
 }
 
 private final class IBMBobLaunchRecorder: @unchecked Sendable {

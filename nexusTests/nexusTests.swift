@@ -6640,6 +6640,78 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelStreamsPiToolAndSubagentActivityBeforeFinalTurnCompletion() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let launcher = ProcessSessionRuntimeLauncher(localProtocolNativeRuntimeFactories: [.pi: { launchConfiguration, _, _ in
+            try PiRPCSessionRuntime(
+                executable: launchConfiguration.executable,
+                workingDirectory: launchConfiguration.workingDirectory,
+                terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
+                transportFactory: { _, _, _ in
+                    StreamingNexusTestsPiRPCTransport()
+                }
+            )
+        }])
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthEvaluator(
+                executableResolver: StubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
+                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                ]),
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+            ),
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+        let session = try await model.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+        try await model.sendInputToFocusedSession("delegate")
+
+        let streamedScreen = try await waitForObservedFocusedSessionScreen(model: model) { screen in
+            screen.session.id == session.id
+                && screen.isAgentTurnInProgress
+                && screen.activityItems.contains(where: { $0.text == "subagent: Looks good overall. Watch the new error path." })
+        }
+
+        #expect(streamedScreen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "You: delegate",
+            "subagent reviewer: Review the latest diff and summarize issues",
+            "subagent: Looks good overall. Watch the new error path."
+        ])
+
+        let completedScreen = try await waitForObservedFocusedSessionScreen(model: model) { screen in
+            screen.session.id == session.id
+                && screen.isAgentTurnInProgress == false
+                && screen.activityItems.contains(where: { $0.text == "Pi: Done" })
+        }
+
+        #expect(completedScreen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "You: delegate",
+            "subagent reviewer: Review the latest diff and summarize issues",
+            "subagent: Looks good overall. Watch the new error path.",
+            "Pi: Done"
+        ])
+    }
+
+    @MainActor
     @Test func appModelKeepsTerminalBackedProvidersOnTerminalSurfacesAlongsidePiSessionSurfaces() async throws {
         final class CompatibilityStaticSessionRuntime: SessionRuntime, @unchecked Sendable {
             var state: Session.State = .ready
@@ -8133,14 +8205,9 @@ private struct NoOpCodexReadinessProbe: CodexReadinessProbing {
     func probe(executable: String, workingDirectory: String) throws {}
 }
 
-private final class NexusTestsPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
-    private let promptResponseText: String
-    private var stdoutLineHandler: (@Sendable (String) -> Void)?
-    private var terminationHandler: (@Sendable (Int32) -> Void)?
-
-    init(promptResponseText: String = "") {
-        self.promptResponseText = promptResponseText
-    }
+private class NexusTestsBasePiRPCTransport: PiRPCTransporting, @unchecked Sendable {
+    var stdoutLineHandler: (@Sendable (String) -> Void)?
+    var terminationHandler: (@Sendable (Int32) -> Void)?
 
     func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
         stdoutLineHandler = handler
@@ -8152,7 +8219,29 @@ private final class NexusTestsPiRPCTransport: PiRPCTransporting, @unchecked Send
 
     func start() throws {}
 
-    func sendLine(_ line: String) throws {
+    func sendLine(_ line: String) throws {}
+
+    func terminate() throws {
+        terminationHandler?(0)
+    }
+
+    func emit(_ object: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: object),
+              let line = String(data: data, encoding: .utf8) else {
+            return
+        }
+        stdoutLineHandler?(line)
+    }
+}
+
+private final class NexusTestsPiRPCTransport: NexusTestsBasePiRPCTransport, @unchecked Sendable {
+    private let promptResponseText: String
+
+    init(promptResponseText: String = "") {
+        self.promptResponseText = promptResponseText
+    }
+
+    override func sendLine(_ line: String) throws {
         guard let data = line.data(using: .utf8),
               let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let type = object["type"] as? String else {
@@ -8201,17 +8290,74 @@ private final class NexusTestsPiRPCTransport: PiRPCTransporting, @unchecked Send
             return
         }
     }
+}
 
-    func terminate() throws {
-        terminationHandler?(0)
-    }
-
-    private func emit(_ object: [String: Any]) {
-        guard let data = try? JSONSerialization.data(withJSONObject: object),
-              let line = String(data: data, encoding: .utf8) else {
+private final class StreamingNexusTestsPiRPCTransport: NexusTestsBasePiRPCTransport, @unchecked Sendable {
+    override func sendLine(_ line: String) throws {
+        guard let data = line.data(using: .utf8),
+              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = object["type"] as? String else {
             return
         }
-        stdoutLineHandler?(line)
+
+        switch type {
+        case "get_state":
+            emit([
+                "id": object["id"] as? String ?? "state",
+                "type": "response",
+                "command": "get_state",
+                "success": true,
+                "data": [
+                    "sessionId": "pi-session-1"
+                ]
+            ])
+        case "prompt":
+            emit([
+                "type": "response",
+                "command": "prompt",
+                "success": true
+            ])
+
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                self?.emit([
+                    "type": "tool_execution_start",
+                    "toolCallId": "tool-1",
+                    "toolName": "subagent",
+                    "args": [
+                        "agent": "reviewer",
+                        "task": "Review the latest diff and summarize issues"
+                    ]
+                ])
+            }
+
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.10) { [weak self] in
+                self?.emit([
+                    "type": "tool_execution_end",
+                    "toolCallId": "tool-1",
+                    "toolName": "subagent",
+                    "result": [
+                        "content": [[
+                            "type": "text",
+                            "text": "Looks good overall. Watch the new error path."
+                        ]]
+                    ]
+                ])
+            }
+
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                self?.emit([
+                    "type": "turn_end",
+                    "message": [
+                        "content": [[
+                            "type": "text",
+                            "text": "Done"
+                        ]]
+                    ]
+                ])
+            }
+        default:
+            return
+        }
     }
 }
 
