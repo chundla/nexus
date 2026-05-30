@@ -143,6 +143,213 @@ struct ClaudeProviderModuleTests {
         ])
     }
 
+    @Test func claudeProviderModuleDerivesLocalCatalogReadFromSharedCLIProbeFacts() async throws {
+        let module = ClaudeProviderModule()
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Local Claude",
+            kind: .local,
+            folderPath: "/tmp/local-claude",
+            primaryGroupID: UUID()
+        )
+        let providerHealthEvaluator = RecordingClaudeCLIHealthFactProvider(
+            localProbeResult: .ready(
+                executable: "/tmp/fake-claude",
+                version: "1.2.3",
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .warning,
+                        code: "versionUnavailable",
+                        message: "Version came from the shared probe"
+                    )
+                ]
+            )
+        )
+
+        let catalogRead = try await module.readCatalog(
+            ProviderModuleCatalogReadRequest(
+                workspace: workspace,
+                remoteContext: nil,
+                defaultSession: nil
+            ),
+            actions: ProviderModuleCatalogReadActions(
+                providerHealthSummary: {
+                    await module.providerHealthSummary(
+                        for: workspace,
+                        remoteContext: nil,
+                        providerHealthEvaluator: providerHealthEvaluator
+                    )
+                }
+            )
+        )
+
+        #expect(catalogRead.health == ProviderHealthSummary(
+            state: .available,
+            summary: "Claude 1.2.3 is available",
+            resolvedExecutable: "/tmp/fake-claude",
+            version: "1.2.3",
+            launchability: .launchable,
+            diagnostics: [
+                ProviderHealthDiagnostic(
+                    severity: .warning,
+                    code: "versionUnavailable",
+                    message: "Version came from the shared probe"
+                )
+            ]
+        ))
+        #expect(providerHealthEvaluator.localProbeRequests == [workspace.id])
+        #expect(providerHealthEvaluator.legacyRequests.isEmpty)
+        #expect(catalogRead.capabilities.launchDefaultSession.isEnabled)
+        #expect(catalogRead.capabilities.createNamedSession.isEnabled)
+        #expect(catalogRead.prelaunchPrimarySurface == .terminal)
+    }
+
+    @Test func claudeProviderModuleDerivesRemoteBlockedCatalogReadFromPrerequisiteFacts() async throws {
+        let module = ClaudeProviderModule()
+        let workspaceID = UUID()
+        let hostID = UUID()
+        let workspace = Workspace(
+            id: workspaceID,
+            name: "Remote Claude",
+            kind: .remote,
+            folderPath: "/srv/api",
+            primaryGroupID: UUID(),
+            remoteHostID: hostID
+        )
+        let providerHealthEvaluator = RecordingClaudeCLIHealthFactProvider(
+            localProbeResult: .ready(executable: "/tmp/unused", version: nil, diagnostics: [])
+        )
+        let remoteContext = RemoteWorkspaceHealthContext(
+            host: NexusDomain.Host(id: hostID, name: "Build Server", sshTarget: "build-box"),
+            hostValidation: HostValidationSnapshot(
+                hostID: hostID,
+                state: .unavailable,
+                summary: "SSH authentication failed",
+                checkedAt: Date()
+            ),
+            workspaceAvailability: WorkspaceAvailabilitySnapshot(
+                workspaceID: workspaceID,
+                state: .available,
+                summary: "Workspace is available",
+                checkedAt: Date()
+            )
+        )
+
+        let catalogRead = try await module.readCatalog(
+            ProviderModuleCatalogReadRequest(
+                workspace: workspace,
+                remoteContext: remoteContext,
+                defaultSession: nil
+            ),
+            actions: ProviderModuleCatalogReadActions(
+                providerHealthSummary: {
+                    await module.providerHealthSummary(
+                        for: workspace,
+                        remoteContext: remoteContext,
+                        providerHealthEvaluator: providerHealthEvaluator
+                    )
+                }
+            )
+        )
+
+        #expect(catalogRead.health == ProviderHealthSummary(
+            state: .blocked,
+            summary: "Provider Health is blocked by Host Validation",
+            diagnostics: [
+                ProviderHealthDiagnostic(
+                    severity: .warning,
+                    code: "hostValidationBlocked",
+                    message: "Provider Health for Claude is blocked by Host Validation: SSH authentication failed."
+                )
+            ]
+        ))
+        #expect(providerHealthEvaluator.remoteProbeRequests.isEmpty)
+        #expect(providerHealthEvaluator.legacyRequests.isEmpty)
+        #expect(catalogRead.capabilities.launchDefaultSession.isEnabled == false)
+        #expect(catalogRead.capabilities.launchDefaultSession.disabledReason == "Provider Health is blocked by Host Validation")
+        #expect(catalogRead.prelaunchPrimarySurface == .terminal)
+    }
+
+    @Test func claudeProviderModuleDerivesRemoteProbeBackedCatalogReadFromSharedCLIProbeFacts() async throws {
+        let module = ClaudeProviderModule()
+        let workspaceID = UUID()
+        let hostID = UUID()
+        let workspace = Workspace(
+            id: workspaceID,
+            name: "Remote Claude",
+            kind: .remote,
+            folderPath: "/srv/api",
+            primaryGroupID: UUID(),
+            remoteHostID: hostID
+        )
+        let providerHealthEvaluator = RecordingClaudeCLIHealthFactProvider(
+            localProbeResult: .ready(executable: "/tmp/unused", version: nil, diagnostics: []),
+            remoteProbeResult: .ready(
+                executable: "/home/tester/.local/bin/claude",
+                version: "1.2.3",
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .info,
+                        code: "remoteProbe",
+                        message: "Validated remote Claude launch prerequisites on Build Server for /srv/api."
+                    )
+                ]
+            )
+        )
+        let remoteContext = RemoteWorkspaceHealthContext(
+            host: NexusDomain.Host(id: hostID, name: "Build Server", sshTarget: "build-box"),
+            hostValidation: HostValidationSnapshot(
+                hostID: hostID,
+                state: .available,
+                summary: "Host is available",
+                checkedAt: Date()
+            ),
+            workspaceAvailability: WorkspaceAvailabilitySnapshot(
+                workspaceID: workspaceID,
+                state: .available,
+                summary: "Workspace is available",
+                checkedAt: Date()
+            )
+        )
+
+        let catalogRead = try await module.readCatalog(
+            ProviderModuleCatalogReadRequest(
+                workspace: workspace,
+                remoteContext: remoteContext,
+                defaultSession: nil
+            ),
+            actions: ProviderModuleCatalogReadActions(
+                providerHealthSummary: {
+                    await module.providerHealthSummary(
+                        for: workspace,
+                        remoteContext: remoteContext,
+                        providerHealthEvaluator: providerHealthEvaluator
+                    )
+                }
+            )
+        )
+
+        #expect(catalogRead.health == ProviderHealthSummary(
+            state: .available,
+            summary: "Claude 1.2.3 is available",
+            resolvedExecutable: "/home/tester/.local/bin/claude",
+            version: "1.2.3",
+            launchability: .launchable,
+            diagnostics: [
+                ProviderHealthDiagnostic(
+                    severity: .info,
+                    code: "remoteProbe",
+                    message: "Validated remote Claude launch prerequisites on Build Server for /srv/api."
+                )
+            ]
+        ))
+        #expect(providerHealthEvaluator.remoteProbeRequests == [workspace.id])
+        #expect(providerHealthEvaluator.legacyRequests.isEmpty)
+        #expect(catalogRead.capabilities.launchDefaultSession.isEnabled)
+        #expect(catalogRead.capabilities.createNamedSession.isEnabled)
+        #expect(catalogRead.prelaunchPrimarySurface == .terminal)
+    }
+
     @Test func claudeProviderModulePreservesClaudeCatalogReadBehavior() async throws {
         let module = ClaudeProviderModule()
         let workspaceID = UUID()
@@ -555,6 +762,45 @@ private final class RecordingClaudeProviderHealthEvaluator: @unchecked Sendable,
     func healthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> ProviderHealthSummary {
         requests.append(.init(providerID: providerID, workspaceID: workspace.id))
         return summary
+    }
+}
+
+private final class RecordingClaudeCLIHealthFactProvider: @unchecked Sendable, ProviderHealthEvaluating, CLIProviderHealthFactProviding {
+    let localProbeResult: LocalCLIHealthProbeResult
+    let remoteProbeResult: RemoteCLIHealthProbeResult
+    private(set) var localProbeRequests: [UUID] = []
+    private(set) var remoteProbeRequests: [UUID] = []
+    private(set) var legacyRequests: [UUID] = []
+
+    init(
+        localProbeResult: LocalCLIHealthProbeResult,
+        remoteProbeResult: RemoteCLIHealthProbeResult = .sshLaunchFailed("unexpected")
+    ) {
+        self.localProbeResult = localProbeResult
+        self.remoteProbeResult = remoteProbeResult
+    }
+
+    func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> [WorkspaceProviderCard] {
+        []
+    }
+
+    func healthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> ProviderHealthSummary {
+        legacyRequests.append(workspace.id)
+        return ProviderHealthSummary(
+            state: .misconfigured,
+            summary: "legacy evaluator path should stay unused",
+            launchability: .notLaunchable
+        )
+    }
+
+    func localCLIHealthProbe(commandName: String, providerName: String, workspace: Workspace) async -> LocalCLIHealthProbeResult {
+        localProbeRequests.append(workspace.id)
+        return localProbeResult
+    }
+
+    func remoteCLIHealthProbe(commandName: String, providerName: String, workspace: Workspace, host: NexusDomain.Host) async -> RemoteCLIHealthProbeResult {
+        remoteProbeRequests.append(workspace.id)
+        return remoteProbeResult
     }
 }
 #endif

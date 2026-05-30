@@ -48,6 +48,36 @@ enum RemotePiReadinessOutcome: Sendable, Equatable {
     case authenticationUncertain(String?)
 }
 
+enum LocalCLIHealthProbeResult: Sendable, Equatable {
+    case executableNotFound(ProviderExecutableResolution)
+    case launchProbeFailed(
+        executable: String,
+        version: String?,
+        diagnostics: [ProviderHealthDiagnostic],
+        detail: String
+    )
+    case ready(
+        executable: String,
+        version: String?,
+        diagnostics: [ProviderHealthDiagnostic]
+    )
+}
+
+enum RemoteCLIHealthProbeResult: Sendable, Equatable {
+    case sshLaunchFailed(String)
+    case probeFailed(String)
+    case ready(
+        executable: String?,
+        version: String?,
+        diagnostics: [ProviderHealthDiagnostic]
+    )
+}
+
+protocol CLIProviderHealthFactProviding: Sendable {
+    func localCLIHealthProbe(commandName: String, providerName: String, workspace: Workspace) async -> LocalCLIHealthProbeResult
+    func remoteCLIHealthProbe(commandName: String, providerName: String, workspace: Workspace, host: NexusDomain.Host) async -> RemoteCLIHealthProbeResult
+}
+
 struct RemoteWorkspaceHealthContext {
     let host: NexusDomain.Host
     let hostValidation: HostValidationSnapshot?
@@ -80,7 +110,7 @@ extension ProviderHealthEvaluating {
     }
 }
 
-struct ProviderHealthEvaluator: ProviderHealthEvaluating, @unchecked Sendable {
+struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactProviding, @unchecked Sendable {
     let executableResolver: any ProviderExecutableResolving
     let commandRunner: any ProviderCommandRunning
     let localShellCommandBuilder: LocalShellCommandBuilder
@@ -123,18 +153,27 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, @unchecked Sendable {
     }
 
     func healthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext? = nil) async -> ProviderHealthSummary {
-        if workspace.kind == .remote {
-            return await remoteHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
-        }
-
         switch providerID {
         case .claude:
-            return localCLIHealthSummary(commandName: "claude", providerName: "Claude", workspace: workspace)
+            return await ClaudeProviderModule().providerHealthSummary(
+                for: workspace,
+                remoteContext: remoteContext,
+                providerHealthEvaluator: self
+            )
         case .codex:
+            if workspace.kind == .remote {
+                return await remoteHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
+            }
             return await localCodexHealthSummary(workspace: workspace)
         case .pi:
-            return localCLIHealthSummary(commandName: "pi", providerName: "Pi", workspace: workspace)
+            if workspace.kind == .remote {
+                return await remoteHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
+            }
+            return await localCLIHealthSummary(commandName: "pi", providerName: "Pi", workspace: workspace)
         case .ibmBob:
+            if workspace.kind == .remote {
+                return await remoteHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
+            }
             return localIBMBobHealthSummary(workspace: workspace)
         }
     }
@@ -166,7 +205,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, @unchecked Sendable {
 
         switch providerID {
         case .claude:
-            return remoteCLIHealthSummary(commandName: "claude", providerName: "Claude", workspace: workspace, host: remoteContext.host)
+            return await remoteCLIHealthSummary(commandName: "claude", providerName: "Claude", workspace: workspace, host: remoteContext.host)
         case .codex:
             return await remoteCodexHealthSummary(workspace: workspace, host: remoteContext.host)
         case .pi:
@@ -240,12 +279,12 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, @unchecked Sendable {
         )
     }
 
-    private func remoteCLIHealthSummary(
+    func remoteCLIHealthProbe(
         commandName: String,
         providerName: String,
         workspace: Workspace,
         host: NexusDomain.Host
-    ) -> ProviderHealthSummary {
+    ) async -> RemoteCLIHealthProbeResult {
         do {
             let result = try commandRunner.run(
                 executable: "/usr/bin/ssh",
@@ -254,24 +293,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, @unchecked Sendable {
             )
 
             guard result.exitStatus == 0 else {
-                let detail = firstDiagnosticLine(stdout: result.stdout, stderr: result.stderr)
-                let classification = classifyRemoteCLIProbeFailure(
-                    detail: detail,
-                    providerName: providerName,
-                    notFoundMarker: remoteExecutableNotFoundMarker(commandName: commandName)
-                )
-                return ProviderHealthSummary(
-                    state: classification.state,
-                    summary: classification.summary,
-                    launchability: .notLaunchable,
-                    diagnostics: [
-                        ProviderHealthDiagnostic(
-                            severity: .error,
-                            code: classification.code,
-                            message: classification.message ?? (detail.isEmpty ? classification.summary : detail)
-                        )
-                    ]
-                )
+                return .probeFailed(firstDiagnosticLine(stdout: result.stdout, stderr: result.stderr))
             }
 
             let outputLines = result.stdout
@@ -282,12 +304,9 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, @unchecked Sendable {
             let executable = outputLines.first
             let version = outputLines.dropFirst().first
 
-            return ProviderHealthSummary(
-                state: .available,
-                summary: version.map { "\(providerName) \($0) is available" } ?? "\(providerName) is available",
-                resolvedExecutable: executable,
+            return .ready(
+                executable: executable,
                 version: version,
-                launchability: .launchable,
                 diagnostics: [
                     ProviderHealthDiagnostic(
                         severity: .info,
@@ -297,6 +316,23 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, @unchecked Sendable {
                 ]
             )
         } catch {
+            return .sshLaunchFailed(error.localizedDescription)
+        }
+    }
+
+    private func remoteCLIHealthSummary(
+        commandName: String,
+        providerName: String,
+        workspace: Workspace,
+        host: NexusDomain.Host
+    ) async -> ProviderHealthSummary {
+        switch await remoteCLIHealthProbe(
+            commandName: commandName,
+            providerName: providerName,
+            workspace: workspace,
+            host: host
+        ) {
+        case let .sshLaunchFailed(message):
             return ProviderHealthSummary(
                 state: .unavailable,
                 summary: "Remote \(providerName) health check failed before the SSH probe completed",
@@ -305,9 +341,36 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, @unchecked Sendable {
                     ProviderHealthDiagnostic(
                         severity: .error,
                         code: "sshLaunchFailed",
-                        message: error.localizedDescription
+                        message: message
                     )
                 ]
+            )
+        case let .probeFailed(detail):
+            let classification = classifyRemoteCLIProbeFailure(
+                detail: detail,
+                providerName: providerName,
+                notFoundMarker: remoteExecutableNotFoundMarker(commandName: commandName)
+            )
+            return ProviderHealthSummary(
+                state: classification.state,
+                summary: classification.summary,
+                launchability: .notLaunchable,
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .error,
+                        code: classification.code,
+                        message: classification.message ?? (detail.isEmpty ? classification.summary : detail)
+                    )
+                ]
+            )
+        case let .ready(executable, version, diagnostics):
+            return ProviderHealthSummary(
+                state: .available,
+                summary: version.map { "\(providerName) \($0) is available" } ?? "\(providerName) is available",
+                resolvedExecutable: executable,
+                version: version,
+                launchability: .launchable,
+                diagnostics: diagnostics
             )
         }
     }
@@ -908,9 +971,53 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, @unchecked Sendable {
         )
     }
 
-    private func localCLIHealthSummary(commandName: String, providerName: String, workspace: Workspace) -> ProviderHealthSummary {
+    func localCLIHealthProbe(commandName: String, providerName: String, workspace: Workspace) async -> LocalCLIHealthProbeResult {
         let resolution = resolvedLocalExecutable(named: commandName)
         guard let executable = resolution.resolvedExecutable else {
+            return .executableNotFound(resolution)
+        }
+
+        var diagnostics: [ProviderHealthDiagnostic] = []
+        let version = detectLocalVersion(executable: executable, providerName: providerName, diagnostics: &diagnostics)
+
+        do {
+            let launchProbe = try runLocalCommandThroughShell(
+                executable: executable,
+                arguments: ["--help"],
+                currentDirectoryURL: URL(fileURLWithPath: workspace.folderPath, isDirectory: true)
+            )
+
+            guard launchProbe.exitStatus == 0 else {
+                return .launchProbeFailed(
+                    executable: executable,
+                    version: version,
+                    diagnostics: diagnostics,
+                    detail: launchProbeFailureMessage(
+                        stdout: launchProbe.stdout,
+                        stderr: launchProbe.stderr,
+                        providerName: providerName
+                    )
+                )
+            }
+        } catch {
+            return .launchProbeFailed(
+                executable: executable,
+                version: version,
+                diagnostics: diagnostics,
+                detail: error.localizedDescription
+            )
+        }
+
+        return .ready(
+            executable: executable,
+            version: version,
+            diagnostics: diagnostics
+        )
+    }
+
+    private func localCLIHealthSummary(commandName: String, providerName: String, workspace: Workspace) async -> ProviderHealthSummary {
+        switch await localCLIHealthProbe(commandName: commandName, providerName: providerName, workspace: workspace) {
+        case let .executableNotFound(resolution):
             return ProviderHealthSummary(
                 state: .unavailable,
                 summary: "\(providerName) executable was not found",
@@ -938,35 +1045,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, @unchecked Sendable {
                     )
                 ]
             )
-        }
-
-        var diagnostics: [ProviderHealthDiagnostic] = []
-        let version = detectLocalVersion(executable: executable, providerName: providerName, diagnostics: &diagnostics)
-
-        do {
-            let launchProbe = try runLocalCommandThroughShell(
-                executable: executable,
-                arguments: ["--help"],
-                currentDirectoryURL: URL(fileURLWithPath: workspace.folderPath, isDirectory: true)
-            )
-
-            guard launchProbe.exitStatus == 0 else {
-                return ProviderHealthSummary(
-                    state: .misconfigured,
-                    summary: "\(providerName) is installed but failed the launch probe",
-                    resolvedExecutable: executable,
-                    version: version,
-                    launchability: .notLaunchable,
-                    diagnostics: diagnostics + [
-                        ProviderHealthDiagnostic(
-                            severity: .error,
-                            code: "launchProbeFailed",
-                            message: launchProbeFailureMessage(stdout: launchProbe.stdout, stderr: launchProbe.stderr, providerName: providerName)
-                        )
-                    ]
-                )
-            }
-        } catch {
+        case let .launchProbeFailed(executable, version, diagnostics, detail):
             return ProviderHealthSummary(
                 state: .misconfigured,
                 summary: "\(providerName) is installed but failed the launch probe",
@@ -977,20 +1056,20 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, @unchecked Sendable {
                     ProviderHealthDiagnostic(
                         severity: .error,
                         code: "launchProbeFailed",
-                        message: error.localizedDescription
+                        message: detail
                     )
                 ]
             )
+        case let .ready(executable, version, diagnostics):
+            return ProviderHealthSummary(
+                state: .available,
+                summary: version.map { "\(providerName) \($0) is available" } ?? "\(providerName) is available",
+                resolvedExecutable: executable,
+                version: version,
+                launchability: .launchable,
+                diagnostics: diagnostics
+            )
         }
-
-        return ProviderHealthSummary(
-            state: .available,
-            summary: version.map { "\(providerName) \($0) is available" } ?? "\(providerName) is available",
-            resolvedExecutable: executable,
-            version: version,
-            launchability: .launchable,
-            diagnostics: diagnostics
-        )
     }
 
     private func resolvedLocalExecutable(named commandName: String) -> ProviderExecutableResolution {
