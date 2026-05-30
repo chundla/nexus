@@ -46,9 +46,10 @@ Current bootstrap implementation:
 ### Current Provider Module seam
 
 - `ProviderModule` is the service-owned seam between shared **Workspace Catalog** / **Session** lifecycle orchestration and provider-owned behavior.
-- generic providers may still use `ServiceProviderAdapter` directly as the module implementation while the seam is being deepened.
+- ADR 0034 sets the target shape: one **Provider Module** seam per **Provider**, with no lasting `ServiceProviderAdapter` fallback.
+- the implementation plan lives in `docs/architecture/provider-module-deepening.md`.
 - Pi and Codex now route catalog reads, fresh-open planning, persisted relaunch planning, structured prelaunch surface selection, and module-owned launch/relaunch policy through dedicated provider modules.
-- the split plus fresh-open/relaunch seam-shrinking slices are in place; remaining no-behavior-change follow-up is to deepen the remaining provider modules and remove any shared `providerAdapter(...)` leakage.
+- the remaining follow-up is to move runtime construction, **Provider Health**, catalog text, and ready-without-runtime interaction bootstrap behind that seam, then delete shared `providerAdapter(...)` leakage.
 - issue #115 is the roadmap umbrella for that sequence.
 
 ### NexusDomain

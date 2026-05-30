@@ -518,47 +518,7 @@ struct NexusServiceRemotePiStructuredSessionTests {
 }
 
 private func makeRemotePiService(rootURL: URL, transportHarness: RemotePiTransportHarness) throws -> NexusService {
-    let remoteProtocolSessionCommandBuilder = RemoteProtocolSessionCommandBuilder()
-    let launcher = ProcessSessionRuntimeLauncher(
-        remoteProtocolNativeRuntimeFactories: [
-            .pi: { launchConfiguration, _, _ in
-                guard let remoteHost = launchConfiguration.remoteHost,
-                      let runtimeIdentifier = launchConfiguration.remoteRuntimeIdentifier else {
-                    throw NSError(
-                        domain: "RemotePiStructuredSessionTests",
-                        code: 1,
-                        userInfo: [NSLocalizedDescriptionKey: "Remote Pi launch requires a Host and runtime identifier."]
-                    )
-                }
-
-                let bridgeArguments = remoteProtocolSessionCommandBuilder.bridgeArguments(
-                    host: remoteHost,
-                    runtimeIdentifier: runtimeIdentifier,
-                    workingDirectory: launchConfiguration.workingDirectory,
-                    executable: launchConfiguration.executable,
-                    providerArguments: PiRPCSessionRuntime.transportArguments(
-                        sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.piSessionLinkage
-                    ),
-                    launchMode: launchConfiguration.remoteRuntimeLaunchMode
-                )
-
-                return try PiRPCSessionRuntime(
-                    executable: "/usr/bin/ssh",
-                    workingDirectory: launchConfiguration.workingDirectory,
-                    sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.piSessionLinkage,
-                    terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
-                    unexpectedTerminationState: .interrupted,
-                    unexpectedTerminationMessageBuilder: { _ in
-                        "Pi Session stream disconnected. Relaunch to reconnect to the tmux-backed remote runtime."
-                    },
-                    stopHandler: {},
-                    transportFactory: { _, _, _ in
-                        try transportHarness.makeTransport(executable: "/usr/bin/ssh", arguments: bridgeArguments, workingDirectory: nil)
-                    }
-                )
-            }
-        ]
-    )
+    let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: transportHarness.makeTransport)
 
     return try NexusService.bootstrapForTests(
         rootURL: rootURL,

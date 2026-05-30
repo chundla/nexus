@@ -139,24 +139,7 @@ struct WorkspaceCatalogTests {
     }
 
     @Test func providerDetailUsesProviderModuleSurfaceWhenPersistedPiSessionHasNoLaunchSnapshot() async throws {
-        let fixture = try WorkspaceCatalogFixture(
-            providerAdapters: ServiceSessionProviderRegistry.providerAdapters(overrides: [
-                .pi: ServiceProviderAdapter(
-                    providerID: .pi,
-                    supportsDefaultSessionLaunch: false,
-                    supportsNamedSessions: false,
-                    healthSummaryEvaluator: { _, _, _ in
-                        ProviderHealthSummary(
-                            state: .available,
-                            summary: "Ready",
-                            resolvedExecutable: "/tmp/fake-pi",
-                            launchability: .launchable
-                        )
-                    },
-                    primarySurfaceEvaluator: { _ in .terminal }
-                )
-            ])
-        )
+        let fixture = try WorkspaceCatalogFixture()
         let session = try fixture.sessionRecordStore.createDefaultSession(
             workspaceID: fixture.workspace.id,
             providerID: .pi,
@@ -242,8 +225,7 @@ private struct WorkspaceCatalogFixture {
     let secondWorkspaceFolder: URL
 
     init(
-        providerModuleRegistry: ProviderModuleRegistry? = nil,
-        providerAdapters: [ProviderID: ServiceProviderAdapter]? = nil
+        providerModuleRegistry: ProviderModuleRegistry? = nil
     ) throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("WorkspaceCatalogTests", isDirectory: true)
@@ -264,7 +246,6 @@ private struct WorkspaceCatalogFixture {
             primaryGroupID: group.id
         )
 
-        let providerAdapters = providerAdapters ?? ServiceSessionProviderRegistry.providerAdapters()
         self.metadataStore = metadataStore
         self.sessionRecordStore = sessionRecordStore
         self.group = group
@@ -278,7 +259,7 @@ private struct WorkspaceCatalogFixture {
                 hostValidationEvaluator: UnusedHostValidationEvaluator(),
                 workspaceAvailabilityEvaluator: UnusedWorkspaceAvailabilityEvaluator(),
                 sessionRuntimeManager: InMemorySessionRuntimeManager(),
-                providerModuleRegistry: providerModuleRegistry ?? ServiceSessionProviderRegistry.providerModules(providerAdapters: providerAdapters)
+                providerModuleRegistry: providerModuleRegistry ?? ServiceSessionProviderRegistry.providerModules()
             )
         )
     }

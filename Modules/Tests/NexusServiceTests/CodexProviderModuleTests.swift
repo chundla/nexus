@@ -6,20 +6,7 @@ import Testing
 
 struct CodexProviderModuleTests {
     @Test func serviceProviderRegistryRoutesCodexThroughCodexProviderModule() {
-        let registry = ServiceSessionProviderRegistry.providerModules(
-            providerAdapters: [
-                .codex: ServiceProviderAdapter(
-                    providerID: .codex,
-                    supportsDefaultSessionLaunch: false,
-                    supportsNamedSessions: false,
-                    healthSummaryEvaluator: { _, _, _ in
-                        ProviderHealthSummary(state: .misconfigured, summary: "Adapter health should stay behind the seam")
-                    },
-                    primarySurfaceEvaluator: { _ in .terminal },
-                    shouldReuseRemoteHealthSnapshot: { _, _ in false }
-                )
-            ]
-        )
+        let registry = ServiceSessionProviderRegistry.providerModules()
         let workspaceID = UUID()
         let hostID = UUID()
         let workspace = Workspace(
@@ -292,14 +279,18 @@ struct CodexProviderModuleTests {
                     Issue.record("Codex should not choose a terminal runtime for local structured Sessions")
                     return StaticCodexRuntime()
                 },
-                makeLocalProtocolNativeRuntime: {
+                makeLocalPiRuntime: { StaticCodexRuntime() },
+                makeRemotePiRuntime: { StaticCodexRuntime() },
+                makeLocalCodexRuntime: {
                     tracker.requests.append(.localProtocolNative)
                     return StaticCodexRuntime()
                 },
-                makeRemoteProtocolNativeRuntime: {
+                makeRemoteCodexRuntime: {
                     Issue.record("Codex should not choose a remote runtime for local structured Sessions")
                     return StaticCodexRuntime()
-                }
+                },
+                makeLocalIBMBobRuntime: { StaticCodexRuntime() },
+                makeRemoteIBMBobRuntime: { StaticCodexRuntime() }
             )
         )
 
@@ -345,14 +336,18 @@ struct CodexProviderModuleTests {
                     Issue.record("Codex should not choose a terminal runtime for remote structured Sessions")
                     return StaticCodexRuntime()
                 },
-                makeLocalProtocolNativeRuntime: {
+                makeLocalPiRuntime: { StaticCodexRuntime() },
+                makeRemotePiRuntime: { StaticCodexRuntime() },
+                makeLocalCodexRuntime: {
                     Issue.record("Codex should not choose a local runtime for remote structured Sessions")
                     return StaticCodexRuntime()
                 },
-                makeRemoteProtocolNativeRuntime: {
+                makeRemoteCodexRuntime: {
                     tracker.requests.append(.remoteProtocolNative)
                     return StaticCodexRuntime()
-                }
+                },
+                makeLocalIBMBobRuntime: { StaticCodexRuntime() },
+                makeRemoteIBMBobRuntime: { StaticCodexRuntime() }
             )
         )
 

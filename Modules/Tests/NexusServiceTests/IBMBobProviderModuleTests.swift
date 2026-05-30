@@ -6,19 +6,7 @@ import Testing
 
 struct IBMBobProviderModuleTests {
     @Test func serviceProviderRegistryRoutesIBMBobThroughIBMBobProviderModule() {
-        let registry = ServiceSessionProviderRegistry.providerModules(
-            providerAdapters: [
-                .ibmBob: ServiceProviderAdapter(
-                    providerID: .ibmBob,
-                    supportsDefaultSessionLaunch: false,
-                    supportsNamedSessions: false,
-                    healthSummaryEvaluator: { _, _, _ in
-                        ProviderHealthSummary(state: .misconfigured, summary: "Adapter health should stay behind the seam")
-                    },
-                    primarySurfaceEvaluator: { _ in .terminal }
-                )
-            ]
-        )
+        let registry = ServiceSessionProviderRegistry.providerModules()
         let workspace = Workspace(
             id: UUID(),
             name: "Remote IBM Bob",
@@ -129,11 +117,15 @@ struct IBMBobProviderModuleTests {
                     Issue.record("IBM Bob should not choose a terminal runtime for local structured Sessions")
                     return StaticIBMBobRuntime()
                 },
-                makeLocalProtocolNativeRuntime: {
+                makeLocalPiRuntime: { StaticIBMBobRuntime() },
+                makeRemotePiRuntime: { StaticIBMBobRuntime() },
+                makeLocalCodexRuntime: { StaticIBMBobRuntime() },
+                makeRemoteCodexRuntime: { StaticIBMBobRuntime() },
+                makeLocalIBMBobRuntime: {
                     tracker.requests.append(.localProtocolNative)
                     return StaticIBMBobRuntime()
                 },
-                makeRemoteProtocolNativeRuntime: {
+                makeRemoteIBMBobRuntime: {
                     Issue.record("IBM Bob should not choose a remote runtime for local structured Sessions")
                     return StaticIBMBobRuntime()
                 }
@@ -182,11 +174,15 @@ struct IBMBobProviderModuleTests {
                     Issue.record("IBM Bob should not choose a terminal runtime for remote structured Sessions")
                     return StaticIBMBobRuntime()
                 },
-                makeLocalProtocolNativeRuntime: {
+                makeLocalPiRuntime: { StaticIBMBobRuntime() },
+                makeRemotePiRuntime: { StaticIBMBobRuntime() },
+                makeLocalCodexRuntime: { StaticIBMBobRuntime() },
+                makeRemoteCodexRuntime: { StaticIBMBobRuntime() },
+                makeLocalIBMBobRuntime: {
                     Issue.record("IBM Bob should not choose a local runtime for remote structured Sessions")
                     return StaticIBMBobRuntime()
                 },
-                makeRemoteProtocolNativeRuntime: {
+                makeRemoteIBMBobRuntime: {
                     tracker.requests.append(.remoteProtocolNative)
                     return StaticIBMBobRuntime()
                 }

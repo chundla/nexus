@@ -6,20 +6,7 @@ import Testing
 
 struct ClaudeProviderModuleTests {
     @Test func serviceProviderRegistryRoutesClaudeThroughClaudeProviderModule() {
-        let registry = ServiceSessionProviderRegistry.providerModules(
-            providerAdapters: [
-                .claude: ServiceProviderAdapter(
-                    providerID: .claude,
-                    supportsDefaultSessionLaunch: false,
-                    supportsNamedSessions: false,
-                    healthSummaryEvaluator: { _, _, _ in
-                        ProviderHealthSummary(state: .misconfigured, summary: "Adapter health should stay behind the seam")
-                    },
-                    primarySurfaceEvaluator: { _ in .structuredActivityFeed },
-                    shouldReuseRemoteHealthSnapshot: { _, _ in false }
-                )
-            ]
-        )
+        let registry = ServiceSessionProviderRegistry.providerModules()
         let workspaceID = UUID()
         let hostID = UUID()
         let workspace = Workspace(

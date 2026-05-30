@@ -5,7 +5,7 @@ import NexusDomain
 import Testing
 
 struct NexusServiceClaudeProviderModuleLeakageTests {
-    @Test func launchingClaudeSessionUsesProviderModuleRuntimePresentationInsteadOfClaudeAdapterOverrides() throws {
+    @Test func launchingClaudeSessionUsesProviderModuleRuntimePresentation() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -16,13 +16,7 @@ struct NexusServiceClaudeProviderModuleLeakageTests {
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
             providerHealthEvaluator: AlwaysReadyClaudeProviderHealthEvaluator(),
-            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher),
-            providerAdapters: [
-                .claude: claudeAdapterOverride(
-                    initialTranscript: "Adapter transcript should stay behind the seam\n",
-                    terminationStatusMessage: { status in "adapter exited: \(status)" }
-                )
-            ]
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
         )
 
         let group = try service.createWorkspaceGroup(name: "Solo Group")
@@ -39,7 +33,7 @@ struct NexusServiceClaudeProviderModuleLeakageTests {
         #expect(launch.launchConfiguration.terminationStatusMessageBuilder(9) == "\n[Claude exited with status 9]\n")
     }
 
-    @Test func relaunchingRemoteClaudeSessionUsesProviderModuleRecoveryFailureInsteadOfClaudeAdapterOverride() throws {
+    @Test func relaunchingRemoteClaudeSessionUsesProviderModuleRecoveryFailure() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -49,14 +43,7 @@ struct NexusServiceClaudeProviderModuleLeakageTests {
             providerHealthEvaluator: AlwaysReadyClaudeProviderHealthEvaluator(),
             hostValidationEvaluator: AlwaysAvailableClaudeHostValidationEvaluator(),
             workspaceAvailabilityEvaluator: AlwaysAvailableClaudeWorkspaceAvailabilityEvaluator(),
-            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: RecordingClaudeSessionRuntimeLauncher()),
-            providerAdapters: [
-                .claude: claudeAdapterOverride(
-                    remoteRuntimeRecoveryFailure: { _ in
-                        (.failed, "Adapter recovery failure should stay behind the seam")
-                    }
-                )
-            ]
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: RecordingClaudeSessionRuntimeLauncher())
         )
 
         let group = try initialService.createWorkspaceGroup(name: "Remote")
@@ -83,14 +70,7 @@ struct NexusServiceClaudeProviderModuleLeakageTests {
                         userInfo: [NSLocalizedDescriptionKey: "permission denied"]
                     )
                 )
-            ),
-            providerAdapters: [
-                .claude: claudeAdapterOverride(
-                    remoteRuntimeRecoveryFailure: { _ in
-                        (.failed, "Adapter recovery failure should stay behind the seam")
-                    }
-                )
-            ]
+            )
         )
 
         let recoveredSession = try relaunchedService.launchOrResumeSession(sessionID: session.id)
@@ -131,31 +111,6 @@ private struct AlwaysReadyClaudeProviderHealthEvaluator: ProviderHealthEvaluatin
             launchability: .launchable
         )
     }
-}
-
-private func claudeAdapterOverride(
-    initialTranscript: String = "",
-    terminationStatusMessage: @escaping (Int32) -> String = { _ in "" },
-    remoteRuntimeRecoveryFailure: @escaping (RemoteRuntimeRecoveryFailureContext) -> (state: Session.State, message: String) = { _ in
-        (.failed, "Adapter recovery failure should stay behind the seam")
-    }
-) -> ServiceProviderAdapter {
-    ServiceProviderAdapter(
-        providerID: .claude,
-        supportsDefaultSessionLaunch: false,
-        supportsNamedSessions: false,
-        healthSummaryEvaluator: { _, _, _ in
-            ProviderHealthSummary(
-                state: .available,
-                summary: "Ready",
-                resolvedExecutable: "/tmp/fake-claude",
-                launchability: .launchable
-            )
-        },
-        initialTranscriptBuilder: { _, _, _ in initialTranscript },
-        terminationStatusMessageBuilder: terminationStatusMessage,
-        remoteRuntimeRecoveryFailureEvaluator: remoteRuntimeRecoveryFailure
-    )
 }
 
 private struct AlwaysAvailableClaudeHostValidationEvaluator: HostValidationEvaluating {

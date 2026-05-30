@@ -9,7 +9,7 @@ struct ServiceSessionLifecycleScenariosTests {
         let fixture = try ServiceSessionLifecycleFixture()
         let tracker = ProviderModuleSessionTransitionTracker()
         let lifecycle = fixture.makeLifecycle(
-            providerModule: RecordingSessionTransitionProviderModule(
+            overrideProviderModule: RecordingSessionTransitionProviderModule(
                 providerID: .claude,
                 tracker: tracker
             )
@@ -29,7 +29,7 @@ struct ServiceSessionLifecycleScenariosTests {
         let fixture = try ServiceSessionLifecycleFixture()
         let tracker = ProviderModuleFreshOpenTracker()
         let lifecycle = fixture.makeLifecycle(
-            providerModule: RecordingFreshOpenProviderModule(
+            overrideProviderModule: RecordingFreshOpenProviderModule(
                 providerID: .pi,
                 tracker: tracker
             )
@@ -49,7 +49,7 @@ struct ServiceSessionLifecycleScenariosTests {
         let fixture = try ServiceSessionLifecycleFixture()
         let tracker = ProviderModuleFreshOpenTracker()
         let lifecycle = fixture.makeLifecycle(
-            providerModule: RecordingFreshOpenProviderModule(
+            overrideProviderModule: RecordingFreshOpenProviderModule(
                 providerID: .pi,
                 tracker: tracker
             )
@@ -76,7 +76,7 @@ struct ServiceSessionLifecycleScenariosTests {
             )
         )
         let lifecycle = fixture.makeLifecycle(
-            providerModule: PiProviderModule()
+            overrideProviderModule: PiProviderModule()
         )
 
         let session = try await lifecycle.launchOrResumeDefaultSession(
@@ -103,7 +103,7 @@ struct ServiceSessionLifecycleScenariosTests {
             )
         )
         let lifecycle = fixture.makeLifecycle(
-            providerModule: PiProviderModule()
+            overrideProviderModule: PiProviderModule()
         )
 
         let session = try await lifecycle.createNamedSession(
@@ -210,20 +210,16 @@ struct ServiceSessionLifecycleScenariosTests {
                 workspace: { try store.workspace(id: $0) },
                 sessionRecordStore: TrackingSessionRecordStore(metadataStore: store),
                 providerModule: { providerID in
-                    GenericProviderModule(
-                        adapter: ServiceProviderAdapter(
-                            providerID: providerID,
-                            supportsDefaultSessionLaunch: true,
-                            supportsNamedSessions: true,
-                            healthSummaryEvaluator: { _, _, _ in
-                                ProviderHealthSummary(
-                                    state: .available,
-                                    summary: "Ready",
-                                    resolvedExecutable: "/tmp/pi",
-                                    launchability: .launchable
-                                )
-                            }
-                        )
+                    TestProviderModule(
+                        providerID: providerID,
+                        healthSummaryEvaluator: { _, _, _ in
+                            ProviderHealthSummary(
+                                state: .available,
+                                summary: "Ready",
+                                resolvedExecutable: "/tmp/pi",
+                                launchability: .launchable
+                            )
+                        }
                     )
                 },
                 remoteWorkspaceHealthContext: { _ in Optional<RemoteWorkspaceHealthContext>.none },
@@ -341,13 +337,9 @@ struct ServiceSessionLifecycleScenariosTests {
                 workspace: { try fixture.store.workspace(id: $0) },
                 sessionRecordStore: sessionRecordStore,
                 providerModule: { providerID in
-                    GenericProviderModule(
-                        adapter: ServiceProviderAdapter(
-                            providerID: providerID,
-                            supportsDefaultSessionLaunch: true,
-                            supportsNamedSessions: true,
-                            healthSummaryEvaluator: { _, _, _ in fixture.health }
-                        )
+                    TestProviderModule(
+                        providerID: providerID,
+                        healthSummaryEvaluator: { _, _, _ in fixture.health }
                     )
                 },
                 remoteWorkspaceHealthContext: { _ in Optional<RemoteWorkspaceHealthContext>.none },
@@ -518,14 +510,10 @@ private struct ServiceSessionLifecycleFixture {
     let tracker = SessionLifecycleTracker()
     let health: ProviderHealthSummary
 
-    private func adapter(for providerID: ProviderID) -> GenericProviderModule {
-        GenericProviderModule(
-            adapter: ServiceProviderAdapter(
-                providerID: providerID,
-                supportsDefaultSessionLaunch: true,
-                supportsNamedSessions: true,
-                healthSummaryEvaluator: { _, _, _ in health }
-            )
+    private func providerModule(for providerID: ProviderID) -> TestProviderModule {
+        TestProviderModule(
+            providerID: providerID,
+            healthSummaryEvaluator: { _, _, _ in health }
         )
     }
 
@@ -556,14 +544,14 @@ private struct ServiceSessionLifecycleFixture {
     }
 
     func makeLifecycle(
-        providerModule: (any ProviderModule)? = nil
+        overrideProviderModule: (any ProviderModule)? = nil
     ) -> ServiceSessionLifecycle {
         ServiceSessionLifecycle(
             dependencies: ServiceSessionLifecycleDependencies(
                 workspace: { try store.workspace(id: $0) },
                 sessionRecordStore: TrackingSessionRecordStore(metadataStore: store),
                 providerModule: { providerID in
-                    providerModule ?? adapter(for: providerID)
+                    overrideProviderModule ?? providerModule(for: providerID)
                 },
                 remoteWorkspaceHealthContext: { _ in Optional<RemoteWorkspaceHealthContext>.none },
                 providerHealthSummary: { _, _, _ in health },

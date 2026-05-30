@@ -5,16 +5,12 @@ import NexusDomain
 import Testing
 
 struct PiProviderModuleTests {
-    @Test func genericProviderModuleUsesSharedFreshOpenAndPersistedRelaunchPlan() async throws {
-        let module = GenericProviderModule(
-            adapter: ServiceProviderAdapter(
-                providerID: .claude,
-                supportsDefaultSessionLaunch: true,
-                supportsNamedSessions: true,
-                healthSummaryEvaluator: { _, _, _ in
-                    ProviderHealthSummary(state: .available, summary: "Ready", resolvedExecutable: "/tmp/fake-claude", launchability: .launchable)
-                }
-            )
+    @Test func testProviderModuleUsesSharedFreshOpenAndPersistedRelaunchPlan() async throws {
+        let module = TestProviderModule(
+            providerID: .claude,
+            healthSummaryEvaluator: { _, _, _ in
+                ProviderHealthSummary(state: .available, summary: "Ready", resolvedExecutable: "/tmp/fake-claude", launchability: .launchable)
+            }
         )
         let workspace = Workspace(
             id: UUID(),
@@ -261,34 +257,7 @@ struct PiProviderModuleTests {
     }
 
     @Test func serviceProviderRegistryRoutesPiThroughPiProviderModule() {
-        let registry = ServiceSessionProviderRegistry.providerModules(
-            providerAdapters: [
-                .claude: ServiceProviderAdapter(
-                    providerID: .claude,
-                    supportsDefaultSessionLaunch: true,
-                    supportsNamedSessions: true,
-                    healthSummaryEvaluator: { _, _, _ in
-                        ProviderHealthSummary(
-                            state: .available,
-                            summary: "Claude ready",
-                            resolvedExecutable: "/tmp/fake-claude",
-                            launchability: .launchable
-                        )
-                    },
-                    primarySurfaceEvaluator: { _ in .terminal }
-                ),
-                .pi: ServiceProviderAdapter(
-                    providerID: .pi,
-                    supportsDefaultSessionLaunch: false,
-                    supportsNamedSessions: false,
-                    healthSummaryEvaluator: { _, _, _ in
-                        ProviderHealthSummary(state: .misconfigured, summary: "Adapter health should be ignored")
-                    },
-                    primarySurfaceEvaluator: { _ in .terminal },
-                    shouldReuseRemoteHealthSnapshot: { _, _ in false }
-                )
-            ]
-        )
+        let registry = ServiceSessionProviderRegistry.providerModules()
         let workspaceID = UUID()
         let hostID = UUID()
         let workspace = Workspace(
@@ -329,7 +298,7 @@ struct PiProviderModuleTests {
     }
 
     @Test func serviceProviderRegistryKeepsDedicatedProviderModulesAvailableWithoutAdapterEntries() {
-        let registry = ServiceSessionProviderRegistry.providerModules(providerAdapters: [:])
+        let registry = ServiceSessionProviderRegistry.providerModules()
         let workspace = Workspace(
             id: UUID(),
             name: "Remote Workspace",
@@ -550,14 +519,18 @@ struct PiProviderModuleTests {
                     Issue.record("Pi should not choose a terminal runtime for local structured Sessions")
                     return StaticPiRuntime()
                 },
-                makeLocalProtocolNativeRuntime: {
+                makeLocalPiRuntime: {
                     tracker.requests.append(.localProtocolNative)
                     return StaticPiRuntime()
                 },
-                makeRemoteProtocolNativeRuntime: {
+                makeRemotePiRuntime: {
                     Issue.record("Pi should not choose a remote runtime for local structured Sessions")
                     return StaticPiRuntime()
-                }
+                },
+                makeLocalCodexRuntime: { StaticPiRuntime() },
+                makeRemoteCodexRuntime: { StaticPiRuntime() },
+                makeLocalIBMBobRuntime: { StaticPiRuntime() },
+                makeRemoteIBMBobRuntime: { StaticPiRuntime() }
             )
         )
 
@@ -603,14 +576,18 @@ struct PiProviderModuleTests {
                     Issue.record("Pi should not choose a terminal runtime for remote structured Sessions")
                     return StaticPiRuntime()
                 },
-                makeLocalProtocolNativeRuntime: {
+                makeLocalPiRuntime: {
                     Issue.record("Pi should not choose a local runtime for remote structured Sessions")
                     return StaticPiRuntime()
                 },
-                makeRemoteProtocolNativeRuntime: {
+                makeRemotePiRuntime: {
                     tracker.requests.append(.remoteProtocolNative)
                     return StaticPiRuntime()
-                }
+                },
+                makeLocalCodexRuntime: { StaticPiRuntime() },
+                makeRemoteCodexRuntime: { StaticPiRuntime() },
+                makeLocalIBMBobRuntime: { StaticPiRuntime() },
+                makeRemoteIBMBobRuntime: { StaticPiRuntime() }
             )
         )
 

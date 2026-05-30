@@ -98,10 +98,10 @@ struct CodexProviderModule: ProviderModule {
         actions: ProviderModuleRuntimeConstructionActions
     ) async throws -> (any SessionRuntime)? {
         if workspace.kind == .remote {
-            return try await actions.makeRemoteProtocolNativeRuntime()
+            return try await actions.makeRemoteCodexRuntime()
         }
 
-        return try await actions.makeLocalProtocolNativeRuntime()
+        return try await actions.makeLocalCodexRuntime()
     }
 }
 #endif

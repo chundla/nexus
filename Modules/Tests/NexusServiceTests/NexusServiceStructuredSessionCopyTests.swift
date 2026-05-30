@@ -20,18 +20,7 @@ struct NexusServiceStructuredSessionCopyTests {
             try NexusService.bootstrapForTests(
                 rootURL: rootURL,
                 providerHealthEvaluator: StructuredCodexProviderHealthEvaluator(),
-                sessionRuntimeManager: sessionRuntimeManager,
-                providerAdapters: [
-                    .codex: ServiceProviderAdapter(
-                        providerID: .codex,
-                        supportsDefaultSessionLaunch: true,
-                        supportsNamedSessions: true,
-                        healthSummaryEvaluator: { workspace, remoteContext, providerHealthEvaluator in
-                            providerHealthEvaluator.healthSummary(for: .codex, workspace: workspace, remoteContext: remoteContext)
-                        },
-                        primarySurfaceEvaluator: { _ in .structuredActivityFeed }
-                    )
-                ]
+                sessionRuntimeManager: sessionRuntimeManager
             )
         }
 

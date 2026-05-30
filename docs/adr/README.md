@@ -39,3 +39,4 @@ Initial set:
 31. Remote protocol-native Sessions use a service-owned SSH stdio bridge with tmux durability
 32. Local structured Sessions may be ready without a continuously attached provider runtime
 33. Some remote structured Sessions may be ready without a continuously attached live runtime
+34. Provider Modules are the single Provider seam

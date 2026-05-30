@@ -5,7 +5,7 @@ import NexusDomain
 import Testing
 
 struct NexusServicePiProviderModuleLeakageTests {
-    @Test func launchingPiSessionUsesProviderModuleRuntimePresentationInsteadOfPiAdapterOverrides() throws {
+    @Test func launchingPiSessionUsesProviderModuleRuntimePresentation() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -16,13 +16,7 @@ struct NexusServicePiProviderModuleLeakageTests {
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
             providerHealthEvaluator: AlwaysReadyProviderHealthEvaluator(),
-            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher),
-            providerAdapters: [
-                .pi: piAdapterOverride(
-                    initialTranscript: "Adapter transcript should stay behind the seam\n",
-                    terminationStatusMessage: { status in "adapter exited: \(status)" }
-                )
-            ]
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
         )
 
         let group = try service.createWorkspaceGroup(name: "Solo Group")
@@ -39,7 +33,7 @@ struct NexusServicePiProviderModuleLeakageTests {
         #expect(launch.launchConfiguration.terminationStatusMessageBuilder(9) == "\n[Pi exited with status 9]\n")
     }
 
-    @Test func relaunchingRemotePiSessionUsesProviderModuleRecoveryFailureInsteadOfPiAdapterOverride() throws {
+    @Test func relaunchingRemotePiSessionUsesProviderModuleRecoveryFailure() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -49,14 +43,7 @@ struct NexusServicePiProviderModuleLeakageTests {
             providerHealthEvaluator: AlwaysReadyProviderHealthEvaluator(),
             hostValidationEvaluator: AlwaysAvailableHostValidationEvaluator(),
             workspaceAvailabilityEvaluator: AlwaysAvailableWorkspaceAvailabilityEvaluator(),
-            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: RecordingPiSessionRuntimeLauncher()),
-            providerAdapters: [
-                .pi: piAdapterOverride(
-                    remoteRuntimeRecoveryFailure: { _ in
-                        (.failed, "Adapter recovery failure should stay behind the seam")
-                    }
-                )
-            ]
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: RecordingPiSessionRuntimeLauncher())
         )
 
         let group = try initialService.createWorkspaceGroup(name: "Remote")
@@ -83,14 +70,7 @@ struct NexusServicePiProviderModuleLeakageTests {
                         userInfo: [NSLocalizedDescriptionKey: "permission denied"]
                     )
                 )
-            ),
-            providerAdapters: [
-                .pi: piAdapterOverride(
-                    remoteRuntimeRecoveryFailure: { _ in
-                        (.failed, "Adapter recovery failure should stay behind the seam")
-                    }
-                )
-            ]
+            )
         )
 
         let recoveredSession = try relaunchedService.launchOrResumeSession(sessionID: session.id)
@@ -131,31 +111,6 @@ private struct AlwaysReadyProviderHealthEvaluator: ProviderHealthEvaluating {
             launchability: .launchable
         )
     }
-}
-
-private func piAdapterOverride(
-    initialTranscript: String = "",
-    terminationStatusMessage: @escaping (Int32) -> String = { _ in "" },
-    remoteRuntimeRecoveryFailure: @escaping (RemoteRuntimeRecoveryFailureContext) -> (state: Session.State, message: String) = { _ in
-        (.failed, "Adapter recovery failure should stay behind the seam")
-    }
-) -> ServiceProviderAdapter {
-    ServiceProviderAdapter(
-        providerID: .pi,
-        supportsDefaultSessionLaunch: false,
-        supportsNamedSessions: false,
-        healthSummaryEvaluator: { _, _, _ in
-            ProviderHealthSummary(
-                state: .available,
-                summary: "Ready",
-                resolvedExecutable: "/tmp/fake-pi",
-                launchability: .launchable
-            )
-        },
-        initialTranscriptBuilder: { _, _, _ in initialTranscript },
-        terminationStatusMessageBuilder: terminationStatusMessage,
-        remoteRuntimeRecoveryFailureEvaluator: remoteRuntimeRecoveryFailure
-    )
 }
 
 private struct AlwaysAvailableHostValidationEvaluator: HostValidationEvaluating {

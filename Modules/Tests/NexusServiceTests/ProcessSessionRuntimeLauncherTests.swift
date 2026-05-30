@@ -5,25 +5,14 @@ import NexusDomain
 import Testing
 
 struct ProcessSessionRuntimeLauncherTests {
-    @Test func localProtocolNativeProvidersUseSharedFactoryRegistry() async throws {
-        let launchRecorder = ProtocolNativeLaunchRecorder()
+    @Test func providerModulesOwnLocalStructuredRuntimeConstruction() async throws {
+        let tracker = RuntimeConstructionTracker()
         let launcher = ProcessSessionRuntimeLauncher(
-            localProtocolNativeRuntimeFactories: [
-                .pi: { launchConfiguration, session, workspace in
-                    launchRecorder.record(session: session, workspace: workspace, launchConfiguration: launchConfiguration)
-                    return StubProtocolNativeRuntime(
-                        primarySurface: .structuredActivityFeed,
-                        activityItems: [SessionActivityItem(kind: .status, text: "Pi ready")]
-                    )
-                },
-                .codex: { launchConfiguration, session, workspace in
-                    launchRecorder.record(session: session, workspace: workspace, launchConfiguration: launchConfiguration)
-                    return StubProtocolNativeRuntime(
-                        primarySurface: .structuredActivityFeed,
-                        transcript: "Codex ready"
-                    )
-                }
-            ]
+            providerModuleRegistry: ProviderModuleRegistry(
+                modules: [
+                    .pi: RuntimeOwningPiProviderModule(tracker: tracker)
+                ]
+            )
         )
 
         let workspace = Workspace(
@@ -33,54 +22,30 @@ struct ProcessSessionRuntimeLauncherTests {
             folderPath: "/tmp/workspace",
             primaryGroupID: UUID()
         )
-        let piSession = Session(id: UUID(), workspaceID: workspace.id, providerID: .pi, isDefault: true, state: .ready)
-        let codexSession = Session(id: UUID(), workspaceID: workspace.id, providerID: .codex, isDefault: false, state: .ready)
+        let session = Session(id: UUID(), workspaceID: workspace.id, providerID: .pi, isDefault: true, state: .ready)
 
-        let piRuntime = try await launcher.makeRuntime(
-            session: piSession,
+        let runtime = try await launcher.makeRuntime(
+            session: session,
             workspace: workspace,
             launchConfiguration: SessionRuntimeLaunchConfiguration(
                 executable: "/tmp/fake-pi",
                 workingDirectory: workspace.folderPath,
-                remoteHost: nil,
-                sessionRecordAdapterMetadata: SessionRecordAdapterMetadata(providerID: .pi, values: ["piSessionID": "pi-session-1"])
-            )
-        )
-        let codexRuntime = try await launcher.makeRuntime(
-            session: codexSession,
-            workspace: workspace,
-            launchConfiguration: SessionRuntimeLaunchConfiguration(
-                executable: "/tmp/fake-codex",
-                workingDirectory: workspace.folderPath,
-                remoteHost: nil,
-                sessionRecordAdapterMetadata: SessionRecordAdapterMetadata(providerID: .codex, values: ["conversationID": "codex-session-1"])
+                remoteHost: nil
             )
         )
 
-        let piScreen = piRuntime.sessionScreen(for: piSession)
-        let codexScreen = codexRuntime.sessionScreen(for: codexSession)
-
-        #expect(launchRecorder.records.map { $0.session.providerID } == [.pi, .codex])
-        #expect(launchRecorder.records.map { $0.launchConfiguration.executable } == ["/tmp/fake-pi", "/tmp/fake-codex"])
-        #expect(launchRecorder.records.map { $0.launchConfiguration.sessionRecordAdapterMetadata?.providerID } == [.some(.pi), .some(.codex)])
-        #expect(piScreen.primarySurface == SessionSurface.structuredActivityFeed)
-        #expect(piScreen.activityItems.map { $0.text } == ["Pi ready"])
-        #expect(codexScreen.primarySurface == SessionSurface.structuredActivityFeed)
-        #expect(codexScreen.transcript == "Codex ready")
+        #expect(tracker.requests == [.localPiStructured])
+        #expect(runtime.sessionScreen(for: session).primarySurface == .structuredActivityFeed)
     }
 
-    @Test func remoteProtocolNativeProvidersUseSharedFactoryRegistry() async throws {
-        let launchRecorder = ProtocolNativeLaunchRecorder()
+    @Test func providerModulesOwnRemoteStructuredRuntimeConstruction() async throws {
+        let tracker = RuntimeConstructionTracker()
         let launcher = ProcessSessionRuntimeLauncher(
-            remoteProtocolNativeRuntimeFactories: [
-                .codex: { launchConfiguration, session, workspace in
-                    launchRecorder.record(session: session, workspace: workspace, launchConfiguration: launchConfiguration)
-                    return StubProtocolNativeRuntime(
-                        primarySurface: .structuredActivityFeed,
-                        activityItems: [SessionActivityItem(kind: .status, text: "Remote Codex ready")]
-                    )
-                }
-            ]
+            providerModuleRegistry: ProviderModuleRegistry(
+                modules: [
+                    .codex: RuntimeOwningRemoteCodexProviderModule(tracker: tracker)
+                ]
+            )
         )
 
         let host = NexusDomain.Host(id: UUID(), name: "Build Server", sshTarget: "build-box", port: 2222)
@@ -101,19 +66,12 @@ struct ProcessSessionRuntimeLauncherTests {
                 executable: "/home/tester/.local/bin/codex",
                 workingDirectory: workspace.folderPath,
                 remoteHost: host,
-                remoteRuntimeIdentifier: "nexus-runtime-1",
-                sessionRecordAdapterMetadata: SessionRecordAdapterMetadata(providerID: .codex, values: ["threadID": "codex-thread-1"])
+                remoteRuntimeIdentifier: "nexus-runtime-1"
             )
         )
 
-        let screen = runtime.sessionScreen(for: session)
-
-        #expect(launchRecorder.records.count == 1)
-        #expect(launchRecorder.records.first?.session.providerID == .codex)
-        #expect(launchRecorder.records.first?.workspace.kind == .remote)
-        #expect(launchRecorder.records.first?.launchConfiguration.remoteHost?.id == host.id)
-        #expect(screen.primarySurface == SessionSurface.structuredActivityFeed)
-        #expect(screen.activityItems.map { $0.text } == ["Remote Codex ready"])
+        #expect(tracker.requests == [.remoteCodexStructured])
+        #expect(runtime.sessionScreen(for: session).primarySurface == .structuredActivityFeed)
     }
 
     @Test func claudeProviderModuleOwnsTerminalRuntimeConstructionUsingSharedProcessPath() async throws {
@@ -178,25 +136,10 @@ struct ProcessSessionRuntimeLauncherTests {
     }
 }
 
-private final class ProtocolNativeLaunchRecorder: @unchecked Sendable {
-    struct Record {
-        let session: Session
-        let workspace: Workspace
-        let launchConfiguration: SessionRuntimeLaunchConfiguration
-    }
-
-    private let lock = NSLock()
-    private(set) var records: [Record] = []
-
-    func record(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) {
-        lock.lock()
-        records.append(Record(session: session, workspace: workspace, launchConfiguration: launchConfiguration))
-        lock.unlock()
-    }
-}
-
 private enum RuntimeConstructionRequest: Equatable {
     case localClaudeTerminal
+    case localPiStructured
+    case remoteCodexStructured
 }
 
 private final class RuntimeConstructionTracker: @unchecked Sendable {
@@ -251,6 +194,114 @@ private struct RuntimeOwningClaudeProviderModule: ProviderModule {
     ) async throws -> (any SessionRuntime)? {
         tracker.requests.append(.localClaudeTerminal)
         return try actions.makeLocalTerminalRuntime()
+    }
+}
+
+private struct RuntimeOwningPiProviderModule: ProviderModule {
+    let provider = Provider(id: .pi)
+    let tracker: RuntimeConstructionTracker
+
+    func supportsDefaultSessionLaunch(in workspace: Workspace) -> Bool { true }
+    func supportsNamedSessions(in workspace: Workspace) -> Bool { true }
+
+    func providerHealthSummary(
+        for workspace: Workspace,
+        remoteContext: RemoteWorkspaceHealthContext?,
+        providerHealthEvaluator: any ProviderHealthEvaluating
+    ) async -> ProviderHealthSummary {
+        await providerHealthEvaluator.healthSummary(for: .pi, workspace: workspace, remoteContext: remoteContext)
+    }
+
+    func providerCapabilities(
+        in workspace: Workspace,
+        health: ProviderHealthSummary,
+        defaultSession: Session?
+    ) -> ProviderCapabilities {
+        makeProviderCapabilities(
+            provider: provider,
+            supportsDefaultSessionLaunch: true,
+            supportsNamedSessions: true,
+            health: health,
+            defaultSession: defaultSession
+        )
+    }
+
+    func prelaunchPrimarySurface(in workspace: Workspace) -> SessionSurface {
+        .structuredActivityFeed
+    }
+
+    func reusesRemoteHealthSnapshot(
+        _ snapshot: ProviderHealthSummary,
+        remoteContext: RemoteWorkspaceHealthContext?
+    ) -> Bool {
+        false
+    }
+
+    func constructRuntime(
+        for session: Session,
+        workspace: Workspace,
+        launchConfiguration: SessionRuntimeLaunchConfiguration,
+        actions: ProviderModuleRuntimeConstructionActions
+    ) async throws -> (any SessionRuntime)? {
+        tracker.requests.append(.localPiStructured)
+        return StubProtocolNativeRuntime(
+            primarySurface: .structuredActivityFeed,
+            activityItems: [SessionActivityItem(kind: .status, text: "Pi ready")]
+        )
+    }
+}
+
+private struct RuntimeOwningRemoteCodexProviderModule: ProviderModule {
+    let provider = Provider(id: .codex)
+    let tracker: RuntimeConstructionTracker
+
+    func supportsDefaultSessionLaunch(in workspace: Workspace) -> Bool { true }
+    func supportsNamedSessions(in workspace: Workspace) -> Bool { true }
+
+    func providerHealthSummary(
+        for workspace: Workspace,
+        remoteContext: RemoteWorkspaceHealthContext?,
+        providerHealthEvaluator: any ProviderHealthEvaluating
+    ) async -> ProviderHealthSummary {
+        await providerHealthEvaluator.healthSummary(for: .codex, workspace: workspace, remoteContext: remoteContext)
+    }
+
+    func providerCapabilities(
+        in workspace: Workspace,
+        health: ProviderHealthSummary,
+        defaultSession: Session?
+    ) -> ProviderCapabilities {
+        makeProviderCapabilities(
+            provider: provider,
+            supportsDefaultSessionLaunch: true,
+            supportsNamedSessions: true,
+            health: health,
+            defaultSession: defaultSession
+        )
+    }
+
+    func prelaunchPrimarySurface(in workspace: Workspace) -> SessionSurface {
+        .structuredActivityFeed
+    }
+
+    func reusesRemoteHealthSnapshot(
+        _ snapshot: ProviderHealthSummary,
+        remoteContext: RemoteWorkspaceHealthContext?
+    ) -> Bool {
+        false
+    }
+
+    func constructRuntime(
+        for session: Session,
+        workspace: Workspace,
+        launchConfiguration: SessionRuntimeLaunchConfiguration,
+        actions: ProviderModuleRuntimeConstructionActions
+    ) async throws -> (any SessionRuntime)? {
+        tracker.requests.append(.remoteCodexStructured)
+        return StubProtocolNativeRuntime(
+            primarySurface: .structuredActivityFeed,
+            activityItems: [SessionActivityItem(kind: .status, text: "Remote Codex ready")]
+        )
     }
 }
 

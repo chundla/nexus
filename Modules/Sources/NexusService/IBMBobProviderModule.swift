@@ -132,10 +132,10 @@ struct IBMBobProviderModule: ProviderModule {
         actions: ProviderModuleRuntimeConstructionActions
     ) async throws -> (any SessionRuntime)? {
         if workspace.kind == .remote {
-            return try await actions.makeRemoteProtocolNativeRuntime()
+            return try await actions.makeRemoteIBMBobRuntime()
         }
 
-        return try await actions.makeLocalProtocolNativeRuntime()
+        return try await actions.makeLocalIBMBobRuntime()
     }
 }
 #endif

@@ -456,13 +456,14 @@ struct RemoteSessionCommandBuilder {
 }
 
 final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
-    typealias ProtocolNativeRuntimeFactory = (_ launchConfiguration: SessionRuntimeLaunchConfiguration, _ session: Session, _ workspace: Workspace) async throws -> any SessionRuntime
-
     private let remoteSessionCommandBuilder = RemoteSessionCommandBuilder()
-    private let providerModuleRegistry: ProviderModuleRegistry?
+    private let providerModuleRegistry: ProviderModuleRegistry
     private let localShellCommandBuilder: LocalShellCommandBuilder
-    private let localProtocolNativeRuntimeFactories: [ProviderID: ProtocolNativeRuntimeFactory]
-    private let remoteProtocolNativeRuntimeFactories: [ProviderID: ProtocolNativeRuntimeFactory]
+    private let piTransportFactory: PiRPCSessionRuntime.TransportFactory
+    private let codexTransportFactory: CodexAppServerRuntime.TransportFactory
+    private let ibmBobTransportFactory: IBMBobSessionRuntime.TransportFactory
+    private let remoteProtocolSessionCommandBuilder: RemoteProtocolSessionCommandBuilder
+    private let remoteIBMBobCommandBuilder: RemoteIBMBobCommandBuilder
 
     init(
         providerModuleRegistry: ProviderModuleRegistry? = nil,
@@ -470,58 +471,38 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
         piTransportFactory: PiRPCSessionRuntime.TransportFactory? = nil,
         codexTransportFactory: CodexAppServerRuntime.TransportFactory? = nil,
         ibmBobTransportFactory: IBMBobSessionRuntime.TransportFactory? = nil,
-        localProtocolNativeRuntimeFactories: [ProviderID: ProtocolNativeRuntimeFactory]? = nil,
-        remoteProtocolNativeRuntimeFactories: [ProviderID: ProtocolNativeRuntimeFactory] = [:],
         remoteProtocolSessionCommandBuilder: RemoteProtocolSessionCommandBuilder = RemoteProtocolSessionCommandBuilder(),
         remoteIBMBobCommandBuilder: RemoteIBMBobCommandBuilder = RemoteIBMBobCommandBuilder()
     ) {
-        let resolvedPiTransportFactory: PiRPCSessionRuntime.TransportFactory = piTransportFactory ?? { executable, arguments, workingDirectory in
+        self.providerModuleRegistry = providerModuleRegistry ?? ServiceSessionProviderRegistry.providerModules()
+        self.localShellCommandBuilder = localShellCommandBuilder
+        self.piTransportFactory = piTransportFactory ?? { executable, arguments, workingDirectory in
             try ProcessPiRPCTransport(
                 executable: executable,
                 arguments: arguments,
                 workingDirectory: workingDirectory
             )
         }
-        let resolvedCodexTransportFactory: CodexAppServerRuntime.TransportFactory = codexTransportFactory ?? { executable, arguments, workingDirectory in
+        self.codexTransportFactory = codexTransportFactory ?? { executable, arguments, workingDirectory in
             try ProcessCodexAppServerTransport(
                 executable: executable,
                 arguments: arguments,
                 workingDirectory: workingDirectory
             )
         }
-
-        self.providerModuleRegistry = providerModuleRegistry
-        self.localShellCommandBuilder = localShellCommandBuilder
-        let resolvedIBMBobTransportFactory: IBMBobSessionRuntime.TransportFactory = ibmBobTransportFactory ?? { executable, arguments, workingDirectory in
+        self.ibmBobTransportFactory = ibmBobTransportFactory ?? { executable, arguments, workingDirectory in
             try ProcessIBMBobTransport(
                 executable: executable,
                 arguments: arguments,
                 workingDirectory: workingDirectory
             )
         }
-
-        self.localProtocolNativeRuntimeFactories = localProtocolNativeRuntimeFactories ?? ServiceSessionProviderRegistry.localProtocolNativeRuntimeFactories(
-            piTransportFactory: resolvedPiTransportFactory,
-            codexTransportFactory: resolvedCodexTransportFactory,
-            ibmBobTransportFactory: resolvedIBMBobTransportFactory
-        )
-
-        self.remoteProtocolNativeRuntimeFactories = if remoteProtocolNativeRuntimeFactories.isEmpty {
-            ServiceSessionProviderRegistry.remoteProtocolNativeRuntimeFactories(
-                piTransportFactory: resolvedPiTransportFactory,
-                codexTransportFactory: resolvedCodexTransportFactory,
-                ibmBobTransportFactory: resolvedIBMBobTransportFactory,
-                remoteProtocolSessionCommandBuilder: remoteProtocolSessionCommandBuilder,
-                remoteIBMBobCommandBuilder: remoteIBMBobCommandBuilder
-            )
-        } else {
-            remoteProtocolNativeRuntimeFactories
-        }
+        self.remoteProtocolSessionCommandBuilder = remoteProtocolSessionCommandBuilder
+        self.remoteIBMBobCommandBuilder = remoteIBMBobCommandBuilder
     }
 
     func makeRuntime(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) async throws -> any SessionRuntime {
-        if let providerModuleRegistry,
-           let runtime = try await providerModuleRegistry.module(for: session.providerID).constructRuntime(
+        if let runtime = try await providerModuleRegistry.module(for: session.providerID).constructRuntime(
             for: session,
             workspace: workspace,
             launchConfiguration: launchConfiguration,
@@ -532,31 +513,27 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
                 makeRemoteTerminalRuntime: { [self] in
                     try makeRemoteTerminalRuntime(launchConfiguration: launchConfiguration)
                 },
-                makeLocalProtocolNativeRuntime: { [self] in
-                    guard let protocolNativeRuntimeFactory = localProtocolNativeRuntimeFactories[session.providerID] else {
-                        return nil
-                    }
-                    return try await protocolNativeRuntimeFactory(launchConfiguration, session, workspace)
+                makeLocalPiRuntime: { [self] in
+                    try await makeLocalPiRuntime(launchConfiguration: launchConfiguration)
                 },
-                makeRemoteProtocolNativeRuntime: { [self] in
-                    guard let protocolNativeRuntimeFactory = remoteProtocolNativeRuntimeFactories[session.providerID] else {
-                        return nil
-                    }
-                    return try await protocolNativeRuntimeFactory(launchConfiguration, session, workspace)
+                makeRemotePiRuntime: { [self] in
+                    try await makeRemotePiRuntime(launchConfiguration: launchConfiguration)
+                },
+                makeLocalCodexRuntime: { [self] in
+                    try await makeLocalCodexRuntime(launchConfiguration: launchConfiguration)
+                },
+                makeRemoteCodexRuntime: { [self] in
+                    try await makeRemoteCodexRuntime(launchConfiguration: launchConfiguration)
+                },
+                makeLocalIBMBobRuntime: { [self] in
+                    try makeLocalIBMBobRuntime(launchConfiguration: launchConfiguration)
+                },
+                makeRemoteIBMBobRuntime: { [self] in
+                    try makeRemoteIBMBobRuntime(launchConfiguration: launchConfiguration)
                 }
             )
-           ) {
+        ) {
             return runtime
-        }
-
-        if launchConfiguration.remoteHost == nil,
-           let protocolNativeRuntimeFactory = localProtocolNativeRuntimeFactories[session.providerID] {
-            return try await protocolNativeRuntimeFactory(launchConfiguration, session, workspace)
-        }
-
-        if launchConfiguration.remoteHost != nil,
-           let protocolNativeRuntimeFactory = remoteProtocolNativeRuntimeFactories[session.providerID] {
-            return try await protocolNativeRuntimeFactory(launchConfiguration, session, workspace)
         }
 
         if launchConfiguration.remoteHost != nil {
@@ -614,6 +591,182 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
             workingDirectory: launchConfiguration.workingDirectory,
             initialTranscript: launchConfiguration.initialTranscript,
             terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder
+        )
+    }
+
+    private func makeLocalPiRuntime(
+        launchConfiguration: SessionRuntimeLaunchConfiguration
+    ) async throws -> any SessionRuntime {
+        try await PiRPCSessionRuntime(
+            executable: launchConfiguration.executable,
+            workingDirectory: launchConfiguration.workingDirectory,
+            sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.piSessionLinkage,
+            terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
+            transportFactory: piTransportFactory
+        )
+    }
+
+    private func makeRemotePiRuntime(
+        launchConfiguration: SessionRuntimeLaunchConfiguration
+    ) async throws -> any SessionRuntime {
+        guard let remoteHost = launchConfiguration.remoteHost,
+              let runtimeIdentifier = launchConfiguration.remoteRuntimeIdentifier else {
+            throw NSError(
+                domain: "ProcessSessionRuntimeLauncher",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Remote Pi launch requires a Host and runtime identifier."]
+            )
+        }
+
+        let bridgeArguments = remoteProtocolSessionCommandBuilder.bridgeArguments(
+            host: remoteHost,
+            runtimeIdentifier: runtimeIdentifier,
+            workingDirectory: launchConfiguration.workingDirectory,
+            executable: launchConfiguration.executable,
+            providerArguments: PiRPCSessionRuntime.transportArguments(
+                sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.piSessionLinkage
+            ),
+            launchMode: launchConfiguration.remoteRuntimeLaunchMode
+        )
+
+        return try await PiRPCSessionRuntime(
+            executable: "/usr/bin/ssh",
+            workingDirectory: launchConfiguration.workingDirectory,
+            sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.piSessionLinkage,
+            terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
+            unexpectedTerminationState: .interrupted,
+            unexpectedTerminationMessageBuilder: { _ in
+                "Pi Session stream disconnected. Relaunch to reconnect to the tmux-backed remote runtime."
+            },
+            stopHandler: {
+                try Self.runCommand(
+                    executable: "/usr/bin/ssh",
+                    arguments: self.remoteProtocolSessionCommandBuilder.stopArguments(
+                        runtimeIdentifier: runtimeIdentifier,
+                        host: remoteHost
+                    )
+                )
+            },
+            transportFactory: { _, _, _ in
+                try self.piTransportFactory("/usr/bin/ssh", bridgeArguments, nil)
+            }
+        )
+    }
+
+    private func makeLocalCodexRuntime(
+        launchConfiguration: SessionRuntimeLaunchConfiguration
+    ) async throws -> any SessionRuntime {
+        try await CodexAppServerRuntime(
+            executable: launchConfiguration.executable,
+            workingDirectory: launchConfiguration.workingDirectory,
+            sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.codexSessionLinkage,
+            terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
+            transportFactory: codexTransportFactory
+        )
+    }
+
+    private func makeRemoteCodexRuntime(
+        launchConfiguration: SessionRuntimeLaunchConfiguration
+    ) async throws -> any SessionRuntime {
+        guard let remoteHost = launchConfiguration.remoteHost,
+              let runtimeIdentifier = launchConfiguration.remoteRuntimeIdentifier else {
+            throw NSError(
+                domain: "ProcessSessionRuntimeLauncher",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Remote Codex launch requires a Host and runtime identifier."]
+            )
+        }
+
+        let bridgeArguments = remoteProtocolSessionCommandBuilder.bridgeArguments(
+            host: remoteHost,
+            runtimeIdentifier: runtimeIdentifier,
+            workingDirectory: launchConfiguration.workingDirectory,
+            executable: launchConfiguration.executable,
+            providerArguments: ["app-server"],
+            launchMode: launchConfiguration.remoteRuntimeLaunchMode
+        )
+
+        return try await CodexAppServerRuntime(
+            executable: "/usr/bin/ssh",
+            workingDirectory: launchConfiguration.workingDirectory,
+            sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.codexSessionLinkage,
+            terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
+            unexpectedTerminationState: .interrupted,
+            unexpectedTerminationMessageBuilder: { _ in
+                "Codex Session stream disconnected. Relaunch to reconnect to the tmux-backed remote runtime."
+            },
+            stopHandler: {
+                try Self.runCommand(
+                    executable: "/usr/bin/ssh",
+                    arguments: self.remoteProtocolSessionCommandBuilder.stopArguments(
+                        runtimeIdentifier: runtimeIdentifier,
+                        host: remoteHost
+                    )
+                )
+            },
+            transportFactory: { _, _, _ in
+                try self.codexTransportFactory("/usr/bin/ssh", bridgeArguments, nil)
+            }
+        )
+    }
+
+    private func makeLocalIBMBobRuntime(
+        launchConfiguration: SessionRuntimeLaunchConfiguration
+    ) throws -> any SessionRuntime {
+        try IBMBobSessionRuntime(
+            executable: launchConfiguration.executable,
+            workingDirectory: launchConfiguration.workingDirectory,
+            sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.ibmBobSessionLinkage,
+            terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
+            transportFactory: ibmBobTransportFactory
+        )
+    }
+
+    private func makeRemoteIBMBobRuntime(
+        launchConfiguration: SessionRuntimeLaunchConfiguration
+    ) throws -> any SessionRuntime {
+        guard let remoteHost = launchConfiguration.remoteHost,
+              let runtimeIdentifier = launchConfiguration.remoteRuntimeIdentifier else {
+            throw NSError(
+                domain: "ProcessSessionRuntimeLauncher",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Remote IBM Bob launch requires a Host and runtime identifier."]
+            )
+        }
+
+        return try IBMBobSessionRuntime(
+            executable: launchConfiguration.executable,
+            workingDirectory: launchConfiguration.workingDirectory,
+            sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.ibmBobSessionLinkage,
+            terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
+            unexpectedTerminationState: .interrupted,
+            unexpectedTerminationStateEvaluator: { status, errorText in
+                let normalized = errorText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                if status == 255
+                    || normalized.contains("could not resolve hostname")
+                    || normalized.contains("operation timed out")
+                    || normalized.contains("connection refused")
+                    || normalized.contains("no route to host")
+                    || normalized.contains("connection closed by remote host")
+                    || normalized.contains("broken pipe")
+                    || normalized.contains("network is unreachable") {
+                    return .interrupted
+                }
+                return .failed
+            },
+            transportFactory: { executable, arguments, workingDirectory in
+                try self.ibmBobTransportFactory(
+                    "/usr/bin/ssh",
+                    self.remoteIBMBobCommandBuilder.bridgeArguments(
+                        host: remoteHost,
+                        runtimeIdentifier: runtimeIdentifier,
+                        workingDirectory: workingDirectory ?? launchConfiguration.workingDirectory,
+                        executable: executable,
+                        providerArguments: arguments
+                    ),
+                    nil
+                )
+            }
         )
     }
 
@@ -1070,92 +1223,6 @@ protocol SessionLifecycleManaging: AnyObject {
     func createNamedSession(workspaceID: UUID, providerID: ProviderID, name: String?) async throws -> Session
 }
 
-struct ServiceProviderAdapter {
-    let provider: Provider
-    private let defaultSessionLaunchSupportEvaluator: (Workspace) -> Bool
-    private let namedSessionSupportEvaluator: (Workspace) -> Bool
-    private let primarySurfaceEvaluator: (Workspace) -> SessionSurface
-    let healthSummaryEvaluator: (Workspace, RemoteWorkspaceHealthContext?, any ProviderHealthEvaluating) async -> ProviderHealthSummary
-    let initialTranscriptBuilder: (Workspace, NexusDomain.Host?, RemoteRuntimeLaunchMode) -> String
-    let terminationStatusMessageBuilder: (Int32) -> String
-    let remoteRuntimeRecoveryFailureEvaluator: (RemoteRuntimeRecoveryFailureContext) -> (state: Session.State, message: String)
-    let shouldReuseRemoteHealthSnapshot: (ProviderHealthSummary, RemoteWorkspaceHealthContext?) -> Bool
-
-    init(
-        providerID: ProviderID,
-        supportsDefaultSessionLaunch: Bool,
-        supportsNamedSessions: Bool,
-        healthSummaryEvaluator: @escaping (Workspace, RemoteWorkspaceHealthContext?, any ProviderHealthEvaluating) async -> ProviderHealthSummary,
-        defaultSessionLaunchSupportEvaluator: ((Workspace) -> Bool)? = nil,
-        namedSessionSupportEvaluator: ((Workspace) -> Bool)? = nil,
-        primarySurfaceEvaluator: ((Workspace) -> SessionSurface)? = nil,
-        initialTranscriptBuilder: ((Workspace, NexusDomain.Host?, RemoteRuntimeLaunchMode) -> String)? = nil,
-        terminationStatusMessageBuilder: ((Int32) -> String)? = nil,
-        remoteRuntimeRecoveryFailureEvaluator: ((RemoteRuntimeRecoveryFailureContext) -> (state: Session.State, message: String))? = nil,
-        shouldReuseRemoteHealthSnapshot: @escaping (ProviderHealthSummary, RemoteWorkspaceHealthContext?) -> Bool = { _, _ in false }
-    ) {
-        let provider = Provider(id: providerID)
-        self.provider = provider
-        self.defaultSessionLaunchSupportEvaluator = defaultSessionLaunchSupportEvaluator ?? { _ in supportsDefaultSessionLaunch }
-        self.namedSessionSupportEvaluator = namedSessionSupportEvaluator ?? { _ in supportsNamedSessions }
-        self.primarySurfaceEvaluator = primarySurfaceEvaluator ?? { _ in .terminal }
-        self.healthSummaryEvaluator = healthSummaryEvaluator
-        self.initialTranscriptBuilder = initialTranscriptBuilder ?? { workspace, remoteHost, launchMode in
-            providerModuleDefaultInitialTranscript(
-                provider: provider,
-                workspace: workspace,
-                remoteHost: remoteHost,
-                launchMode: launchMode
-            )
-        }
-        self.terminationStatusMessageBuilder = terminationStatusMessageBuilder ?? { status in
-            providerModuleDefaultTerminationStatusMessage(provider: provider, status: status)
-        }
-        self.remoteRuntimeRecoveryFailureEvaluator = remoteRuntimeRecoveryFailureEvaluator ?? { context in
-            providerModuleDefaultRemoteRuntimeRecoveryFailure(for: context)
-        }
-        self.shouldReuseRemoteHealthSnapshot = shouldReuseRemoteHealthSnapshot
-    }
-
-    func supportsDefaultSessionLaunch(in workspace: Workspace) -> Bool {
-        defaultSessionLaunchSupportEvaluator(workspace)
-    }
-
-    func supportsNamedSessions(in workspace: Workspace) -> Bool {
-        namedSessionSupportEvaluator(workspace)
-    }
-
-    func primarySurface(in workspace: Workspace) -> SessionSurface {
-        primarySurfaceEvaluator(workspace)
-    }
-
-    func healthSummary(
-        for workspace: Workspace,
-        remoteContext: RemoteWorkspaceHealthContext?,
-        providerHealthEvaluator: any ProviderHealthEvaluating
-    ) async -> ProviderHealthSummary {
-        await healthSummaryEvaluator(workspace, remoteContext, providerHealthEvaluator)
-    }
-
-    func initialTranscript(
-        for workspace: Workspace,
-        remoteHost: NexusDomain.Host?,
-        launchMode: RemoteRuntimeLaunchMode
-    ) -> String {
-        initialTranscriptBuilder(workspace, remoteHost, launchMode)
-    }
-
-    func terminationStatusMessage(for status: Int32) -> String {
-        terminationStatusMessageBuilder(status)
-    }
-
-    func remoteRuntimeRecoveryFailure(
-        for context: RemoteRuntimeRecoveryFailureContext
-    ) -> (state: Session.State, message: String) {
-        remoteRuntimeRecoveryFailureEvaluator(context)
-    }
-}
-
 public final class NexusService: NSObject, NexusEmbeddedServiceSession, @unchecked Sendable {
     public let listener: NSXPCListener
     public let storeURL: URL
@@ -1356,7 +1423,6 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         sessionInteraction: (any SessionInteractionManaging)? = nil,
         sessionRecordStoreFactory: ((NexusMetadataStore) -> any SessionRecordStore)? = nil,
         remoteAccessRuntime: RemoteAccessRuntime = RemoteAccessRuntime(),
-        providerAdapters: [ProviderID: ServiceProviderAdapter]? = nil,
         providerModuleRegistry: ProviderModuleRegistry? = nil,
         ibmBobNativeSessionCleaner: any IBMBobNativeSessionCleaning = IBMBobNativeSessionCleaner()
     ) throws -> NexusService {
@@ -1370,7 +1436,6 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             sessionInteraction: sessionInteraction,
             sessionRecordStoreFactory: sessionRecordStoreFactory,
             remoteAccessRuntime: remoteAccessRuntime,
-            providerAdapters: providerAdapters,
             providerModuleRegistry: providerModuleRegistry,
             ibmBobNativeSessionCleaner: ibmBobNativeSessionCleaner
         )
@@ -1410,7 +1475,6 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         sessionInteraction: (any SessionInteractionManaging)? = nil,
         sessionRecordStoreFactory: ((NexusMetadataStore) -> any SessionRecordStore)? = nil,
         remoteAccessRuntime: RemoteAccessRuntime = RemoteAccessRuntime(),
-        providerAdapters: [ProviderID: ServiceProviderAdapter]? = nil,
         providerModuleRegistry: ProviderModuleRegistry? = nil,
         ibmBobNativeSessionCleaner: any IBMBobNativeSessionCleaning = IBMBobNativeSessionCleaner()
     ) throws -> NexusService {
@@ -1424,9 +1488,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         let metadataStore = try NexusMetadataStore(storeURL: storeURL)
         let sessionRecordStore = sessionRecordStoreFactory?(metadataStore)
         let resolvedProviderModuleRegistry = providerModuleRegistry
-            ?? ServiceSessionProviderRegistry.providerModules(
-                providerAdapters: ServiceSessionProviderRegistry.providerAdapters(overrides: providerAdapters)
-            )
+            ?? ServiceSessionProviderRegistry.providerModules()
         let resolvedSessionRuntimeManager = sessionRuntimeManager
             ?? InMemorySessionRuntimeManager(
                 launcher: ProcessSessionRuntimeLauncher(providerModuleRegistry: resolvedProviderModuleRegistry)

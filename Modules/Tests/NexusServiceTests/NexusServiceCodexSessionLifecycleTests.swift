@@ -139,15 +139,9 @@ struct NexusServiceCodexSessionLifecycleTests {
 }
 
 private func makeCodexLifecycleService(rootURL: URL, transportHarness: PersistentCodexTransportHarness) throws -> NexusService {
-    let launcher = ProcessSessionRuntimeLauncher(localProtocolNativeRuntimeFactories: [.codex: { launchConfiguration, _, _ in
-        try CodexAppServerRuntime(
-            executable: launchConfiguration.executable,
-            workingDirectory: launchConfiguration.workingDirectory,
-            sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.codexSessionLinkage,
-            terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
-            transportFactory: { _, _, _ in transportHarness.makeTransport() }
-        )
-    }])
+    let launcher = ProcessSessionRuntimeLauncher(
+        codexTransportFactory: { _, _, _ in transportHarness.makeTransport() }
+    )
 
     return try NexusService.bootstrapForTests(
         rootURL: rootURL,

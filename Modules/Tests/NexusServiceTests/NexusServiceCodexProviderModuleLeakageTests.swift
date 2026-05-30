@@ -5,7 +5,7 @@ import NexusDomain
 import Testing
 
 struct NexusServiceCodexProviderModuleLeakageTests {
-    @Test func launchingCodexSessionUsesProviderModuleRuntimePresentationInsteadOfCodexAdapterOverrides() throws {
+    @Test func launchingCodexSessionUsesProviderModuleRuntimePresentation() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -16,13 +16,7 @@ struct NexusServiceCodexProviderModuleLeakageTests {
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
             providerHealthEvaluator: AlwaysReadyCodexProviderHealthEvaluator(),
-            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher),
-            providerAdapters: [
-                .codex: codexAdapterOverride(
-                    initialTranscript: "Adapter transcript should stay behind the seam\n",
-                    terminationStatusMessage: { status in "adapter exited: \(status)" }
-                )
-            ]
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
         )
 
         let group = try service.createWorkspaceGroup(name: "Solo Group")
@@ -39,7 +33,7 @@ struct NexusServiceCodexProviderModuleLeakageTests {
         #expect(launch.launchConfiguration.terminationStatusMessageBuilder(9) == "\n[Codex exited with status 9]\n")
     }
 
-    @Test func relaunchingRemoteCodexSessionUsesProviderModuleRecoveryFailureInsteadOfCodexAdapterOverride() throws {
+    @Test func relaunchingRemoteCodexSessionUsesProviderModuleRecoveryFailure() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -49,14 +43,7 @@ struct NexusServiceCodexProviderModuleLeakageTests {
             providerHealthEvaluator: AlwaysReadyCodexProviderHealthEvaluator(),
             hostValidationEvaluator: AlwaysAvailableCodexHostValidationEvaluator(),
             workspaceAvailabilityEvaluator: AlwaysAvailableCodexWorkspaceAvailabilityEvaluator(),
-            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: RecordingCodexSessionRuntimeLauncher()),
-            providerAdapters: [
-                .codex: codexAdapterOverride(
-                    remoteRuntimeRecoveryFailure: { _ in
-                        (.failed, "Adapter recovery failure should stay behind the seam")
-                    }
-                )
-            ]
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: RecordingCodexSessionRuntimeLauncher())
         )
 
         let group = try initialService.createWorkspaceGroup(name: "Remote")
@@ -83,14 +70,7 @@ struct NexusServiceCodexProviderModuleLeakageTests {
                         userInfo: [NSLocalizedDescriptionKey: "permission denied"]
                     )
                 )
-            ),
-            providerAdapters: [
-                .codex: codexAdapterOverride(
-                    remoteRuntimeRecoveryFailure: { _ in
-                        (.failed, "Adapter recovery failure should stay behind the seam")
-                    }
-                )
-            ]
+            )
         )
 
         let recoveredSession = try relaunchedService.launchOrResumeSession(sessionID: session.id)
@@ -131,31 +111,6 @@ private struct AlwaysReadyCodexProviderHealthEvaluator: ProviderHealthEvaluating
             launchability: .launchable
         )
     }
-}
-
-private func codexAdapterOverride(
-    initialTranscript: String = "",
-    terminationStatusMessage: @escaping (Int32) -> String = { _ in "" },
-    remoteRuntimeRecoveryFailure: @escaping (RemoteRuntimeRecoveryFailureContext) -> (state: Session.State, message: String) = { _ in
-        (.failed, "Adapter recovery failure should stay behind the seam")
-    }
-) -> ServiceProviderAdapter {
-    ServiceProviderAdapter(
-        providerID: .codex,
-        supportsDefaultSessionLaunch: false,
-        supportsNamedSessions: false,
-        healthSummaryEvaluator: { _, _, _ in
-            ProviderHealthSummary(
-                state: .available,
-                summary: "Ready",
-                resolvedExecutable: "/tmp/fake-codex",
-                launchability: .launchable
-            )
-        },
-        initialTranscriptBuilder: { _, _, _ in initialTranscript },
-        terminationStatusMessageBuilder: terminationStatusMessage,
-        remoteRuntimeRecoveryFailureEvaluator: remoteRuntimeRecoveryFailure
-    )
 }
 
 private struct AlwaysAvailableCodexHostValidationEvaluator: HostValidationEvaluating {

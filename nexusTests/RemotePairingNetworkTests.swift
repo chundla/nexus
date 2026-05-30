@@ -1822,16 +1822,9 @@ struct RemotePairingNetworkTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let launcher = ProcessSessionRuntimeLauncher(localProtocolNativeRuntimeFactories: [.pi: { launchConfiguration, _, _ in
-            try PiRPCSessionRuntime(
-                executable: launchConfiguration.executable,
-                workingDirectory: launchConfiguration.workingDirectory,
-                terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
-                transportFactory: { _, _, _ in
-                    RemotePairingStreamingPiRPCTransport()
-                }
-            )
-        }])
+        let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
+            RemotePairingStreamingPiRPCTransport()
+        })
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthEvaluator(

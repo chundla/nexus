@@ -6592,16 +6592,9 @@ struct nexusTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let launcher = ProcessSessionRuntimeLauncher(localProtocolNativeRuntimeFactories: [.pi: { launchConfiguration, _, _ in
-            try PiRPCSessionRuntime(
-                executable: launchConfiguration.executable,
-                workingDirectory: launchConfiguration.workingDirectory,
-                terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
-                transportFactory: { _, _, _ in
-                    NexusTestsPiRPCTransport(promptResponseText: "world")
-                }
-            )
-        }])
+        let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
+            NexusTestsPiRPCTransport(promptResponseText: "world")
+        })
 
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
@@ -6645,16 +6638,9 @@ struct nexusTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let launcher = ProcessSessionRuntimeLauncher(localProtocolNativeRuntimeFactories: [.pi: { launchConfiguration, _, _ in
-            try PiRPCSessionRuntime(
-                executable: launchConfiguration.executable,
-                workingDirectory: launchConfiguration.workingDirectory,
-                terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
-                transportFactory: { _, _, _ in
-                    StreamingNexusTestsPiRPCTransport()
-                }
-            )
-        }])
+        let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
+            StreamingNexusTestsPiRPCTransport()
+        })
 
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
@@ -6885,17 +6871,9 @@ struct nexusTests {
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
         func makeService() throws -> NexusService {
-            let launcher = ProcessSessionRuntimeLauncher(localProtocolNativeRuntimeFactories: [.pi: { launchConfiguration, _, _ in
-                try PiRPCSessionRuntime(
-                    executable: launchConfiguration.executable,
-                    workingDirectory: launchConfiguration.workingDirectory,
-                    sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.piSessionLinkage,
-                    terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
-                    transportFactory: { _, _, _ in
-                        NexusTestsPiRPCTransport(promptResponseText: "world")
-                    }
-                )
-            }])
+            let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
+                NexusTestsPiRPCTransport(promptResponseText: "world")
+            })
 
             return try NexusService.bootstrapForTests(
                 rootURL: rootURL,
@@ -6948,17 +6926,9 @@ struct nexusTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let launcher = ProcessSessionRuntimeLauncher(localProtocolNativeRuntimeFactories: [.pi: { launchConfiguration, _, _ in
-            try PiRPCSessionRuntime(
-                executable: launchConfiguration.executable,
-                workingDirectory: launchConfiguration.workingDirectory,
-                sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.piSessionLinkage,
-                terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
-                transportFactory: { _, _, _ in
-                    NexusTestsPiRPCTransport(promptResponseText: "world")
-                }
-            )
-        }])
+        let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
+            NexusTestsPiRPCTransport(promptResponseText: "world")
+        })
 
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory

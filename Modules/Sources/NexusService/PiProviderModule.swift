@@ -104,10 +104,10 @@ struct PiProviderModule: ProviderModule {
         actions: ProviderModuleRuntimeConstructionActions
     ) async throws -> (any SessionRuntime)? {
         if workspace.kind == .remote {
-            return try await actions.makeRemoteProtocolNativeRuntime()
+            return try await actions.makeRemotePiRuntime()
         }
 
-        return try await actions.makeLocalProtocolNativeRuntime()
+        return try await actions.makeLocalPiRuntime()
     }
 }
 #endif

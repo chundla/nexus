@@ -97,14 +97,15 @@ private struct NexusServiceSessionRecordStoreFixture {
                 trackingStore = store
                 return store
             },
-            providerAdapters: [
-                providerID: ServiceProviderAdapter(
-                    providerID: providerID,
-                    supportsDefaultSessionLaunch: true,
-                    supportsNamedSessions: true,
-                    healthSummaryEvaluator: { _, _, _ in health }
-                )
-            ]
+            providerModuleRegistry: ServiceSessionProviderRegistry.providerModules(
+                overrides: [
+                    providerID: TestProviderModule(
+                        providerID: providerID,
+                        healthSummaryEvaluator: { _, _, _ in health },
+                        primarySurfaceEvaluator: { _ in providerID == .claude ? .terminal : .structuredActivityFeed }
+                    )
+                ]
+            )
         )
         sessionRecordStore = try #require(trackingStore)
 

@@ -35,13 +35,24 @@ struct NexusServiceLocalCodexMigrationTests {
         let migratedSession = try oldService.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .codex)
 
         func makeStructuredService() throws -> NexusService {
-            let launcher = ProcessSessionRuntimeLauncher(localProtocolNativeRuntimeFactories: [
-                .codex: { _, _, _ in MigrationStructuredCodexRuntime() }
-            ])
+            let providerModuleRegistry = ServiceSessionProviderRegistry.providerModules(
+                overrides: [
+                    .codex: TestProviderModule(
+                        providerID: .codex,
+                        healthSummaryEvaluator: { workspace, remoteContext, providerHealthEvaluator in
+                            await providerHealthEvaluator.healthSummary(for: .codex, workspace: workspace, remoteContext: remoteContext)
+                        },
+                        primarySurfaceEvaluator: { _ in .structuredActivityFeed },
+                        runtimeConstructor: { _, _, _, _ in MigrationStructuredCodexRuntime() }
+                    )
+                ]
+            )
+            let launcher = ProcessSessionRuntimeLauncher(providerModuleRegistry: providerModuleRegistry)
             return try NexusService.bootstrapForTests(
                 rootURL: rootURL,
                 providerHealthEvaluator: healthEvaluator,
-                sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+                sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher),
+                providerModuleRegistry: providerModuleRegistry
             )
         }
 

@@ -13,16 +13,9 @@ struct NexusServiceCodexApprovalFlowTests {
         try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
 
         let transportHarness = CodexApprovalTransportHarness()
-        let launcher = ProcessSessionRuntimeLauncher(localProtocolNativeRuntimeFactories: [
-            .codex: { launchConfiguration, _, _ in
-                try CodexAppServerRuntime(
-                    executable: launchConfiguration.executable,
-                    workingDirectory: launchConfiguration.workingDirectory,
-                    terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
-                    transportFactory: { _, _, _ in transportHarness.transport }
-                )
-            }
-        ])
+        let launcher = ProcessSessionRuntimeLauncher(
+            codexTransportFactory: { _, _, _ in transportHarness.transport }
+        )
 
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,

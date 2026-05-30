@@ -88,8 +88,12 @@ enum ProviderModuleSessionTransitionPlan: Equatable {
 struct ProviderModuleRuntimeConstructionActions {
     let makeLocalTerminalRuntime: () throws -> any SessionRuntime
     let makeRemoteTerminalRuntime: () throws -> any SessionRuntime
-    let makeLocalProtocolNativeRuntime: () async throws -> (any SessionRuntime)?
-    let makeRemoteProtocolNativeRuntime: () async throws -> (any SessionRuntime)?
+    let makeLocalPiRuntime: () async throws -> any SessionRuntime
+    let makeRemotePiRuntime: () async throws -> any SessionRuntime
+    let makeLocalCodexRuntime: () async throws -> any SessionRuntime
+    let makeRemoteCodexRuntime: () async throws -> any SessionRuntime
+    let makeLocalIBMBobRuntime: () async throws -> any SessionRuntime
+    let makeRemoteIBMBobRuntime: () async throws -> any SessionRuntime
 }
 
 protocol ProviderModule {
@@ -561,74 +565,4 @@ private struct UnsupportedProviderModule: ProviderModule {
     }
 }
 
-struct GenericProviderModule: ProviderModule {
-    private let adapter: ServiceProviderAdapter
-
-    init(adapter: ServiceProviderAdapter) {
-        self.adapter = adapter
-    }
-
-    var provider: Provider {
-        adapter.provider
-    }
-
-    func supportsDefaultSessionLaunch(in workspace: Workspace) -> Bool {
-        adapter.supportsDefaultSessionLaunch(in: workspace)
-    }
-
-    func supportsNamedSessions(in workspace: Workspace) -> Bool {
-        adapter.supportsNamedSessions(in: workspace)
-    }
-
-    func providerHealthSummary(
-        for workspace: Workspace,
-        remoteContext: RemoteWorkspaceHealthContext?,
-        providerHealthEvaluator: any ProviderHealthEvaluating
-    ) async -> ProviderHealthSummary {
-        await adapter.healthSummary(for: workspace, remoteContext: remoteContext, providerHealthEvaluator: providerHealthEvaluator)
-    }
-
-    func providerCapabilities(
-        in workspace: Workspace,
-        health: ProviderHealthSummary,
-        defaultSession: Session?
-    ) -> ProviderCapabilities {
-        makeProviderCapabilities(
-            provider: provider,
-            supportsDefaultSessionLaunch: supportsDefaultSessionLaunch(in: workspace),
-            supportsNamedSessions: supportsNamedSessions(in: workspace),
-            health: health,
-            defaultSession: defaultSession
-        )
-    }
-
-    func prelaunchPrimarySurface(in workspace: Workspace) -> SessionSurface {
-        adapter.primarySurface(in: workspace)
-    }
-
-    func initialTranscript(
-        for workspace: Workspace,
-        remoteHost: NexusDomain.Host?,
-        launchMode: RemoteRuntimeLaunchMode
-    ) -> String {
-        adapter.initialTranscript(for: workspace, remoteHost: remoteHost, launchMode: launchMode)
-    }
-
-    func terminationStatusMessage(for status: Int32) -> String {
-        adapter.terminationStatusMessage(for: status)
-    }
-
-    func remoteRuntimeRecoveryFailure(
-        for context: RemoteRuntimeRecoveryFailureContext
-    ) -> (state: Session.State, message: String) {
-        adapter.remoteRuntimeRecoveryFailure(for: context)
-    }
-
-    func reusesRemoteHealthSnapshot(
-        _ snapshot: ProviderHealthSummary,
-        remoteContext: RemoteWorkspaceHealthContext?
-    ) -> Bool {
-        adapter.shouldReuseRemoteHealthSnapshot(snapshot, remoteContext)
-    }
-}
 #endif
