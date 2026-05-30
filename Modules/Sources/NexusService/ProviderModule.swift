@@ -29,6 +29,7 @@ struct ProviderModuleCatalogReadResult: Equatable {
     let health: ProviderHealthSummary
     let capabilities: ProviderCapabilities
     let prelaunchPrimarySurface: SessionSurface
+    let defaultSession: ProviderDefaultSessionSummary
 }
 
 struct ProviderModuleFreshSessionOpenActions {
@@ -109,6 +110,8 @@ protocol ProviderModule {
         actions: ProviderModuleCatalogReadActions
     ) async throws -> ProviderModuleCatalogReadResult
 
+    func defaultSessionSummary(for session: Session?) -> ProviderDefaultSessionSummary
+
     func providerCapabilities(
         in workspace: Workspace,
         health: ProviderHealthSummary,
@@ -163,6 +166,12 @@ protocol ProviderModule {
         storedMetadata: SessionRecordAdapterMetadata?
     ) -> Bool
 
+    func interruptedSessionFailureMessage(
+        for session: Session,
+        workspace: Workspace?,
+        persistedPrimarySurface: SessionSurface
+    ) -> String
+
     func shouldRetryFreshRemotePersistedSessionRelaunchWithoutContinuity(
         _ error: Error,
         metadata: SessionRecordAdapterMetadata?
@@ -189,7 +198,8 @@ extension ProviderModule {
                 health: health,
                 defaultSession: request.defaultSession
             ),
-            prelaunchPrimarySurface: prelaunchPrimarySurface(in: request.workspace)
+            prelaunchPrimarySurface: prelaunchPrimarySurface(in: request.workspace),
+            defaultSession: defaultSessionSummary(for: request.defaultSession)
         )
     }
 
@@ -269,6 +279,14 @@ extension ProviderModule {
         false
     }
 
+    func interruptedSessionFailureMessage(
+        for session: Session,
+        workspace: Workspace?,
+        persistedPrimarySurface: SessionSurface
+    ) -> String {
+        providerModuleDefaultInterruptedSessionFailureMessage()
+    }
+
     func shouldRetryFreshRemotePersistedSessionRelaunchWithoutContinuity(
         _ error: Error,
         metadata: SessionRecordAdapterMetadata?
@@ -312,6 +330,47 @@ extension ProviderModule {
                 executable: executable
             )
         )
+    }
+
+    func defaultSessionSummary(for session: Session?) -> ProviderDefaultSessionSummary {
+        guard let session else {
+            return ProviderDefaultSessionSummary(
+                state: .notCreated,
+                summary: "No default session yet",
+                actionTitle: "Launch"
+            )
+        }
+
+        switch session.state {
+        case .ready:
+            return ProviderDefaultSessionSummary(
+                state: .ready,
+                summary: "Default session ready",
+                actionTitle: "Resume",
+                sessionID: session.id
+            )
+        case .interrupted:
+            return ProviderDefaultSessionSummary(
+                state: .interrupted,
+                summary: session.failureMessage ?? "Session interrupted after the service restarted",
+                actionTitle: "Relaunch",
+                sessionID: session.id
+            )
+        case .exited:
+            return ProviderDefaultSessionSummary(
+                state: .exited,
+                summary: session.failureMessage ?? "Session exited",
+                actionTitle: "Relaunch",
+                sessionID: session.id
+            )
+        case .failed:
+            return ProviderDefaultSessionSummary(
+                state: .failed,
+                summary: session.failureMessage ?? "Last launch failed",
+                actionTitle: "Relaunch",
+                sessionID: session.id
+            )
+        }
     }
 }
 
@@ -395,6 +454,10 @@ func providerCapabilityDisabledReason(
 
 func providerHealthFailureMessage(from health: ProviderHealthSummary) -> String {
     health.diagnostics.first(where: { $0.severity == .error })?.message ?? health.summary
+}
+
+func providerModuleDefaultInterruptedSessionFailureMessage() -> String {
+    "Session interrupted because the background service restarted. Relaunch to create a new live runtime."
 }
 
 func providerModuleDefaultInitialTranscript(

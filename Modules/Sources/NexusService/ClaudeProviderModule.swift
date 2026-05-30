@@ -35,7 +35,8 @@ struct ClaudeProviderModule: ProviderModule {
                 health: health,
                 defaultSession: request.defaultSession
             ),
-            prelaunchPrimarySurface: prelaunchPrimarySurface(in: request.workspace)
+            prelaunchPrimarySurface: prelaunchPrimarySurface(in: request.workspace),
+            defaultSession: defaultSessionSummary(for: request.defaultSession)
         )
     }
 

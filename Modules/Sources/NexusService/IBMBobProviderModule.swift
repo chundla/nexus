@@ -35,7 +35,8 @@ struct IBMBobProviderModule: ProviderModule {
                 health: health,
                 defaultSession: request.defaultSession
             ),
-            prelaunchPrimarySurface: prelaunchPrimarySurface(in: request.workspace)
+            prelaunchPrimarySurface: prelaunchPrimarySurface(in: request.workspace),
+            defaultSession: defaultSessionSummary(for: request.defaultSession)
         )
     }
 
@@ -110,6 +111,18 @@ struct IBMBobProviderModule: ProviderModule {
         }
 
         return storedMetadata?.ibmBobTurnInProgress != true
+    }
+
+    func interruptedSessionFailureMessage(
+        for session: Session,
+        workspace: Workspace?,
+        persistedPrimarySurface: SessionSurface
+    ) -> String {
+        guard persistedPrimarySurface == .structuredActivityFeed else {
+            return providerModuleDefaultInterruptedSessionFailureMessage()
+        }
+
+        return structuredInterruptedSessionFailureMessage(for: provider.id)
     }
 
     func constructRuntime(

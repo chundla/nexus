@@ -70,6 +70,19 @@ struct PiProviderModule: ProviderModule {
         }
     }
 
+    func interruptedSessionFailureMessage(
+        for session: Session,
+        workspace: Workspace?,
+        persistedPrimarySurface: SessionSurface
+    ) -> String {
+        guard workspace?.kind == .local,
+              persistedPrimarySurface == .structuredActivityFeed else {
+            return providerModuleDefaultInterruptedSessionFailureMessage()
+        }
+
+        return structuredInterruptedSessionFailureMessage(for: provider.id)
+    }
+
     func shouldRetryFreshRemotePersistedSessionRelaunchWithoutContinuity(
         _ error: Error,
         metadata: SessionRecordAdapterMetadata?

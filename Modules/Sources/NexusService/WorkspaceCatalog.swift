@@ -42,7 +42,9 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
         var providerCards: [WorkspaceProviderCard] = []
         for providerID in ProviderID.allCases {
             let providerModule = providerModule(for: providerID)
-            let defaultSession = try dependencies.sessionRecordStore.defaultSession(workspaceID: workspaceID, providerID: providerID)
+            let sessions = try dependencies.sessionRecordStore.listSessions(workspaceID: workspaceID, providerID: providerID)
+                .map(reconcileSessionRuntimeState)
+            let defaultSession = sessions.first(where: \.isDefault)
             let catalogRead = try await providerModule.readCatalog(
                 ProviderModuleCatalogReadRequest(
                     workspace: workspace,
@@ -59,10 +61,8 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
                     health: catalogRead.health,
                     capabilities: catalogRead.capabilities,
                     prelaunchPrimarySurface: catalogRead.prelaunchPrimarySurface,
-                    defaultSession: try defaultSessionSummary(for: workspace, providerID: providerID),
-                    alternateSessionCount: try dependencies.sessionRecordStore.listSessions(workspaceID: workspaceID, providerID: providerID)
-                        .filter { $0.isDefault == false }
-                        .count
+                    defaultSession: catalogRead.defaultSession,
+                    alternateSessionCount: sessions.filter { $0.isDefault == false }.count
                 )
             )
         }
@@ -248,49 +248,6 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
         dependencies.providerModuleRegistry.module(for: providerID)
     }
 
-    private func defaultSessionSummary(for workspace: Workspace, providerID: ProviderID) throws -> ProviderDefaultSessionSummary {
-        guard let session = try dependencies.sessionRecordStore.defaultSession(workspaceID: workspace.id, providerID: providerID) else {
-            return ProviderDefaultSessionSummary(
-                state: .notCreated,
-                summary: "No default session yet",
-                actionTitle: "Launch"
-            )
-        }
-
-        let resolvedSession = try reconcileSessionRuntimeState(session)
-
-        switch resolvedSession.state {
-        case .ready:
-            return ProviderDefaultSessionSummary(
-                state: .ready,
-                summary: "Default session ready",
-                actionTitle: "Resume",
-                sessionID: resolvedSession.id
-            )
-        case .interrupted:
-            return ProviderDefaultSessionSummary(
-                state: .interrupted,
-                summary: resolvedSession.failureMessage ?? "Session interrupted after the service restarted",
-                actionTitle: "Relaunch",
-                sessionID: resolvedSession.id
-            )
-        case .exited:
-            return ProviderDefaultSessionSummary(
-                state: .exited,
-                summary: resolvedSession.failureMessage ?? "Session exited",
-                actionTitle: "Relaunch",
-                sessionID: resolvedSession.id
-            )
-        case .failed:
-            return ProviderDefaultSessionSummary(
-                state: .failed,
-                summary: resolvedSession.failureMessage ?? "Last launch failed",
-                actionTitle: "Relaunch",
-                sessionID: resolvedSession.id
-            )
-        }
-    }
-
     private func updatedSessionForRuntimeState(_ session: Session, runtimeState: Session.State) throws -> Session {
         switch runtimeState {
         case .ready:
@@ -355,27 +312,13 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
         return providerModule(for: session.providerID).prelaunchPrimarySurface(in: resolvedWorkspace)
     }
 
-    private func stopRequiresActiveIBMBobTurn(_ session: Session, workspace: Workspace? = nil) throws -> Bool {
-        let resolvedWorkspace = if let workspace {
-            workspace
-        } else {
-            try dependencies.metadataStore.workspace(id: session.workspaceID)
-        }
-
-        guard session.providerID == .ibmBob else {
-            return false
-        }
-
-        return try persistedPrimarySurface(for: session, workspace: resolvedWorkspace) == .structuredActivityFeed
-    }
-
     private func interruptedSessionFailureMessage(for session: Session, workspace: Workspace?) throws -> String {
-        if try persistedPrimarySurface(for: session, workspace: workspace) == .structuredActivityFeed,
-           session.providerID == .ibmBob || workspace?.kind == .local {
-            return structuredInterruptedSessionFailureMessage(for: session.providerID)
-        }
-
-        return "Session interrupted because the background service restarted. Relaunch to create a new live runtime."
+        let primarySurface = try persistedPrimarySurface(for: session, workspace: workspace)
+        return providerModule(for: session.providerID).interruptedSessionFailureMessage(
+            for: session,
+            workspace: workspace,
+            persistedPrimarySurface: primarySurface
+        )
     }
 }
 #endif

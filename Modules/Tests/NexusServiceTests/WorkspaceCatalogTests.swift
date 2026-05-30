@@ -112,7 +112,12 @@ struct WorkspaceCatalogTests {
                                     isEnabled: true
                                 )
                             ),
-                            prelaunchPrimarySurface: .terminal
+                            prelaunchPrimarySurface: .terminal,
+                            defaultSession: ProviderDefaultSessionSummary(
+                                state: .notCreated,
+                                summary: "Catalog-owned default summary",
+                                actionTitle: "Launch"
+                            )
                         )
                     )
                 ]
@@ -127,6 +132,7 @@ struct WorkspaceCatalogTests {
         #expect(claudeCard.capabilities.launchDefaultSession.isEnabled)
         #expect(claudeCard.capabilities.createNamedSession.isEnabled)
         #expect(claudeCard.prelaunchPrimarySurface == .terminal)
+        #expect(claudeCard.defaultSession.summary == "Catalog-owned default summary")
         #expect(detail.health == claudeCard.health)
         #expect(detail.capabilities == claudeCard.capabilities)
         #expect(detail.prelaunchPrimarySurface == claudeCard.prelaunchPrimarySurface)
@@ -164,6 +170,51 @@ struct WorkspaceCatalogTests {
         #expect(detail.defaultSession?.state == .interrupted)
         #expect(persistedSession.state == .interrupted)
         #expect(persistedSession.failureMessage == structuredInterruptedSessionFailureMessage(for: .pi))
+    }
+
+    @Test func providerDetailUsesProviderModuleInterruptedFailureCopyWhenRuntimeIsLost() async throws {
+        let fixture = try WorkspaceCatalogFixture(
+            providerModuleRegistry: ProviderModuleRegistry(
+                modules: [
+                    .pi: StubProviderModule(
+                        providerID: .pi,
+                        health: ProviderHealthSummary(
+                            state: .available,
+                            summary: "Ready",
+                            resolvedExecutable: "/tmp/fake-pi",
+                            launchability: .launchable
+                        ),
+                        capabilities: ProviderCapabilities(
+                            launchDefaultSession: ProviderCapability(
+                                action: .launchDefaultSession,
+                                isSupported: true,
+                                isEnabled: true
+                            ),
+                            createNamedSession: ProviderCapability(
+                                action: .createNamedSession,
+                                isSupported: true,
+                                isEnabled: true
+                            )
+                        ),
+                        prelaunchPrimarySurface: .structuredActivityFeed,
+                        interruptedFailureMessage: "Module-owned interrupted copy"
+                    )
+                ]
+            )
+        )
+        let session = try fixture.sessionRecordStore.createDefaultSession(
+            workspaceID: fixture.workspace.id,
+            providerID: .pi,
+            state: .ready,
+            failureMessage: nil
+        )
+
+        let detail = try await fixture.catalog.providerDetail(workspaceID: fixture.workspace.id, providerID: .pi)
+        let persistedSession = try #require(try fixture.sessionRecordStore.session(id: session.id))
+
+        #expect(detail.defaultSession?.state == .interrupted)
+        #expect(persistedSession.state == .interrupted)
+        #expect(persistedSession.failureMessage == "Module-owned interrupted copy")
     }
 
     @Test func workspaceOverviewsPreserveInputOrder() async throws {
@@ -239,19 +290,22 @@ private struct StubProviderModule: ProviderModule {
     let capabilities: ProviderCapabilities
     let prelaunchPrimarySurface: SessionSurface
     let catalogReadResult: ProviderModuleCatalogReadResult?
+    let interruptedFailureMessage: String?
 
     init(
         providerID: ProviderID,
         health: ProviderHealthSummary,
         capabilities: ProviderCapabilities,
         prelaunchPrimarySurface: SessionSurface,
-        catalogReadResult: ProviderModuleCatalogReadResult? = nil
+        catalogReadResult: ProviderModuleCatalogReadResult? = nil,
+        interruptedFailureMessage: String? = nil
     ) {
         self.provider = Provider(id: providerID)
         self.health = health
         self.capabilities = capabilities
         self.prelaunchPrimarySurface = prelaunchPrimarySurface
         self.catalogReadResult = catalogReadResult
+        self.interruptedFailureMessage = interruptedFailureMessage
     }
 
     func supportsDefaultSessionLaunch(in workspace: Workspace) -> Bool {
@@ -265,7 +319,8 @@ private struct StubProviderModule: ProviderModule {
         catalogReadResult ?? ProviderModuleCatalogReadResult(
             health: health,
             capabilities: capabilities,
-            prelaunchPrimarySurface: prelaunchPrimarySurface
+            prelaunchPrimarySurface: prelaunchPrimarySurface,
+            defaultSession: defaultSessionSummary(for: request.defaultSession)
         )
     }
 
@@ -298,6 +353,14 @@ private struct StubProviderModule: ProviderModule {
         remoteContext: RemoteWorkspaceHealthContext?
     ) -> Bool {
         false
+    }
+
+    func interruptedSessionFailureMessage(
+        for session: Session,
+        workspace: Workspace?,
+        persistedPrimarySurface: SessionSurface
+    ) -> String {
+        interruptedFailureMessage ?? providerModuleDefaultInterruptedSessionFailureMessage()
     }
 }
 

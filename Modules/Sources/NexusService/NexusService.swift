@@ -3547,12 +3547,12 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     private func interruptedSessionFailureMessage(for session: Session, workspace: Workspace?) throws -> String {
-        if try persistedPrimarySurface(for: session, workspace: workspace) == .structuredActivityFeed,
-           session.providerID == .ibmBob || workspace?.kind == .local {
-            return structuredInterruptedSessionFailureMessage(for: session.providerID)
-        }
-
-        return "Session interrupted because the background service restarted. Relaunch to create a new live runtime."
+        let primarySurface = try persistedPrimarySurface(for: session, workspace: workspace)
+        return providerModuleRegistry.module(for: session.providerID).interruptedSessionFailureMessage(
+            for: session,
+            workspace: workspace,
+            persistedPrimarySurface: primarySurface
+        )
     }
 }
 
