@@ -485,6 +485,59 @@ struct WorkspaceCatalogTests {
         #expect(await providerHealthEvaluator.callCount(for: ProviderID.claude) == 1)
     }
 
+    @Test func providerDetailUsesSingleRemoteBrowseFactPassForRemoteWorkspaceTarget() async throws {
+        let hostValidationEvaluator = CountingHostValidationEvaluator(
+            result: HostValidationResult(state: .available, summary: "Unexpected Host Validation", diagnostics: [])
+        )
+        let workspaceAvailabilityEvaluator = CountingWorkspaceAvailabilityEvaluator(
+            result: WorkspaceAvailabilityResult(state: .available, summary: "Unexpected Workspace Availability", diagnostics: [])
+        )
+        let commandRunner = FailingWorkspaceCatalogCommandRunner()
+        let codexReadinessProbe = RecordingWorkspaceCatalogRemoteCodexReadinessProbe()
+        let providerHealthEvaluator = ProviderHealthFacts(
+            commandRunner: commandRunner,
+            remoteCodexReadinessProbe: codexReadinessProbe
+        )
+        let collector = RecordingRemoteWorkspaceBrowseFactCollector(
+            result: .collected(
+                RemoteWorkspaceBrowseFacts(
+                    tmuxAvailable: true,
+                    workspacePath: .available,
+                    providerFacts: [
+                        .codex: RemoteProviderBrowseFact(
+                            executable: "/opt/tools/codex",
+                            version: "0.9.0",
+                            resolutionDetail: nil,
+                            probeDetail: nil
+                        )
+                    ]
+                )
+            )
+        )
+        let fixture = try WorkspaceCatalogFixture(
+            providerHealthEvaluator: providerHealthEvaluator,
+            hostValidationEvaluator: hostValidationEvaluator,
+            workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
+            remoteWorkspaceBrowseFactCollector: collector
+        )
+        let host = try fixture.metadataStore.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
+        let remoteWorkspace = try fixture.metadataStore.createRemoteWorkspace(
+            name: "Remote API",
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: fixture.group.id
+        )
+
+        let detail = try await fixture.catalog.providerDetail(workspaceID: remoteWorkspace.id, providerID: .codex)
+
+        #expect(detail.health.summary == "Codex 0.9.0 is available")
+        #expect(collector.callCount == 1)
+        #expect(hostValidationEvaluator.callCount == 0)
+        #expect(workspaceAvailabilityEvaluator.callCount == 0)
+        #expect(commandRunner.callCount == 0)
+        #expect(await codexReadinessProbe.invocations == [WorkspaceCatalogReadinessInvocation(hostID: host.id, executable: "/opt/tools/codex", workingDirectory: "/srv/api")])
+    }
+
     @Test func refreshWorkspaceOverviewUsesSingleRemoteBrowseFactPassForRemoteWorkspaceTarget() async throws {
         let hostValidationEvaluator = CountingHostValidationEvaluator(
             result: HostValidationResult(state: .available, summary: "Unexpected Host Validation", diagnostics: [])

@@ -88,13 +88,8 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
                 throw NexusMetadataStoreError.workspaceNotFound
             }
 
-            let remoteTarget = try trace.measure("loadRemoteTarget", { try remoteWorkspaceTargetOverview(for: workspace) })
-            let remoteContext = remoteTarget.map {
-                RemoteWorkspaceHealthContext(
-                    host: $0.host,
-                    hostValidation: $0.hostValidation,
-                    workspaceAvailability: $0.workspaceAvailability
-                )
+            let remoteContext = try trace.measure("loadRemoteTarget") {
+                try providerDetailRemoteContext(for: workspace, providerID: providerID)
             }
             let providerModule = providerModule(for: providerID)
             let sessions = try trace.measure("loadSessions") {
@@ -164,6 +159,64 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
                 hostValidation: $0.hostValidation,
                 workspaceAvailability: $0.workspaceAvailability
             )
+        }
+    }
+
+    private func providerDetailRemoteContext(
+        for workspace: Workspace,
+        providerID: ProviderID
+    ) throws -> RemoteWorkspaceHealthContext? {
+        guard workspace.kind == .remote else {
+            return try remoteWorkspaceHealthContext(for: workspace)
+        }
+
+        guard supportsSharedRemoteBrowseFactCollection(for: providerID) else {
+            return try remoteWorkspaceHealthContext(for: workspace)
+        }
+
+        if let storedContext = try storedRemoteWorkspaceHealthContext(for: workspace),
+           let snapshot = try dependencies.metadataStore.providerHealth(workspaceID: workspace.id, providerID: providerID),
+           isRecent(snapshot.checkedAt),
+           providerModule(for: providerID).reusesRemoteHealthSnapshot(snapshot, remoteContext: storedContext) {
+            return storedContext
+        }
+
+        let (remoteTarget, _, remoteBrowseFacts) = try workspaceOverviewRemoteTargetOverview(for: workspace, mode: .forceFresh)
+        return remoteTarget.map {
+            RemoteWorkspaceHealthContext(
+                host: $0.host,
+                hostValidation: $0.hostValidation,
+                workspaceAvailability: $0.workspaceAvailability,
+                browseFacts: remoteBrowseFacts
+            )
+        }
+    }
+
+    private func storedRemoteWorkspaceHealthContext(for workspace: Workspace) throws -> RemoteWorkspaceHealthContext? {
+        guard workspace.kind == .remote,
+              let hostID = workspace.remoteHostID,
+              let host = try dependencies.metadataStore.host(id: hostID),
+              let workspaceAvailability = try dependencies.metadataStore.workspaceAvailability(workspaceID: workspace.id) else {
+            return nil
+        }
+
+        return RemoteWorkspaceHealthContext(
+            host: host,
+            hostValidation: try dependencies.metadataStore.hostValidation(hostID: hostID),
+            workspaceAvailability: workspaceAvailability
+        )
+    }
+
+    private func supportsSharedRemoteBrowseFactCollection(for providerID: ProviderID) -> Bool {
+        switch providerID {
+        case .claude:
+            dependencies.providerHealthEvaluator is any SharedRemoteCLIProviderHealthFactProviding
+        case .codex:
+            dependencies.providerHealthEvaluator is any SharedRemoteCodexProviderHealthFactProviding
+        case .pi:
+            dependencies.providerHealthEvaluator is any SharedRemotePiProviderHealthFactProviding
+        case .ibmBob:
+            dependencies.providerHealthEvaluator is any SharedRemoteIBMBobProviderHealthFactProviding
         }
     }
 
