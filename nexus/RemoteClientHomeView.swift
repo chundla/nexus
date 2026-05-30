@@ -1,5 +1,6 @@
 #if os(iOS)
 import NexusDomain
+import NexusSessionPresentation
 import SwiftUI
 
 struct RemoteClientHomeView: View {
@@ -1448,9 +1449,9 @@ private struct RemoteSessionScreenView: View {
             return nil
         }
 
-        return structuredSessionPresentation(
-            for: screen,
-            isController: model.focusedSessionIsController,
+        return StructuredSessionPresentation(
+            screen: screen,
+            hasWriterAuthority: model.focusedSessionIsController,
             draft: structuredPrompt,
             isPerformingAction: isPerformingAction || screen.isAgentTurnInProgress
         )

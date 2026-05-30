@@ -1,6 +1,7 @@
 #if os(macOS)
 import AppKit
 import NexusDomain
+import NexusSessionPresentation
 import SwiftUI
 
 struct ContentView: View {
@@ -823,7 +824,7 @@ struct ContentView: View {
             if let screen {
                 let isReady = screen.session.state == .ready
                 let isRemote = context?.isRemote == true
-                let surface = focusedSessionSurface(for: screen)
+                let surface = screen.primarySurface
                 let stateColor = sessionStateColor(screen.session.state)
 
                 HStack(spacing: 10) {
@@ -907,7 +908,7 @@ struct ContentView: View {
         }
     }
 
-    private func sessionSubtitle(for context: SessionPresentationContext, surface: FocusedSessionSurface) -> String {
+    private func sessionSubtitle(for context: SessionPresentationContext, surface: SessionSurface) -> String {
         if context.isRemote {
             return surface == .terminal
                 ? "\(context.workspace.name) • \(context.hostName ?? "Remote") • terminal"
@@ -1513,9 +1514,9 @@ struct ContentView: View {
 
     @ViewBuilder
     private func structuredSessionFeed(screen: SessionScreen, isReady: Bool) -> some View {
-        let presentation = structuredSessionPresentation(
-            for: screen,
-            isController: true,
+        let presentation = StructuredSessionPresentation(
+            screen: screen,
+            hasWriterAuthority: true,
             draft: structuredSessionPrompt,
             isPerformingAction: screen.isAgentTurnInProgress
         )

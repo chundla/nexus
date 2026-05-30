@@ -1,8 +1,9 @@
 import AppKit
 import Foundation
 import NexusDomain
-import SwiftUI
 import NexusIPC
+import NexusSessionPresentation
+import SwiftUI
 @testable import NexusService
 import Testing
 @testable import nexus
@@ -143,8 +144,8 @@ struct nexusTests {
             ]
         )
 
-        #expect(focusedSessionSurface(for: piScreen) == .terminal)
-        #expect(focusedSessionSurface(for: claudeScreen) == .structuredActivityFeed)
+        #expect(piScreen.primarySurface == .terminal)
+        #expect(claudeScreen.primarySurface == .structuredActivityFeed)
     }
 
     @MainActor
@@ -168,9 +169,9 @@ struct nexusTests {
             approvalRequests: [pendingRequest, approvedRequest]
         )
 
-        let presentation = structuredSessionPresentation(
-            for: screen,
-            isController: true,
+        let presentation = StructuredSessionPresentation(
+            screen: screen,
+            hasWriterAuthority: true,
             draft: "/mo",
             isPerformingAction: false
         )
@@ -209,9 +210,9 @@ struct nexusTests {
             approvalRequests: [pendingRequest, approvedRequest]
         )
 
-        let presentation = structuredSessionPresentation(
-            for: screen,
-            isController: false,
+        let presentation = StructuredSessionPresentation(
+            screen: screen,
+            hasWriterAuthority: false,
             draft: "/mo",
             isPerformingAction: false
         )
@@ -249,9 +250,9 @@ struct nexusTests {
             primarySurface: .structuredActivityFeed,
             transcript: ""
         )
-        let presentation = structuredSessionPresentation(
-            for: screen,
-            isController: true,
+        let presentation = StructuredSessionPresentation(
+            screen: screen,
+            hasWriterAuthority: true,
             draft: "  /go",
             isPerformingAction: false
         )
@@ -6694,7 +6695,7 @@ struct nexusTests {
         try await model.sendInputToFocusedSession("hello")
 
         let screen = try #require(model.focusedSessionScreen)
-        #expect(focusedSessionSurface(for: screen) == .structuredActivityFeed)
+        #expect(screen.primarySurface == .structuredActivityFeed)
         #expect(screen.activityItems.map(\.text) == [
             "Pi shared Session stream connected",
             "You: hello",
@@ -6876,33 +6877,33 @@ struct nexusTests {
         let claudeSession = try await model.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
         let initialClaudeScreen = try #require(model.focusedSessionScreen)
         #expect(initialClaudeScreen.session.id == claudeSession.id)
-        #expect(focusedSessionSurface(for: initialClaudeScreen) == .terminal)
+        #expect(initialClaudeScreen.primarySurface == .terminal)
         #expect(initialClaudeScreen.transcript == "Claude ready")
 
         let piSession = try await model.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
         let piScreen = try #require(model.focusedSessionScreen)
         #expect(piScreen.session.id == piSession.id)
-        #expect(focusedSessionSurface(for: piScreen) == .structuredActivityFeed)
+        #expect(piScreen.primarySurface == .structuredActivityFeed)
         #expect(piScreen.activityItems.map(\.text) == ["Pi shared Session stream connected"])
 
         try await model.focusSession(sessionID: claudeSession.id)
         try await model.loadSessionScreen(sessionID: claudeSession.id)
         let resumedClaudeScreen = try #require(model.focusedSessionScreen)
         #expect(resumedClaudeScreen.session.id == claudeSession.id)
-        #expect(focusedSessionSurface(for: resumedClaudeScreen) == .terminal)
+        #expect(resumedClaudeScreen.primarySurface == .terminal)
         #expect(resumedClaudeScreen.transcript == "Claude ready")
 
         let codexSession = try await model.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .codex)
         let codexScreen = try #require(model.focusedSessionScreen)
         #expect(codexScreen.session.id == codexSession.id)
-        #expect(focusedSessionSurface(for: codexScreen) == .structuredActivityFeed)
+        #expect(codexScreen.primarySurface == .structuredActivityFeed)
         #expect(codexScreen.transcript == "Codex ready")
 
         try await model.focusSession(sessionID: piSession.id)
         try await model.loadSessionScreen(sessionID: piSession.id)
         let refocusedPiScreen = try #require(model.focusedSessionScreen)
         #expect(refocusedPiScreen.session.id == piSession.id)
-        #expect(focusedSessionSurface(for: refocusedPiScreen) == .structuredActivityFeed)
+        #expect(refocusedPiScreen.primarySurface == .structuredActivityFeed)
         #expect(refocusedPiScreen.activityItems.map(\.text) == ["Pi shared Session stream connected"])
 
         let overview = try #require(model.workspaceOverview(for: workspace.id))
@@ -6982,7 +6983,7 @@ struct nexusTests {
 
         #expect(piCard.defaultSession.state == .interrupted)
         #expect(piCard.defaultSession.summary == expectedMessage)
-        #expect(focusedSessionSurface(for: screen) == .structuredActivityFeed)
+        #expect(screen.primarySurface == .structuredActivityFeed)
         #expect(screen.session.state == .interrupted)
         #expect(screen.activityItems.map(\.kind) == [.error])
         #expect(screen.activityItems.map(\.text) == [expectedMessage])
@@ -7049,7 +7050,7 @@ struct nexusTests {
         #expect(namedSession.providerID == .pi)
         #expect(namedSession.name == "Review")
         #expect(namedSession.isDefault == false)
-        #expect(focusedSessionSurface(for: stoppedScreen) == .structuredActivityFeed)
+        #expect(stoppedScreen.primarySurface == .structuredActivityFeed)
         #expect(stoppedSession.state == .exited)
         #expect(stoppedDetail.alternateSessions.map(\.id) == [namedSession.id])
         #expect(stoppedDetail.alternateSessions.first?.state == .exited)
@@ -7061,7 +7062,7 @@ struct nexusTests {
         ])
         #expect(relaunchedSession.id == namedSession.id)
         #expect(relaunchedSession.state == .ready)
-        #expect(focusedSessionSurface(for: relaunchedScreen) == .structuredActivityFeed)
+        #expect(relaunchedScreen.primarySurface == .structuredActivityFeed)
         #expect(deleted)
         #expect(model.focusedSessionScreen == nil)
         #expect(deletedDetail.alternateSessions.isEmpty)

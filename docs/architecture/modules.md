@@ -69,6 +69,26 @@ Responsibilities:
 - attachment/event envelopes
 - client metadata models
 
+### NexusSessionPresentation
+
+Responsibilities:
+- shared structured **Session Presentation** projection from `SessionScreen` into render-ready state
+- shared activity-row projection, conversation-role classification, pending **Approval Request** filtering, composer/send state, and slash-command menu state
+- provider-aware copy for structured **Session Surfaces**
+
+Must not own:
+- primary **Session Surface** selection before a caller enters structured presentation
+- platform-specific SwiftUI layout, theme, focus, scrolling, or animation
+- terminal-backed **Session Surface** rendering
+
+Current adapters:
+- `nexus/ContentView.swift` is the macOS structured **Session Surface** adapter
+- `nexus/RemoteClientHomeView.swift` is the iPhone structured **Session Surface** adapter
+
+Implementation notes:
+- the detailed seam record lives in `docs/architecture/session-presentation-deepening.md`
+- terminal projection stays out of scope here and remains future `NexusTerminal` work
+
 ## Likely future modules
 
 ### NexusProviders
@@ -78,10 +98,6 @@ Extract provider adapter interfaces and implementations when complexity warrants
 ### NexusTerminal
 
 Extract shared terminal model/runtime helpers once macOS+iOS renderers both exist.
-
-### NexusSessionPresentation
-
-Extract shared structured **Session Presentation** projection once the macOS and iPhone **Adapter**s both consume the same structured **Session Surface** rules. The implementation plan lives in `docs/architecture/session-presentation-deepening.md`.
 
 ## Boundary rules
 
