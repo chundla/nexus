@@ -235,6 +235,7 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
 
         if preferFreshRemoteCheck == false,
            let snapshot = try dependencies.metadataStore.providerHealth(workspaceID: workspace.id, providerID: providerID),
+           isRecent(snapshot.checkedAt),
            providerModule.reusesRemoteHealthSnapshot(snapshot, remoteContext: remoteContext) {
             return snapshot
         }

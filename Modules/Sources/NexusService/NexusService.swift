@@ -1304,8 +1304,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                     try await self.workspaceCatalog.providerHealthSummary(
                         for: providerID,
                         workspace: workspace,
-                        remoteContext: remoteContext,
-                        preferFreshRemoteCheck: true
+                        remoteContext: remoteContext
                     )
                 },
                 resolveNamedSessionName: { [unowned self] requestedName, existingSessions in
