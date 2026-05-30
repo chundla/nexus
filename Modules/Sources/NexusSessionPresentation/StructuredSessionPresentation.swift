@@ -363,6 +363,12 @@ public func structuredSessionSlashCommands(for screen: SessionScreen) -> [Struct
                     displayText: "/model <provider>/<model>",
                     insertionText: "/model ",
                     summary: "Switch Pi to a configured provider/model."
+                ),
+                StructuredSessionSlashCommand(
+                    matchText: "thinking",
+                    displayText: "/thinking <level>",
+                    insertionText: "/thinking ",
+                    summary: "Set Pi's thinking level."
                 )
             ],
             liveCommands: (screen.slashCommands ?? []).map(structuredSessionSlashCommand(from:))

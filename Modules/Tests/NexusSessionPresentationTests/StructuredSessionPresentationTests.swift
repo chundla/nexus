@@ -390,6 +390,33 @@ struct StructuredSessionPresentationTests {
         #expect(structuredSessionSlashCommandMenuPresentation(for: "/model anth", screen: screen).commands.map(\.displayText) == ["/model anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4"])
     }
 
+    @Test func structuredSessionSlashCommandMenuUsesLivePiThinkingCommandsOnlyAfterThinkingPrefix() {
+        let screen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            ),
+            transcript: "",
+            slashCommands: [
+                SessionSlashCommand(
+                    name: "thinking high",
+                    displayName: "thinking high",
+                    insertionText: "thinking high",
+                    suggestionQueryPrefix: "thinking ",
+                    description: "Set Pi thinking level to high.",
+                    source: .builtIn
+                )
+            ]
+        )
+
+        #expect(structuredSessionSlashCommandMenuPresentation(for: "/", screen: screen).commands.map(\.displayText).contains("/thinking <level>"))
+        #expect(structuredSessionSlashCommandMenuPresentation(for: "/", screen: screen).commands.contains(where: { $0.displayText == "/thinking high" }) == false)
+        #expect(structuredSessionSlashCommandMenuPresentation(for: "/thinking h", screen: screen).commands.map(\.displayText) == ["/thinking high"])
+    }
+
     @Test func structuredSessionSlashCommandMenuUsesLiveCodexModelCommandsOnlyAfterModelPrefix() {
         let screen = SessionScreen(
             session: Session(

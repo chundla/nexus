@@ -207,6 +207,76 @@ struct NexusServicePiSessionStreamTests {
         ])
     }
 
+    @Test func localPiRuntimePublishesThinkingCommandsForCurrentModelState() throws {
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in
+                TestPiRPCTransport(
+                    stateModel: TestPiRPCModel(
+                        provider: "anthropic",
+                        id: "claude-sonnet-4-20250514",
+                        name: "Claude Sonnet 4",
+                        reasoning: true
+                    ),
+                    stateThinkingLevel: "medium"
+                )
+            }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        let screen = runtime.sessionScreen(for: session)
+        let commandNames = screen.slashCommands?.map(\.name)
+
+        #expect(commandNames == [
+            "thinking off",
+            "thinking minimal",
+            "thinking low",
+            "thinking medium",
+            "thinking high"
+        ])
+        #expect(commandNames?.contains("thinking xhigh") == false)
+    }
+
+    @Test func localPiRuntimeShowsXhighThinkingCommandForCodexMaxModels() throws {
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in
+                TestPiRPCTransport(
+                    stateModel: TestPiRPCModel(
+                        provider: "openai",
+                        id: "gpt-5.1-codex-max",
+                        name: "GPT-5.1 Codex Max",
+                        reasoning: true
+                    ),
+                    stateThinkingLevel: "high"
+                )
+            }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(screen.slashCommands?.contains(where: { $0.name == "thinking xhigh" }) == true)
+    }
+
     @Test func localPiRuntimeSwitchesModelsViaBuiltInModelCommand() throws {
         let transport = TestPiRPCTransport(
             availableModels: [
@@ -244,6 +314,45 @@ struct NexusServicePiSessionStreamTests {
         ])
         #expect(screen.activityItems.map(\.kind) == [.status, .command, .status, .status])
         #expect(screen.transcript.isEmpty)
+    }
+
+    @Test func localPiRuntimeSwitchesThinkingLevelsViaBuiltInThinkingCommand() throws {
+        let transport = TestPiRPCTransport(
+            stateModel: TestPiRPCModel(
+                provider: "anthropic",
+                id: "claude-sonnet-4-20250514",
+                name: "Claude Sonnet 4",
+                reasoning: true
+            ),
+            stateThinkingLevel: "medium"
+        )
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("/thinking high")
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"set_thinking_level\"") }))
+        #expect(screen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "Current Pi model: anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4 (thinking: medium)",
+            "/thinking high",
+            "Pi thinking level set to high",
+            "Current Pi model: anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4 (thinking: high)"
+        ])
+        #expect(screen.activityItems.map(\.kind) == [.status, .status, .command, .status, .status])
     }
 
     @Test func localPiDefaultSessionRelaunchKeepsPiConversationLinkageAcrossServiceRestart() throws {
@@ -1147,6 +1256,14 @@ private struct TestPiRPCModel {
     let provider: String
     let id: String
     let name: String?
+    let reasoning: Bool?
+
+    init(provider: String, id: String, name: String?, reasoning: Bool? = nil) {
+        self.provider = provider
+        self.id = id
+        self.name = name
+        self.reasoning = reasoning
+    }
 
     func responseObject() -> [String: Any] {
         var object: [String: Any] = [
@@ -1155,6 +1272,9 @@ private struct TestPiRPCModel {
         ]
         if let name {
             object["name"] = name
+        }
+        if let reasoning {
+            object["reasoning"] = reasoning
         }
         return object
     }
@@ -1261,6 +1381,13 @@ private final class TestPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
                     "error": "Model not found: \(provider)/\(modelID)"
                 ])
             }
+        case "set_thinking_level":
+            emit([
+                "id": object["id"] as? String ?? "set-thinking-level",
+                "type": "response",
+                "command": "set_thinking_level",
+                "success": true
+            ])
         case "prompt":
             emit([
                 "type": "response",

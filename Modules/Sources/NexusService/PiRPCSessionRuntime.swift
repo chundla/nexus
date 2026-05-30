@@ -2,6 +2,16 @@
 import Foundation
 import NexusDomain
 
+private let piBasicThinkingLevels = ["off", "minimal", "low", "medium", "high"]
+private let piExtendedThinkingLevels = piBasicThinkingLevels + ["xhigh"]
+
+private struct PiRPCModelDescriptor: Equatable {
+    let provider: String
+    let id: String
+    let name: String?
+    let availableThinkingLevels: [String]
+}
+
 protocol PiRPCTransporting: AnyObject {
     func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?)
     func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?)
@@ -55,6 +65,8 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     private let startupCommandsResponseID = "nexus-pi-startup-commands"
     private let startupAvailableModelsResponseID = "nexus-pi-startup-available-models"
     private let currentModelStatusPrefix = "Current Pi model:"
+    private var currentModel: PiRPCModelDescriptor?
+    private var currentThinkingLevel: String?
     private var runtimeState: Session.State = .ready
     private var transcriptEntries: [String] = []
     private var interruptedFailureMessage: String?
@@ -76,8 +88,10 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     private var pendingSlashCommandsRequestID: String?
     private var pendingAvailableModelsRequestID: String?
     private var pendingSetModelTargetsByRequestID: [String: String] = [:]
+    private var pendingSetThinkingLevelsByRequestID: [String: String] = [:]
     private var nextSlashCommandsRequestSequence = 0
     private var nextAvailableModelsRequestSequence = 0
+    private var nextSetThinkingRequestSequence = 0
 
     convenience init(
         executable: String,
@@ -325,6 +339,11 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             return
         }
 
+        if trimmed == "/thinking" || trimmed.hasPrefix("/thinking ") {
+            try submitThinkingCommand(trimmed)
+            return
+        }
+
         lock.lock()
         guard isStreaming == false else {
             lock.unlock()
@@ -382,6 +401,40 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         )
     }
 
+    private func submitThinkingCommand(_ commandText: String) throws {
+        let target = String(commandText.dropFirst("/thinking".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let level = parseThinkingLevelSelection(target) else {
+            lock.lock()
+            draft = ""
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: "Usage: /thinking <off|minimal|low|medium|high|xhigh>"))
+            lock.unlock()
+            notifyChange()
+            return
+        }
+
+        let requestID: String
+        lock.lock()
+        guard isStreaming == false else {
+            lock.unlock()
+            throw PiRPCSessionRuntimeError.busy
+        }
+        draft = ""
+        requestID = "nexus-pi-set-thinking-\(nextSetThinkingRequestSequence)"
+        nextSetThinkingRequestSequence += 1
+        pendingSetThinkingLevelsByRequestID[requestID] = level
+        appendActivityItemLocked(SessionActivityItem(kind: .command, text: "/thinking \(level)"))
+        lock.unlock()
+        notifyChange()
+
+        try transport.sendLine(
+            Self.jsonLine([
+                "id": requestID,
+                "type": "set_thinking_level",
+                "level": level
+            ])
+        )
+    }
+
     private func handleResponse(
         _ response: [String: Any],
         startupState: StartupState,
@@ -394,8 +447,9 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             if bool(for: "success", in: response) == true {
                 lock.lock()
                 updateSessionLinkageLocked(from: response)
+                updateCurrentStateLocked(from: response)
                 appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"))
-                if let currentModelStatus = currentModelStatusText(from: response) {
+                if let currentModelStatus = currentModelStatusTextLocked() {
                     appendActivityItemLocked(SessionActivityItem(kind: .status, text: currentModelStatus))
                 }
                 lock.unlock()
@@ -423,6 +477,11 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
 
         if command == "set_model" {
             handleSetModelResponse(response, requestID: id)
+            return
+        }
+
+        if command == "set_thinking_level" {
+            handleSetThinkingLevelResponse(response, requestID: id)
             return
         }
 
@@ -699,32 +758,51 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     }
 
     private func handleSetModelResponse(_ response: [String: Any], requestID: String?) {
-        let fallbackTarget: String?
         lock.lock()
-        fallbackTarget = requestID.flatMap { pendingSetModelTargetsByRequestID.removeValue(forKey: $0) }
-        lock.unlock()
+        let fallbackTarget = requestID.flatMap { pendingSetModelTargetsByRequestID.removeValue(forKey: $0) }
 
-        let message: String
-        let kind: SessionActivityItem.Kind
-        let currentModelStatus: String?
         if bool(for: "success", in: response) == true {
+            if let data = response["data"] as? [String: Any],
+               let model = parseModelDescriptor(from: data) {
+                currentModel = model
+                if let currentThinkingLevel {
+                    self.currentThinkingLevel = clampThinkingLevel(currentThinkingLevel, for: model)
+                }
+            }
+
             let resolvedTarget = formattedModelTarget(fromResponse: response) ?? fallbackTarget ?? "selected model"
-            message = "Pi model switched to \(resolvedTarget)"
-            currentModelStatus = currentModelStatusText(fromModelResponse: response)
-            kind = .status
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi model switched to \(resolvedTarget)"))
+            if let currentModelStatus = currentModelStatusTextLocked() {
+                appendActivityItemLocked(SessionActivityItem(kind: .status, text: currentModelStatus))
+            }
+            lock.unlock()
             requestAvailableModels()
         } else {
             let detail = string(for: "error", in: response) ?? "Pi failed to switch models."
-            message = detail
-            currentModelStatus = nil
-            kind = .error
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: detail))
+            lock.unlock()
         }
 
+        notifyChange()
+    }
+
+    private func handleSetThinkingLevelResponse(_ response: [String: Any], requestID: String?) {
         lock.lock()
-        appendActivityItemLocked(SessionActivityItem(kind: kind, text: message))
-        if let currentModelStatus {
-            appendActivityItemLocked(SessionActivityItem(kind: .status, text: currentModelStatus))
+        let requestedLevel = requestID.flatMap { pendingSetThinkingLevelsByRequestID.removeValue(forKey: $0) }
+
+        if bool(for: "success", in: response) == true {
+            let effectiveLevel = requestedLevel.map { clampThinkingLevel($0, for: currentModel) } ?? currentThinkingLevel
+            currentThinkingLevel = effectiveLevel
+            let message = effectiveLevel.map { "Pi thinking level set to \($0)" } ?? "Pi thinking level updated"
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: message))
+            if let currentModelStatus = currentModelStatusTextLocked() {
+                appendActivityItemLocked(SessionActivityItem(kind: .status, text: currentModelStatus))
+            }
+        } else {
+            let detail = string(for: "error", in: response) ?? "Pi failed to set thinking level."
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: detail))
         }
+
         lock.unlock()
         notifyChange()
     }
@@ -847,6 +925,14 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         return (provider: provider, modelID: modelID, target: "\(provider)/\(modelID)")
     }
 
+    private func parseThinkingLevelSelection(_ target: String) -> String? {
+        let normalized = target.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard piExtendedThinkingLevels.contains(normalized) else {
+            return nil
+        }
+        return normalized
+    }
+
     private func formattedModelTarget(fromResponse response: [String: Any]) -> String? {
         guard let data = response["data"] as? [String: Any] else {
             return nil
@@ -867,20 +953,104 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         return target
     }
 
+    private func parseModelDescriptor(from model: [String: Any]) -> PiRPCModelDescriptor? {
+        guard let provider = trimmedString(for: "provider", in: model),
+              let modelID = trimmedString(for: "id", in: model) else {
+            return nil
+        }
+
+        return PiRPCModelDescriptor(
+            provider: provider,
+            id: modelID,
+            name: trimmedString(for: "name", in: model),
+            availableThinkingLevels: availableThinkingLevels(from: model, provider: provider, modelID: modelID)
+        )
+    }
+
+    private func availableThinkingLevels(from model: [String: Any], provider: String, modelID: String) -> [String] {
+        let reasoning = model["reasoning"] as? Bool ?? true
+        guard reasoning else {
+            return ["off"]
+        }
+
+        if let thinkingLevelMap = model["thinkingLevelMap"] as? [String: Any] {
+            return piExtendedThinkingLevels.filter { level in
+                if let mappedValue = thinkingLevelMap[level] {
+                    return (mappedValue is NSNull) == false
+                }
+                return level == "xhigh" ? supportsXHighThinkingLevel(provider: provider, modelID: modelID) : true
+            }
+        }
+
+        return piBasicThinkingLevels + (supportsXHighThinkingLevel(provider: provider, modelID: modelID) ? ["xhigh"] : [])
+    }
+
+    private func supportsXHighThinkingLevel(provider: String, modelID: String) -> Bool {
+        provider.caseInsensitiveCompare("openai") == .orderedSame && modelID.localizedCaseInsensitiveContains("codex-max")
+    }
+
+    private func clampThinkingLevel(_ level: String, for model: PiRPCModelDescriptor?) -> String {
+        let availableLevels = availableThinkingLevels(for: model)
+        if availableLevels.contains(level) {
+            return level
+        }
+
+        guard let requestedIndex = piExtendedThinkingLevels.firstIndex(of: level) else {
+            return availableLevels.first ?? "off"
+        }
+
+        for candidate in piExtendedThinkingLevels[requestedIndex...] where availableLevels.contains(candidate) {
+            return candidate
+        }
+
+        for candidate in piExtendedThinkingLevels[..<requestedIndex].reversed() where availableLevels.contains(candidate) {
+            return candidate
+        }
+
+        return availableLevels.first ?? "off"
+    }
+
+    private func availableThinkingLevels(for model: PiRPCModelDescriptor?) -> [String] {
+        model?.availableThinkingLevels ?? piBasicThinkingLevels
+    }
+
+    private func thinkingSlashCommandsLocked() -> [SessionSlashCommand]? {
+        guard currentModel != nil || currentThinkingLevel != nil else {
+            return nil
+        }
+
+        var levels = availableThinkingLevels(for: currentModel)
+        if let currentThinkingLevel, levels.contains(currentThinkingLevel) == false {
+            levels.append(currentThinkingLevel)
+            levels.sort {
+                (piExtendedThinkingLevels.firstIndex(of: $0) ?? piExtendedThinkingLevels.count) < (piExtendedThinkingLevels.firstIndex(of: $1) ?? piExtendedThinkingLevels.count)
+            }
+        }
+
+        return levels.map { level in
+            let isCurrent = level == currentThinkingLevel
+            return SessionSlashCommand(
+                name: "thinking \(level)",
+                displayName: "thinking \(level)",
+                insertionText: "thinking \(level)",
+                suggestionQueryPrefix: "thinking ",
+                description: isCurrent ? "Current Pi thinking level." : "Set Pi thinking level to \(level).",
+                source: .builtIn
+            )
+        }
+    }
+
     private func mergedSlashCommandsLocked() -> [SessionSlashCommand]? {
-        let merged = mergeSlashCommands(primary: providerSlashCommands, secondary: availableModelCommands)
+        let merged = mergeSlashCommands(groups: [providerSlashCommands, availableModelCommands, thinkingSlashCommandsLocked()])
         return merged.isEmpty ? nil : merged
     }
 
-    private func mergeSlashCommands(
-        primary: [SessionSlashCommand]?,
-        secondary: [SessionSlashCommand]?
-    ) -> [SessionSlashCommand] {
+    private func mergeSlashCommands(groups: [[SessionSlashCommand]?]) -> [SessionSlashCommand] {
         var merged: [SessionSlashCommand] = []
         var seenNames: Set<String> = []
 
-        for command in (primary ?? []) + (secondary ?? []) {
-            if seenNames.insert(command.name).inserted {
+        for group in groups {
+            for command in group ?? [] where seenNames.insert(command.name).inserted {
                 merged.append(command)
             }
         }
@@ -904,25 +1074,37 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         sessionLinkage = linkage
     }
 
-    private func currentModelStatusText(from response: [String: Any]) -> String? {
-        guard let data = response["data"] as? [String: Any],
-              let model = data["model"] as? [String: Any],
-              let target = formattedModelTarget(fromModel: model) else {
+    private func updateCurrentStateLocked(from response: [String: Any]) {
+        guard let data = response["data"] as? [String: Any] else {
+            return
+        }
+
+        if let model = data["model"] as? [String: Any] {
+            currentModel = parseModelDescriptor(from: model)
+        } else {
+            currentModel = nil
+        }
+        currentThinkingLevel = trimmedString(for: "thinkingLevel", in: data)
+    }
+
+    private func currentModelStatusTextLocked() -> String? {
+        guard let currentModel else {
             return nil
         }
 
-        if let thinkingLevel = trimmedString(for: "thinkingLevel", in: data) {
-            return "\(currentModelStatusPrefix) \(target) (thinking: \(thinkingLevel))"
+        let target = formattedModelTarget(for: currentModel)
+        if let currentThinkingLevel {
+            return "\(currentModelStatusPrefix) \(target) (thinking: \(currentThinkingLevel))"
         }
         return "\(currentModelStatusPrefix) \(target)"
     }
 
-    private func currentModelStatusText(fromModelResponse response: [String: Any]) -> String? {
-        guard let data = response["data"] as? [String: Any],
-              let target = formattedModelTarget(fromModel: data) else {
-            return nil
+    private func formattedModelTarget(for model: PiRPCModelDescriptor) -> String {
+        let target = "\(model.provider)/\(model.id)"
+        if let name = model.name {
+            return "\(target) — \(name)"
         }
-        return "\(currentModelStatusPrefix) \(target)"
+        return target
     }
 
     private func toolExecutionCallText(toolName: String, args: [String: Any]?) -> String {
