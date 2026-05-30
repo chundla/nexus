@@ -122,8 +122,9 @@ private extension CodexProviderModule {
         for workspace: Workspace,
         healthFacts: any CodexProviderHealthFactProviding
     ) async -> ProviderHealthSummary {
-        switch await healthFacts.localCodexHealthProbe(workspace: workspace) {
-        case let .executableNotFound(resolution):
+        let executableFacts = await healthFacts.localCodexExecutableFacts(workspace: workspace)
+        guard let executable = executableFacts.executable else {
+            let resolution = executableFacts.resolution
             return ProviderHealthSummary(
                 state: .unavailable,
                 summary: "Codex executable was not found",
@@ -151,14 +152,17 @@ private extension CodexProviderModule {
                     )
                 ]
             )
-        case let .readinessProbeFailed(executable, version, diagnostics, detail):
+        }
+
+        switch await healthFacts.probeLocalCodexReadiness(workspace: workspace, executable: executable) {
+        case let .failed(detail):
             return ProviderHealthSummary(
                 state: .misconfigured,
                 summary: "Codex is installed but failed the protocol-native readiness probe",
                 resolvedExecutable: executable,
-                version: version,
+                version: executableFacts.version,
                 launchability: .notLaunchable,
-                diagnostics: diagnostics + [
+                diagnostics: executableFacts.diagnostics + [
                     ProviderHealthDiagnostic(
                         severity: .error,
                         code: "launchProbeFailed",
@@ -166,14 +170,14 @@ private extension CodexProviderModule {
                     )
                 ]
             )
-        case let .ready(executable, version, diagnostics):
+        case .ready:
             return ProviderHealthSummary(
                 state: .available,
-                summary: version.map { "Codex \($0) is available" } ?? "Codex is available",
+                summary: executableFacts.version.map { "Codex \($0) is available" } ?? "Codex is available",
                 resolvedExecutable: executable,
-                version: version,
+                version: executableFacts.version,
                 launchability: .launchable,
-                diagnostics: diagnostics
+                diagnostics: executableFacts.diagnostics
             )
         }
     }
@@ -253,33 +257,30 @@ private extension CodexProviderModule {
             )
         }
 
-        let remoteProbeResult: RemoteCodexHealthProbeResult
-        if let probeFacts = remoteContext?.probeFacts,
-           let sharedHealthFacts = healthFacts as? any SharedRemoteCodexProviderHealthFactProviding {
-            remoteProbeResult = await sharedHealthFacts.remoteCodexHealthProbe(
-                workspace: workspace,
-                host: host,
-                probeFacts: probeFacts
-            )
+        let probeFact: RemoteProviderProbeFacts
+        if let sharedProbeFact = remoteContext?.probeFacts?.providerFacts[.codex] {
+            probeFact = sharedProbeFact
         } else {
-            remoteProbeResult = await healthFacts.remoteCodexHealthProbe(workspace: workspace, host: host)
+            switch await healthFacts.remoteCodexExecutableFacts(workspace: workspace, host: host) {
+            case let .sshLaunchFailed(message):
+                return ProviderHealthSummary(
+                    state: .unavailable,
+                    summary: "Remote Codex health check failed before the SSH probe completed",
+                    launchability: .notLaunchable,
+                    diagnostics: [
+                        ProviderHealthDiagnostic(
+                            severity: .error,
+                            code: "sshLaunchFailed",
+                            message: message
+                        )
+                    ]
+                )
+            case let .facts(facts):
+                probeFact = facts
+            }
         }
 
-        switch remoteProbeResult {
-        case let .sshResolutionLaunchFailed(message):
-            return ProviderHealthSummary(
-                state: .unavailable,
-                summary: "Remote Codex health check failed before the SSH probe completed",
-                launchability: .notLaunchable,
-                diagnostics: [
-                    ProviderHealthDiagnostic(
-                        severity: .error,
-                        code: "sshLaunchFailed",
-                        message: message
-                    )
-                ]
-            )
-        case let .resolutionProbeFailed(detail):
+        if let detail = probeFact.resolutionDetail ?? probeFact.probeDetail {
             let classification = classifyRemoteProbeFailure(detail: detail)
             return ProviderHealthSummary(
                 state: classification.state,
@@ -293,7 +294,9 @@ private extension CodexProviderModule {
                     )
                 ]
             )
-        case .resolutionReturnedNoExecutable:
+        }
+
+        guard let executable = probeFact.executable else {
             return ProviderHealthSummary(
                 state: .misconfigured,
                 summary: "Codex executable resolution returned no executable path",
@@ -306,12 +309,23 @@ private extension CodexProviderModule {
                     )
                 ]
             )
-        case let .readinessProbeFailed(executable, version, detail):
+        }
+
+        var diagnostics = [
+            ProviderHealthDiagnostic(
+                severity: .info,
+                code: "remoteProbe",
+                message: "Validated remote Codex launch prerequisites on \(host.name) for \(workspace.folderPath)."
+            )
+        ]
+
+        switch await healthFacts.probeRemoteCodexReadiness(workspace: workspace, host: host, executable: executable) {
+        case let .failed(detail):
             return ProviderHealthSummary(
                 state: .misconfigured,
                 summary: "Codex is installed but failed the remote protocol-native readiness probe",
                 resolvedExecutable: executable,
-                version: version,
+                version: probeFact.version,
                 launchability: .notLaunchable,
                 diagnostics: [
                     ProviderHealthDiagnostic(
@@ -321,12 +335,12 @@ private extension CodexProviderModule {
                     )
                 ]
             )
-        case let .authenticationRequired(executable, version, message):
+        case let .authenticationRequired(message):
             return ProviderHealthSummary(
                 state: .unavailable,
                 summary: "Codex requires authentication on the Remote Workspace",
                 resolvedExecutable: executable,
-                version: version,
+                version: probeFact.version,
                 launchability: .notLaunchable,
                 diagnostics: [
                     ProviderHealthDiagnostic(
@@ -336,10 +350,9 @@ private extension CodexProviderModule {
                     )
                 ]
             )
-        case let .authenticationUncertain(executable, version, diagnostics, message):
-            var finalDiagnostics = diagnostics
+        case let .authenticationUncertain(message):
             if let message, message.isEmpty == false {
-                finalDiagnostics.append(
+                diagnostics.append(
                     ProviderHealthDiagnostic(
                         severity: .warning,
                         code: "remoteAuthUncertain",
@@ -349,18 +362,18 @@ private extension CodexProviderModule {
             }
             return ProviderHealthSummary(
                 state: .available,
-                summary: version.map { "Codex \($0) is available" } ?? "Codex is available",
+                summary: probeFact.version.map { "Codex \($0) is available" } ?? "Codex is available",
                 resolvedExecutable: executable,
-                version: version,
+                version: probeFact.version,
                 launchability: .launchable,
-                diagnostics: finalDiagnostics
+                diagnostics: diagnostics
             )
-        case let .ready(executable, version, diagnostics):
+        case .ready:
             return ProviderHealthSummary(
                 state: .available,
-                summary: version.map { "Codex \($0) is available" } ?? "Codex is available",
+                summary: probeFact.version.map { "Codex \($0) is available" } ?? "Codex is available",
                 resolvedExecutable: executable,
-                version: version,
+                version: probeFact.version,
                 launchability: .launchable,
                 diagnostics: diagnostics
             )

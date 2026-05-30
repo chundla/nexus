@@ -212,7 +212,7 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
         case .claude:
             dependencies.providerHealthEvaluator is any SharedRemoteCLIProviderHealthFactProviding
         case .codex:
-            dependencies.providerHealthEvaluator is any SharedRemoteCodexProviderHealthFactProviding
+            dependencies.providerHealthEvaluator is any CodexProviderHealthFactProviding
         case .pi:
             dependencies.providerHealthEvaluator is any SharedRemotePiProviderHealthFactProviding
         case .ibmBob:

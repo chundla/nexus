@@ -73,38 +73,29 @@ enum RemoteCLIHealthProbeResult: Sendable, Equatable {
     )
 }
 
-enum LocalCodexHealthProbeResult: Sendable, Equatable {
-    case executableNotFound(ProviderExecutableResolution)
-    case readinessProbeFailed(
-        executable: String,
-        version: String?,
-        diagnostics: [ProviderHealthDiagnostic],
-        detail: String
-    )
-    case ready(
-        executable: String,
-        version: String?,
-        diagnostics: [ProviderHealthDiagnostic]
-    )
+struct LocalCodexExecutableFacts: Sendable, Equatable {
+    let resolution: ProviderExecutableResolution
+    let version: String?
+    let diagnostics: [ProviderHealthDiagnostic]
+
+    var executable: String? { resolution.resolvedExecutable }
 }
 
-enum RemoteCodexHealthProbeResult: Sendable, Equatable {
-    case sshResolutionLaunchFailed(String)
-    case resolutionProbeFailed(String)
-    case resolutionReturnedNoExecutable
-    case readinessProbeFailed(executable: String, version: String?, detail: String)
-    case authenticationRequired(executable: String, version: String?, message: String)
-    case authenticationUncertain(
-        executable: String,
-        version: String?,
-        diagnostics: [ProviderHealthDiagnostic],
-        message: String?
-    )
-    case ready(
-        executable: String,
-        version: String?,
-        diagnostics: [ProviderHealthDiagnostic]
-    )
+enum LocalCodexReadinessProbeResult: Sendable, Equatable {
+    case ready
+    case failed(String)
+}
+
+enum RemoteCodexExecutableProbeResult: Sendable, Equatable {
+    case sshLaunchFailed(String)
+    case facts(RemoteProviderProbeFacts)
+}
+
+enum RemoteCodexReadinessProbeResult: Sendable, Equatable {
+    case ready
+    case authenticationRequired(String)
+    case authenticationUncertain(String?)
+    case failed(String)
 }
 
 enum RemotePiHealthProbeResult: Sendable, Equatable {
@@ -164,8 +155,10 @@ protocol CLIProviderHealthFactProviding: Sendable {
 }
 
 protocol CodexProviderHealthFactProviding: Sendable {
-    func localCodexHealthProbe(workspace: Workspace) async -> LocalCodexHealthProbeResult
-    func remoteCodexHealthProbe(workspace: Workspace, host: NexusDomain.Host) async -> RemoteCodexHealthProbeResult
+    func localCodexExecutableFacts(workspace: Workspace) async -> LocalCodexExecutableFacts
+    func probeLocalCodexReadiness(workspace: Workspace, executable: String) async -> LocalCodexReadinessProbeResult
+    func remoteCodexExecutableFacts(workspace: Workspace, host: NexusDomain.Host) async -> RemoteCodexExecutableProbeResult
+    func probeRemoteCodexReadiness(workspace: Workspace, host: NexusDomain.Host, executable: String) async -> RemoteCodexReadinessProbeResult
 }
 
 protocol PiProviderHealthFactProviding: Sendable {
@@ -185,14 +178,6 @@ protocol SharedRemoteCLIProviderHealthFactProviding: Sendable {
         host: NexusDomain.Host,
         probeFacts: RemoteWorkspaceProbeFacts
     ) async -> RemoteCLIHealthProbeResult
-}
-
-protocol SharedRemoteCodexProviderHealthFactProviding: Sendable {
-    func remoteCodexHealthProbe(
-        workspace: Workspace,
-        host: NexusDomain.Host,
-        probeFacts: RemoteWorkspaceProbeFacts
-    ) async -> RemoteCodexHealthProbeResult
 }
 
 protocol SharedRemotePiProviderHealthFactProviding: Sendable {
@@ -257,7 +242,7 @@ extension ProviderHealthEvaluating {
     }
 }
 
-struct ProviderHealthFacts: ProviderHealthEvaluating, CLIProviderHealthFactProviding, CodexProviderHealthFactProviding, PiProviderHealthFactProviding, IBMBobProviderHealthFactProviding, SharedRemoteCLIProviderHealthFactProviding, SharedRemoteCodexProviderHealthFactProviding, SharedRemotePiProviderHealthFactProviding, SharedRemoteIBMBobProviderHealthFactProviding, @unchecked Sendable {
+struct ProviderHealthFacts: ProviderHealthEvaluating, CLIProviderHealthFactProviding, CodexProviderHealthFactProviding, PiProviderHealthFactProviding, IBMBobProviderHealthFactProviding, SharedRemoteCLIProviderHealthFactProviding, SharedRemotePiProviderHealthFactProviding, SharedRemoteIBMBobProviderHealthFactProviding, @unchecked Sendable {
     let executableResolver: any ProviderExecutableResolving
     let commandRunner: any ProviderCommandRunning
     let localShellCommandBuilder: LocalShellCommandBuilder
@@ -386,47 +371,7 @@ struct ProviderHealthFacts: ProviderHealthEvaluating, CLIProviderHealthFactProvi
         )
     }
 
-    func remoteCodexHealthProbe(workspace: Workspace, host: NexusDomain.Host, probeFacts: RemoteWorkspaceProbeFacts) async -> RemoteCodexHealthProbeResult {
-        let fact = probeFacts.providerFacts[.codex]
-        if let resolutionDetail = fact?.resolutionDetail {
-            return .resolutionProbeFailed(resolutionDetail)
-        }
-        guard let executable = fact?.executable else {
-            return .resolutionReturnedNoExecutable
-        }
-        let version = fact?.version
-        let diagnostics = [
-            ProviderHealthDiagnostic(
-                severity: .info,
-                code: "remoteProbe",
-                message: "Validated remote Codex launch prerequisites on \(host.name) for \(workspace.folderPath)."
-            )
-        ]
-
-        do {
-            switch try await remoteCodexReadinessProbe.probe(host: host, executable: executable, workingDirectory: workspace.folderPath) {
-            case .ready:
-                return .ready(executable: executable, version: version, diagnostics: diagnostics)
-            case let .authenticationRequired(message):
-                return .authenticationRequired(executable: executable, version: version, message: message)
-            case let .authenticationUncertain(message):
-                return .authenticationUncertain(
-                    executable: executable,
-                    version: version,
-                    diagnostics: diagnostics,
-                    message: message
-                )
-            }
-        } catch {
-            return .readinessProbeFailed(
-                executable: executable,
-                version: version,
-                detail: error.localizedDescription
-            )
-        }
-    }
-
-    func remoteCodexHealthProbe(workspace: Workspace, host: NexusDomain.Host) async -> RemoteCodexHealthProbeResult {
+    func remoteCodexExecutableFacts(workspace: Workspace, host: NexusDomain.Host) async -> RemoteCodexExecutableProbeResult {
         let result: ProviderCommandResult
         do {
             result = try commandRunner.run(
@@ -435,11 +380,18 @@ struct ProviderHealthFacts: ProviderHealthEvaluating, CLIProviderHealthFactProvi
                 currentDirectoryURL: nil
             )
         } catch {
-            return .sshResolutionLaunchFailed(error.localizedDescription)
+            return .sshLaunchFailed(error.localizedDescription)
         }
 
         guard result.exitStatus == 0 else {
-            return .resolutionProbeFailed(firstDiagnosticLine(stdout: result.stdout, stderr: result.stderr))
+            return .facts(
+                RemoteProviderProbeFacts(
+                    executable: nil,
+                    version: nil,
+                    resolutionDetail: firstDiagnosticLine(stdout: result.stdout, stderr: result.stderr),
+                    probeDetail: nil
+                )
+            )
         }
 
         let outputLines = result.stdout
@@ -447,38 +399,33 @@ struct ProviderHealthFacts: ProviderHealthEvaluating, CLIProviderHealthFactProvi
             .map(String.init)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { $0.isEmpty == false }
-        guard let executable = outputLines.first else {
-            return .resolutionReturnedNoExecutable
-        }
-        let version = outputLines.dropFirst().first
-        let diagnostics = [
-            ProviderHealthDiagnostic(
-                severity: .info,
-                code: "remoteProbe",
-                message: "Validated remote Codex launch prerequisites on \(host.name) for \(workspace.folderPath)."
-            )
-        ]
 
+        return .facts(
+            RemoteProviderProbeFacts(
+                executable: outputLines.first,
+                version: outputLines.dropFirst().first,
+                resolutionDetail: nil,
+                probeDetail: nil
+            )
+        )
+    }
+
+    func probeRemoteCodexReadiness(
+        workspace: Workspace,
+        host: NexusDomain.Host,
+        executable: String
+    ) async -> RemoteCodexReadinessProbeResult {
         do {
             switch try await remoteCodexReadinessProbe.probe(host: host, executable: executable, workingDirectory: workspace.folderPath) {
             case .ready:
-                return .ready(executable: executable, version: version, diagnostics: diagnostics)
+                return .ready
             case let .authenticationRequired(message):
-                return .authenticationRequired(executable: executable, version: version, message: message)
+                return .authenticationRequired(message)
             case let .authenticationUncertain(message):
-                return .authenticationUncertain(
-                    executable: executable,
-                    version: version,
-                    diagnostics: diagnostics,
-                    message: message
-                )
+                return .authenticationUncertain(message)
             }
         } catch {
-            return .readinessProbeFailed(
-                executable: executable,
-                version: version,
-                detail: error.localizedDescription
-            )
+            return .failed(error.localizedDescription)
         }
     }
 
@@ -644,27 +591,27 @@ struct ProviderHealthFacts: ProviderHealthEvaluating, CLIProviderHealthFactProvi
         )
     }
 
-    func localCodexHealthProbe(workspace: Workspace) async -> LocalCodexHealthProbeResult {
+    func localCodexExecutableFacts(workspace: Workspace) async -> LocalCodexExecutableFacts {
         let resolution = resolvedLocalExecutable(named: "codex")
-        guard let executable = resolution.resolvedExecutable else {
-            return .executableNotFound(resolution)
-        }
-
         var diagnostics: [ProviderHealthDiagnostic] = []
-        let version = detectLocalVersion(executable: executable, providerName: "Codex", diagnostics: &diagnostics)
+        let version = resolution.resolvedExecutable.map {
+            detectLocalVersion(executable: $0, providerName: "Codex", diagnostics: &diagnostics)
+        } ?? nil
 
+        return LocalCodexExecutableFacts(
+            resolution: resolution,
+            version: version,
+            diagnostics: diagnostics
+        )
+    }
+
+    func probeLocalCodexReadiness(workspace: Workspace, executable: String) async -> LocalCodexReadinessProbeResult {
         do {
             try await codexReadinessProbe.probe(executable: executable, workingDirectory: workspace.folderPath)
+            return .ready
         } catch {
-            return .readinessProbeFailed(
-                executable: executable,
-                version: version,
-                diagnostics: diagnostics,
-                detail: error.localizedDescription
-            )
+            return .failed(error.localizedDescription)
         }
-
-        return .ready(executable: executable, version: version, diagnostics: diagnostics)
     }
 
     func localIBMBobPassiveProbe(workspace: Workspace) async -> LocalIBMBobPassiveProbeResult {
