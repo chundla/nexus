@@ -997,7 +997,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: providerHealthRunner
             ),
@@ -1058,7 +1058,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: [
                     "claude": "/tmp/fake-claude",
                     "codex": "/tmp/fake-codex"
@@ -1114,7 +1114,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: resolver,
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -1177,7 +1177,7 @@ struct nexusTests {
         ])
         let firstService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: providerHealthRunner
             ),
@@ -1207,7 +1207,7 @@ struct nexusTests {
 
         let secondService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [:])
             ),
@@ -1247,7 +1247,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: providerHealthRunner
             ),
@@ -1309,7 +1309,7 @@ struct nexusTests {
         ])
         let firstService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: failedHealthRunner
             ),
@@ -1356,7 +1356,7 @@ struct nexusTests {
         )
         let secondService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: recoveredHealthRunner
             ),
@@ -1389,7 +1389,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -1439,7 +1439,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -1498,7 +1498,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -1559,7 +1559,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -1596,7 +1596,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
@@ -1634,7 +1634,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: [:]),
                 commandRunner: StubCommandRunner(results: [:])
             )
@@ -1682,7 +1682,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
@@ -1724,7 +1724,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -1766,7 +1766,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": resolvedExecutable]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: resolvedExecutable, arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -1803,7 +1803,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/provider-module-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/provider-module-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -1866,7 +1866,7 @@ struct nexusTests {
         ])
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: providerHealthRunner
             ),
@@ -1940,7 +1940,7 @@ struct nexusTests {
         )
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: providerHealthRunner
             ),
@@ -2013,7 +2013,7 @@ struct nexusTests {
         )
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
                 commandRunner: providerHealthRunner
             ),
@@ -2085,7 +2085,7 @@ struct nexusTests {
         )
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
                 commandRunner: providerHealthRunner
             ),
@@ -2149,7 +2149,7 @@ struct nexusTests {
         ])
         let firstService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
                 commandRunner: failedHealthRunner
             ),
@@ -2196,7 +2196,7 @@ struct nexusTests {
         ])
         let secondService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
                 commandRunner: recoveredHealthRunner
             ),
@@ -2268,7 +2268,7 @@ struct nexusTests {
         )
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: providerHealthRunner
             ),
@@ -2379,7 +2379,7 @@ struct nexusTests {
         )
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: providerHealthRunner
             ),
@@ -2445,7 +2445,7 @@ struct nexusTests {
         ])
         let firstService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: providerHealthRunner
             ),
@@ -2478,7 +2478,7 @@ struct nexusTests {
         let launchedSession = try await firstClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
         let restartedService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: providerHealthRunner
             ),
@@ -2537,7 +2537,7 @@ struct nexusTests {
         ])
         let firstService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: providerHealthRunner
             ),
@@ -2570,7 +2570,7 @@ struct nexusTests {
         let launchedSession = try await firstClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
         let restartedService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: providerHealthRunner
             ),
@@ -2625,7 +2625,7 @@ struct nexusTests {
         ])
         let firstService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: providerHealthRunner
             ),
@@ -2658,7 +2658,7 @@ struct nexusTests {
         let launchedSession = try await firstClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
         let restartedService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: providerHealthRunner
             ),
@@ -2725,7 +2725,7 @@ struct nexusTests {
         ])
         let firstService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: providerHealthRunner
             ),
@@ -2758,7 +2758,7 @@ struct nexusTests {
         let launchedSession = try await firstClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
         let restartedService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: providerHealthRunner
             ),
@@ -2815,7 +2815,7 @@ struct nexusTests {
         ])
         let firstService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: failedHealthRunner
             ),
@@ -2862,7 +2862,7 @@ struct nexusTests {
         ])
         let secondService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: recoveredHealthRunner
             ),
@@ -2901,7 +2901,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -2936,7 +2936,7 @@ struct nexusTests {
 
         let firstService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -3005,7 +3005,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -3047,7 +3047,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
@@ -3101,7 +3101,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -3141,7 +3141,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -3179,7 +3179,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -3213,7 +3213,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -3252,7 +3252,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -3289,7 +3289,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -3325,7 +3325,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -3361,7 +3361,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -3394,7 +3394,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -3429,7 +3429,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -3465,7 +3465,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -3501,7 +3501,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -3537,7 +3537,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -3573,7 +3573,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -3609,7 +3609,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -3645,7 +3645,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -3681,7 +3681,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -3717,7 +3717,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -3753,7 +3753,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -3789,7 +3789,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -3825,7 +3825,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -3859,7 +3859,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -3895,7 +3895,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -3931,7 +3931,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -3967,7 +3967,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -4003,7 +4003,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -4039,7 +4039,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -4075,7 +4075,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -4111,7 +4111,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -4147,7 +4147,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -4183,7 +4183,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -4220,7 +4220,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -4256,7 +4256,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -4292,7 +4292,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -4328,7 +4328,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -4364,7 +4364,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -4400,7 +4400,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -4436,7 +4436,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -4472,7 +4472,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -4508,7 +4508,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -4544,7 +4544,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -4580,7 +4580,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -4616,7 +4616,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -4652,7 +4652,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -4688,7 +4688,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -4724,7 +4724,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -4760,7 +4760,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -4796,7 +4796,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -4832,7 +4832,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -4868,7 +4868,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -4904,7 +4904,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -4940,7 +4940,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -4976,7 +4976,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -5012,7 +5012,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -5072,7 +5072,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -5124,7 +5124,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -5172,7 +5172,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -5230,7 +5230,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -5288,7 +5288,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -5345,7 +5345,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -5400,7 +5400,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -5455,7 +5455,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -5511,7 +5511,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -5571,7 +5571,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -5625,7 +5625,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -5683,7 +5683,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -5739,7 +5739,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -5785,7 +5785,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -5828,7 +5828,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -5868,7 +5868,7 @@ struct nexusTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let healthEvaluator = ProviderHealthEvaluator(
+        let healthEvaluator = ProviderHealthFacts(
             executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
             commandRunner: StubCommandRunner(results: [
                 StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -5916,7 +5916,7 @@ struct nexusTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let healthEvaluator = ProviderHealthEvaluator(
+        let healthEvaluator = ProviderHealthFacts(
             executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
             commandRunner: StubCommandRunner(results: [
                 StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -5962,7 +5962,7 @@ struct nexusTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let healthEvaluator = ProviderHealthEvaluator(
+        let healthEvaluator = ProviderHealthFacts(
             executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
             commandRunner: StubCommandRunner(results: [
                 StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -6014,7 +6014,7 @@ struct nexusTests {
         })
         let firstService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/claude-a"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/claude-a", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -6034,7 +6034,7 @@ struct nexusTests {
 
         let restartedService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: [:]),
                 commandRunner: StubCommandRunner(results: [:])
             ),
@@ -6065,7 +6065,7 @@ struct nexusTests {
 
         let firstService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/claude-a"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/claude-a", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -6087,7 +6087,7 @@ struct nexusTests {
 
         let restartedService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/claude-b"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/claude-b", arguments: ["--version"]): .success(stdout: "9.9.10 (Claude Code)\n"),
@@ -6119,7 +6119,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: [:]),
                 commandRunner: StubCommandRunner(results: [:])
             )
@@ -6304,7 +6304,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -6600,7 +6600,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
@@ -6646,7 +6646,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
@@ -6744,7 +6744,7 @@ struct nexusTests {
                 session: Session,
                 workspace: Workspace,
                 launchConfiguration: SessionRuntimeLaunchConfiguration
-            ) throws -> any SessionRuntime {
+            ) async throws -> any SessionRuntime {
                 switch session.providerID {
                 case .claude:
                     CompatibilityStaticSessionRuntime(transcript: "Claude ready")
@@ -6770,7 +6770,7 @@ struct nexusTests {
 
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: [
                     "claude": "/tmp/fake-claude",
                     "codex": "/tmp/fake-codex",
@@ -6877,7 +6877,7 @@ struct nexusTests {
 
             return try NexusService.bootstrapForTests(
                 rootURL: rootURL,
-                providerHealthEvaluator: ProviderHealthEvaluator(
+                providerHealthEvaluator: ProviderHealthFacts(
                     executableResolver: StubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
                     commandRunner: StubCommandRunner(results: [
                         StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
@@ -6934,7 +6934,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
@@ -7008,7 +7008,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -7240,7 +7240,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: [:]),
                 commandRunner: StubCommandRunner(results: [:])
             )
@@ -7286,7 +7286,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -7353,7 +7353,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -7418,7 +7418,7 @@ struct nexusTests {
         ])
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: providerHealthRunner
             ),
@@ -7480,7 +7480,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -7516,7 +7516,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -7551,7 +7551,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -7751,7 +7751,7 @@ struct nexusTests {
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),

@@ -983,10 +983,15 @@ final class RemoteClientPairingModel {
             )
             focusedSessionObservation = observation
 
+            // HTTP observation startup can queue the initial screen back onto the MainActor.
+            // Yield once so that update lands before we decide whether a fallback fetch is needed.
+            await Task.yield()
+
             if focusedSessionScreen?.session.id != sessionID {
                 do {
                     let initialScreen = try await client.fetchSessionScreen(for: pairedMac, sessionID: sessionID)
-                    if focusedSessionID == sessionID {
+                    if focusedSessionID == sessionID,
+                       focusedSessionScreen?.session.id != sessionID {
                         focusedSessionScreen = initialScreen
                         focusedSessionIsStale = false
                         focusedSessionErrorMessage = nil

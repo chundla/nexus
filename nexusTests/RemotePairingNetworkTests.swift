@@ -353,7 +353,7 @@ struct RemotePairingNetworkTests {
 
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
@@ -456,7 +456,7 @@ struct RemotePairingNetworkTests {
 
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
@@ -512,7 +512,7 @@ struct RemotePairingNetworkTests {
 
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
@@ -574,7 +574,7 @@ struct RemotePairingNetworkTests {
         )
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: RemotePairingTestExecutableResolver(executables: ["bob": "/tmp/fake-bob"]),
                 commandRunner: RemotePairingTestCommandRunner(results: [
                     RemotePairingTestCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--version'"]): .success(stdout: "3.4.5\n"),
@@ -674,7 +674,7 @@ struct RemotePairingNetworkTests {
 
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: [:]),
                 commandRunner: StubCommandRunner(results: [:])
             )
@@ -729,7 +729,7 @@ struct RemotePairingNetworkTests {
         )
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
@@ -801,7 +801,7 @@ struct RemotePairingNetworkTests {
         )
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
@@ -861,7 +861,7 @@ struct RemotePairingNetworkTests {
 
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
@@ -919,7 +919,7 @@ struct RemotePairingNetworkTests {
 
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
@@ -1184,7 +1184,7 @@ struct RemotePairingNetworkTests {
         ])
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: failedHealthRunner
             ),
@@ -1455,7 +1455,7 @@ struct RemotePairingNetworkTests {
 
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: RemotePairingTestExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
                 commandRunner: RemotePairingTestCommandRunner(results: [
                     RemotePairingTestCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -1529,7 +1529,7 @@ struct RemotePairingNetworkTests {
 
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: RemotePairingTestExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
                 commandRunner: RemotePairingTestCommandRunner(results: [
                     RemotePairingTestCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -1618,7 +1618,7 @@ struct RemotePairingNetworkTests {
 
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: RemotePairingTestExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
                 commandRunner: RemotePairingTestCommandRunner(results: [
                     RemotePairingTestCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
@@ -1670,7 +1670,7 @@ struct RemotePairingNetworkTests {
 
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: RemotePairingTestExecutableResolver(executables: ["claude": "/bin/cat"]),
                 commandRunner: RemotePairingTestCommandRunner(results: [
                     RemotePairingTestCommandRunner.Invocation(executable: "/bin/cat", arguments: ["--version"]): .success(stdout: "cat (test)\n"),
@@ -1749,7 +1749,7 @@ struct RemotePairingNetworkTests {
         let delayedRuntimeManager = DelayedEchoSessionRuntimeManager(initialTranscript: "Ready\n> ayyy")
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: RemotePairingTestExecutableResolver(executables: ["claude": "/bin/cat"]),
                 commandRunner: RemotePairingTestCommandRunner(results: [
                     RemotePairingTestCommandRunner.Invocation(executable: "/bin/cat", arguments: ["--version"]): .success(stdout: "cat (test)\n"),
@@ -1827,7 +1827,7 @@ struct RemotePairingNetworkTests {
         })
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthEvaluator(
+            providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: RemotePairingTestExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
                 commandRunner: RemotePairingTestCommandRunner(results: [
                     RemotePairingTestCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
