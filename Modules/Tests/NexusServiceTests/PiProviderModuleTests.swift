@@ -514,6 +514,109 @@ struct PiProviderModuleTests {
             remoteContext: remoteContext
         ))
     }
+
+    @Test func piProviderModuleChoosesLocalProtocolNativeRuntimeConstructionThroughProviderModuleSeam() async throws {
+        let module = PiProviderModule()
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Local Pi",
+            kind: .local,
+            folderPath: "/tmp/local-pi",
+            primaryGroupID: UUID()
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let tracker = PiRuntimeConstructionTracker()
+
+        let runtime = try await module.constructRuntime(
+            for: session,
+            workspace: workspace,
+            launchConfiguration: SessionRuntimeLaunchConfiguration(
+                executable: "/tmp/fake-pi",
+                workingDirectory: workspace.folderPath,
+                remoteHost: nil
+            ),
+            actions: ProviderModuleRuntimeConstructionActions(
+                makeLocalTerminalRuntime: {
+                    Issue.record("Pi should not choose a terminal runtime for local structured Sessions")
+                    return StaticPiRuntime()
+                },
+                makeRemoteTerminalRuntime: {
+                    Issue.record("Pi should not choose a terminal runtime for local structured Sessions")
+                    return StaticPiRuntime()
+                },
+                makeLocalProtocolNativeRuntime: {
+                    tracker.requests.append(.localProtocolNative)
+                    return StaticPiRuntime()
+                },
+                makeRemoteProtocolNativeRuntime: {
+                    Issue.record("Pi should not choose a remote runtime for local structured Sessions")
+                    return StaticPiRuntime()
+                }
+            )
+        )
+
+        #expect(tracker.requests == [.localProtocolNative])
+        #expect(runtime?.sessionScreen(for: session).primarySurface == .structuredActivityFeed)
+    }
+
+    @Test func piProviderModuleChoosesRemoteProtocolNativeRuntimeConstructionThroughProviderModuleSeam() async throws {
+        let module = PiProviderModule()
+        let host = NexusDomain.Host(id: UUID(), name: "Build Server", sshTarget: "build-box")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Remote Pi",
+            kind: .remote,
+            folderPath: "/srv/api",
+            primaryGroupID: UUID(),
+            remoteHostID: host.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let tracker = PiRuntimeConstructionTracker()
+
+        let runtime = try await module.constructRuntime(
+            for: session,
+            workspace: workspace,
+            launchConfiguration: SessionRuntimeLaunchConfiguration(
+                executable: "/home/tester/.local/bin/pi",
+                workingDirectory: workspace.folderPath,
+                remoteHost: host,
+                remoteRuntimeIdentifier: "nexus-runtime-1"
+            ),
+            actions: ProviderModuleRuntimeConstructionActions(
+                makeLocalTerminalRuntime: {
+                    Issue.record("Pi should not choose a terminal runtime for remote structured Sessions")
+                    return StaticPiRuntime()
+                },
+                makeRemoteTerminalRuntime: {
+                    Issue.record("Pi should not choose a terminal runtime for remote structured Sessions")
+                    return StaticPiRuntime()
+                },
+                makeLocalProtocolNativeRuntime: {
+                    Issue.record("Pi should not choose a local runtime for remote structured Sessions")
+                    return StaticPiRuntime()
+                },
+                makeRemoteProtocolNativeRuntime: {
+                    tracker.requests.append(.remoteProtocolNative)
+                    return StaticPiRuntime()
+                }
+            )
+        )
+
+        #expect(tracker.requests == [.remoteProtocolNative])
+        #expect(runtime?.sessionScreen(for: session).primarySurface == .structuredActivityFeed)
+    }
 }
 
 private func makeFreshOpenSessionActions(
@@ -559,6 +662,32 @@ private final class RecordingPiProviderHealthEvaluator: @unchecked Sendable, Pro
         requests.append(.init(providerID: providerID, workspaceID: workspace.id))
         return summary
     }
+}
+
+private enum PiRuntimeConstructionRequest: Equatable {
+    case localProtocolNative
+    case remoteProtocolNative
+}
+
+private final class PiRuntimeConstructionTracker: @unchecked Sendable {
+    var requests: [PiRuntimeConstructionRequest] = []
+}
+
+private final class StaticPiRuntime: SessionRuntime, @unchecked Sendable {
+    var state: Session.State = .ready
+    var sessionRecordAdapterMetadata: SessionRecordAdapterMetadata? { nil }
+
+    func sessionScreen(for session: Session) -> SessionScreen {
+        SessionScreen(session: session, primarySurface: .structuredActivityFeed, transcript: "Pi ready")
+    }
+
+    func setChangeHandler(_ handler: (@Sendable () -> Void)?) {}
+    func stop() throws {}
+    func sendInput(_ text: String) throws {}
+    func sendText(_ text: String) throws {}
+    func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool) throws {}
+    func respondToApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision) throws {}
+    func resize(columns: Int, rows: Int) throws {}
 }
 
 #endif

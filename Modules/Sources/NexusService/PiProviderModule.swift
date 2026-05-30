@@ -83,5 +83,18 @@ struct PiProviderModule: ProviderModule {
             || normalized.contains("invalid session")
             || normalized.contains("session not found")
     }
+
+    func constructRuntime(
+        for session: Session,
+        workspace: Workspace,
+        launchConfiguration: SessionRuntimeLaunchConfiguration,
+        actions: ProviderModuleRuntimeConstructionActions
+    ) async throws -> (any SessionRuntime)? {
+        if workspace.kind == .remote {
+            return try await actions.makeRemoteProtocolNativeRuntime()
+        }
+
+        return try await actions.makeLocalProtocolNativeRuntime()
+    }
 }
 #endif
