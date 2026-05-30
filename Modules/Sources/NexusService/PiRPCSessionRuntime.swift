@@ -58,6 +58,15 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         return sessionLinkage?.sessionRecordAdapterMetadata
     }
 
+    func consumeSessionTransition() -> SessionRuntimeSessionTransition? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard pendingSessionTransitions.isEmpty == false else {
+            return nil
+        }
+        return pendingSessionTransitions.removeFirst()
+    }
+
     private let lock = NSLock()
     private let transport: any PiRPCTransporting
     private let stopHandler: (() throws -> Void)?
@@ -93,6 +102,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     private var terminalColumns = 80
     private var terminalRows = 24
     private var sessionLinkage: PiSessionLinkage?
+    private var pendingSessionTransitions: [SessionRuntimeSessionTransition] = []
     private var changeHandler: (@Sendable () -> Void)?
     private var isStreaming = false
     private var assistantTranscriptIndex: Int?
@@ -736,6 +746,8 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             handleExtensionUIRequest(object)
         case "queue_update":
             handleQueueUpdate(object)
+        case "new_session", "switch_session":
+            handleSessionTransitionEvent(object)
         case "tool_execution_start":
             handleToolExecutionStart(object)
         case "tool_execution_update":
@@ -1587,6 +1599,42 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
                 source: .builtIn
             )
         ] + steeringModes + followUpModes
+    }
+
+    private func handleSessionTransitionEvent(_ object: [String: Any]) {
+        guard let linkage = sessionTransitionLinkage(from: object),
+              let metadata = linkage.sessionRecordAdapterMetadata else {
+            notifyChange()
+            return
+        }
+
+        lock.lock()
+        sessionLinkage = linkage
+        pendingSessionTransitions.append(
+            SessionRuntimeSessionTransition(sessionRecordAdapterMetadata: metadata)
+        )
+        lock.unlock()
+        notifyChange()
+    }
+
+    private func sessionTransitionLinkage(from object: [String: Any]) -> PiSessionLinkage? {
+        let candidates: [[String: Any]] = [
+            object,
+            object["data"] as? [String: Any],
+            object["session"] as? [String: Any]
+        ].compactMap { $0 }
+
+        for candidate in candidates {
+            let linkage = PiSessionLinkage(
+                piSessionID: string(for: "sessionId", in: candidate) ?? string(for: "session_id", in: candidate),
+                sessionFile: string(for: "sessionFile", in: candidate) ?? string(for: "session_file", in: candidate)
+            )
+            if linkage.isEmpty == false {
+                return linkage
+            }
+        }
+
+        return nil
     }
 
     private func mergedSlashCommandsLocked() -> [SessionSlashCommand]? {

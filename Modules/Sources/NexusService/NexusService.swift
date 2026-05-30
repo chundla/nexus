@@ -23,6 +23,10 @@ public enum NexusEmbeddedServiceBootstrap {
     }
 }
 
+struct SessionRuntimeSessionTransition: Equatable, Sendable {
+    let sessionRecordAdapterMetadata: SessionRecordAdapterMetadata
+}
+
 protocol SessionRuntimeManaging: AnyObject {
     func setRuntimeChangeHandler(_ handler: (@Sendable (UUID) -> Void)?)
     func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) async throws
@@ -31,6 +35,8 @@ protocol SessionRuntimeManaging: AnyObject {
     func hasRuntime(for session: Session) -> Bool
     func runtimeState(for session: Session) -> Session.State?
     func sessionRecordAdapterMetadata(for session: Session) -> SessionRecordAdapterMetadata?
+    func consumeSessionTransition(for session: Session) -> SessionRuntimeSessionTransition?
+    func moveRuntime(from sourceSessionID: UUID, to targetSessionID: UUID)
     func sessionScreen(for session: Session) throws -> SessionScreen
     func addUpdateObserver(id: UUID, for session: Session, observer: @escaping @Sendable () -> Void)
     func removeUpdateObserver(id: UUID)
@@ -43,6 +49,16 @@ protocol SessionRuntimeManaging: AnyObject {
 }
 
 extension SessionRuntimeManaging {
+    func consumeSessionTransition(for session: Session) -> SessionRuntimeSessionTransition? {
+        _ = session
+        return nil
+    }
+
+    func moveRuntime(from sourceSessionID: UUID, to targetSessionID: UUID) {
+        _ = sourceSessionID
+        _ = targetSessionID
+    }
+
     func respondToExtensionDialog(_ dialogID: String, response: SessionExtensionUIDialogResponse, to session: Session) throws -> SessionScreen {
         _ = dialogID
         _ = response
@@ -102,6 +118,7 @@ protocol SessionRuntimeLaunching {
 protocol SessionRuntime: AnyObject {
     var state: Session.State { get }
     var sessionRecordAdapterMetadata: SessionRecordAdapterMetadata? { get }
+    func consumeSessionTransition() -> SessionRuntimeSessionTransition?
     func sessionScreen(for session: Session) -> SessionScreen
     func setChangeHandler(_ handler: (@Sendable () -> Void)?)
     func stop() throws
@@ -114,6 +131,10 @@ protocol SessionRuntime: AnyObject {
 }
 
 extension SessionRuntime {
+    func consumeSessionTransition() -> SessionRuntimeSessionTransition? {
+        nil
+    }
+
     func respondToExtensionDialog(_ dialogID: String, response: SessionExtensionUIDialogResponse) throws {
         _ = dialogID
         _ = response
@@ -176,6 +197,26 @@ final class SessionControllerRegistry: @unchecked Sendable {
         record.controller = .mac
         records[sessionID] = record
         return record.lastKnownMacSize
+    }
+
+    func moveController(from sourceSessionID: UUID, to targetSessionID: UUID) {
+        guard sourceSessionID != targetSessionID else {
+            return
+        }
+
+        lock.lock()
+        defer { lock.unlock() }
+
+        var sourceRecord = records[sourceSessionID] ?? Record()
+        var targetRecord = records[targetSessionID] ?? Record()
+        if targetRecord.lastKnownMacSize == nil {
+            targetRecord.lastKnownMacSize = sourceRecord.lastKnownMacSize
+        }
+        targetRecord.controller = sourceRecord.controller
+        records[targetSessionID] = targetRecord
+
+        sourceRecord.controller = .mac
+        records[sourceSessionID] = sourceRecord
     }
 }
 
@@ -298,6 +339,36 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Se
         lock.lock()
         defer { lock.unlock() }
         return runtimes[session.id]?.sessionRecordAdapterMetadata
+    }
+
+    func consumeSessionTransition(for session: Session) -> SessionRuntimeSessionTransition? {
+        lock.lock()
+        let runtime = runtimes[session.id]
+        lock.unlock()
+        return runtime?.consumeSessionTransition()
+    }
+
+    func moveRuntime(from sourceSessionID: UUID, to targetSessionID: UUID) {
+        guard sourceSessionID != targetSessionID else {
+            return
+        }
+
+        let runtime: (any SessionRuntime)?
+        let replacedRuntime: (any SessionRuntime)?
+        lock.lock()
+        runtime = runtimes.removeValue(forKey: sourceSessionID)
+        if let runtime {
+            replacedRuntime = runtimes.updateValue(runtime, forKey: targetSessionID)
+        } else {
+            replacedRuntime = nil
+        }
+        lock.unlock()
+
+        replacedRuntime?.setChangeHandler(nil)
+        runtime?.setChangeHandler { [weak self] in
+            self?.notifyRuntimeChange(for: targetSessionID)
+        }
+        notifyRuntimeChange(for: targetSessionID)
     }
 
     func sessionScreen(for session: Session) throws -> SessionScreen {
@@ -1289,6 +1360,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     private let remoteAccessRuntime: RemoteAccessRuntime
     private let ibmBobNativeSessionCleaner: any IBMBobNativeSessionCleaning
     private let sessionControllerRegistry = SessionControllerRegistry()
+    private let piSessionRedirectLock = NSLock()
+    private var pendingPiSessionRedirects: [UUID: UUID] = [:]
 
     private init(
         listener: NSXPCListener,
@@ -1440,6 +1513,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             )
         )
         self.sessionRuntimeManager.setRuntimeChangeHandler { [weak self] sessionID in
+            self?.handlePiSessionTransitionAfterRuntimeChange(sessionID: sessionID)
             self?.persistRuntimeLinkageAfterRuntimeChange(sessionID: sessionID)
             self?.persistSessionStateAfterRuntimeChange(sessionID: sessionID)
         }
@@ -1871,7 +1945,10 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     func sendSessionInput(sessionID: UUID, text: String) async throws -> SessionScreen {
-        try await sessionInteraction.sendSessionInput(sessionID: sessionID, text: text)
+        sessionScreenAfterPiRedirectIfNeeded(
+            sourceSessionID: sessionID,
+            fallback: try await sessionInteraction.sendSessionInput(sessionID: sessionID, text: text)
+        )
     }
 
     func sendSessionText(sessionID: UUID, text: String) throws -> SessionScreen {
@@ -1951,10 +2028,13 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         approvalRequestID: UUID,
         decision: ApprovalRequestDecision
     ) async throws -> SessionScreen {
-        try await sessionInteraction.respondToApprovalRequest(
-            sessionID: sessionID,
-            approvalRequestID: approvalRequestID,
-            decision: decision
+        sessionScreenAfterPiRedirectIfNeeded(
+            sourceSessionID: sessionID,
+            fallback: try await sessionInteraction.respondToApprovalRequest(
+                sessionID: sessionID,
+                approvalRequestID: approvalRequestID,
+                decision: decision
+            )
         )
     }
 
@@ -1977,10 +2057,13 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         dialogID: String,
         response: SessionExtensionUIDialogResponse
     ) async throws -> SessionScreen {
-        try await sessionInteraction.respondToExtensionDialog(
-            sessionID: sessionID,
-            dialogID: dialogID,
-            response: response
+        sessionScreenAfterPiRedirectIfNeeded(
+            sourceSessionID: sessionID,
+            fallback: try await sessionInteraction.respondToExtensionDialog(
+                sessionID: sessionID,
+                dialogID: dialogID,
+                response: response
+            )
         )
     }
 
@@ -2052,10 +2135,13 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     func sendRemoteSessionInput(sessionID: UUID, pairedDeviceID: UUID, text: String) async throws -> SessionScreen {
-        try await sessionInteraction.sendRemoteSessionInput(
-            sessionID: sessionID,
-            pairedDeviceID: pairedDeviceID,
-            text: text
+        sessionScreenAfterPiRedirectIfNeeded(
+            sourceSessionID: sessionID,
+            fallback: try await sessionInteraction.sendRemoteSessionInput(
+                sessionID: sessionID,
+                pairedDeviceID: pairedDeviceID,
+                text: text
+            )
         )
     }
 
@@ -2081,11 +2167,14 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         approvalRequestID: UUID,
         decision: ApprovalRequestDecision
     ) async throws -> SessionScreen {
-        try await sessionInteraction.respondToRemoteApprovalRequest(
-            sessionID: sessionID,
-            pairedDeviceID: pairedDeviceID,
-            approvalRequestID: approvalRequestID,
-            decision: decision
+        sessionScreenAfterPiRedirectIfNeeded(
+            sourceSessionID: sessionID,
+            fallback: try await sessionInteraction.respondToRemoteApprovalRequest(
+                sessionID: sessionID,
+                pairedDeviceID: pairedDeviceID,
+                approvalRequestID: approvalRequestID,
+                decision: decision
+            )
         )
     }
 
@@ -2111,11 +2200,14 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         dialogID: String,
         response: SessionExtensionUIDialogResponse
     ) async throws -> SessionScreen {
-        try await sessionInteraction.respondToRemoteExtensionDialog(
-            sessionID: sessionID,
-            pairedDeviceID: pairedDeviceID,
-            dialogID: dialogID,
-            response: response
+        sessionScreenAfterPiRedirectIfNeeded(
+            sourceSessionID: sessionID,
+            fallback: try await sessionInteraction.respondToRemoteExtensionDialog(
+                sessionID: sessionID,
+                pairedDeviceID: pairedDeviceID,
+                dialogID: dialogID,
+                response: response
+            )
         )
     }
 
@@ -2550,6 +2642,115 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         }
 
         try? persistRuntimeLinkageIfNeeded(for: session)
+    }
+
+    private func handlePiSessionTransitionAfterRuntimeChange(sessionID: UUID) {
+        guard let sourceSession = (try? sessionRecordStore.session(id: sessionID)) ?? nil,
+              sourceSession.providerID == .pi,
+              let transition = sessionRuntimeManager.consumeSessionTransition(for: sourceSession),
+              let targetLinkage = transition.sessionRecordAdapterMetadata.piSessionLinkage else {
+            return
+        }
+
+        try? applyPiSessionTransition(from: sourceSession, targetLinkage: targetLinkage)
+    }
+
+    private func applyPiSessionTransition(from sourceSession: Session, targetLinkage: PiSessionLinkage) throws {
+        let existingSessions = try sessionRecordStore.listSessions(workspaceID: sourceSession.workspaceID, providerID: sourceSession.providerID)
+        let existingTargetSession = try matchingPiSessionRecord(
+            in: existingSessions,
+            excluding: sourceSession.id,
+            targetLinkage: targetLinkage
+        )
+        let targetSession = if let existingTargetSession {
+            try sessionRecordStore.updateSession(id: existingTargetSession.id, state: .ready, failureMessage: nil)
+        } else {
+            try createPiTransitionNamedSession(from: sourceSession, existingSessions: existingSessions)
+        }
+
+        if let metadata = targetLinkage.sessionRecordAdapterMetadata {
+            try sessionRecordStore.saveSessionRecordAdapterMetadata(sessionID: targetSession.id, metadata: metadata)
+        }
+        sessionControllerRegistry.moveController(from: sourceSession.id, to: targetSession.id)
+        sessionRuntimeManager.moveRuntime(from: sourceSession.id, to: targetSession.id)
+        recordPiSessionRedirect(from: sourceSession.id, to: targetSession.id)
+    }
+
+    private func matchingPiSessionRecord(
+        in sessions: [Session],
+        excluding sourceSessionID: UUID,
+        targetLinkage: PiSessionLinkage
+    ) throws -> Session? {
+        for session in sessions where session.id != sourceSessionID {
+            guard let linkage = try sessionRecordStore.sessionRecordAdapterMetadata(sessionID: session.id)?.piSessionLinkage else {
+                continue
+            }
+            if piSessionLinkage(linkage, matches: targetLinkage) {
+                return session
+            }
+        }
+        return nil
+    }
+
+    private func createPiTransitionNamedSession(from sourceSession: Session, existingSessions: [Session]) throws -> Session {
+        let session = try sessionRecordStore.createNamedSession(
+            workspaceID: sourceSession.workspaceID,
+            providerID: sourceSession.providerID,
+            name: resolveNamedSessionName(nil, existingSessions: existingSessions),
+            state: .ready,
+            failureMessage: nil
+        )
+
+        if let launchSnapshot = try sessionRecordStore.launchSnapshot(sessionID: sourceSession.id) {
+            _ = try sessionRecordStore.ensureLaunchSnapshot(
+                sessionID: session.id,
+                workspaceID: session.workspaceID,
+                providerID: session.providerID,
+                primarySurface: launchSnapshot.primarySurface,
+                resolvedExecutable: launchSnapshot.resolvedExecutable,
+                resolvedWorkingDirectory: launchSnapshot.resolvedWorkingDirectory
+            )
+        }
+
+        let terminalSize = try sessionRecordStore.sessionTerminalSize(id: sourceSession.id)
+        try sessionRecordStore.updateSessionTerminalSize(id: session.id, columns: terminalSize.columns, rows: terminalSize.rows)
+        return session
+    }
+
+    private func piSessionLinkage(_ lhs: PiSessionLinkage, matches rhs: PiSessionLinkage) -> Bool {
+        let lhsFile = lhs.sessionFile?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rhsFile = rhs.sessionFile?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let lhsFile, let rhsFile, lhsFile.isEmpty == false, lhsFile == rhsFile {
+            return true
+        }
+
+        let lhsID = lhs.piSessionID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rhsID = rhs.piSessionID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return lhsID != nil && lhsID == rhsID && lhsID?.isEmpty == false
+    }
+
+    private func recordPiSessionRedirect(from sourceSessionID: UUID, to targetSessionID: UUID) {
+        guard sourceSessionID != targetSessionID else {
+            return
+        }
+
+        piSessionRedirectLock.lock()
+        pendingPiSessionRedirects[sourceSessionID] = targetSessionID
+        piSessionRedirectLock.unlock()
+    }
+
+    private func consumePiSessionRedirect(for sourceSessionID: UUID) -> UUID? {
+        piSessionRedirectLock.lock()
+        defer { piSessionRedirectLock.unlock() }
+        return pendingPiSessionRedirects.removeValue(forKey: sourceSessionID)
+    }
+
+    private func sessionScreenAfterPiRedirectIfNeeded(sourceSessionID: UUID, fallback: SessionScreen) -> SessionScreen {
+        guard let redirectedSessionID = consumePiSessionRedirect(for: sourceSessionID),
+              let redirectedScreen = try? getSessionScreen(sessionID: redirectedSessionID) else {
+            return fallback
+        }
+        return redirectedScreen
     }
 
     private func persistSessionStateAfterRuntimeChange(sessionID: UUID) {
