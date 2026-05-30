@@ -521,6 +521,65 @@ struct NexusServicePiSessionStreamTests {
         #expect(commandNames.contains("follow-up-mode one-at-a-time"))
     }
 
+    @Test func localPiRuntimeGetsForkMessagesViaBuiltInCommand() throws {
+        let transport = TestPiRPCTransport(
+            forkMessages: [
+                TestPiRPCForkMessage(entryID: "abc123", text: "First prompt..."),
+                TestPiRPCForkMessage(entryID: "def456", text: "Second prompt...")
+            ]
+        )
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("/fork-messages")
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"get_fork_messages\"") }))
+        #expect(screen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "/fork-messages",
+            "Fork message abc123: First prompt...",
+            "Fork message def456: Second prompt..."
+        ])
+        #expect(screen.activityItems.map(\.kind) == [.status, .command, .status, .status])
+    }
+
+    @Test func localPiRuntimePublishesSessionGraphCommands() throws {
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in TestPiRPCTransport() }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        let commandNames = runtime.sessionScreen(for: session).slashCommands?.map(\.name) ?? []
+
+        #expect(commandNames.contains("fork"))
+        #expect(commandNames.contains("clone"))
+        #expect(commandNames.contains("fork-messages"))
+        #expect(commandNames.contains("session-name"))
+    }
+
     @Test func localPiRuntimeAbortsActiveRunViaCommand() throws {
         let transport = QueueControlPiRPCTransport()
         let runtime = try PiRPCSessionRuntime(
@@ -2069,10 +2128,23 @@ private struct TestPiRPCModel {
     }
 }
 
+private struct TestPiRPCForkMessage {
+    let entryID: String
+    let text: String
+
+    func responseObject() -> [String: Any] {
+        [
+            "entryId": entryID,
+            "text": text
+        ]
+    }
+}
+
 private final class TestPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
     private let promptResponseText: String
     private let slashCommands: [TestPiRPCCommand]
     private let availableModels: [TestPiRPCModel]
+    private let forkMessages: [TestPiRPCForkMessage]
     private let stateModel: TestPiRPCModel?
     private let stateThinkingLevel: String?
     private(set) var sentLines: [String] = []
@@ -2083,12 +2155,14 @@ private final class TestPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
         promptResponseText: String = "",
         slashCommands: [TestPiRPCCommand] = [],
         availableModels: [TestPiRPCModel] = [],
+        forkMessages: [TestPiRPCForkMessage] = [],
         stateModel: TestPiRPCModel? = nil,
         stateThinkingLevel: String? = nil
     ) {
         self.promptResponseText = promptResponseText
         self.slashCommands = slashCommands
         self.availableModels = availableModels
+        self.forkMessages = forkMessages
         self.stateModel = stateModel
         self.stateThinkingLevel = stateThinkingLevel
     }
@@ -2148,6 +2222,16 @@ private final class TestPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
                 "success": true,
                 "data": [
                     "models": availableModels.map { $0.responseObject() }
+                ]
+            ])
+        case "get_fork_messages":
+            emit([
+                "id": object["id"] as? String ?? "fork-messages",
+                "type": "response",
+                "command": "get_fork_messages",
+                "success": true,
+                "data": [
+                    "messages": forkMessages.map { $0.responseObject() }
                 ]
             ])
         case "set_model":

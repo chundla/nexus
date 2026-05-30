@@ -1106,6 +1106,26 @@ final class NexusMetadataStore {
         }
     }
 
+    func updateSessionName(id: UUID, name: String?) throws -> Session {
+        let trimmedName = name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return try withLock {
+            let statement = try prepare(
+                "UPDATE sessions SET name = ? WHERE id = ?;"
+            )
+            defer { sqlite3_finalize(statement) }
+
+            try bind(trimmedName?.isEmpty == false ? trimmedName : nil, at: 1, in: statement)
+            try bind(id.uuidString, at: 2, in: statement)
+            try stepDone(statement)
+
+            guard let session = try sessionWithoutLock(id: id) else {
+                throw NexusMetadataStoreError.sessionNotFound
+            }
+
+            return session
+        }
+    }
+
     func deleteSession(id: UUID) throws -> Bool {
         try withLock {
             let statement = try prepare("DELETE FROM sessions WHERE id = ?;")

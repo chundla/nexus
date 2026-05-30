@@ -566,6 +566,10 @@ private final class TrackingSessionRecordStore: SessionRecordStore {
         try metadataStore.updateSession(id: id, state: state, failureMessage: failureMessage)
     }
 
+    func updateSessionName(id: UUID, name: String?) throws -> Session {
+        try metadataStore.updateSessionName(id: id, name: name)
+    }
+
     func deleteSessionRecord(id: UUID) throws -> Bool {
         try metadataStore.deleteSession(id: id)
     }

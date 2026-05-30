@@ -83,6 +83,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     private var followUpMode = "one-at-a-time"
     private var queuedSteeringMessages: [String] = []
     private var queuedFollowUpMessages: [String] = []
+    private var currentSessionName: String?
     private var runtimeState: Session.State = .ready
     private var transcriptEntries: [String] = []
     private var interruptedFailureMessage: String?
@@ -116,6 +117,8 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     private var pendingSetThinkingLevelsByRequestID: [String: String] = [:]
     private var pendingSetSteeringModesByRequestID: [String: String] = [:]
     private var pendingSetFollowUpModesByRequestID: [String: String] = [:]
+    private var pendingSetSessionNamesByRequestID: [String: String] = [:]
+    private var pendingSessionTransitionStateRequestIDs: Set<String> = []
     private var nextSlashCommandsRequestSequence = 0
     private var nextAvailableModelsRequestSequence = 0
     private var nextSetThinkingRequestSequence = 0
@@ -253,8 +256,19 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     func sessionScreen(for session: Session) -> SessionScreen {
         lock.lock()
         defer { lock.unlock() }
+        let currentSession = currentSessionName.map {
+            Session(
+                id: session.id,
+                workspaceID: session.workspaceID,
+                providerID: session.providerID,
+                name: $0,
+                isDefault: session.isDefault,
+                state: session.state,
+                failureMessage: session.failureMessage
+            )
+        } ?? session
         return SessionScreen(
-            session: session,
+            session: currentSession,
             primarySurface: .structuredActivityFeed,
             transcript: runtimeState == .interrupted ? (interruptedFailureMessage ?? renderedTranscriptLocked()) : renderedTranscriptLocked(),
             terminalColumns: terminalColumns,
@@ -432,6 +446,26 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             return
         }
 
+        if trimmed == "/fork-messages" || trimmed == "/fork_messages" {
+            try submitGetForkMessagesCommand(trimmed)
+            return
+        }
+
+        if trimmed == "/fork" || trimmed.hasPrefix("/fork ") {
+            try submitForkCommand(trimmed)
+            return
+        }
+
+        if trimmed == "/clone" {
+            try submitCloneCommand()
+            return
+        }
+
+        if trimmed == "/session-name" || trimmed.hasPrefix("/session-name ") || trimmed == "/session_name" || trimmed.hasPrefix("/session_name ") {
+            try submitSetSessionNameCommand(trimmed)
+            return
+        }
+
         lock.lock()
         let isCurrentlyStreaming = isStreaming
         if isCurrentlyStreaming == false {
@@ -501,6 +535,107 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         notifyChange()
 
         try transport.sendLine(Self.jsonLine(["type": "abort"]))
+    }
+
+    private func submitGetForkMessagesCommand(_ commandText: String) throws {
+        lock.lock()
+        draft = ""
+        appendActivityItemLocked(SessionActivityItem(kind: .command, text: commandText))
+        lock.unlock()
+        notifyChange()
+
+        try transport.sendLine(Self.jsonLine([
+            "id": "nexus-pi-fork-messages-\(UUID().uuidString)",
+            "type": "get_fork_messages"
+        ]))
+    }
+
+    private func submitForkCommand(_ commandText: String) throws {
+        let entryID = String(commandText.dropFirst("/fork".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard entryID.isEmpty == false else {
+            lock.lock()
+            draft = ""
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: "Usage: /fork <entry-id>"))
+            lock.unlock()
+            notifyChange()
+            return
+        }
+
+        lock.lock()
+        guard isStreaming == false else {
+            lock.unlock()
+            throw PiRPCSessionRuntimeError.busy
+        }
+        draft = ""
+        appendActivityItemLocked(SessionActivityItem(kind: .command, text: "/fork \(entryID)"))
+        lock.unlock()
+        notifyChange()
+
+        try transport.sendLine(
+            Self.jsonLine([
+                "id": "nexus-pi-fork-\(UUID().uuidString)",
+                "type": "fork",
+                "entryId": entryID
+            ])
+        )
+    }
+
+    private func submitCloneCommand() throws {
+        lock.lock()
+        guard isStreaming == false else {
+            lock.unlock()
+            throw PiRPCSessionRuntimeError.busy
+        }
+        draft = ""
+        appendActivityItemLocked(SessionActivityItem(kind: .command, text: "/clone"))
+        lock.unlock()
+        notifyChange()
+
+        try transport.sendLine(
+            Self.jsonLine([
+                "id": "nexus-pi-clone-\(UUID().uuidString)",
+                "type": "clone"
+            ])
+        )
+    }
+
+    private func submitSetSessionNameCommand(_ commandText: String) throws {
+        let trimmed = commandText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let nameText: String
+        if trimmed.hasPrefix("/session_name") {
+            nameText = String(trimmed.dropFirst("/session_name".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            nameText = String(trimmed.dropFirst("/session-name".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        guard nameText.isEmpty == false else {
+            lock.lock()
+            draft = ""
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: "Usage: /session-name <name>"))
+            lock.unlock()
+            notifyChange()
+            return
+        }
+
+        let requestID: String
+        lock.lock()
+        guard isStreaming == false else {
+            lock.unlock()
+            throw PiRPCSessionRuntimeError.busy
+        }
+        draft = ""
+        requestID = "nexus-pi-set-session-name-\(UUID().uuidString)"
+        pendingSetSessionNamesByRequestID[requestID] = nameText
+        appendActivityItemLocked(SessionActivityItem(kind: .command, text: "/session-name \(nameText)"))
+        lock.unlock()
+        notifyChange()
+
+        try transport.sendLine(
+            Self.jsonLine([
+                "id": requestID,
+                "type": "set_session_name",
+                "name": nameText
+            ])
+        )
     }
 
     private func submitSteeringModeCommand(_ commandText: String) throws {
@@ -699,6 +834,11 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             return
         }
 
+        if command == "get_state" {
+            handleGetStateResponse(response, requestID: id)
+            return
+        }
+
         if command == "get_commands" {
             handleGetCommandsResponse(response, requestID: id)
             return
@@ -726,6 +866,26 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
 
         if command == "set_follow_up_mode" {
             handleSetFollowUpModeResponse(response, requestID: id)
+            return
+        }
+
+        if command == "get_fork_messages" {
+            handleGetForkMessagesResponse(response)
+            return
+        }
+
+        if command == "fork" {
+            handleForkResponse(response)
+            return
+        }
+
+        if command == "clone" {
+            handleCloneResponse(response)
+            return
+        }
+
+        if command == "set_session_name" {
+            handleSetSessionNameResponse(response, requestID: id)
             return
         }
 
@@ -1156,6 +1316,33 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         return lines.joined(separator: "\n")
     }
 
+    private func handleGetStateResponse(_ response: [String: Any], requestID: String?) {
+        let shouldQueueTransition: Bool
+        if bool(for: "success", in: response) == true {
+            lock.lock()
+            updateSessionLinkageLocked(from: response)
+            updateCurrentStateLocked(from: response)
+            shouldQueueTransition = requestID.map { pendingSessionTransitionStateRequestIDs.remove($0) != nil } ?? false
+            if shouldQueueTransition,
+               let metadata = sessionLinkage?.sessionRecordAdapterMetadata {
+                pendingSessionTransitions.append(
+                    SessionRuntimeSessionTransition(sessionRecordAdapterMetadata: metadata)
+                )
+            }
+            lock.unlock()
+        } else {
+            lock.lock()
+            if let requestID {
+                pendingSessionTransitionStateRequestIDs.remove(requestID)
+            }
+            let detail = string(for: "error", in: response) ?? "Pi failed to refresh Session state."
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: detail))
+            lock.unlock()
+        }
+
+        notifyChange()
+    }
+
     private func handleGetCommandsResponse(_ response: [String: Any], requestID: String?) {
         let nextSlashCommands: [SessionSlashCommand]?
         if bool(for: "success", in: response) == true {
@@ -1296,6 +1483,84 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         notifyChange()
     }
 
+    private func handleGetForkMessagesResponse(_ response: [String: Any]) {
+        lock.lock()
+        if bool(for: "success", in: response) == true,
+           let data = response["data"] as? [String: Any],
+           let messages = data["messages"] as? [[String: Any]] {
+            if messages.isEmpty {
+                appendActivityItemLocked(SessionActivityItem(kind: .status, text: "No fork messages available"))
+            } else {
+                for message in messages {
+                    guard let entryID = trimmedString(for: "entryId", in: message),
+                          let text = trimmedString(for: "text", in: message) else {
+                        continue
+                    }
+                    appendActivityItemLocked(
+                        SessionActivityItem(
+                            kind: .status,
+                            text: "Fork message \(entryID): \(previewText(text, limit: 120))"
+                        )
+                    )
+                }
+            }
+        } else {
+            let detail = string(for: "error", in: response) ?? "Pi failed to load fork messages."
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: detail))
+        }
+        lock.unlock()
+        notifyChange()
+    }
+
+    private func handleSetSessionNameResponse(_ response: [String: Any], requestID: String?) {
+        lock.lock()
+        let requestedName = requestID.flatMap { pendingSetSessionNamesByRequestID.removeValue(forKey: $0) }
+        if bool(for: "success", in: response) == true {
+            if let requestedName {
+                currentSessionName = requestedName
+                appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi session name set to \(requestedName)"))
+            }
+        } else {
+            let detail = string(for: "error", in: response) ?? "Pi failed to set the Session name."
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: detail))
+        }
+        lock.unlock()
+        notifyChange()
+    }
+
+    private func handleForkResponse(_ response: [String: Any]) {
+        if bool(for: "success", in: response) == true {
+            if let data = response["data"] as? [String: Any],
+               let selectedText = trimmedString(for: "text", in: data) {
+                lock.lock()
+                appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Forked from: \(previewText(selectedText, limit: 120))"))
+                lock.unlock()
+            }
+            requestState(forSessionTransition: true)
+        } else {
+            lock.lock()
+            let detail = string(for: "error", in: response) ?? "Pi failed to fork the Session."
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: detail))
+            lock.unlock()
+            notifyChange()
+        }
+    }
+
+    private func handleCloneResponse(_ response: [String: Any]) {
+        if bool(for: "success", in: response) == true {
+            lock.lock()
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Cloned the current Pi Session"))
+            lock.unlock()
+            requestState(forSessionTransition: true)
+        } else {
+            lock.lock()
+            let detail = string(for: "error", in: response) ?? "Pi failed to clone the Session."
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: detail))
+            lock.unlock()
+            notifyChange()
+        }
+    }
+
     private func requestSlashCommands(preferredID: String? = nil) {
         let requestID: String
         lock.lock()
@@ -1319,6 +1584,23 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             if pendingSlashCommandsRequestID == requestID {
                 pendingSlashCommandsRequestID = nil
             }
+            lock.unlock()
+        }
+    }
+
+    private func requestState(forSessionTransition: Bool = false) {
+        let requestID = "nexus-pi-state-refresh-\(UUID().uuidString)"
+        lock.lock()
+        if forSessionTransition {
+            pendingSessionTransitionStateRequestIDs.insert(requestID)
+        }
+        lock.unlock()
+
+        do {
+            try transport.sendLine(Self.jsonLine(["id": requestID, "type": "get_state"]))
+        } catch {
+            lock.lock()
+            pendingSessionTransitionStateRequestIDs.remove(requestID)
             lock.unlock()
         }
     }
@@ -1601,6 +1883,41 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         ] + steeringModes + followUpModes
     }
 
+    private func sessionGraphSlashCommandsLocked() -> [SessionSlashCommand] {
+        [
+            SessionSlashCommand(
+                name: "fork",
+                displayName: "fork <entry-id>",
+                insertionText: "fork ",
+                suggestionQueryPrefix: "fork ",
+                description: "Fork from a previous Pi message into a new Named Session.",
+                source: .builtIn
+            ),
+            SessionSlashCommand(
+                name: "clone",
+                displayName: "clone",
+                insertionText: "clone",
+                description: "Clone the current Pi Session into a new Named Session.",
+                source: .builtIn
+            ),
+            SessionSlashCommand(
+                name: "fork-messages",
+                displayName: "fork-messages",
+                insertionText: "fork-messages",
+                description: "List Pi messages available for forking.",
+                source: .builtIn
+            ),
+            SessionSlashCommand(
+                name: "session-name",
+                displayName: "session-name <name>",
+                insertionText: "session-name ",
+                suggestionQueryPrefix: "session-name ",
+                description: "Set the current Pi Session name and sync it into Nexus.",
+                source: .builtIn
+            )
+        ]
+    }
+
     private func handleSessionTransitionEvent(_ object: [String: Any]) {
         guard let linkage = sessionTransitionLinkage(from: object),
               let metadata = linkage.sessionRecordAdapterMetadata else {
@@ -1638,7 +1955,13 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     }
 
     private func mergedSlashCommandsLocked() -> [SessionSlashCommand]? {
-        let merged = mergeSlashCommands(groups: [providerSlashCommands, availableModelCommands, thinkingSlashCommandsLocked(), queueControlSlashCommandsLocked()])
+        let merged = mergeSlashCommands(groups: [
+            providerSlashCommands,
+            availableModelCommands,
+            thinkingSlashCommandsLocked(),
+            queueControlSlashCommandsLocked(),
+            sessionGraphSlashCommandsLocked()
+        ])
         return merged.isEmpty ? nil : merged
     }
 
@@ -1682,6 +2005,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             currentModel = nil
         }
         currentThinkingLevel = trimmedString(for: "thinkingLevel", in: data)
+        currentSessionName = trimmedString(for: "sessionName", in: data)
         steeringMode = trimmedString(for: "steeringMode", in: data) ?? steeringMode
         followUpMode = trimmedString(for: "followUpMode", in: data) ?? followUpMode
     }

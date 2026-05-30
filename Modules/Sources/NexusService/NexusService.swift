@@ -1515,6 +1515,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         self.sessionRuntimeManager.setRuntimeChangeHandler { [weak self] sessionID in
             self?.handlePiSessionTransitionAfterRuntimeChange(sessionID: sessionID)
             self?.persistRuntimeLinkageAfterRuntimeChange(sessionID: sessionID)
+            self?.persistPiSessionNameAfterRuntimeChange(sessionID: sessionID)
             self?.persistSessionStateAfterRuntimeChange(sessionID: sessionID)
         }
         self.listener.delegate = self
@@ -2644,6 +2645,31 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         try? persistRuntimeLinkageIfNeeded(for: session)
     }
 
+    private func persistPiSessionNameIfNeeded(for session: Session) throws {
+        guard session.providerID == .pi,
+              sessionRuntimeManager.hasRuntime(for: session),
+              let runtimeScreen = try? sessionRuntimeManager.sessionScreen(for: session),
+              let runtimeName = runtimeScreen.session.name?.trimmingCharacters(in: .whitespacesAndNewlines),
+              runtimeName.isEmpty == false else {
+            return
+        }
+
+        let persistedName = session.name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard persistedName != runtimeName else {
+            return
+        }
+
+        _ = try sessionRecordStore.updateSessionName(id: session.id, name: runtimeName)
+    }
+
+    private func persistPiSessionNameAfterRuntimeChange(sessionID: UUID) {
+        guard let session = (try? sessionRecordStore.session(id: sessionID)) ?? nil else {
+            return
+        }
+
+        try? persistPiSessionNameIfNeeded(for: session)
+    }
+
     private func handlePiSessionTransitionAfterRuntimeChange(sessionID: UUID) {
         guard let sourceSession = (try? sessionRecordStore.session(id: sessionID)) ?? nil,
               sourceSession.providerID == .pi,
@@ -2673,6 +2699,9 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         }
         sessionControllerRegistry.moveController(from: sourceSession.id, to: targetSession.id)
         sessionRuntimeManager.moveRuntime(from: sourceSession.id, to: targetSession.id)
+        if let refreshedTargetSession = try sessionRecordStore.session(id: targetSession.id) {
+            try persistPiSessionNameIfNeeded(for: refreshedTargetSession)
+        }
         recordPiSessionRedirect(from: sourceSession.id, to: targetSession.id)
     }
 

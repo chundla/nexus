@@ -21,6 +21,7 @@ protocol SessionRecordStore: AnyObject {
         failureMessage: String?
     ) throws -> Session
     func updateSession(id: UUID, state: Session.State, failureMessage: String?) throws -> Session
+    func updateSessionName(id: UUID, name: String?) throws -> Session
     func deleteSessionRecord(id: UUID) throws -> Bool
     func launchSnapshot(sessionID: UUID) throws -> LaunchSnapshot?
     func ensureLaunchSnapshot(
@@ -95,6 +96,10 @@ final class MetadataStoreSessionRecordStore: SessionRecordStore {
 
     func updateSession(id: UUID, state: Session.State, failureMessage: String?) throws -> Session {
         try metadataStore.updateSession(id: id, state: state, failureMessage: failureMessage)
+    }
+
+    func updateSessionName(id: UUID, name: String?) throws -> Session {
+        try metadataStore.updateSessionName(id: id, name: name)
     }
 
     func deleteSessionRecord(id: UUID) throws -> Bool {

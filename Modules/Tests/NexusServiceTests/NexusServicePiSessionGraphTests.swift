@@ -132,6 +132,119 @@ struct NexusServicePiSessionGraphTests {
         #expect(namedMetadata?.piSessionLinkage?.sessionFile == detachedSession.sessionFile)
     }
 
+    @Test func piSetSessionNameKeepsNamedSessionRecordInSync() async throws {
+        let fixture = try PiSessionGraphFixture()
+
+        let namedSession = try await fixture.service.createNamedSession(
+            workspaceID: fixture.workspace.id,
+            providerID: .pi,
+            name: "Review"
+        )
+        _ = try await fixture.service.launchOrResumeSession(sessionID: namedSession.id)
+
+        let renamedScreen = try await fixture.service.sendSessionInput(
+            sessionID: namedSession.id,
+            text: "/session-name Branch Review"
+        )
+        let detail = try await fixture.service.getProviderDetail(workspaceID: fixture.workspace.id, providerID: .pi)
+        let persistedScreen = try fixture.service.getSessionScreen(sessionID: namedSession.id)
+        let renamedSession = try #require(detail.alternateSessions.only)
+
+        #expect(renamedScreen.session.name == "Branch Review")
+        #expect(renamedSession.name == "Branch Review")
+        #expect(persistedScreen.session.name == "Branch Review")
+    }
+
+    @Test func piForkCreatesNamedSessionRecordAndMovesRemoteController() async throws {
+        let fixture = try PiSessionGraphFixture()
+        let pairedDeviceID = UUID()
+
+        let defaultSession = try await fixture.service.launchOrResumeDefaultSession(
+            workspaceID: fixture.workspace.id,
+            providerID: .pi
+        )
+        let forkedPiSession = fixture.harness.makeDetachedSession()
+        fixture.harness.setForkTransition(
+            entryID: "entry-1",
+            targetSessionID: forkedPiSession.sessionID,
+            targetSessionFile: forkedPiSession.sessionFile,
+            selectedText: "Original prompt"
+        )
+
+        _ = try await fixture.service.takeRemoteSessionControl(
+            sessionID: defaultSession.id,
+            pairedDeviceID: pairedDeviceID,
+            columns: 90,
+            rows: 28
+        )
+
+        let forkedScreen = try await fixture.service.sendRemoteSessionInput(
+            sessionID: defaultSession.id,
+            pairedDeviceID: pairedDeviceID,
+            text: "/fork entry-1"
+        )
+        let detail = try await fixture.service.getProviderDetail(workspaceID: fixture.workspace.id, providerID: .pi)
+        let namedSession = try #require(detail.alternateSessions.only)
+        let namedMetadata = try fixture.metadataStore.sessionRecordAdapterMetadata(sessionID: namedSession.id)
+        let namedScreen = try fixture.service.getSessionScreen(sessionID: namedSession.id)
+        let defaultScreen = try fixture.service.getSessionScreen(sessionID: defaultSession.id)
+
+        #expect(forkedScreen.session.id == namedSession.id)
+        #expect(namedMetadata?.piSessionLinkage?.piSessionID == forkedPiSession.sessionID)
+        #expect(namedMetadata?.piSessionLinkage?.sessionFile == forkedPiSession.sessionFile)
+        #expect(namedScreen.controller == .pairedDevice(pairedDeviceID))
+        #expect(defaultScreen.controller == .mac)
+
+        let followedScreen = try await fixture.service.sendRemoteSessionInput(
+            sessionID: namedSession.id,
+            pairedDeviceID: pairedDeviceID,
+            text: "after fork"
+        )
+        #expect(followedScreen.activityItems.suffix(2).map(\.text) == [
+            "You: after fork",
+            "Pi: after fork"
+        ])
+    }
+
+    @Test func piCloneCreatesNamedSessionRecordAndMovesRemoteController() async throws {
+        let fixture = try PiSessionGraphFixture()
+        let pairedDeviceID = UUID()
+
+        let defaultSession = try await fixture.service.launchOrResumeDefaultSession(
+            workspaceID: fixture.workspace.id,
+            providerID: .pi
+        )
+        let clonedPiSession = fixture.harness.makeDetachedSession()
+        fixture.harness.setCloneTransition(
+            targetSessionID: clonedPiSession.sessionID,
+            targetSessionFile: clonedPiSession.sessionFile
+        )
+
+        _ = try await fixture.service.takeRemoteSessionControl(
+            sessionID: defaultSession.id,
+            pairedDeviceID: pairedDeviceID,
+            columns: 90,
+            rows: 28
+        )
+
+        let clonedScreen = try await fixture.service.sendRemoteSessionInput(
+            sessionID: defaultSession.id,
+            pairedDeviceID: pairedDeviceID,
+            text: "/clone"
+        )
+        let detail = try await fixture.service.getProviderDetail(workspaceID: fixture.workspace.id, providerID: .pi)
+        let namedSession = try #require(detail.alternateSessions.only)
+        let namedMetadata = try fixture.metadataStore.sessionRecordAdapterMetadata(sessionID: namedSession.id)
+        let namedScreen = try fixture.service.getSessionScreen(sessionID: namedSession.id)
+        let defaultScreen = try fixture.service.getSessionScreen(sessionID: defaultSession.id)
+
+        #expect(clonedScreen.session.id == namedSession.id)
+        #expect(namedMetadata?.piSessionLinkage?.piSessionID == clonedPiSession.sessionID)
+        #expect(namedMetadata?.piSessionLinkage?.sessionFile == clonedPiSession.sessionFile)
+        #expect(namedScreen.controller == .pairedDevice(pairedDeviceID))
+        #expect(defaultScreen.controller == .mac)
+    }
+
     @Test func piSessionTransitionLeavesExistingObserversOnTheirCurrentSession() async throws {
         let fixture = try PiSessionGraphFixture()
         let pairedDeviceID = UUID()
@@ -246,6 +359,7 @@ private final class PiSessionGraphHarness: @unchecked Sendable {
     struct SessionState {
         let sessionID: String
         let sessionFile: String
+        var sessionName: String?
     }
 
     private struct PromptTransition {
@@ -255,10 +369,18 @@ private final class PiSessionGraphHarness: @unchecked Sendable {
         let responseText: String
     }
 
+    private struct ForkTransition {
+        let targetSessionID: String
+        let targetSessionFile: String
+        let selectedText: String
+    }
+
     private let lock = NSLock()
     private var nextSessionNumber = 0
     private var sessionsByFile: [String: SessionState] = [:]
     private var promptTransitions: [String: PromptTransition] = [:]
+    private var forkTransitions: [String: ForkTransition] = [:]
+    private var cloneTransition: SessionState?
 
     func makeTransport(arguments: [String]) -> any PiRPCTransporting {
         PiSessionGraphTransport(harness: self, arguments: arguments)
@@ -270,7 +392,8 @@ private final class PiSessionGraphHarness: @unchecked Sendable {
         nextSessionNumber += 1
         let session = SessionState(
             sessionID: "pi-session-detached-\(nextSessionNumber)",
-            sessionFile: "/tmp/pi-session-detached-\(nextSessionNumber).jsonl"
+            sessionFile: "/tmp/pi-session-detached-\(nextSessionNumber).jsonl",
+            sessionName: nil
         )
         sessionsByFile[session.sessionFile] = session
         return (session.sessionID, session.sessionFile)
@@ -306,7 +429,8 @@ private final class PiSessionGraphHarness: @unchecked Sendable {
         nextSessionNumber += 1
         let session = SessionState(
             sessionID: "pi-session-\(nextSessionNumber)",
-            sessionFile: "/tmp/pi-session-\(nextSessionNumber).jsonl"
+            sessionFile: "/tmp/pi-session-\(nextSessionNumber).jsonl",
+            sessionName: nil
         )
         sessionsByFile[session.sessionFile] = session
         return session
@@ -320,6 +444,60 @@ private final class PiSessionGraphHarness: @unchecked Sendable {
             return nil
         }
         return (transition.eventType, session, transition.responseText)
+    }
+
+    func renameCurrentSession(sessionFile: String, name: String) -> SessionState? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard var session = sessionsByFile[sessionFile] else {
+            return nil
+        }
+        session.sessionName = name
+        sessionsByFile[sessionFile] = session
+        return session
+    }
+
+    func setForkTransition(entryID: String, targetSessionID: String, targetSessionFile: String, selectedText: String) {
+        lock.lock()
+        forkTransitions[entryID] = ForkTransition(
+            targetSessionID: targetSessionID,
+            targetSessionFile: targetSessionFile,
+            selectedText: selectedText
+        )
+        sessionsByFile[targetSessionFile] = SessionState(
+            sessionID: targetSessionID,
+            sessionFile: targetSessionFile,
+            sessionName: nil
+        )
+        lock.unlock()
+    }
+
+    func forkTransition(for entryID: String) -> (session: SessionState, selectedText: String)? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let transition = forkTransitions[entryID],
+              let session = sessionsByFile[transition.targetSessionFile] else {
+            return nil
+        }
+        return (session, transition.selectedText)
+    }
+
+    func setCloneTransition(targetSessionID: String, targetSessionFile: String) {
+        lock.lock()
+        let session = SessionState(
+            sessionID: targetSessionID,
+            sessionFile: targetSessionFile,
+            sessionName: nil
+        )
+        cloneTransition = session
+        sessionsByFile[targetSessionFile] = session
+        lock.unlock()
+    }
+
+    func cloneTransitionState() -> SessionState? {
+        lock.lock()
+        defer { lock.unlock() }
+        return cloneTransition
     }
 
     private func sessionArgument(in arguments: [String]) -> String? {
@@ -365,9 +543,65 @@ private final class PiSessionGraphTransport: PiRPCTransporting, @unchecked Senda
                 "type": "response",
                 "command": "get_state",
                 "success": true,
+                "data": {
+                    var data: [String: Any] = [
+                        "sessionId": currentSession.sessionID,
+                        "sessionFile": currentSession.sessionFile
+                    ]
+                    if let sessionName = currentSession.sessionName {
+                        data["sessionName"] = sessionName
+                    }
+                    return data
+                }()
+            ])
+        case "set_session_name":
+            let sessionName = (object["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard sessionName.isEmpty == false,
+                  let renamedSession = harness.renameCurrentSession(sessionFile: currentSession.sessionFile, name: sessionName) else {
+                emit([
+                    "id": object["id"] as? String ?? "set-session-name",
+                    "type": "response",
+                    "command": "set_session_name",
+                    "success": false,
+                    "error": "Session name cannot be empty"
+                ])
+                return
+            }
+            currentSession = renamedSession
+            emit([
+                "id": object["id"] as? String ?? "set-session-name",
+                "type": "response",
+                "command": "set_session_name",
+                "success": true
+            ])
+        case "fork":
+            let entryID = object["entryId"] as? String ?? ""
+            guard let transition = harness.forkTransition(for: entryID) else {
+                return
+            }
+            currentSession = transition.session
+            emit([
+                "id": object["id"] as? String ?? "fork",
+                "type": "response",
+                "command": "fork",
+                "success": true,
                 "data": [
-                    "sessionId": currentSession.sessionID,
-                    "sessionFile": currentSession.sessionFile
+                    "text": transition.selectedText,
+                    "cancelled": false
+                ]
+            ])
+        case "clone":
+            guard let transition = harness.cloneTransitionState() else {
+                return
+            }
+            currentSession = transition
+            emit([
+                "id": object["id"] as? String ?? "clone",
+                "type": "response",
+                "command": "clone",
+                "success": true,
+                "data": [
+                    "cancelled": false
                 ]
             ])
         case "prompt":
