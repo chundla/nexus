@@ -193,6 +193,218 @@ struct IBMBobProviderModuleTests {
         #expect(runtime?.sessionScreen(for: session).primarySurface == .structuredActivityFeed)
     }
 
+    @Test func ibmBobProviderModuleDerivesLocalCatalogReadFromSharedPassiveProbeFacts() async throws {
+        let module = IBMBobProviderModule()
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Local IBM Bob",
+            kind: .local,
+            folderPath: "/tmp/local-ibm-bob",
+            primaryGroupID: UUID()
+        )
+        let providerHealthEvaluator = RecordingIBMBobHealthFactProvider(
+            localResult: .passiveProbeCompleted(
+                executable: "/tmp/fake-bob",
+                version: "3.4.5",
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .warning,
+                        code: "versionUnavailable",
+                        message: "Version came from the shared probe"
+                    )
+                ],
+                detail: nil
+            )
+        )
+
+        let catalogRead = try await module.readCatalog(
+            ProviderModuleCatalogReadRequest(
+                workspace: workspace,
+                remoteContext: nil,
+                defaultSession: nil
+            ),
+            actions: ProviderModuleCatalogReadActions(
+                providerHealthSummary: {
+                    await module.providerHealthSummary(
+                        for: workspace,
+                        remoteContext: nil,
+                        providerHealthEvaluator: providerHealthEvaluator
+                    )
+                }
+            )
+        )
+
+        #expect(catalogRead.health == ProviderHealthSummary(
+            state: .available,
+            summary: "IBM Bob 3.4.5 is available",
+            resolvedExecutable: "/tmp/fake-bob",
+            version: "3.4.5",
+            launchability: .launchable,
+            diagnostics: [
+                ProviderHealthDiagnostic(
+                    severity: .warning,
+                    code: "versionUnavailable",
+                    message: "Version came from the shared probe"
+                )
+            ]
+        ))
+        #expect(providerHealthEvaluator.localProbeRequests == [workspace.id])
+        #expect(providerHealthEvaluator.legacyRequests.isEmpty)
+        #expect(catalogRead.capabilities.launchDefaultSession.isEnabled)
+        #expect(catalogRead.capabilities.createNamedSession.isEnabled)
+        #expect(catalogRead.prelaunchPrimarySurface == .structuredActivityFeed)
+    }
+
+    @Test func ibmBobProviderModuleDerivesRemoteBlockedCatalogReadFromPrerequisiteFacts() async throws {
+        let module = IBMBobProviderModule()
+        let workspaceID = UUID()
+        let hostID = UUID()
+        let workspace = Workspace(
+            id: workspaceID,
+            name: "Remote IBM Bob",
+            kind: .remote,
+            folderPath: "/srv/bob",
+            primaryGroupID: UUID(),
+            remoteHostID: hostID
+        )
+        let providerHealthEvaluator = RecordingIBMBobHealthFactProvider(
+            localResult: .passiveProbeCompleted(
+                executable: "/tmp/unused",
+                version: nil,
+                diagnostics: [],
+                detail: nil
+            )
+        )
+        let remoteContext = RemoteWorkspaceHealthContext(
+            host: NexusDomain.Host(id: hostID, name: "Build Server", sshTarget: "build-box"),
+            hostValidation: HostValidationSnapshot(
+                hostID: hostID,
+                state: .unavailable,
+                summary: "SSH authentication failed",
+                checkedAt: Date()
+            ),
+            workspaceAvailability: WorkspaceAvailabilitySnapshot(
+                workspaceID: workspaceID,
+                state: .available,
+                summary: "Workspace is available",
+                checkedAt: Date()
+            )
+        )
+
+        let catalogRead = try await module.readCatalog(
+            ProviderModuleCatalogReadRequest(
+                workspace: workspace,
+                remoteContext: remoteContext,
+                defaultSession: nil
+            ),
+            actions: ProviderModuleCatalogReadActions(
+                providerHealthSummary: {
+                    await module.providerHealthSummary(
+                        for: workspace,
+                        remoteContext: remoteContext,
+                        providerHealthEvaluator: providerHealthEvaluator
+                    )
+                }
+            )
+        )
+
+        #expect(catalogRead.health == ProviderHealthSummary(
+            state: .blocked,
+            summary: "Provider Health is blocked by Host Validation",
+            diagnostics: [
+                ProviderHealthDiagnostic(
+                    severity: .warning,
+                    code: "hostValidationBlocked",
+                    message: "Provider Health for IBM Bob is blocked by Host Validation: SSH authentication failed."
+                )
+            ]
+        ))
+        #expect(providerHealthEvaluator.remoteProbeRequests.isEmpty)
+        #expect(providerHealthEvaluator.legacyRequests.isEmpty)
+        #expect(catalogRead.capabilities.launchDefaultSession.isEnabled == false)
+        #expect(catalogRead.capabilities.launchDefaultSession.disabledReason == "Provider Health is blocked by Host Validation")
+        #expect(catalogRead.prelaunchPrimarySurface == .structuredActivityFeed)
+    }
+
+    @Test func ibmBobProviderModuleDerivesRemoteProbeBackedCatalogReadFromSharedPassiveProbeFacts() async throws {
+        let module = IBMBobProviderModule()
+        let workspaceID = UUID()
+        let hostID = UUID()
+        let workspace = Workspace(
+            id: workspaceID,
+            name: "Remote IBM Bob",
+            kind: .remote,
+            folderPath: "/srv/bob",
+            primaryGroupID: UUID(),
+            remoteHostID: hostID
+        )
+        let providerHealthEvaluator = RecordingIBMBobHealthFactProvider(
+            localResult: .passiveProbeCompleted(
+                executable: "/tmp/unused",
+                version: nil,
+                diagnostics: [],
+                detail: nil
+            ),
+            remoteResult: .passiveProbeCompleted(
+                executable: "/home/tester/.local/bin/bob",
+                version: "3.4.5",
+                detail: nil
+            )
+        )
+        let remoteContext = RemoteWorkspaceHealthContext(
+            host: NexusDomain.Host(id: hostID, name: "Build Server", sshTarget: "build-box"),
+            hostValidation: HostValidationSnapshot(
+                hostID: hostID,
+                state: .available,
+                summary: "Host is available",
+                checkedAt: Date()
+            ),
+            workspaceAvailability: WorkspaceAvailabilitySnapshot(
+                workspaceID: workspaceID,
+                state: .available,
+                summary: "Workspace is available",
+                checkedAt: Date()
+            )
+        )
+
+        let catalogRead = try await module.readCatalog(
+            ProviderModuleCatalogReadRequest(
+                workspace: workspace,
+                remoteContext: remoteContext,
+                defaultSession: nil
+            ),
+            actions: ProviderModuleCatalogReadActions(
+                providerHealthSummary: {
+                    await module.providerHealthSummary(
+                        for: workspace,
+                        remoteContext: remoteContext,
+                        providerHealthEvaluator: providerHealthEvaluator
+                    )
+                }
+            )
+        )
+
+        #expect(catalogRead.health == ProviderHealthSummary(
+            state: .available,
+            summary: "IBM Bob 3.4.5 is available",
+            resolvedExecutable: "/home/tester/.local/bin/bob",
+            version: "3.4.5",
+            launchability: .launchable,
+            diagnostics: [
+                ProviderHealthDiagnostic(
+                    severity: .info,
+                    code: "remoteProbe",
+                    message: "Validated remote IBM Bob launch prerequisites on Build Server for /srv/bob."
+                )
+            ]
+        ))
+        #expect(providerHealthEvaluator.remoteProbeRequests == [workspace.id])
+        #expect(providerHealthEvaluator.legacyRequests.isEmpty)
+        #expect(catalogRead.capabilities.launchDefaultSession.isEnabled)
+        #expect(catalogRead.capabilities.createNamedSession.isEnabled)
+        #expect(catalogRead.prelaunchPrimarySurface == .structuredActivityFeed)
+    }
+
     @Test func ibmBobProviderModulePreservesIBMBobCatalogReadBehavior() async throws {
         let module = IBMBobProviderModule()
         let workspace = Workspace(
@@ -620,6 +832,45 @@ private struct ReadyIBMBobProviderHealthEvaluator: ProviderHealthEvaluating {
             resolvedExecutable: "/tmp/fake-\(providerID.rawValue)",
             launchability: .launchable
         )
+    }
+}
+
+private final class RecordingIBMBobHealthFactProvider: @unchecked Sendable, ProviderHealthEvaluating, IBMBobProviderHealthFactProviding {
+    let localResult: LocalIBMBobPassiveProbeResult
+    let remoteResult: RemoteIBMBobPassiveProbeResult
+    private(set) var localProbeRequests: [UUID] = []
+    private(set) var remoteProbeRequests: [UUID] = []
+    private(set) var legacyRequests: [UUID] = []
+
+    init(
+        localResult: LocalIBMBobPassiveProbeResult,
+        remoteResult: RemoteIBMBobPassiveProbeResult = .sshResolutionLaunchFailed("unexpected")
+    ) {
+        self.localResult = localResult
+        self.remoteResult = remoteResult
+    }
+
+    func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> [WorkspaceProviderCard] {
+        []
+    }
+
+    func healthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> ProviderHealthSummary {
+        legacyRequests.append(workspace.id)
+        return ProviderHealthSummary(
+            state: .misconfigured,
+            summary: "legacy evaluator path should stay unused",
+            launchability: .notLaunchable
+        )
+    }
+
+    func localIBMBobPassiveProbe(workspace: Workspace) async -> LocalIBMBobPassiveProbeResult {
+        localProbeRequests.append(workspace.id)
+        return localResult
+    }
+
+    func remoteIBMBobPassiveProbe(workspace: Workspace, host: NexusDomain.Host) async -> RemoteIBMBobPassiveProbeResult {
+        remoteProbeRequests.append(workspace.id)
+        return remoteResult
     }
 }
 

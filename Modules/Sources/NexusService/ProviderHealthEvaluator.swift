@@ -73,9 +73,46 @@ enum RemoteCLIHealthProbeResult: Sendable, Equatable {
     )
 }
 
+enum LocalIBMBobPassiveProbeResult: Sendable, Equatable {
+    case executableNotFound(ProviderExecutableResolution)
+    case passiveProbeLaunchFailed(
+        executable: String,
+        version: String?,
+        diagnostics: [ProviderHealthDiagnostic],
+        detail: String
+    )
+    case passiveProbeCompleted(
+        executable: String,
+        version: String?,
+        diagnostics: [ProviderHealthDiagnostic],
+        detail: String?
+    )
+}
+
+enum RemoteIBMBobPassiveProbeResult: Sendable, Equatable {
+    case sshResolutionLaunchFailed(String)
+    case resolutionProbeFailed(String)
+    case resolutionReturnedNoExecutable
+    case passiveProbeSSHLaunchFailed(
+        executable: String,
+        version: String?,
+        message: String
+    )
+    case passiveProbeCompleted(
+        executable: String,
+        version: String?,
+        detail: String?
+    )
+}
+
 protocol CLIProviderHealthFactProviding: Sendable {
     func localCLIHealthProbe(commandName: String, providerName: String, workspace: Workspace) async -> LocalCLIHealthProbeResult
     func remoteCLIHealthProbe(commandName: String, providerName: String, workspace: Workspace, host: NexusDomain.Host) async -> RemoteCLIHealthProbeResult
+}
+
+protocol IBMBobProviderHealthFactProviding: Sendable {
+    func localIBMBobPassiveProbe(workspace: Workspace) async -> LocalIBMBobPassiveProbeResult
+    func remoteIBMBobPassiveProbe(workspace: Workspace, host: NexusDomain.Host) async -> RemoteIBMBobPassiveProbeResult
 }
 
 struct RemoteWorkspaceHealthContext {
@@ -110,7 +147,7 @@ extension ProviderHealthEvaluating {
     }
 }
 
-struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactProviding, @unchecked Sendable {
+struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactProviding, IBMBobProviderHealthFactProviding, @unchecked Sendable {
     let executableResolver: any ProviderExecutableResolving
     let commandRunner: any ProviderCommandRunning
     let localShellCommandBuilder: LocalShellCommandBuilder
@@ -171,10 +208,11 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactP
             }
             return await localCLIHealthSummary(commandName: "pi", providerName: "Pi", workspace: workspace)
         case .ibmBob:
-            if workspace.kind == .remote {
-                return await remoteHealthSummary(for: providerID, workspace: workspace, remoteContext: remoteContext)
-            }
-            return localIBMBobHealthSummary(workspace: workspace)
+            return await IBMBobProviderModule().providerHealthSummary(
+                for: workspace,
+                remoteContext: remoteContext,
+                providerHealthEvaluator: self
+            )
         }
     }
 
@@ -211,7 +249,11 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactP
         case .pi:
             return await remotePiHealthSummary(workspace: workspace, host: remoteContext.host)
         case .ibmBob:
-            return await remoteIBMBobHealthSummary(workspace: workspace, host: remoteContext.host)
+            return await IBMBobProviderModule().providerHealthSummary(
+                for: workspace,
+                remoteContext: remoteContext,
+                providerHealthEvaluator: self
+            )
         }
     }
 
@@ -657,7 +699,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactP
         }
     }
 
-    private func remoteIBMBobHealthSummary(workspace: Workspace, host: NexusDomain.Host) async -> ProviderHealthSummary {
+    func remoteIBMBobPassiveProbe(workspace: Workspace, host: NexusDomain.Host) async -> RemoteIBMBobPassiveProbeResult {
         let resolutionResult: ProviderCommandResult
         do {
             resolutionResult = try commandRunner.run(
@@ -666,39 +708,11 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactP
                 currentDirectoryURL: nil
             )
         } catch {
-            return ProviderHealthSummary(
-                state: .unavailable,
-                summary: "Remote IBM Bob health check failed before the SSH probe completed",
-                launchability: .notLaunchable,
-                diagnostics: [
-                    ProviderHealthDiagnostic(
-                        severity: .error,
-                        code: "sshLaunchFailed",
-                        message: error.localizedDescription
-                    )
-                ]
-            )
+            return .sshResolutionLaunchFailed(error.localizedDescription)
         }
 
         guard resolutionResult.exitStatus == 0 else {
-            let detail = firstDiagnosticLine(stdout: resolutionResult.stdout, stderr: resolutionResult.stderr)
-            let classification = classifyRemoteCLIProbeFailure(
-                detail: detail,
-                providerName: "IBM Bob",
-                notFoundMarker: remoteExecutableNotFoundMarker(commandName: "bob")
-            )
-            return ProviderHealthSummary(
-                state: classification.state,
-                summary: classification.summary,
-                launchability: .notLaunchable,
-                diagnostics: [
-                    ProviderHealthDiagnostic(
-                        severity: .error,
-                        code: classification.code,
-                        message: classification.message ?? (detail.isEmpty ? classification.summary : detail)
-                    )
-                ]
-            )
+            return .resolutionProbeFailed(firstDiagnosticLine(stdout: resolutionResult.stdout, stderr: resolutionResult.stderr))
         }
 
         let outputLines = resolutionResult.stdout
@@ -707,18 +721,7 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactP
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { $0.isEmpty == false }
         guard let executable = outputLines.first else {
-            return ProviderHealthSummary(
-                state: .misconfigured,
-                summary: "IBM Bob executable resolution returned no executable path",
-                launchability: .notLaunchable,
-                diagnostics: [
-                    ProviderHealthDiagnostic(
-                        severity: .error,
-                        code: "remoteExecutableResolutionFailed",
-                        message: "The remote IBM Bob executable resolution probe did not return an executable path."
-                    )
-                ]
-            )
+            return .resolutionReturnedNoExecutable
         }
         let version = outputLines.dropFirst().first
 
@@ -730,93 +733,20 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactP
                 currentDirectoryURL: nil
             )
         } catch {
-            return ProviderHealthSummary(
-                state: .unavailable,
-                summary: "Remote IBM Bob health check failed before the passive readiness probe completed",
-                resolvedExecutable: executable,
+            return .passiveProbeSSHLaunchFailed(
+                executable: executable,
                 version: version,
-                launchability: .notLaunchable,
-                diagnostics: [
-                    ProviderHealthDiagnostic(
-                        severity: .error,
-                        code: "sshLaunchFailed",
-                        message: error.localizedDescription
-                    )
-                ]
+                message: error.localizedDescription
             )
         }
 
-        guard readinessProbe.exitStatus == 0 else {
-            let detail = firstDiagnosticLine(stdout: readinessProbe.stdout, stderr: readinessProbe.stderr)
-            let bobClassification = classifyLocalIBMBobPassiveProbeFailure(detail: detail)
-            if bobClassification.code != "passiveProbeInconclusive" {
-                return ProviderHealthSummary(
-                    state: bobClassification.state,
-                    summary: remoteIBMBobBlockedSummary(for: bobClassification.code),
-                    resolvedExecutable: executable,
-                    version: version,
-                    launchability: bobClassification.launchability,
-                    diagnostics: [
-                        ProviderHealthDiagnostic(
-                            severity: bobClassification.severity,
-                            code: bobClassification.code,
-                            message: bobClassification.message
-                        )
-                    ]
-                )
-            }
-
-            let genericClassification = classifyRemoteCLIProbeFailure(
-                detail: detail,
-                providerName: "IBM Bob",
-                notFoundMarker: remoteExecutableNotFoundMarker(commandName: "bob")
-            )
-            if genericClassification.code != "remoteLaunchProbeFailed" {
-                return ProviderHealthSummary(
-                    state: genericClassification.state,
-                    summary: genericClassification.summary,
-                    resolvedExecutable: executable,
-                    version: version,
-                    launchability: .notLaunchable,
-                    diagnostics: [
-                        ProviderHealthDiagnostic(
-                            severity: .error,
-                            code: genericClassification.code,
-                            message: genericClassification.message ?? (detail.isEmpty ? genericClassification.summary : detail)
-                        )
-                    ]
-                )
-            }
-
-            return ProviderHealthSummary(
-                state: .available,
-                summary: version.map { "IBM Bob \($0) is available" } ?? "IBM Bob is available",
-                resolvedExecutable: executable,
-                version: version,
-                launchability: .launchable,
-                diagnostics: [
-                    ProviderHealthDiagnostic(
-                        severity: .warning,
-                        code: bobClassification.code,
-                        message: bobClassification.message
-                    )
-                ]
-            )
-        }
-
-        return ProviderHealthSummary(
-            state: .available,
-            summary: version.map { "IBM Bob \($0) is available" } ?? "IBM Bob is available",
-            resolvedExecutable: executable,
+        let detail = readinessProbe.exitStatus == 0
+            ? nil
+            : firstDiagnosticLine(stdout: readinessProbe.stdout, stderr: readinessProbe.stderr)
+        return .passiveProbeCompleted(
+            executable: executable,
             version: version,
-            launchability: .launchable,
-            diagnostics: [
-                ProviderHealthDiagnostic(
-                    severity: .info,
-                    code: "remoteProbe",
-                    message: "Validated remote IBM Bob launch prerequisites on \(host.name) for \(workspace.folderPath)."
-                )
-            ]
+            detail: detail
         )
     }
 
@@ -884,36 +814,10 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactP
         )
     }
 
-    private func localIBMBobHealthSummary(workspace: Workspace) -> ProviderHealthSummary {
+    func localIBMBobPassiveProbe(workspace: Workspace) async -> LocalIBMBobPassiveProbeResult {
         let resolution = resolvedLocalExecutable(named: "bob")
         guard let executable = resolution.resolvedExecutable else {
-            return ProviderHealthSummary(
-                state: .unavailable,
-                summary: "IBM Bob executable was not found",
-                launchability: .notLaunchable,
-                diagnostics: [
-                    ProviderHealthDiagnostic(
-                        severity: .error,
-                        code: "executableNotFound",
-                        message: "IBM Bob executable was not found in the service search paths."
-                    ),
-                    ProviderHealthDiagnostic(
-                        severity: .info,
-                        code: "searchedDirectories",
-                        message: "Searched directories: \(resolution.searchedDirectories.joined(separator: ", "))"
-                    ),
-                    ProviderHealthDiagnostic(
-                        severity: .info,
-                        code: "homeDirectories",
-                        message: "Resolved home directories: \(resolution.homeDirectories.joined(separator: ", "))"
-                    ),
-                    ProviderHealthDiagnostic(
-                        severity: .info,
-                        code: "pathEnvironment",
-                        message: "PATH: \(resolution.pathEnvironment ?? "<unset>")"
-                    )
-                ]
-            )
+            return .executableNotFound(resolution)
         }
 
         var diagnostics: [ProviderHealthDiagnostic] = []
@@ -926,49 +830,22 @@ struct ProviderHealthEvaluator: ProviderHealthEvaluating, CLIProviderHealthFactP
                 currentDirectoryURL: URL(fileURLWithPath: workspace.folderPath, isDirectory: true)
             )
 
-            guard launchProbe.exitStatus == 0 else {
-                let detail = launchProbeFailureMessage(stdout: launchProbe.stdout, stderr: launchProbe.stderr, providerName: "IBM Bob")
-                let classification = classifyLocalIBMBobPassiveProbeFailure(detail: detail)
-                return ProviderHealthSummary(
-                    state: classification.state,
-                    summary: classification.summary(version),
-                    resolvedExecutable: executable,
-                    version: version,
-                    launchability: classification.launchability,
-                    diagnostics: diagnostics + [
-                        ProviderHealthDiagnostic(
-                            severity: classification.severity,
-                            code: classification.code,
-                            message: classification.message
-                        )
-                    ]
-                )
-            }
-        } catch {
-            return ProviderHealthSummary(
-                state: .misconfigured,
-                summary: "IBM Bob is installed but failed the passive readiness probe",
-                resolvedExecutable: executable,
+            return .passiveProbeCompleted(
+                executable: executable,
                 version: version,
-                launchability: .notLaunchable,
-                diagnostics: diagnostics + [
-                    ProviderHealthDiagnostic(
-                        severity: .error,
-                        code: "launchProbeFailed",
-                        message: error.localizedDescription
-                    )
-                ]
+                diagnostics: diagnostics,
+                detail: launchProbe.exitStatus == 0
+                    ? nil
+                    : launchProbeFailureMessage(stdout: launchProbe.stdout, stderr: launchProbe.stderr, providerName: "IBM Bob")
+            )
+        } catch {
+            return .passiveProbeLaunchFailed(
+                executable: executable,
+                version: version,
+                diagnostics: diagnostics,
+                detail: error.localizedDescription
             )
         }
-
-        return ProviderHealthSummary(
-            state: .available,
-            summary: version.map { "IBM Bob \($0) is available" } ?? "IBM Bob is available",
-            resolvedExecutable: executable,
-            version: version,
-            launchability: .launchable,
-            diagnostics: diagnostics
-        )
     }
 
     func localCLIHealthProbe(commandName: String, providerName: String, workspace: Workspace) async -> LocalCLIHealthProbeResult {

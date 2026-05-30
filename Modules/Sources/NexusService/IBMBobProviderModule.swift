@@ -20,7 +20,19 @@ struct IBMBobProviderModule: ProviderModule {
         remoteContext: RemoteWorkspaceHealthContext?,
         providerHealthEvaluator: any ProviderHealthEvaluating
     ) async -> ProviderHealthSummary {
-        await providerHealthEvaluator.healthSummary(for: .ibmBob, workspace: workspace, remoteContext: remoteContext)
+        guard let healthFacts = providerHealthEvaluator as? any IBMBobProviderHealthFactProviding else {
+            return await providerHealthEvaluator.healthSummary(for: .ibmBob, workspace: workspace, remoteContext: remoteContext)
+        }
+
+        if workspace.kind == .remote {
+            return await remoteProviderHealthSummary(
+                for: workspace,
+                remoteContext: remoteContext,
+                healthFacts: healthFacts
+            )
+        }
+
+        return await localProviderHealthSummary(for: workspace, healthFacts: healthFacts)
     }
 
     func readCatalog(
@@ -136,6 +148,426 @@ struct IBMBobProviderModule: ProviderModule {
         }
 
         return try await actions.makeLocalIBMBobRuntime()
+    }
+}
+
+private extension IBMBobProviderModule {
+    func localProviderHealthSummary(
+        for workspace: Workspace,
+        healthFacts: any IBMBobProviderHealthFactProviding
+    ) async -> ProviderHealthSummary {
+        switch await healthFacts.localIBMBobPassiveProbe(workspace: workspace) {
+        case let .executableNotFound(resolution):
+            return ProviderHealthSummary(
+                state: .unavailable,
+                summary: "IBM Bob executable was not found",
+                launchability: .notLaunchable,
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .error,
+                        code: "executableNotFound",
+                        message: "IBM Bob executable was not found in the service search paths."
+                    ),
+                    ProviderHealthDiagnostic(
+                        severity: .info,
+                        code: "searchedDirectories",
+                        message: "Searched directories: \(resolution.searchedDirectories.joined(separator: ", "))"
+                    ),
+                    ProviderHealthDiagnostic(
+                        severity: .info,
+                        code: "homeDirectories",
+                        message: "Resolved home directories: \(resolution.homeDirectories.joined(separator: ", "))"
+                    ),
+                    ProviderHealthDiagnostic(
+                        severity: .info,
+                        code: "pathEnvironment",
+                        message: "PATH: \(resolution.pathEnvironment ?? "<unset>")"
+                    )
+                ]
+            )
+        case let .passiveProbeLaunchFailed(executable, version, diagnostics, detail):
+            return ProviderHealthSummary(
+                state: .misconfigured,
+                summary: "IBM Bob is installed but failed the passive readiness probe",
+                resolvedExecutable: executable,
+                version: version,
+                launchability: .notLaunchable,
+                diagnostics: diagnostics + [
+                    ProviderHealthDiagnostic(
+                        severity: .error,
+                        code: "launchProbeFailed",
+                        message: detail
+                    )
+                ]
+            )
+        case let .passiveProbeCompleted(executable, version, diagnostics, detail):
+            guard let detail else {
+                return ProviderHealthSummary(
+                    state: .available,
+                    summary: availableSummary(version: version),
+                    resolvedExecutable: executable,
+                    version: version,
+                    launchability: .launchable,
+                    diagnostics: diagnostics
+                )
+            }
+
+            let classification = classifyPassiveProbeFailure(detail: detail)
+            return ProviderHealthSummary(
+                state: classification.state,
+                summary: classification.summary(version),
+                resolvedExecutable: executable,
+                version: version,
+                launchability: classification.launchability,
+                diagnostics: diagnostics + [
+                    ProviderHealthDiagnostic(
+                        severity: classification.severity,
+                        code: classification.code,
+                        message: classification.message
+                    )
+                ]
+            )
+        }
+    }
+
+    func remoteProviderHealthSummary(
+        for workspace: Workspace,
+        remoteContext: RemoteWorkspaceHealthContext?,
+        healthFacts: any IBMBobProviderHealthFactProviding
+    ) async -> ProviderHealthSummary {
+        if let hostValidation = remoteContext?.hostValidation {
+            if hostValidation.state != .available {
+                return ProviderHealthSummary(
+                    state: .blocked,
+                    summary: "Provider Health is blocked by Host Validation",
+                    diagnostics: [
+                        ProviderHealthDiagnostic(
+                            severity: .warning,
+                            code: "hostValidationBlocked",
+                            message: "Provider Health for IBM Bob is blocked by Host Validation: \(hostValidation.summary)."
+                        )
+                    ]
+                )
+            }
+        } else {
+            return ProviderHealthSummary(
+                state: .blocked,
+                summary: "Provider Health is blocked by Host Validation",
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .warning,
+                        code: "hostValidationBlocked",
+                        message: "Provider Health for IBM Bob is blocked until Host Validation runs."
+                    )
+                ]
+            )
+        }
+
+        if let workspaceAvailability = remoteContext?.workspaceAvailability {
+            if workspaceAvailability.state != .available {
+                return ProviderHealthSummary(
+                    state: .blocked,
+                    summary: "Provider Health is blocked by Workspace Availability",
+                    diagnostics: [
+                        ProviderHealthDiagnostic(
+                            severity: .warning,
+                            code: "workspaceAvailabilityBlocked",
+                            message: "Provider Health for IBM Bob is blocked by Workspace Availability: \(workspaceAvailability.summary)."
+                        )
+                    ]
+                )
+            }
+        } else {
+            return ProviderHealthSummary(
+                state: .blocked,
+                summary: "Provider Health is blocked by Workspace Availability",
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .warning,
+                        code: "workspaceAvailabilityBlocked",
+                        message: "Provider Health for IBM Bob is blocked until Workspace Availability is checked."
+                    )
+                ]
+            )
+        }
+
+        guard let host = remoteContext?.host else {
+            return ProviderHealthSummary(
+                state: .blocked,
+                summary: "Provider Health is blocked by Workspace Availability",
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .warning,
+                        code: "workspaceAvailabilityBlocked",
+                        message: "Provider Health for IBM Bob is blocked until Workspace Availability is checked."
+                    )
+                ]
+            )
+        }
+
+        switch await healthFacts.remoteIBMBobPassiveProbe(workspace: workspace, host: host) {
+        case let .sshResolutionLaunchFailed(message):
+            return ProviderHealthSummary(
+                state: .unavailable,
+                summary: "Remote IBM Bob health check failed before the SSH probe completed",
+                launchability: .notLaunchable,
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .error,
+                        code: "sshLaunchFailed",
+                        message: message
+                    )
+                ]
+            )
+        case let .resolutionProbeFailed(detail):
+            let classification = classifyRemoteProbeFailure(detail: detail)
+            return ProviderHealthSummary(
+                state: classification.state,
+                summary: classification.summary,
+                launchability: .notLaunchable,
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .error,
+                        code: classification.code,
+                        message: classification.message ?? (detail.isEmpty ? classification.summary : detail)
+                    )
+                ]
+            )
+        case .resolutionReturnedNoExecutable:
+            return ProviderHealthSummary(
+                state: .misconfigured,
+                summary: "IBM Bob executable resolution returned no executable path",
+                launchability: .notLaunchable,
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .error,
+                        code: "remoteExecutableResolutionFailed",
+                        message: "The remote IBM Bob executable resolution probe did not return an executable path."
+                    )
+                ]
+            )
+        case let .passiveProbeSSHLaunchFailed(executable, version, message):
+            return ProviderHealthSummary(
+                state: .unavailable,
+                summary: "Remote IBM Bob health check failed before the passive readiness probe completed",
+                resolvedExecutable: executable,
+                version: version,
+                launchability: .notLaunchable,
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .error,
+                        code: "sshLaunchFailed",
+                        message: message
+                    )
+                ]
+            )
+        case let .passiveProbeCompleted(executable, version, detail):
+            guard let detail else {
+                return ProviderHealthSummary(
+                    state: .available,
+                    summary: availableSummary(version: version),
+                    resolvedExecutable: executable,
+                    version: version,
+                    launchability: .launchable,
+                    diagnostics: [
+                        ProviderHealthDiagnostic(
+                            severity: .info,
+                            code: "remoteProbe",
+                            message: "Validated remote IBM Bob launch prerequisites on \(host.name) for \(workspace.folderPath)."
+                        )
+                    ]
+                )
+            }
+
+            let bobClassification = classifyPassiveProbeFailure(detail: detail)
+            if bobClassification.code != "passiveProbeInconclusive" {
+                return ProviderHealthSummary(
+                    state: bobClassification.state,
+                    summary: remoteBlockedSummary(for: bobClassification.code),
+                    resolvedExecutable: executable,
+                    version: version,
+                    launchability: bobClassification.launchability,
+                    diagnostics: [
+                        ProviderHealthDiagnostic(
+                            severity: bobClassification.severity,
+                            code: bobClassification.code,
+                            message: bobClassification.message
+                        )
+                    ]
+                )
+            }
+
+            let genericClassification = classifyRemoteProbeFailure(detail: detail)
+            if genericClassification.code != "remoteLaunchProbeFailed" {
+                return ProviderHealthSummary(
+                    state: genericClassification.state,
+                    summary: genericClassification.summary,
+                    resolvedExecutable: executable,
+                    version: version,
+                    launchability: .notLaunchable,
+                    diagnostics: [
+                        ProviderHealthDiagnostic(
+                            severity: .error,
+                            code: genericClassification.code,
+                            message: genericClassification.message ?? (detail.isEmpty ? genericClassification.summary : detail)
+                        )
+                    ]
+                )
+            }
+
+            return ProviderHealthSummary(
+                state: .available,
+                summary: availableSummary(version: version),
+                resolvedExecutable: executable,
+                version: version,
+                launchability: .launchable,
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .warning,
+                        code: bobClassification.code,
+                        message: bobClassification.message
+                    )
+                ]
+            )
+        }
+    }
+
+    func availableSummary(version: String?) -> String {
+        version.map { "IBM Bob \($0) is available" } ?? "IBM Bob is available"
+    }
+
+    func remoteBlockedSummary(for code: String) -> String {
+        switch code {
+        case "licenseRequired":
+            "IBM Bob requires license acceptance"
+        case "authenticationRequired":
+            "IBM Bob requires authentication on the Remote Workspace"
+        case "setupRequired":
+            "IBM Bob requires setup on the Remote Workspace"
+        default:
+            "IBM Bob is unavailable on the Remote Workspace"
+        }
+    }
+
+    func classifyPassiveProbeFailure(detail: String) -> (
+        state: ProviderHealthSummary.State,
+        summary: (String?) -> String,
+        launchability: ProviderHealthSummary.Launchability,
+        severity: ProviderHealthDiagnostic.Severity,
+        code: String,
+        message: String
+    ) {
+        let normalized = detail.lowercased()
+
+        if normalized.contains("license") || normalized.contains("licence") {
+            return (
+                .misconfigured,
+                { _ in "IBM Bob requires license acceptance" },
+                .notLaunchable,
+                .error,
+                "licenseRequired",
+                detail
+            )
+        }
+
+        if isExplicitAuthenticationFailure(normalized) {
+            return (
+                .unavailable,
+                { _ in "IBM Bob requires authentication" },
+                .notLaunchable,
+                .error,
+                "authenticationRequired",
+                detail
+            )
+        }
+
+        if normalized.contains("setup")
+            || normalized.contains("configure")
+            || normalized.contains("configuration")
+            || normalized.contains("install") {
+            return (
+                .misconfigured,
+                { _ in "IBM Bob requires setup" },
+                .notLaunchable,
+                .error,
+                "setupRequired",
+                detail
+            )
+        }
+
+        return (
+            .available,
+            { version in version.map { "IBM Bob \($0) is available" } ?? "IBM Bob is available" },
+            .launchable,
+            .warning,
+            "passiveProbeInconclusive",
+            detail
+        )
+    }
+
+    func classifyRemoteProbeFailure(
+        detail: String
+    ) -> (state: ProviderHealthSummary.State, summary: String, code: String, message: String?) {
+        let normalized = detail.lowercased()
+
+        if normalized.contains("nexus_remote_workspace_unavailable") {
+            return (
+                .unavailable,
+                "IBM Bob is unavailable on the Remote Workspace",
+                "remoteWorkspaceUnavailable",
+                "The Remote Workspace path is unavailable on the Host."
+            )
+        }
+
+        if normalized.contains("nexus_remote_bob_not_found")
+            || normalized.contains("command not found")
+            || normalized.contains("no such file") {
+            return (
+                .unavailable,
+                "IBM Bob is unavailable on the Remote Workspace",
+                "remoteExecutableNotFound",
+                "IBM Bob executable was not found in the remote shell environments Nexus checked."
+            )
+        }
+
+        if normalized.contains("permission denied")
+            || normalized.contains("bad configuration option") {
+            return (
+                .misconfigured,
+                "Remote IBM Bob launch prerequisites are misconfigured",
+                "remoteLaunchMisconfigured",
+                nil
+            )
+        }
+
+        if normalized.contains("connection timed out")
+            || normalized.contains("operation timed out")
+            || normalized.contains("connection refused")
+            || normalized.contains("network is unreachable")
+            || normalized.contains("no route to host") {
+            return (
+                .unavailable,
+                "Remote IBM Bob is currently unavailable",
+                "remoteUnavailable",
+                nil
+            )
+        }
+
+        return (
+            .misconfigured,
+            "IBM Bob is installed but failed the remote launch probe",
+            "remoteLaunchProbeFailed",
+            nil
+        )
+    }
+
+    func isExplicitAuthenticationFailure(_ message: String) -> Bool {
+        let normalized = message.lowercased()
+        return normalized.contains("auth")
+            || normalized.contains("login")
+            || normalized.contains("not logged in")
+            || normalized.contains("not authenticated")
+            || normalized.contains("unauthorized")
     }
 }
 #endif
