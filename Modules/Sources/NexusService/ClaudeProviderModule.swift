@@ -244,26 +244,60 @@ private extension ClaudeProviderModule {
             )
         }
 
-        let remoteProbeResult: RemoteCLIHealthProbeResult
-        if let probeFacts = remoteContext?.probeFacts,
-           let sharedHealthFacts = healthFacts as? any SharedRemoteCLIProviderHealthFactProviding {
-            remoteProbeResult = await sharedHealthFacts.remoteCLIHealthProbe(
-                commandName: "claude",
-                providerName: provider.displayName,
-                workspace: workspace,
-                host: host,
-                probeFacts: probeFacts
-            )
-        } else {
-            remoteProbeResult = await healthFacts.remoteCLIHealthProbe(
-                commandName: "claude",
-                providerName: provider.displayName,
-                workspace: workspace,
-                host: host
+        if let probeFact = remoteContext?.probeFacts?.providerFacts[.claude] {
+            if let detail = probeFact.resolutionDetail ?? probeFact.probeDetail {
+                let classification = classifyRemoteClaudeCLIProbeFailure(detail: detail)
+                return ProviderHealthSummary(
+                    state: classification.state,
+                    summary: classification.summary,
+                    launchability: .notLaunchable,
+                    diagnostics: [
+                        ProviderHealthDiagnostic(
+                            severity: .error,
+                            code: classification.code,
+                            message: classification.message ?? (detail.isEmpty ? classification.summary : detail)
+                        )
+                    ]
+                )
+            }
+
+            guard let executable = probeFact.executable else {
+                return ProviderHealthSummary(
+                    state: .misconfigured,
+                    summary: "Claude executable resolution returned no executable path",
+                    launchability: .notLaunchable,
+                    diagnostics: [
+                        ProviderHealthDiagnostic(
+                            severity: .error,
+                            code: "remoteExecutableResolutionFailed",
+                            message: "The remote Claude executable resolution probe did not return an executable path."
+                        )
+                    ]
+                )
+            }
+
+            return ProviderHealthSummary(
+                state: .available,
+                summary: probeFact.version.map { "Claude \($0) is available" } ?? "Claude is available",
+                resolvedExecutable: executable,
+                version: probeFact.version,
+                launchability: .launchable,
+                diagnostics: [
+                    ProviderHealthDiagnostic(
+                        severity: .info,
+                        code: "remoteProbe",
+                        message: "Validated remote Claude launch prerequisites on \(host.name) for \(workspace.folderPath)."
+                    )
+                ]
             )
         }
 
-        switch remoteProbeResult {
+        switch await healthFacts.remoteCLIHealthProbe(
+            commandName: "claude",
+            providerName: provider.displayName,
+            workspace: workspace,
+            host: host
+        ) {
         case let .sshLaunchFailed(message):
             return ProviderHealthSummary(
                 state: .unavailable,

@@ -350,6 +350,154 @@ struct ClaudeProviderModuleTests {
         #expect(catalogRead.prelaunchPrimarySurface == .terminal)
     }
 
+    @Test func claudeProviderModuleDerivesRemoteCatalogReadFromRawClaudeProbeFacts() async throws {
+        let module = ClaudeProviderModule()
+        let workspaceID = UUID()
+        let hostID = UUID()
+        let workspace = Workspace(
+            id: workspaceID,
+            name: "Remote Claude",
+            kind: .remote,
+            folderPath: "/srv/api",
+            primaryGroupID: UUID(),
+            remoteHostID: hostID
+        )
+        let providerHealthEvaluator = RecordingClaudeCLIHealthFactProvider(
+            localProbeResult: .ready(executable: "/tmp/unused", version: nil, diagnostics: []),
+            remoteProbeResult: .sshLaunchFailed("direct remote probe should stay unused")
+        )
+        let remoteContext = RemoteWorkspaceHealthContext(
+            host: NexusDomain.Host(id: hostID, name: "Build Server", sshTarget: "build-box"),
+            hostValidation: HostValidationSnapshot(
+                hostID: hostID,
+                state: .available,
+                summary: "Host is available",
+                checkedAt: Date()
+            ),
+            workspaceAvailability: WorkspaceAvailabilitySnapshot(
+                workspaceID: workspaceID,
+                state: .available,
+                summary: "Workspace is available",
+                checkedAt: Date()
+            ),
+            probeFacts: RemoteWorkspaceProbeFacts(
+                tmuxAvailable: true,
+                workspacePath: .available,
+                providerFacts: [
+                    .claude: RemoteProviderProbeFacts(
+                        executable: "/home/tester/.local/bin/claude",
+                        version: "1.2.3",
+                        resolutionDetail: nil,
+                        probeDetail: nil
+                    )
+                ]
+            )
+        )
+
+        let catalogRead = try await module.readCatalog(
+            ProviderModuleCatalogReadRequest(
+                workspace: workspace,
+                remoteContext: remoteContext,
+                defaultSession: nil
+            ),
+            actions: ProviderModuleCatalogReadActions(
+                providerHealthSummary: {
+                    await module.providerHealthSummary(
+                        for: workspace,
+                        remoteContext: remoteContext,
+                        providerHealthEvaluator: providerHealthEvaluator
+                    )
+                }
+            )
+        )
+
+        #expect(catalogRead.health == ProviderHealthSummary(
+            state: .available,
+            summary: "Claude 1.2.3 is available",
+            resolvedExecutable: "/home/tester/.local/bin/claude",
+            version: "1.2.3",
+            launchability: .launchable,
+            diagnostics: [
+                ProviderHealthDiagnostic(
+                    severity: .info,
+                    code: "remoteProbe",
+                    message: "Validated remote Claude launch prerequisites on Build Server for /srv/api."
+                )
+            ]
+        ))
+        #expect(providerHealthEvaluator.remoteProbeRequests.isEmpty)
+        #expect(providerHealthEvaluator.legacyRequests.isEmpty)
+        #expect(catalogRead.capabilities.launchDefaultSession.isEnabled)
+        #expect(catalogRead.capabilities.createNamedSession.isEnabled)
+        #expect(catalogRead.prelaunchPrimarySurface == .terminal)
+    }
+
+    @Test func claudeProviderModuleClassifiesRemoteRawProbeFactsWithoutSharedRemoteHealthAdapter() async {
+        let module = ClaudeProviderModule()
+        let workspaceID = UUID()
+        let hostID = UUID()
+        let workspace = Workspace(
+            id: workspaceID,
+            name: "Remote Claude",
+            kind: .remote,
+            folderPath: "/srv/api",
+            primaryGroupID: UUID(),
+            remoteHostID: hostID
+        )
+        let providerHealthEvaluator = RecordingClaudeCLIHealthFactProvider(
+            localProbeResult: .ready(executable: "/tmp/unused", version: nil, diagnostics: []),
+            remoteProbeResult: .sshLaunchFailed("direct remote probe should stay unused")
+        )
+        let remoteContext = RemoteWorkspaceHealthContext(
+            host: NexusDomain.Host(id: hostID, name: "Build Server", sshTarget: "build-box"),
+            hostValidation: HostValidationSnapshot(
+                hostID: hostID,
+                state: .available,
+                summary: "Host is available",
+                checkedAt: Date()
+            ),
+            workspaceAvailability: WorkspaceAvailabilitySnapshot(
+                workspaceID: workspaceID,
+                state: .available,
+                summary: "Workspace is available",
+                checkedAt: Date()
+            ),
+            probeFacts: RemoteWorkspaceProbeFacts(
+                tmuxAvailable: true,
+                workspacePath: .available,
+                providerFacts: [
+                    .claude: RemoteProviderProbeFacts(
+                        executable: nil,
+                        version: nil,
+                        resolutionDetail: "NEXUS_REMOTE_CLAUDE_NOT_FOUND",
+                        probeDetail: nil
+                    )
+                ]
+            )
+        )
+
+        let health = await module.providerHealthSummary(
+            for: workspace,
+            remoteContext: remoteContext,
+            providerHealthEvaluator: providerHealthEvaluator
+        )
+
+        #expect(health == ProviderHealthSummary(
+            state: .unavailable,
+            summary: "Claude is unavailable on the Remote Workspace",
+            launchability: .notLaunchable,
+            diagnostics: [
+                ProviderHealthDiagnostic(
+                    severity: .error,
+                    code: "remoteExecutableNotFound",
+                    message: "Claude executable was not found in the remote shell environments Nexus checked."
+                )
+            ]
+        ))
+        #expect(providerHealthEvaluator.remoteProbeRequests.isEmpty)
+        #expect(providerHealthEvaluator.legacyRequests.isEmpty)
+    }
+
     @Test func claudeProviderModulePreservesClaudeCatalogReadBehavior() async throws {
         let module = ClaudeProviderModule()
         let workspaceID = UUID()

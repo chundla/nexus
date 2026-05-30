@@ -485,6 +485,54 @@ struct WorkspaceCatalogTests {
         #expect(await providerHealthEvaluator.callCount(for: ProviderID.claude) == 1)
     }
 
+    @Test func providerDetailUsesSingleRemoteProbePassForRemoteClaudeWorkspaceTarget() async throws {
+        let hostValidationEvaluator = CountingHostValidationEvaluator(
+            result: HostValidationResult(state: .available, summary: "Unexpected Host Validation", diagnostics: [])
+        )
+        let workspaceAvailabilityEvaluator = CountingWorkspaceAvailabilityEvaluator(
+            result: WorkspaceAvailabilityResult(state: .available, summary: "Unexpected Workspace Availability", diagnostics: [])
+        )
+        let commandRunner = FailingWorkspaceCatalogCommandRunner()
+        let providerHealthEvaluator = ProviderHealthFacts(commandRunner: commandRunner)
+        let collector = RecordingRemoteWorkspaceProbeCollector(
+            result: .collected(
+                RemoteWorkspaceProbeFacts(
+                    tmuxAvailable: true,
+                    workspacePath: .available,
+                    providerFacts: [
+                        .claude: RemoteProviderProbeFacts(
+                            executable: "/opt/tools/claude",
+                            version: "1.2.3",
+                            resolutionDetail: nil,
+                            probeDetail: nil
+                        )
+                    ]
+                )
+            )
+        )
+        let fixture = try WorkspaceCatalogFixture(
+            providerHealthEvaluator: providerHealthEvaluator,
+            hostValidationEvaluator: hostValidationEvaluator,
+            workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
+            remoteWorkspaceProbeCollector: collector
+        )
+        let host = try fixture.metadataStore.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
+        let remoteWorkspace = try fixture.metadataStore.createRemoteWorkspace(
+            name: "Remote API",
+            hostID: host.id,
+            remotePath: "/srv/api",
+            primaryGroupID: fixture.group.id
+        )
+
+        let detail = try await fixture.catalog.providerDetail(workspaceID: remoteWorkspace.id, providerID: .claude)
+
+        #expect(detail.health.summary == "Claude 1.2.3 is available")
+        #expect(collector.callCount == 1)
+        #expect(hostValidationEvaluator.callCount == 0)
+        #expect(workspaceAvailabilityEvaluator.callCount == 0)
+        #expect(commandRunner.callCount == 0)
+    }
+
     @Test func providerDetailUsesSingleRemoteProbePassForRemoteWorkspaceTarget() async throws {
         let hostValidationEvaluator = CountingHostValidationEvaluator(
             result: HostValidationResult(state: .available, summary: "Unexpected Host Validation", diagnostics: [])

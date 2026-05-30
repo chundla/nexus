@@ -210,7 +210,7 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
     private func supportsSharedRemoteProbeCollection(for providerID: ProviderID) -> Bool {
         switch providerID {
         case .claude:
-            dependencies.providerHealthEvaluator is any SharedRemoteCLIProviderHealthFactProviding
+            dependencies.providerHealthEvaluator is any CLIProviderHealthFactProviding
         case .codex:
             dependencies.providerHealthEvaluator is any CodexProviderHealthFactProviding
         case .pi:
