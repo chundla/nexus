@@ -1399,9 +1399,10 @@ private enum RemoteSessionAction: Equatable {
     case returnToViewer
 }
 
-private struct RemoteSessionScreenView: View {
+struct RemoteSessionScreenView: View {
     @Bindable var model: RemoteClientPairingModel
     let session: Session
+    let benchmarkMode: Bool
 
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -1508,6 +1509,12 @@ private struct RemoteSessionScreenView: View {
         return currentSession.name ?? currentSession.state.rawValue.capitalized
     }
 
+    init(model: RemoteClientPairingModel, session: Session, benchmarkMode: Bool = false) {
+        self.model = model
+        self.session = session
+        self.benchmarkMode = benchmarkMode
+    }
+
     var body: some View {
         ZStack {
             NexusIOSBackdrop()
@@ -1542,16 +1549,24 @@ private struct RemoteSessionScreenView: View {
         .toolbarBackground(.hidden, for: .navigationBar)
         .toolbar { sessionToolbar }
         .safeAreaInset(edge: .bottom) {
-            if surfacePresentation?.showsStructuredActivity == true {
-                structuredComposerBar
-            } else if surfacePresentation?.showsTerminal == true, isReady {
-                terminalComposerBar
+            if benchmarkMode == false {
+                if surfacePresentation?.showsStructuredActivity == true {
+                    structuredComposerBar
+                } else if surfacePresentation?.showsTerminal == true, isReady {
+                    terminalComposerBar
+                }
             }
         }
         .task(id: session.id) {
+            guard benchmarkMode == false else {
+                return
+            }
             await model.focusRemoteSession(sessionID: session.id)
         }
         .refreshable {
+            guard benchmarkMode == false else {
+                return
+            }
             await model.refreshFocusedSessionScreen()
         }
         .confirmationDialog(
@@ -1569,7 +1584,10 @@ private struct RemoteSessionScreenView: View {
             Alert(title: Text("Nexus Remote"), message: Text(error.message))
         }
         .onChange(of: terminalViewportSize) { _, _ in
-            guard isReady, supportsFocusedSessionSurface, model.focusedSessionIsController else {
+            guard benchmarkMode == false,
+                  isReady,
+                  supportsFocusedSessionSurface,
+                  model.focusedSessionIsController else {
                 return
             }
 
@@ -1579,6 +1597,9 @@ private struct RemoteSessionScreenView: View {
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
+            guard benchmarkMode == false else {
+                return
+            }
             if newPhase == .background {
                 Task {
                     await model.handleFocusedSessionBackgrounded()
@@ -1586,6 +1607,9 @@ private struct RemoteSessionScreenView: View {
             }
         }
         .onDisappear {
+            guard benchmarkMode == false else {
+                return
+            }
             if model.focusedSessionID == session.id {
                 Task {
                     await model.handleFocusedSessionScreenDisappeared(preserveAttachment: scenePhase == .background)
@@ -1607,29 +1631,31 @@ private struct RemoteSessionScreenView: View {
             }
         }
 
-        ToolbarItem(placement: .topBarTrailing) {
-            Menu {
-                if isReady, surfacePresentation?.showsAttachment == true {
-                    Button(controllerActionTitle) {
-                        toggleControllerState()
+        if benchmarkMode == false {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    if isReady, surfacePresentation?.showsAttachment == true {
+                        Button(controllerActionTitle) {
+                            toggleControllerState()
+                        }
+                        .disabled(isPerformingAction)
                     }
-                    .disabled(isPerformingAction)
-                }
 
-                if isReady {
-                    Button("Stop Session", role: .destructive) {
-                        isShowingStopConfirmation = true
+                    if isReady {
+                        Button("Stop Session", role: .destructive) {
+                            isShowingStopConfirmation = true
+                        }
+                        .disabled(isPerformingAction)
+                    } else {
+                        Button("Relaunch Session") {
+                            relaunchSession()
+                        }
+                        .disabled(isPerformingAction || surfacePresentation?.relaunchIsEnabled == false)
                     }
-                    .disabled(isPerformingAction)
-                } else {
-                    Button("Relaunch Session") {
-                        relaunchSession()
-                    }
-                    .disabled(isPerformingAction || surfacePresentation?.relaunchIsEnabled == false)
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .foregroundStyle(.white)
                 }
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .foregroundStyle(.white)
             }
         }
     }
@@ -1990,53 +2016,21 @@ private struct RemoteSessionScreenView: View {
         _ screen: SessionScreen,
         presentation: StructuredSessionPresentation
     ) -> some View {
-        ScrollViewReader { proxy in
+        let pendingDialogs = extensionUI?.pendingDialogs ?? []
+        let pendingRequests = presentation.feed.pendingApprovalRequests
+        let activityRows = presentation.feed.activityRows
+        let latestActivityRowID = activityRows.last?.id
+        let notificationCount = extensionUI?.notifications.count ?? 0
+
+        return ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
-                    if let extensionUI, extensionUI.pendingDialogs.isEmpty == false {
-                        VStack(alignment: .leading, spacing: 10) {
-                            ForEach(extensionUI.pendingDialogs) { dialog in
-                                structuredSessionExtensionDialogView(dialog)
-                            }
-                        }
-                    }
-
-                    if presentation.feed.pendingApprovalRequests.isEmpty == false {
-                        VStack(alignment: .leading, spacing: 10) {
-                            ForEach(presentation.feed.pendingApprovalRequests) { request in
-                                structuredSessionApprovalRequestView(request, presentation: presentation.approvalRequest)
-                            }
-                        }
-                    }
-
-                    if let extensionUI,
-                       extensionUI.title != nil || extensionUI.statuses.isEmpty == false || extensionUI.notifications.isEmpty == false {
-                        structuredSessionExtensionSummaryView(extensionUI)
-                    }
-
-                    if presentation.feed.activityRows.isEmpty {
-                        RemoteUnavailableInsetCard(
-                            title: presentation.feed.copy.emptyStateTitle,
-                            detail: presentation.feed.copy.emptyStateDescription,
-                            accent: NexusIOSTheme.gold
-                        )
-                    } else {
-                        LazyVStack(spacing: 10) {
-                            ForEach(presentation.feed.activityRows) { row in
-                                structuredSessionActivityRowView(row, screen: screen)
-                                    .id(row.id)
-                            }
-
-                            if let thinkingIndicator = presentation.feed.thinkingIndicator {
-                                structuredSessionThinkingIndicatorView(thinkingIndicator)
-                            }
-
-                            Color.clear
-                                .frame(height: 1)
-                                .id(conversationBottomID)
-                        }
-                    }
-                }
+                structuredSessionScrollBody(
+                    screen: screen,
+                    presentation: presentation,
+                    pendingDialogs: pendingDialogs,
+                    pendingRequests: pendingRequests,
+                    activityRows: activityRows
+                )
                 .padding(.horizontal, horizontalPadding)
                 .padding(.top, 14)
                 .padding(.bottom, 120)
@@ -2046,29 +2040,84 @@ private struct RemoteSessionScreenView: View {
                     proxy.scrollTo(conversationBottomID, anchor: .bottom)
                 }
             }
-            .onChange(of: presentation.feed.activityRows.count) { _, _ in
+            .onChange(of: activityRows.count) { _, _ in
                 withAnimation(.easeOut(duration: 0.18)) {
                     proxy.scrollTo(conversationBottomID, anchor: .bottom)
                 }
             }
-            .onChange(of: presentation.feed.activityRows.last) { _, _ in
+            .onChange(of: latestActivityRowID) { _, _ in
                 withAnimation(.easeOut(duration: 0.18)) {
                     proxy.scrollTo(conversationBottomID, anchor: .bottom)
                 }
             }
-            .onChange(of: presentation.feed.pendingApprovalRequests.count) { _, _ in
+            .onChange(of: pendingRequests.count) { _, _ in
                 withAnimation(.easeOut(duration: 0.18)) {
                     proxy.scrollTo(conversationBottomID, anchor: .bottom)
                 }
             }
-            .onChange(of: extensionUI?.pendingDialogs.count ?? 0) { _, _ in
+            .onChange(of: pendingDialogs.count) { _, _ in
                 withAnimation(.easeOut(duration: 0.18)) {
                     proxy.scrollTo(conversationBottomID, anchor: .bottom)
                 }
             }
-            .onChange(of: extensionUI?.notifications.count ?? 0) { _, _ in
+            .onChange(of: notificationCount) { _, _ in
                 withAnimation(.easeOut(duration: 0.18)) {
                     proxy.scrollTo(conversationBottomID, anchor: .bottom)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func structuredSessionScrollBody(
+        screen: SessionScreen,
+        presentation: StructuredSessionPresentation,
+        pendingDialogs: [SessionExtensionUIDialog],
+        pendingRequests: [SessionApprovalRequest],
+        activityRows: [StructuredSessionActivityRow]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if pendingDialogs.isEmpty == false {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(pendingDialogs) { dialog in
+                        structuredSessionExtensionDialogView(dialog)
+                    }
+                }
+            }
+
+            if pendingRequests.isEmpty == false {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(pendingRequests) { request in
+                        structuredSessionApprovalRequestView(request, presentation: presentation.approvalRequest)
+                    }
+                }
+            }
+
+            if let extensionUI,
+               extensionUI.title != nil || extensionUI.statuses.isEmpty == false || extensionUI.notifications.isEmpty == false {
+                structuredSessionExtensionSummaryView(extensionUI)
+            }
+
+            if activityRows.isEmpty {
+                RemoteUnavailableInsetCard(
+                    title: presentation.feed.copy.emptyStateTitle,
+                    detail: presentation.feed.copy.emptyStateDescription,
+                    accent: NexusIOSTheme.gold
+                )
+            } else {
+                LazyVStack(spacing: 10) {
+                    ForEach(activityRows) { row in
+                        structuredSessionActivityRowView(row, screen: screen)
+                            .id(row.id)
+                    }
+
+                    if let thinkingIndicator = presentation.feed.thinkingIndicator {
+                        structuredSessionThinkingIndicatorView(thinkingIndicator)
+                    }
+
+                    Color.clear
+                        .frame(height: 1)
+                        .id(conversationBottomID)
                 }
             }
         }
