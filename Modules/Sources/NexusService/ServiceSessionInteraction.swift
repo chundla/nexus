@@ -97,6 +97,7 @@ struct ServiceSessionInteractionDependencies {
     let sendInputKey: (SessionInputKey, Bool, Session) throws -> SessionScreen
     let respondToApprovalRequest: (UUID, ApprovalRequestDecision, Session) throws -> SessionScreen
     let respondToExtensionDialog: (String, SessionExtensionUIDialogResponse, Session) throws -> SessionScreen
+    let resetPiSession: (Session) throws -> SessionScreen
     let stabilizedScreenAfterTerminalInput: (Session, SessionScreen, SessionScreen) -> SessionScreen
 }
 
@@ -172,6 +173,9 @@ final class ServiceSessionInteraction: SessionInteractionManaging, @unchecked Se
 
     func sendSessionInput(sessionID: UUID, prompt: SessionPrompt) async throws -> SessionScreen {
         let resolvedSession = try await readyMacControlledSession(sessionID: sessionID)
+        if isPiSessionResetCommand(prompt, session: resolvedSession) {
+            return dependencies.normalizedSessionScreen(try dependencies.resetPiSession(resolvedSession))
+        }
         return dependencies.normalizedSessionScreen(try dependencies.sendInput(prompt, resolvedSession))
     }
 
@@ -211,6 +215,9 @@ final class ServiceSessionInteraction: SessionInteractionManaging, @unchecked Se
             pairedDeviceID: pairedDeviceID,
             controllerError: .remoteSessionInputControllerRequired
         )
+        if isPiSessionResetCommand(prompt, session: resolvedSession) {
+            return dependencies.normalizedSessionScreen(try dependencies.resetPiSession(resolvedSession))
+        }
         return dependencies.normalizedSessionScreen(try dependencies.sendInput(prompt, resolvedSession))
     }
 
@@ -248,6 +255,9 @@ final class ServiceSessionInteraction: SessionInteractionManaging, @unchecked Se
 
     func sendRemoteSessionText(sessionID: UUID, pairedDeviceID: UUID, text: String) async throws -> SessionScreen {
         let resolvedSession = try await readyRemoteControlledSession(sessionID: sessionID, pairedDeviceID: pairedDeviceID)
+        if isPiSessionResetCommand(SessionPrompt(text: text), session: resolvedSession) {
+            return dependencies.normalizedSessionScreen(try dependencies.resetPiSession(resolvedSession))
+        }
         let screenBeforeInput = dependencies.normalizedSessionScreen(try dependencies.runtimeSessionScreen(resolvedSession))
         let responseScreen = dependencies.normalizedSessionScreen(try dependencies.sendText(text, resolvedSession))
         return dependencies.stabilizedScreenAfterTerminalInput(resolvedSession, screenBeforeInput, responseScreen)
@@ -299,6 +309,16 @@ final class ServiceSessionInteraction: SessionInteractionManaging, @unchecked Se
             throw NexusMetadataStoreError.sessionNotReady
         }
         return resolvedSession
+    }
+
+    private func isPiSessionResetCommand(_ prompt: SessionPrompt, session: Session) -> Bool {
+        guard session.providerID == .pi,
+              prompt.images.isEmpty,
+              prompt.text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "/new"
+                || prompt.text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "/clear" else {
+            return false
+        }
+        return true
     }
 }
 #endif

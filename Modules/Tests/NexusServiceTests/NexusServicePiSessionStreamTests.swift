@@ -45,7 +45,7 @@ struct NexusServicePiSessionStreamTests {
         #expect(firstSession.providerID == .pi)
         #expect(firstSession.isDefault)
         #expect(resumedSession.id == firstSession.id)
-        #expect(firstScreen.activityItems.map(\.text) == ["Pi shared Session stream connected"])
+        #expect(firstScreen.activityItems.map(\.text) == ["Session stream connected"])
         #expect(firstScreen.activityItems.map(\.kind) == [.status])
         #expect(firstScreen.transcript.isEmpty)
         #expect(launchCounter.value == 1)
@@ -79,8 +79,8 @@ struct NexusServicePiSessionStreamTests {
         let screen = runtime.sessionScreen(for: session)
 
         #expect(screen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
-            "Current Pi model: anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4 (thinking: medium)"
+            "Session stream connected",
+            "Current Model: anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4 (thinking: medium)"
         ])
         #expect(screen.activityItems.map(\.kind) == [.status, .status])
     }
@@ -335,10 +335,10 @@ struct NexusServicePiSessionStreamTests {
 
         #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"set_model\"") }))
         #expect(screen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
+            "Session stream connected",
             "/model anthropic/claude-sonnet-4-20250514",
-            "Pi model switched to anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4",
-            "Current Pi model: anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4"
+            "Model switched to anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4",
+            "Current Model: anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4"
         ])
         #expect(screen.activityItems.map(\.kind) == [.status, .command, .status, .status])
         #expect(screen.transcript.isEmpty)
@@ -374,11 +374,11 @@ struct NexusServicePiSessionStreamTests {
 
         #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"set_thinking_level\"") }))
         #expect(screen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
-            "Current Pi model: anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4 (thinking: medium)",
+            "Session stream connected",
+            "Current Model: anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4 (thinking: medium)",
             "/thinking high",
-            "Pi thinking level set to high",
-            "Current Pi model: anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4 (thinking: high)"
+            "Thinking level set to high",
+            "Current Model: anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4 (thinking: high)"
         ])
         #expect(screen.activityItems.map(\.kind) == [.status, .status, .command, .status, .status])
     }
@@ -418,11 +418,11 @@ struct NexusServicePiSessionStreamTests {
 
         #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"cycle_model\"") }))
         #expect(screen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
-            "Current Pi model: anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4 (thinking: medium)",
+            "Session stream connected",
+            "Current Model: anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4 (thinking: medium)",
             "/cycle-model",
-            "Pi model cycled to openai/gpt-4o — GPT-4o",
-            "Current Pi model: openai/gpt-4o — GPT-4o (thinking: high)"
+            "Model cycled to openai/gpt-4o — GPT-4o",
+            "Current Model: openai/gpt-4o — GPT-4o (thinking: high)"
         ])
         #expect(screen.activityItems.map(\.kind) == [.status, .status, .command, .status, .status])
     }
@@ -458,11 +458,11 @@ struct NexusServicePiSessionStreamTests {
 
         #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"cycle_thinking_level\"") }))
         #expect(screen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
-            "Current Pi model: anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4 (thinking: medium)",
+            "Session stream connected",
+            "Current Model: anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4 (thinking: medium)",
             "/cycle-thinking-level",
-            "Pi thinking level cycled to high",
-            "Current Pi model: anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4 (thinking: high)"
+            "Thinking level cycled to high",
+            "Current Model: anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4 (thinking: high)"
         ])
         #expect(screen.activityItems.map(\.kind) == [.status, .status, .command, .status, .status])
     }
@@ -491,9 +491,9 @@ struct NexusServicePiSessionStreamTests {
             $0.contains("\"type\":\"compact\"") && $0.contains("\"customInstructions\":\"Focus on the latest code changes\"")
         }))
         #expect(screen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
+            "Session stream connected",
             "/compact Focus on the latest code changes",
-            "Pi compacted the Session context",
+            "Compacted the session context",
             "Compaction summary: Focus on the latest code changes"
         ])
         #expect(screen.activityItems.map(\.kind) == [.status, .command, .status, .status])
@@ -525,13 +525,13 @@ struct NexusServicePiSessionStreamTests {
         #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"set_auto_retry\"") && $0.contains("\"enabled\":true") }))
         #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"abort_retry\"") }))
         #expect(screen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
+            "Session stream connected",
             "/auto-compaction off",
-            "Pi auto-compaction disabled",
+            "Auto-compaction disabled",
             "/auto-retry on",
-            "Pi auto-retry enabled",
+            "Auto-retry enabled",
             "/abort-retry",
-            "Requested Pi retry cancellation"
+            "Requested retry cancellation"
         ])
         #expect(screen.activityItems.map(\.kind) == [.status, .command, .status, .command, .status, .command, .status])
     }
@@ -570,7 +570,7 @@ struct NexusServicePiSessionStreamTests {
         #expect(images[0]["data"] as? String == "iVBORw==")
         #expect(images[0]["mimeType"] as? String == "image/png")
         #expect(screen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
+            "Session stream connected",
             "You: What changed in this screenshot? [1 image]"
         ])
         #expect(screen.activityItems.last?.prompt == prompt)
@@ -609,9 +609,9 @@ struct NexusServicePiSessionStreamTests {
         #expect(images[0]["data"] as? String == "R0lG")
         #expect(images[0]["mimeType"] as? String == "image/gif")
         #expect(screen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
+            "Session stream connected",
             "Queued steering: Focus on this image instead [1 image]",
-            "Pi queue updated — steering: Focus on this image instead"
+            "Queue updated — steering: Focus on this image instead"
         ])
         #expect(screen.activityItems[1].prompt == SessionPrompt(text: "Focus on this image instead", images: prompt.images))
         #expect(screen.transcript == "> Focus on this image instead [1 image]")
@@ -642,9 +642,9 @@ struct NexusServicePiSessionStreamTests {
         }))
         #expect(screen.providerEvents.contains(where: { $0.type == "queue_update" && $0.family == .queue }))
         #expect(screen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
+            "Session stream connected",
             "Queued steering: Focus on error handling",
-            "Pi queue updated — steering: Focus on error handling"
+            "Queue updated — steering: Focus on error handling"
         ])
         #expect(screen.transcript == "> Focus on error handling")
     }
@@ -681,9 +681,9 @@ struct NexusServicePiSessionStreamTests {
         #expect(images[0]["data"] as? String == "/9j/")
         #expect(images[0]["mimeType"] as? String == "image/jpeg")
         #expect(screen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
+            "Session stream connected",
             "Queued follow-up: Also check this screenshot [1 image]",
-            "Pi queue updated — follow-up: Also check this screenshot"
+            "Queue updated — follow-up: Also check this screenshot"
         ])
         #expect(screen.activityItems[1].prompt == SessionPrompt(text: "Also check this screenshot", images: prompt.images))
         #expect(screen.transcript == "> Also check this screenshot [1 image]")
@@ -714,9 +714,9 @@ struct NexusServicePiSessionStreamTests {
         }))
         #expect(screen.providerEvents.contains(where: { $0.type == "queue_update" && $0.family == .queue }))
         #expect(screen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
+            "Session stream connected",
             "Queued follow-up: After that, summarize the result",
-            "Pi queue updated — follow-up: After that, summarize the result"
+            "Queue updated — follow-up: After that, summarize the result"
         ])
         #expect(screen.transcript == "> After that, summarize the result")
     }
@@ -754,10 +754,10 @@ struct NexusServicePiSessionStreamTests {
         }))
         #expect(screen.providerEvents.contains(where: { $0.type == "queue_update" && $0.family == .queue }))
         #expect(screen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
+            "Session stream connected",
             "You: hello",
             "Queued steering: Focus on error handling",
-            "Pi queue updated — steering: Focus on error handling"
+            "Queue updated — steering: Focus on error handling"
         ])
         #expect(screen.transcript == "> hello\n> Focus on error handling")
         #expect(screen.isAgentTurnInProgress)
@@ -787,11 +787,11 @@ struct NexusServicePiSessionStreamTests {
         #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"set_steering_mode\"") && $0.contains("\"mode\":\"all\"") }))
         #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"set_follow_up_mode\"") && $0.contains("\"mode\":\"all\"") }))
         #expect(screen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
+            "Session stream connected",
             "/steering-mode all",
-            "Pi steering mode set to all",
+            "Steering mode set to all",
             "/follow-up-mode all",
-            "Pi follow-up mode set to all"
+            "Follow-up mode set to all"
         ])
         #expect(screen.transcript.isEmpty)
     }
@@ -850,7 +850,7 @@ struct NexusServicePiSessionStreamTests {
 
         #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"get_fork_messages\"") }))
         #expect(screen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
+            "Session stream connected",
             "/fork-messages",
             "Fork message abc123: First prompt...",
             "Fork message def456: Second prompt..."
@@ -931,7 +931,7 @@ struct NexusServicePiSessionStreamTests {
 
         #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"abort\"") }))
         #expect(screen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
+            "Session stream connected",
             "You: hello",
             "/abort",
             "Operation aborted"
@@ -966,9 +966,9 @@ struct NexusServicePiSessionStreamTests {
             $0.contains("\"type\":\"bash\"") && $0.contains("\"command\":\"ls -la\"")
         }))
         #expect(screen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
+            "Session stream connected",
             "/bash ls -la",
-            "Running Pi bash: ls -la",
+            "Running bash: ls -la",
             "bash: total 48",
             "Pi bash completed with exit code 0 and will be included on the next prompt"
         ])
@@ -999,12 +999,12 @@ struct NexusServicePiSessionStreamTests {
 
         #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"abort_bash\"") }))
         #expect(screen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
+            "Session stream connected",
             "/bash sleep 10",
-            "Running Pi bash: sleep 10",
+            "Running bash: sleep 10",
             "/abort-bash",
             "Requested Pi bash cancellation",
-            "Pi bash cancelled"
+            "Bash cancelled"
         ])
         #expect(screen.activityItems.map(\.kind) == [.status, .command, .progress, .command, .status, .status])
     }
@@ -1033,7 +1033,7 @@ struct NexusServicePiSessionStreamTests {
             $0.contains("\"type\":\"export_html\"") && $0.contains("pi-session.html")
         }))
         #expect(screen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
+            "Session stream connected",
             "/export-html /tmp/pi-session.html",
             "Exported Pi Session HTML to /tmp/pi-session.html"
         ])
@@ -1074,7 +1074,7 @@ struct NexusServicePiSessionStreamTests {
 
         #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"get_messages\"") }))
         #expect(screen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
+            "Session stream connected",
             "/messages",
             "Pi returned 2 messages",
             "Message 1 — user: Hello Pi",
@@ -1117,7 +1117,7 @@ struct NexusServicePiSessionStreamTests {
 
         #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"get_session_stats\"") }))
         #expect(screen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
+            "Session stream connected",
             "/session-stats",
             "Pi Session stats — user: 5 · assistant: 4 · tool calls: 12 · tool results: 12 · total: 21 · cost: $0.45",
             "Pi context usage — 60000 / 200000 tokens (30%)"
@@ -1147,9 +1147,9 @@ struct NexusServicePiSessionStreamTests {
 
         #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"get_last_assistant_text\"") }))
         #expect(screen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
+            "Session stream connected",
             "/last-assistant-text",
-            "Last Pi assistant message: Summarized answer"
+            "Last assistant message: Summarized answer"
         ])
         #expect(screen.activityItems.map(\.kind) == [.status, .command, .message])
     }
@@ -1201,6 +1201,98 @@ struct NexusServicePiSessionStreamTests {
         #expect(firstTurn.activityItems.suffix(2).map(\.text) == ["You: alpha", "Pi: alpha"])
         #expect(relaunchedSession.id == firstSession.id)
         #expect(resumedTurn.activityItems.suffix(2).map(\.text) == ["You: what was my last message?", "Pi: alpha"])
+    }
+
+    @Test func localPiNewCommandResetsCurrentSessionHistoryAndStartsFreshPiSession() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
+
+        let transportHarness = PersistentPiTransportHarness()
+        func makeService() throws -> NexusService {
+            let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, arguments, _ in
+                transportHarness.makeTransport(arguments: arguments)
+            })
+
+            return try NexusService.bootstrapForTests(
+                rootURL: rootURL,
+                providerHealthEvaluator: ProviderHealthFacts(
+                    executableResolver: PiStreamStubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
+                    commandRunner: PiStreamStubCommandRunner(results: [
+                        .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
+                        .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                    ]),
+                    localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+                ),
+                sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+            )
+        }
+
+        let service = try makeService()
+        let group = try service.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try service.createLocalWorkspace(
+            name: "Local Pi",
+            folderPath: workspaceFolder.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+        let firstTurn = try service.sendSessionInput(sessionID: session.id, text: "alpha")
+        let resetScreen = try service.sendSessionInput(sessionID: session.id, text: "/new")
+        let nextTurn = try service.sendSessionInput(sessionID: session.id, text: "what was my last message?")
+
+        #expect(firstTurn.activityItems.suffix(2).map(\.text) == ["You: alpha", "Pi: alpha"])
+        #expect(resetScreen.session.id == session.id)
+        #expect(resetScreen.activityItems.map(\.text) == ["Session stream connected"])
+        #expect(nextTurn.session.id == session.id)
+        #expect(nextTurn.activityItems.suffix(2).map(\.text) == ["You: what was my last message?", "Pi: (none)"])
+    }
+
+    @Test func localPiClearCommandResetsCurrentSessionHistoryAndStartsFreshPiSession() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
+
+        let transportHarness = PersistentPiTransportHarness()
+        func makeService() throws -> NexusService {
+            let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, arguments, _ in
+                transportHarness.makeTransport(arguments: arguments)
+            })
+
+            return try NexusService.bootstrapForTests(
+                rootURL: rootURL,
+                providerHealthEvaluator: ProviderHealthFacts(
+                    executableResolver: PiStreamStubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
+                    commandRunner: PiStreamStubCommandRunner(results: [
+                        .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
+                        .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                    ]),
+                    localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+                ),
+                sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+            )
+        }
+
+        let service = try makeService()
+        let group = try service.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try service.createLocalWorkspace(
+            name: "Local Pi",
+            folderPath: workspaceFolder.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+        _ = try service.sendSessionInput(sessionID: session.id, text: "alpha")
+        let resetScreen = try service.sendSessionInput(sessionID: session.id, text: "/clear")
+        let nextTurn = try service.sendSessionInput(sessionID: session.id, text: "what was my last message?")
+
+        #expect(resetScreen.session.id == session.id)
+        #expect(resetScreen.activityItems.map(\.text) == ["Session stream connected"])
+        #expect(nextTurn.activityItems.suffix(2).map(\.text) == ["You: what was my last message?", "Pi: (none)"])
     }
 
     @Test func localPiRestartedSessionShowsInterruptedLostRuntimeCopyAcrossInspectableSurfaces() throws {
@@ -1261,10 +1353,10 @@ struct NexusServicePiSessionStreamTests {
         #expect(interruptedDefaultScreen.session.state == .interrupted)
         #expect(interruptedDefaultScreen.transcript == expectedMessage)
         #expect(interruptedDefaultScreen.activityItems.map(\.kind) == [.status, .error])
-        #expect(interruptedDefaultScreen.activityItems.map(\.text) == ["Pi shared Session stream connected", expectedMessage])
+        #expect(interruptedDefaultScreen.activityItems.map(\.text) == ["Session stream connected", expectedMessage])
         #expect(interruptedNamedScreen.session.state == .interrupted)
         #expect(interruptedNamedScreen.activityItems.map(\.kind) == [.status, .error])
-        #expect(interruptedNamedScreen.activityItems.map(\.text) == ["Pi shared Session stream connected", expectedMessage])
+        #expect(interruptedNamedScreen.activityItems.map(\.text) == ["Session stream connected", expectedMessage])
     }
 
     @Test func localPiNamedSessionCanBeStoppedRelaunchedAndDeletedWhilePreservingConversationLinkage() throws {
@@ -1395,7 +1487,7 @@ struct NexusServicePiSessionStreamTests {
         let screen = runtime.sessionScreen(for: session)
 
         #expect(screen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
+            "Session stream connected",
             "You: hello",
             "Pi: world"
         ])
@@ -1511,10 +1603,10 @@ struct NexusServicePiSessionStreamTests {
             .response
         ])
         #expect(screen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
+            "Session stream connected",
             "You: hello",
             "subagent reviewer: Review the latest diff",
-            "subagent: Looks good overall.",
+            "reviewer: Looks good overall.",
             "Pi: world"
         ])
         #expect(screen.transcript == "> hello\nworld")
@@ -1613,23 +1705,19 @@ struct NexusServicePiSessionStreamTests {
             .agent
         ])
         #expect(screen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
+            "Session stream connected",
             "You: inspect auth",
-            "Pi is thinking",
-            "Pi thought: Inspect the auth flow before running tools.",
-            "Pi prepared tool call: subagent reviewer: Inspect the auth flow",
-            "Pi: Done",
-            "Pi turn complete"
+            "thoughts:",
+            "Pi: Done"
         ])
         #expect(screen.activityItems.map(\.kind) == [
             .status,
             .message,
             .status,
-            .status,
-            .status,
-            .message,
-            .completion
+            .message
         ])
+        #expect(screen.activityItems[2].detailText == "Inspect the auth flow before running tools.")
+        #expect(screen.activityItems.contains(where: { $0.kind == .completion }) == false)
         #expect(screen.transcript == "> inspect auth\nDone")
     }
 
@@ -1678,7 +1766,7 @@ struct NexusServicePiSessionStreamTests {
         let screen = runtime.sessionScreen(for: session)
 
         #expect(screen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
+            "Session stream connected",
             "You: inspect auth",
             "Pi: Partial answer",
             "Provider overloaded"
@@ -1757,13 +1845,13 @@ struct NexusServicePiSessionStreamTests {
             .turn
         ])
         #expect(screen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
+            "Session stream connected",
             "You: hello",
-            "Pi is compacting the Session context",
-            "Pi compacted the Session context",
+            "Compacting the session context",
+            "Compacted the session context",
             "Compaction summary: Focus on the latest code changes",
-            "Pi will retry automatically (attempt 2 of 3) in 3s",
-            "Pi retry failed after 3 attempts: Provider overloaded",
+            "Retrying automatically (attempt 2 of 3) in 3s",
+            "Retry failed after 3 attempts: Provider overloaded",
             "Pi: done"
         ])
     }
@@ -1823,7 +1911,7 @@ struct NexusServicePiSessionStreamTests {
         #expect(try #require(providerEvents.first(where: { $0.type == "extension_error" })).rawPayload.contains("Widget render failed"))
         #expect(try #require(providerEvents.first(where: { $0.type == "future_event" })).rawPayload.contains("\"ticket\":7"))
         #expect(screen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
+            "Session stream connected",
             "You: hello",
             "Pi: done"
         ])
@@ -1851,7 +1939,7 @@ struct NexusServicePiSessionStreamTests {
 
         #expect(runningScreen.isAgentTurnInProgress)
         #expect(runningScreen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
+            "Session stream connected",
             "You: delegate"
         ])
 
@@ -1876,10 +1964,10 @@ struct NexusServicePiSessionStreamTests {
 
         #expect(completedScreen.isAgentTurnInProgress == false)
         #expect(completedScreen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
+            "Session stream connected",
             "You: delegate",
             "subagent reviewer: Review the latest diff and summarize issues",
-            "subagent: Looks good overall. Watch the new error path.",
+            "reviewer: Looks good overall. Watch the new error path.",
             "Pi: Done"
         ])
     }
@@ -1921,11 +2009,11 @@ struct NexusServicePiSessionStreamTests {
 
         #expect(streamedScreen.isAgentTurnInProgress)
         #expect(streamedScreen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
+            "Session stream connected",
             "You: delegate",
-            "subagent reviewer: Review the latest diff and summarize issues",
-            "subagent: Looks good overall. Watch the new error path."
+            "subagent reviewer: Review the latest diff and summarize issues"
         ])
+        #expect(streamedScreen.activityItems.last?.detailText == "Looks good overall. Watch the new error path.")
     }
 
     @Test func localPiSessionScreenShowsPendingExtensionDialogInSharedSessionState() throws {
@@ -1952,7 +2040,7 @@ struct NexusServicePiSessionStreamTests {
 
         #expect(screen.activityItems.map(\.kind) == [.status, .message])
         #expect(screen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
+            "Session stream connected",
             "You: deploy"
         ])
         #expect(screen.approvalRequests.isEmpty)

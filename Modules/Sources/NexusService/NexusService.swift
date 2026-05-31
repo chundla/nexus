@@ -1537,6 +1537,9 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 respondToExtensionDialog: { [unowned self] in
                     try self.sessionRuntimeManager.respondToExtensionDialog($0, response: $1, to: $2)
                 },
+                resetPiSession: { [unowned self] in
+                    try self.resetPiSession($0)
+                },
                 stabilizedScreenAfterTerminalInput: { [unowned self] in
                     self.stabilizedScreenAfterTerminalInput(for: $0, screenBeforeInput: $1, immediateResponseScreen: $2)
                 }
@@ -1906,6 +1909,19 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         return try reconcileSessionRuntimeState(updatedSession)
     }
 
+    private func resetPiSession(_ session: Session) throws -> SessionScreen {
+        let resolvedSession = try reconcileSessionRuntimeState(session)
+
+        if sessionRuntimeManager.hasRuntime(for: resolvedSession) {
+            sessionRuntimeManager.remove(session: resolvedSession)
+        }
+
+        try sessionRecordStore.deleteSessionRecordAdapterMetadata(sessionID: resolvedSession.id)
+        let readySession = try sessionRecordStore.updateSession(id: resolvedSession.id, state: .ready, failureMessage: nil)
+        let relaunchedSession = try launchOrResumeSession(sessionID: readySession.id)
+        return normalizedSessionScreen(try sessionRuntimeManager.sessionScreen(for: relaunchedSession))
+    }
+
     func deleteSessionRecord(sessionID: UUID) throws -> Bool {
         guard let session = try sessionRecordStore.session(id: sessionID) else {
             throw NexusMetadataStoreError.sessionNotFound
@@ -2002,6 +2018,13 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         let resolvedSession = try await interactiveReadySession(for: session)
         guard resolvedSession.state == .ready else {
             throw NexusMetadataStoreError.sessionNotReady
+        }
+
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if resolvedSession.providerID == .pi,
+           trimmedText == "/new" || trimmedText == "/clear" {
+            _ = try claimMacController(for: resolvedSession)
+            return normalizedSessionScreen(try resetPiSession(resolvedSession))
         }
 
         let screenBeforeInput = try claimMacController(for: resolvedSession)

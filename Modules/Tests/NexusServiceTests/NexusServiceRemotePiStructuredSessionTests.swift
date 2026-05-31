@@ -29,7 +29,7 @@ struct NexusServiceRemotePiStructuredSessionTests {
 
         #expect(session.state == .ready)
         #expect(screen.primarySurface == .structuredActivityFeed)
-        #expect(screen.activityItems.map(\.text) == ["Pi shared Session stream connected"])
+        #expect(screen.activityItems.map(\.text) == ["Session stream connected"])
         #expect(launch.executable == "/usr/bin/ssh")
         #expect(launch.arguments.prefix(5) == ["-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5"])
         #expect(launch.arguments.contains("-tt") == false)
@@ -63,7 +63,7 @@ struct NexusServiceRemotePiStructuredSessionTests {
 
         #expect(screen.primarySurface == .structuredActivityFeed)
         #expect(screen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
+            "Session stream connected",
             "You: hello",
             "Pi: Remote hello"
         ])
@@ -106,7 +106,7 @@ struct NexusServiceRemotePiStructuredSessionTests {
         #expect(promptedScreen.primarySurface == .structuredActivityFeed)
         #expect(promptedScreen.controller == .pairedDevice(pairedDeviceID))
         #expect(promptedScreen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
+            "Session stream connected",
             "You: hello",
             "Pi: Remote hello"
         ])
@@ -149,9 +149,9 @@ struct NexusServiceRemotePiStructuredSessionTests {
         #expect(controllerScreen.primarySurface == .structuredActivityFeed)
         #expect(controllerScreen.controller == .pairedDevice(pairedDeviceID))
         #expect(controllerScreen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
+            "Session stream connected",
             "/cycle-thinking-level",
-            "Pi thinking level cycled to high"
+            "Thinking level cycled to high"
         ])
         #expect(viewerScreen.controller == .pairedDevice(pairedDeviceID))
         #expect(viewerScreen.activityItems == controllerScreen.activityItems)
@@ -192,9 +192,9 @@ struct NexusServiceRemotePiStructuredSessionTests {
         #expect(queuedScreen.primarySurface == .structuredActivityFeed)
         #expect(queuedScreen.controller == .pairedDevice(pairedDeviceID))
         #expect(queuedScreen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
+            "Session stream connected",
             "Queued follow-up: After that, summarize the result",
-            "Pi queue updated — follow-up: After that, summarize the result"
+            "Queue updated — follow-up: After that, summarize the result"
         ])
         #expect(queuedScreen.transcript == "> After that, summarize the result")
     }
@@ -330,10 +330,10 @@ struct NexusServiceRemotePiStructuredSessionTests {
         #expect(detail.alternateSessions.map(\.id) == [namedSession.id])
         #expect(detail.failedSessions.isEmpty)
         #expect(namedScreen.primarySurface == .structuredActivityFeed)
-        #expect(namedScreen.activityItems.map(\.text) == ["Pi shared Session stream connected"])
+        #expect(namedScreen.activityItems.map(\.text) == ["Session stream connected"])
         #expect(resumedNamedSession.id == namedSession.id)
         #expect(resumedNamedScreen.primarySurface == .structuredActivityFeed)
-        #expect(resumedNamedScreen.activityItems.map(\.text) == ["Pi shared Session stream connected"])
+        #expect(resumedNamedScreen.activityItems.map(\.text) == ["Session stream connected"])
         #expect(launches.count == 3)
         #expect(defaultLaunch.sessionFile != namedLaunch.sessionFile)
         #expect(namedLaunch.sessionFile == resumedNamedLaunch.sessionFile)
@@ -451,7 +451,7 @@ struct NexusServiceRemotePiStructuredSessionTests {
         #expect(resumedScreen.session.state == .ready)
         #expect(resumedScreen.primarySurface == .structuredActivityFeed)
         #expect(resumedScreen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
+            "Session stream connected",
             "You: again",
             "Pi: Remote again"
         ])

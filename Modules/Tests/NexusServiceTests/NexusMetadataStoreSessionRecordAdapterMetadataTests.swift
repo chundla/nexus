@@ -41,7 +41,7 @@ struct NexusMetadataStoreSessionRecordAdapterMetadataTests {
                     sessionFile: "/tmp/pi-session-1.jsonl"
                 ),
                 activityItems: [
-                    SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"),
+                    SessionActivityItem(kind: .status, text: "Session stream connected"),
                     SessionActivityItem(kind: .message, text: "You: deploy")
                 ],
                 approvalRequests: [
@@ -79,7 +79,7 @@ struct NexusMetadataStoreSessionRecordAdapterMetadataTests {
         #expect(try store.launchSnapshot(sessionID: session.id) == launchSnapshot)
         #expect(storedMetadata == metadata)
         #expect(storedMetadata.piSessionLinkage?.piSessionID == "pi-session-1")
-        #expect(storedMetadata.piPersistedActivityItems?.map(\.text) == ["Pi shared Session stream connected", "You: deploy"])
+        #expect(storedMetadata.piPersistedActivityItems?.map(\.text) == ["Session stream connected", "You: deploy"])
         #expect(storedMetadata.piPersistedApprovalRequests?.map(\.title) == ["Approve deploy"])
         #expect(storedMetadata.piPersistedExtensionUIState?.pendingDialogs.map(\.title) == ["Deploy to production?"])
         #expect(storedMetadata.piPersistedProviderEvents?.map(\.type) == ["extension_ui_request"])

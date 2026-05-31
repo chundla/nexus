@@ -13,13 +13,15 @@ public struct StructuredSessionActivityRow: Identifiable, Equatable {
     public let title: String
     public let systemImage: String
     public let text: String
+    public let detailText: String?
     public let emphasis: StructuredSessionActivityEmphasis
 
-    public init(id: UUID, title: String, systemImage: String, text: String, emphasis: StructuredSessionActivityEmphasis) {
+    public init(id: UUID, title: String, systemImage: String, text: String, detailText: String? = nil, emphasis: StructuredSessionActivityEmphasis) {
         self.id = id
         self.title = title
         self.systemImage = systemImage
         self.text = text
+        self.detailText = detailText
         self.emphasis = emphasis
     }
 }
@@ -187,6 +189,7 @@ public func structuredSessionActivityRows(for screen: SessionScreen) -> [Structu
             title: structuredSessionActivityTitle(for: item.kind),
             systemImage: structuredSessionActivitySystemImage(for: item.kind),
             text: item.text,
+            detailText: item.detailText,
             emphasis: structuredSessionActivityEmphasis(for: item.kind)
         )
     }
@@ -383,6 +386,18 @@ public func structuredSessionSlashCommands(for screen: SessionScreen) -> [Struct
                     summary: "Cycle Pi to the next available thinking level."
                 ),
                 StructuredSessionSlashCommand(
+                    matchText: "new",
+                    displayText: "/new",
+                    insertionText: "/new",
+                    summary: "Start a new chat and clear the current session history."
+                ),
+                StructuredSessionSlashCommand(
+                    matchText: "clear",
+                    displayText: "/clear",
+                    insertionText: "/clear",
+                    summary: "Start a new chat and clear the current session history."
+                ),
+                StructuredSessionSlashCommand(
                     matchText: "compact",
                     displayText: "/compact [instructions]",
                     insertionText: "/compact ",
@@ -527,8 +542,10 @@ private func structuredSessionConversationPrefixSplit(for text: String) -> (labe
     }
 
     let label = String(text[..<separatorRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
-    let body = String(text[separatorRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
-    guard label.isEmpty == false, body.isEmpty == false, label.count <= 24 else {
+    let body = String(text[separatorRange.upperBound...])
+    guard label.isEmpty == false,
+          body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
+          label.count <= 24 else {
         return nil
     }
     return (label, body)

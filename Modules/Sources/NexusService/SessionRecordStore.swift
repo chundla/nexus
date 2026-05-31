@@ -35,10 +35,17 @@ protocol SessionRecordStore: AnyObject {
     func updateLaunchSnapshotPrimarySurface(sessionID: UUID, primarySurface: SessionSurface) throws
     func sessionRecordAdapterMetadata(sessionID: UUID) throws -> SessionRecordAdapterMetadata?
     func saveSessionRecordAdapterMetadata(sessionID: UUID, metadata: SessionRecordAdapterMetadata) throws
+    func deleteSessionRecordAdapterMetadata(sessionID: UUID) throws
     func updateSessionTerminalSize(id: UUID, columns: Int, rows: Int) throws
     func sessionTerminalSize(id: UUID) throws -> (columns: Int, rows: Int)
     func remoteRuntimeGeneration(sessionID: UUID) throws -> Int
     func advanceRemoteRuntimeGeneration(sessionID: UUID) throws -> Int
+}
+
+extension SessionRecordStore {
+    func deleteSessionRecordAdapterMetadata(sessionID: UUID) throws {
+        _ = sessionID
+    }
 }
 
 final class MetadataStoreSessionRecordStore: SessionRecordStore {
@@ -138,6 +145,10 @@ final class MetadataStoreSessionRecordStore: SessionRecordStore {
 
     func saveSessionRecordAdapterMetadata(sessionID: UUID, metadata: SessionRecordAdapterMetadata) throws {
         try metadataStore.saveSessionRecordAdapterMetadata(sessionID: sessionID, metadata: metadata)
+    }
+
+    func deleteSessionRecordAdapterMetadata(sessionID: UUID) throws {
+        try metadataStore.deleteSessionRecordAdapterMetadata(sessionID: sessionID)
     }
 
     func updateSessionTerminalSize(id: UUID, columns: Int, rows: Int) throws {

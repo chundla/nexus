@@ -82,7 +82,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     private let startupStateResponseID = "nexus-pi-startup-state"
     private let startupCommandsResponseID = "nexus-pi-startup-commands"
     private let startupAvailableModelsResponseID = "nexus-pi-startup-available-models"
-    private let currentModelStatusPrefix = "Current Pi model:"
+    private let currentModelStatusPrefix = "Current Model:"
     private var currentModel: PiRPCModelDescriptor?
     private var currentThinkingLevel: String?
     private var steeringMode = "one-at-a-time"
@@ -117,6 +117,8 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     private var lastAssistantStopReason: String?
     private var toolOutputByCallID: [String: String] = [:]
     private var toolNamesByCallID: [String: String] = [:]
+    private var toolActivityItemIDByCallID: [String: UUID] = [:]
+    private var toolAgentsByCallID: [String: String] = [:]
     private var didRequestStop = false
     private var pendingSlashCommandsRequestID: String?
     private var pendingAvailableModelsRequestID: String?
@@ -290,6 +292,10 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             try? transport.terminate()
             throw startupError
         }
+    }
+
+    deinit {
+        try? transport.terminate()
     }
 
     func sessionScreen(for session: Session) -> SessionScreen {
@@ -757,7 +763,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         nextBashRequestSequence += 1
         pendingBashCommandsByRequestID[requestID] = bashCommand
         appendActivityItemLocked(SessionActivityItem(kind: .command, text: "/bash \(bashCommand)"))
-        appendActivityItemLocked(SessionActivityItem(kind: .progress, text: "Running Pi bash: \(bashCommand)"))
+        appendActivityItemLocked(SessionActivityItem(kind: .progress, text: "Running bash: \(bashCommand)"))
         lock.unlock()
         notifyChange()
 
@@ -1186,7 +1192,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
                 updateSessionLinkageLocked(from: response)
                 updateCurrentStateLocked(from: response)
                 if activityItems.isEmpty {
-                    appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"))
+                    appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Session stream connected"))
                 }
                 if let currentModelStatus = currentModelStatusTextLocked(),
                    activityItems.contains(where: { $0.kind == .status && $0.text == currentModelStatus }) == false {
@@ -1442,9 +1448,9 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         lock.lock()
         switch reason {
         case "threshold", "overflow":
-            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi is auto-compacting the Session context"))
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Auto-compacting the session context"))
         default:
-            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi is compacting the Session context"))
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Compacting the session context"))
         }
         lock.unlock()
         notifyChange()
@@ -1460,14 +1466,14 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             appendActivityItemLocked(
                 SessionActivityItem(
                     kind: .error,
-                    text: isAutomatic ? "Pi auto-compaction was cancelled" : "Pi compaction was cancelled"
+                    text: isAutomatic ? "Auto-compaction was cancelled" : "Compaction was cancelled"
                 )
             )
         } else if let result = object["result"] as? [String: Any] {
             appendActivityItemLocked(
                 SessionActivityItem(
                     kind: .status,
-                    text: isAutomatic ? "Pi auto-compacted the Session context" : "Pi compacted the Session context"
+                    text: isAutomatic ? "Auto-compacted the session context" : "Compacted the session context"
                 )
             )
             if let summary = trimmedString(for: "summary", in: result) {
@@ -1491,7 +1497,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         appendActivityItemLocked(
             SessionActivityItem(
                 kind: .status,
-                text: "Pi will retry automatically (attempt \(attempt) of \(maxAttempts)) in \(delaySeconds)s"
+                text: "Retrying automatically (attempt \(attempt) of \(maxAttempts)) in \(delaySeconds)s"
             )
         )
         lock.unlock()
@@ -1505,10 +1511,10 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
 
         lock.lock()
         if success {
-            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi retry succeeded on attempt \(attempt)"))
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Retry succeeded on attempt \(attempt)"))
         } else {
             let detail = finalError ?? "Unknown error"
-            appendActivityItemLocked(SessionActivityItem(kind: .error, text: "Pi retry failed after \(attempt) attempts: \(detail)"))
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: "Retry failed after \(attempt) attempts: \(detail)"))
         }
         lock.unlock()
         notifyChange()
@@ -1654,10 +1660,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             lock.unlock()
             notifyChange()
         case "thinking_start":
-            lock.lock()
-            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi is thinking"))
-            lock.unlock()
-            notifyChange()
+            return
         case "thinking_end":
             let thinkingText = assistantThinkingText(from: assistantMessageEvent)
             guard thinkingText.isEmpty == false else {
@@ -1665,24 +1668,11 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             }
 
             lock.lock()
-            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi thought: \(thinkingText)"))
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "thoughts:", detailText: thinkingText))
             lock.unlock()
             notifyChange()
         case "toolcall_end":
-            guard let toolCall = assistantMessageEvent["toolCall"] as? [String: Any],
-                  let toolName = string(for: "name", in: toolCall) else {
-                return
-            }
-
-            let callText = toolExecutionCallText(toolName: toolName, args: toolCall["arguments"] as? [String: Any])
-            guard callText.isEmpty == false else {
-                return
-            }
-
-            lock.lock()
-            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi prepared tool call: \(callText)"))
-            lock.unlock()
-            notifyChange()
+            return
         default:
             return
         }
@@ -1712,6 +1702,8 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         assistantTranscriptIndex = nil
         toolOutputByCallID.removeAll()
         toolNamesByCallID.removeAll()
+        toolActivityItemIDByCallID.removeAll()
+        toolAgentsByCallID.removeAll()
         isStreaming = false
         lastAssistantStopReason = stopReason
         appendActivityItemLocked(SessionActivityItem(kind: .error, text: errorText))
@@ -1728,11 +1720,18 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
 
         let args = object["args"] as? [String: Any]
         let callText = toolExecutionCallText(toolName: toolName, args: args)
+        let activityItemID = UUID()
 
         lock.lock()
         toolNamesByCallID[toolCallID] = toolName
         toolOutputByCallID[toolCallID] = ""
-        appendActivityItemLocked(SessionActivityItem(kind: .command, text: callText))
+        toolActivityItemIDByCallID[toolCallID] = activityItemID
+        if toolName.caseInsensitiveCompare("subagent") == .orderedSame,
+           let agent = args.flatMap({ string(for: "agent", in: $0) })?.trimmingCharacters(in: .whitespacesAndNewlines),
+           agent.isEmpty == false {
+            toolAgentsByCallID[toolCallID] = agent
+        }
+        appendActivityItemLocked(SessionActivityItem(id: activityItemID, kind: .command, text: callText))
         lock.unlock()
         notifyChange()
     }
@@ -1751,11 +1750,10 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         let shouldNotify: Bool
         lock.lock()
         let previousText = toolOutputByCallID[toolCallID] ?? ""
-        let nextDelta = incrementalToolOutput(from: previousText, to: outputText)
-        toolOutputByCallID[toolCallID] = outputText
-        if nextDelta.isEmpty == false {
-            let toolLabel = toolExecutionOutputLabel(for: toolNamesByCallID[toolCallID])
-            appendActivityItemLocked(SessionActivityItem(kind: .message, text: "\(toolLabel): \(nextDelta)"))
+        if previousText != outputText,
+           let activityItemID = toolActivityItemIDByCallID[toolCallID] {
+            toolOutputByCallID[toolCallID] = outputText
+            setActivityItemDetailTextLocked(id: activityItemID, detailText: outputText)
             shouldNotify = true
         } else {
             shouldNotify = false
@@ -1778,21 +1776,27 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
 
         let shouldNotify: Bool
         lock.lock()
-        let previousText = toolOutputByCallID[toolCallID] ?? ""
-        let nextDelta = incrementalToolOutput(from: previousText, to: outputText)
-        toolOutputByCallID.removeValue(forKey: toolCallID)
-        let toolLabel = toolExecutionOutputLabel(for: toolNamesByCallID.removeValue(forKey: toolCallID))
+        if let activityItemID = toolActivityItemIDByCallID[toolCallID],
+           outputText.isEmpty == false {
+            setActivityItemDetailTextLocked(id: activityItemID, detailText: outputText)
+        }
 
-        if nextDelta.isEmpty == false {
-            appendActivityItemLocked(
-                SessionActivityItem(
-                    kind: isError ? .error : .message,
-                    text: isError ? nextDelta : "\(toolLabel): \(nextDelta)"
-                )
-            )
+        let toolName = toolNamesByCallID.removeValue(forKey: toolCallID)
+        let toolAgent = toolAgentsByCallID.removeValue(forKey: toolCallID)
+        toolOutputByCallID.removeValue(forKey: toolCallID)
+        toolActivityItemIDByCallID.removeValue(forKey: toolCallID)
+
+        if let toolName,
+           toolName.caseInsensitiveCompare("subagent") == .orderedSame,
+           outputText.isEmpty == false,
+           isError == false {
+            appendActivityItemLocked(SessionActivityItem(kind: .message, text: "\(toolAgent ?? "subagent"): \(outputText)"))
+            shouldNotify = true
+        } else if isError, outputText.isEmpty == false {
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: outputText))
             shouldNotify = true
         } else {
-            shouldNotify = false
+            shouldNotify = outputText.isEmpty == false
         }
         lock.unlock()
 
@@ -1817,6 +1821,8 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         assistantTranscriptIndex = nil
         toolOutputByCallID.removeAll()
         toolNamesByCallID.removeAll()
+        toolActivityItemIDByCallID.removeAll()
+        toolAgentsByCallID.removeAll()
         isStreaming = false
         lastAssistantStopReason = "stop"
         lock.unlock()
@@ -1829,14 +1835,6 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             notifyChange()
             return
         }
-
-        let shouldAppendCompletion: Bool
-        lock.lock()
-        shouldAppendCompletion = lastAssistantStopReason != "aborted" && lastAssistantStopReason != "error"
-        if shouldAppendCompletion {
-            appendActivityItemLocked(SessionActivityItem(kind: .completion, text: "Pi turn complete"))
-        }
-        lock.unlock()
 
         notifyChange()
     }
@@ -1989,7 +1987,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             }
 
             let resolvedTarget = formattedModelTarget(fromResponse: response) ?? fallbackTarget ?? "selected model"
-            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi model switched to \(resolvedTarget)"))
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Model switched to \(resolvedTarget)"))
             if let currentModelStatus = currentModelStatusTextLocked() {
                 appendActivityItemLocked(SessionActivityItem(kind: .status, text: currentModelStatus))
             }
@@ -2011,7 +2009,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         if bool(for: "success", in: response) == true {
             let effectiveLevel = requestedLevel.map { clampThinkingLevel($0, for: currentModel) } ?? currentThinkingLevel
             currentThinkingLevel = effectiveLevel
-            let message = effectiveLevel.map { "Pi thinking level set to \($0)" } ?? "Pi thinking level updated"
+            let message = effectiveLevel.map { "Thinking level set to \($0)" } ?? "Thinking level updated"
             appendActivityItemLocked(SessionActivityItem(kind: .status, text: message))
             if let currentModelStatus = currentModelStatusTextLocked() {
                 appendActivityItemLocked(SessionActivityItem(kind: .status, text: currentModelStatus))
@@ -2032,12 +2030,12 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
            let data = response["data"] as? [String: Any],
            let level = trimmedString(for: "level", in: data) {
             currentThinkingLevel = clampThinkingLevel(level, for: currentModel)
-            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi thinking level cycled to \(currentThinkingLevel ?? level)"))
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Thinking level cycled to \(currentThinkingLevel ?? level)"))
             if let currentModelStatus = currentModelStatusTextLocked() {
                 appendActivityItemLocked(SessionActivityItem(kind: .status, text: currentModelStatus))
             }
         } else if bool(for: "success", in: response) == true {
-            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi thinking cycle kept the current level"))
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Thinking level stayed the same"))
         } else {
             let detail = string(for: "error", in: response) ?? "Pi failed to cycle thinking levels."
             appendActivityItemLocked(SessionActivityItem(kind: .error, text: detail))
@@ -2058,14 +2056,14 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
                 if let thinkingLevel = trimmedString(for: "thinkingLevel", in: data) {
                     currentThinkingLevel = clampThinkingLevel(thinkingLevel, for: descriptor)
                 }
-                appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi model cycled to \(formattedModelTarget(for: descriptor))"))
+                appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Model cycled to \(formattedModelTarget(for: descriptor))"))
                 if let currentModelStatus = currentModelStatusTextLocked() {
                     appendActivityItemLocked(SessionActivityItem(kind: .status, text: currentModelStatus))
                 }
                 lock.unlock()
                 requestAvailableModels()
             } else {
-                appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi model cycle kept the current model"))
+                appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Model stayed the same"))
                 lock.unlock()
             }
         } else {
@@ -2085,7 +2083,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             if let requestedMode {
                 steeringMode = requestedMode
             }
-            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi steering mode set to \(steeringMode)"))
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Steering mode set to \(steeringMode)"))
         } else {
             let detail = string(for: "error", in: response) ?? "Pi failed to update steering mode."
             appendActivityItemLocked(SessionActivityItem(kind: .error, text: detail))
@@ -2104,7 +2102,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             if let requestedMode {
                 followUpMode = requestedMode
             }
-            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi follow-up mode set to \(followUpMode)"))
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Follow-up mode set to \(followUpMode)"))
         } else {
             let detail = string(for: "error", in: response) ?? "Pi failed to update follow-up mode."
             appendActivityItemLocked(SessionActivityItem(kind: .error, text: detail))
@@ -2118,7 +2116,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     private func handleCompactResponse(_ response: [String: Any]) {
         lock.lock()
         if bool(for: "success", in: response) == true {
-            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi compacted the Session context"))
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Compacted the session context"))
             if let data = response["data"] as? [String: Any],
                let summary = trimmedString(for: "summary", in: data) {
                 appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Compaction summary: \(summary)"))
@@ -2136,7 +2134,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         let enabled = requestID.flatMap { pendingAutoCompactionSettingsByRequestID.removeValue(forKey: $0) }
         if bool(for: "success", in: response) == true {
             let stateText = enabled == false ? "disabled" : "enabled"
-            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi auto-compaction \(stateText)"))
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Auto-compaction \(stateText)"))
         } else {
             let detail = string(for: "error", in: response) ?? "Pi failed to update auto-compaction."
             appendActivityItemLocked(SessionActivityItem(kind: .error, text: detail))
@@ -2150,7 +2148,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         let enabled = requestID.flatMap { pendingAutoRetrySettingsByRequestID.removeValue(forKey: $0) }
         if bool(for: "success", in: response) == true {
             let stateText = enabled == false ? "disabled" : "enabled"
-            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi auto-retry \(stateText)"))
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Auto-retry \(stateText)"))
         } else {
             let detail = string(for: "error", in: response) ?? "Pi failed to update auto-retry."
             appendActivityItemLocked(SessionActivityItem(kind: .error, text: detail))
@@ -2162,7 +2160,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     private func handleAbortRetryResponse(_ response: [String: Any]) {
         lock.lock()
         if bool(for: "success", in: response) == true {
-            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Requested Pi retry cancellation"))
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Requested retry cancellation"))
         } else {
             let detail = string(for: "error", in: response) ?? "Pi failed to cancel retry."
             appendActivityItemLocked(SessionActivityItem(kind: .error, text: detail))
@@ -2206,7 +2204,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         if bool(for: "success", in: response) == true {
             if let requestedName {
                 currentSessionName = requestedName
-                appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi session name set to \(requestedName)"))
+                appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Session name set to \(requestedName)"))
             }
         } else {
             let detail = string(for: "error", in: response) ?? "Pi failed to set the Session name."
@@ -2233,9 +2231,9 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             }
 
             if cancelled {
-                appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi bash cancelled"))
+                appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Bash cancelled"))
             } else {
-                var detail = "Pi bash completed with exit code \(exitCode) and will be included on the next prompt"
+                var detail = "Bash completed with exit code \(exitCode) and will be included on the next prompt"
                 if truncated, let fullOutputPath {
                     detail += " (full output: \(fullOutputPath))"
                 }
@@ -2252,7 +2250,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     private func handleAbortBashResponse(_ response: [String: Any]) {
         lock.lock()
         if bool(for: "success", in: response) == true {
-            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Requested Pi bash cancellation"))
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Requested bash cancellation"))
         } else {
             let detail = string(for: "error", in: response) ?? "Pi failed to cancel bash."
             appendActivityItemLocked(SessionActivityItem(kind: .error, text: detail))
@@ -2267,7 +2265,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         if bool(for: "success", in: response) == true {
             let responsePath = (response["data"] as? [String: Any]).flatMap { trimmedString(for: "path", in: $0) }
             let resolvedPath = responsePath ?? requestedPath
-            let detail = resolvedPath.map { "Exported Pi Session HTML to \($0)" } ?? "Exported Pi Session HTML"
+            let detail = resolvedPath.map { "Exported session HTML to \($0)" } ?? "Exported session HTML"
             appendActivityItemLocked(SessionActivityItem(kind: .status, text: detail))
         } else {
             let detail = string(for: "error", in: response) ?? "Pi failed to export Session HTML."
@@ -2282,7 +2280,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         if bool(for: "success", in: response) == true,
            let data = response["data"] as? [String: Any],
            let messages = data["messages"] as? [[String: Any]] {
-            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi returned \(messages.count) message\(messages.count == 1 ? "" : "s")"))
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Returned \(messages.count) message\(messages.count == 1 ? "" : "s")"))
             for (index, message) in messages.enumerated() {
                 let summary = sessionMessageSummary(message, index: index + 1)
                 appendActivityItemLocked(SessionActivityItem(kind: .status, text: summary))
@@ -2317,9 +2315,9 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
            let data = response["data"] as? [String: Any] {
             let trimmedText = (data["text"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
             if let trimmedText, trimmedText.isEmpty == false {
-                appendActivityItemLocked(SessionActivityItem(kind: .message, text: "Last Pi assistant message: \(trimmedText)"))
+                appendActivityItemLocked(SessionActivityItem(kind: .message, text: "Last assistant message: \(trimmedText)"))
             } else {
-                appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Pi has no assistant message yet"))
+                appendActivityItemLocked(SessionActivityItem(kind: .status, text: "No assistant message yet"))
             }
         } else {
             let detail = string(for: "error", in: response) ?? "Pi failed to load the last assistant message."
@@ -2350,7 +2348,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     private func handleCloneResponse(_ response: [String: Any]) {
         if bool(for: "success", in: response) == true {
             lock.lock()
-            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Cloned the current Pi Session"))
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Cloned the current session"))
             lock.unlock()
             requestState(forSessionTransition: true)
         } else {
@@ -2631,7 +2629,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
                 displayName: "thinking \(level)",
                 insertionText: "thinking \(level)",
                 suggestionQueryPrefix: "thinking ",
-                description: isCurrent ? "Current Pi thinking level." : "Set Pi thinking level to \(level).",
+                description: isCurrent ? "Current thinking level." : "Set the thinking level to \(level).",
                 source: .builtIn
             )
         }
@@ -2646,9 +2644,9 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             segments.append("follow-up: \(followUp.map { previewText($0, limit: 80) }.joined(separator: " · "))")
         }
         if segments.isEmpty {
-            return "Pi queue cleared"
+            return "Queue cleared"
         }
-        return "Pi queue updated — \(segments.joined(separator: "; "))"
+        return "Queue updated — \(segments.joined(separator: "; "))"
     }
 
     private func compactionAndRetrySlashCommandsLocked() -> [SessionSlashCommand] {
@@ -2657,14 +2655,14 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
                 name: "cycle-model",
                 displayName: "cycle-model",
                 insertionText: "cycle-model",
-                description: "Cycle Pi to the next available model.",
+                description: "Cycle to the next available model.",
                 source: .builtIn
             ),
             SessionSlashCommand(
                 name: "cycle-thinking-level",
                 displayName: "cycle-thinking-level",
                 insertionText: "cycle-thinking-level",
-                description: "Cycle Pi to the next available thinking level.",
+                description: "Cycle to the next available thinking level.",
                 source: .builtIn
             ),
             SessionSlashCommand(
@@ -2672,7 +2670,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
                 displayName: "compact [instructions]",
                 insertionText: "compact ",
                 suggestionQueryPrefix: "compact ",
-                description: "Compact the current Pi Session context, optionally with custom instructions.",
+                description: "Compact the current session context, optionally with custom instructions.",
                 source: .builtIn
             ),
             SessionSlashCommand(
@@ -2680,7 +2678,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
                 displayName: "auto-compaction on",
                 insertionText: "auto-compaction on",
                 suggestionQueryPrefix: "auto-compaction ",
-                description: "Enable Pi auto-compaction.",
+                description: "Enable auto-compaction.",
                 source: .builtIn
             ),
             SessionSlashCommand(
@@ -2688,7 +2686,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
                 displayName: "auto-compaction off",
                 insertionText: "auto-compaction off",
                 suggestionQueryPrefix: "auto-compaction ",
-                description: "Disable Pi auto-compaction.",
+                description: "Disable auto-compaction.",
                 source: .builtIn
             ),
             SessionSlashCommand(
@@ -2696,7 +2694,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
                 displayName: "auto-retry on",
                 insertionText: "auto-retry on",
                 suggestionQueryPrefix: "auto-retry ",
-                description: "Enable Pi auto-retry for transient failures.",
+                description: "Enable auto-retry for transient failures.",
                 source: .builtIn
             ),
             SessionSlashCommand(
@@ -2704,14 +2702,14 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
                 displayName: "auto-retry off",
                 insertionText: "auto-retry off",
                 suggestionQueryPrefix: "auto-retry ",
-                description: "Disable Pi auto-retry for transient failures.",
+                description: "Disable auto-retry for transient failures.",
                 source: .builtIn
             ),
             SessionSlashCommand(
                 name: "abort-retry",
                 displayName: "abort-retry",
                 insertionText: "abort-retry",
-                description: "Abort the current Pi retry delay.",
+                description: "Abort the current retry delay.",
                 source: .builtIn
             )
         ]
@@ -2724,7 +2722,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
                 displayName: "steering-mode \(mode)",
                 insertionText: "steering-mode \(mode)",
                 suggestionQueryPrefix: "steering-mode ",
-                description: mode == steeringMode ? "Current Pi steering mode." : "Set Pi steering mode to \(mode).",
+                description: mode == steeringMode ? "Current steering mode." : "Set the steering mode to \(mode).",
                 source: .builtIn
             )
         }
@@ -2734,7 +2732,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
                 displayName: "follow-up-mode \(mode)",
                 insertionText: "follow-up-mode \(mode)",
                 suggestionQueryPrefix: "follow-up-mode ",
-                description: mode == followUpMode ? "Current Pi follow-up mode." : "Set Pi follow-up mode to \(mode).",
+                description: mode == followUpMode ? "Current follow-up mode." : "Set the follow-up mode to \(mode).",
                 source: .builtIn
             )
         }
@@ -2744,7 +2742,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
                 displayName: "steer <message>",
                 insertionText: "steer ",
                 suggestionQueryPrefix: "steer ",
-                description: "Queue a steering message while Pi is running.",
+                description: "Queue a steering message while the agent is running.",
                 source: .builtIn
             ),
             SessionSlashCommand(
@@ -2752,14 +2750,14 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
                 displayName: "follow-up <message>",
                 insertionText: "follow-up ",
                 suggestionQueryPrefix: "follow-up ",
-                description: "Queue a follow-up message for after Pi finishes.",
+                description: "Queue a follow-up message for after the agent finishes.",
                 source: .builtIn
             ),
             SessionSlashCommand(
                 name: "abort",
                 displayName: "abort",
                 insertionText: "abort",
-                description: "Abort the current Pi run.",
+                description: "Abort the current run.",
                 source: .builtIn
             )
         ] + steeringModes + followUpModes
@@ -2772,21 +2770,21 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
                 displayName: "fork <entry-id>",
                 insertionText: "fork ",
                 suggestionQueryPrefix: "fork ",
-                description: "Fork from a previous Pi message into a new Named Session.",
+                description: "Fork from a previous message into a new Named Session.",
                 source: .builtIn
             ),
             SessionSlashCommand(
                 name: "clone",
                 displayName: "clone",
                 insertionText: "clone",
-                description: "Clone the current Pi Session into a new Named Session.",
+                description: "Clone the current session into a new Named Session.",
                 source: .builtIn
             ),
             SessionSlashCommand(
                 name: "fork-messages",
                 displayName: "fork-messages",
                 insertionText: "fork-messages",
-                description: "List Pi messages available for forking.",
+                description: "List messages available for forking.",
                 source: .builtIn
             ),
             SessionSlashCommand(
@@ -2794,7 +2792,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
                 displayName: "session-name <name>",
                 insertionText: "session-name ",
                 suggestionQueryPrefix: "session-name ",
-                description: "Set the current Pi Session name and sync it into Nexus.",
+                description: "Set the current session name and sync it into Nexus.",
                 source: .builtIn
             )
         ]
@@ -2814,7 +2812,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
                 name: "abort-bash",
                 displayName: "abort-bash",
                 insertionText: "abort-bash",
-                description: "Cancel the currently running Pi bash command.",
+                description: "Cancel the currently running bash command.",
                 source: .builtIn
             ),
             SessionSlashCommand(
@@ -2822,28 +2820,28 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
                 displayName: "export-html [path]",
                 insertionText: "export-html ",
                 suggestionQueryPrefix: "export-html ",
-                description: "Export the current Pi Session to an HTML file.",
+                description: "Export the current session to an HTML file.",
                 source: .builtIn
             ),
             SessionSlashCommand(
                 name: "messages",
                 displayName: "messages",
                 insertionText: "messages",
-                description: "List messages in the current Pi Session.",
+                description: "List messages in the current session.",
                 source: .builtIn
             ),
             SessionSlashCommand(
                 name: "session-stats",
                 displayName: "session-stats",
                 insertionText: "session-stats",
-                description: "Show Pi Session token, tool, and context usage stats.",
+                description: "Show token, tool, and context usage stats.",
                 source: .builtIn
             ),
             SessionSlashCommand(
                 name: "last-assistant-text",
                 displayName: "last-assistant-text",
                 insertionText: "last-assistant-text",
-                description: "Show the last assistant text from the Pi Session.",
+                description: "Show the last assistant text from the current session.",
                 source: .builtIn
             )
         ]
@@ -2999,6 +2997,40 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             }
         }
 
+        if normalizedToolName.caseInsensitiveCompare("read") == .orderedSame,
+           let path = args.flatMap({ string(for: "path", in: $0) })?.trimmingCharacters(in: .whitespacesAndNewlines),
+           path.isEmpty == false {
+            let offset = args.flatMap { intValue($0["offset"]) }
+            let limit = args.flatMap { intValue($0["limit"]) }
+            switch (offset, limit) {
+            case let (offset?, limit?) where limit > 0:
+                return "read \(path):\(offset)-\(offset + limit - 1)"
+            case let (offset?, _):
+                return "read \(path) from line \(offset)"
+            default:
+                return "read \(path)"
+            }
+        }
+
+        if normalizedToolName.caseInsensitiveCompare("edit") == .orderedSame,
+           let path = args.flatMap({ string(for: "path", in: $0) })?.trimmingCharacters(in: .whitespacesAndNewlines),
+           path.isEmpty == false {
+            let editCount = (args?["edits"] as? [Any])?.count ?? 0
+            return editCount > 0 ? "edit \(path) (\(editCount) change\(editCount == 1 ? "" : "s"))" : "edit \(path)"
+        }
+
+        if normalizedToolName.caseInsensitiveCompare("write") == .orderedSame,
+           let path = args.flatMap({ string(for: "path", in: $0) })?.trimmingCharacters(in: .whitespacesAndNewlines),
+           path.isEmpty == false {
+            return "write \(path)"
+        }
+
+        if normalizedToolName.caseInsensitiveCompare("bash") == .orderedSame,
+           let command = args.flatMap({ string(for: "command", in: $0) })?.trimmingCharacters(in: .whitespacesAndNewlines),
+           command.isEmpty == false {
+            return "bash \(previewText(command, limit: 100))"
+        }
+
         if let command = args.flatMap({ string(for: "command", in: $0) })?.trimmingCharacters(in: .whitespacesAndNewlines),
            command.isEmpty == false {
             return command
@@ -3010,14 +3042,6 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         }
 
         return normalizedToolName.isEmpty ? "Tool" : normalizedToolName
-    }
-
-    private func toolExecutionOutputLabel(for toolName: String?) -> String {
-        let normalizedToolName = toolName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let normalizedToolName, normalizedToolName.isEmpty == false else {
-            return "Tool"
-        }
-        return normalizedToolName.caseInsensitiveCompare("subagent") == .orderedSame ? "subagent" : normalizedToolName
     }
 
     private func toolExecutionResultText(_ object: [String: Any]?) -> String {
@@ -3082,7 +3106,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         let totalMessages = intValue(data["totalMessages"]) ?? 0
         let cost = doubleValue(data["cost"]) ?? 0
         return String(
-            format: "Pi Session stats — user: %d · assistant: %d · tool calls: %d · tool results: %d · total: %d · cost: $%.2f",
+            format: "Session stats — user: %d · assistant: %d · tool calls: %d · tool results: %d · total: %d · cost: $%.2f",
             userMessages,
             assistantMessages,
             toolCalls,
@@ -3099,7 +3123,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         }
         let tokens = intValue(contextUsage["tokens"])
         let percent = intValue(contextUsage["percent"])
-        return "Pi context usage — \(tokens.map(String.init) ?? "unknown") / \(contextWindow) tokens (\(percent.map { "\($0)%" } ?? "unknown"))"
+        return "Context usage — \(tokens.map(String.init) ?? "unknown") / \(contextWindow) tokens (\(percent.map { "\($0)%" } ?? "unknown"))"
     }
 
     private func previewText(_ text: String, limit: Int) -> String {
@@ -3148,10 +3172,34 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             return
         }
 
-        activityItems.append(SessionActivityItem(id: item.id, kind: item.kind, text: trimmedText, prompt: item.prompt))
-        if activityItems.count > 200 {
-            activityItems.removeFirst(activityItems.count - 200)
+        let trimmedDetailText = item.detailText?.trimmingCharacters(in: .whitespacesAndNewlines)
+        activityItems.append(
+            SessionActivityItem(
+                id: item.id,
+                kind: item.kind,
+                text: trimmedText,
+                detailText: trimmedDetailText?.isEmpty == false ? trimmedDetailText : nil,
+                prompt: item.prompt
+            )
+        )
+        if activityItems.count > 2_000 {
+            activityItems.removeFirst(activityItems.count - 2_000)
         }
+    }
+
+    private func setActivityItemDetailTextLocked(id: UUID, detailText: String) {
+        guard let index = activityItems.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+
+        let trimmedDetailText = detailText.trimmingCharacters(in: .whitespacesAndNewlines)
+        activityItems[index] = SessionActivityItem(
+            id: activityItems[index].id,
+            kind: activityItems[index].kind,
+            text: activityItems[index].text,
+            detailText: trimmedDetailText.isEmpty ? nil : trimmedDetailText,
+            prompt: activityItems[index].prompt
+        )
     }
 
     private func assistantText(from message: [String: Any]?) -> String {

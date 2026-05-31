@@ -203,17 +203,19 @@ public struct SessionActivityItem: Codable, Equatable, Identifiable, Sendable {
     public let id: UUID
     public let kind: Kind
     public let text: String
+    public let detailText: String?
     public let prompt: SessionPrompt?
 
-    public init(id: UUID = UUID(), kind: Kind, text: String, prompt: SessionPrompt? = nil) {
+    public init(id: UUID = UUID(), kind: Kind, text: String, detailText: String? = nil, prompt: SessionPrompt? = nil) {
         self.id = id
         self.kind = kind
         self.text = text
+        self.detailText = detailText
         self.prompt = prompt
     }
 
     public init(id: UUID = UUID(), kind: Kind, text: String) {
-        self.init(id: id, kind: kind, text: text, prompt: nil)
+        self.init(id: id, kind: kind, text: text, detailText: nil, prompt: nil)
     }
 }
 

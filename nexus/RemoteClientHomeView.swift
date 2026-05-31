@@ -2051,6 +2051,11 @@ private struct RemoteSessionScreenView: View {
                     proxy.scrollTo(conversationBottomID, anchor: .bottom)
                 }
             }
+            .onChange(of: presentation.feed.activityRows.last) { _, _ in
+                withAnimation(.easeOut(duration: 0.18)) {
+                    proxy.scrollTo(conversationBottomID, anchor: .bottom)
+                }
+            }
             .onChange(of: presentation.feed.pendingApprovalRequests.count) { _, _ in
                 withAnimation(.easeOut(duration: 0.18)) {
                     proxy.scrollTo(conversationBottomID, anchor: .bottom)
@@ -2115,10 +2120,11 @@ private struct RemoteSessionScreenView: View {
                     Text(label)
                         .font(NexusIOSTheme.bodyFont(11, relativeTo: .caption, weight: .medium))
                         .foregroundStyle(NexusIOSTheme.mutedText)
-                    Text(conversation.text)
-                        .font(NexusIOSTheme.bodyFont(15))
-                        .foregroundStyle(.white.opacity(0.94))
-                        .textSelection(.enabled)
+                    structuredSessionMarkdownText(
+                        conversation.text,
+                        font: NexusIOSTheme.bodyFont(15),
+                        color: .white.opacity(0.94)
+                    )
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
@@ -2132,7 +2138,7 @@ private struct RemoteSessionScreenView: View {
             }
         case .command:
             HStack {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 8) {
                     Label(row.title, systemImage: row.systemImage)
                         .font(NexusIOSTheme.monoFont(10, relativeTo: .caption))
                         .foregroundStyle(accentColor)
@@ -2140,6 +2146,19 @@ private struct RemoteSessionScreenView: View {
                         .font(NexusIOSTheme.monoFont(12, relativeTo: .callout))
                         .foregroundStyle(.white.opacity(0.92))
                         .textSelection(.enabled)
+                    if let detailText = row.detailText {
+                        ScrollView(.vertical) {
+                            Text(detailText)
+                                .font(NexusIOSTheme.monoFont(12, relativeTo: .callout))
+                                .foregroundStyle(.white.opacity(0.84))
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(maxHeight: 220)
+                        .padding(10)
+                        .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
                 }
                 .padding(14)
                 .frame(maxWidth: 520, alignment: .leading)
@@ -2172,16 +2191,52 @@ private struct RemoteSessionScreenView: View {
             }
         case .system:
             HStack {
-                Spacer()
-                Label(conversation.text, systemImage: row.systemImage)
-                    .font(NexusIOSTheme.bodyFont(11, relativeTo: .caption))
-                    .foregroundStyle(NexusIOSTheme.mutedText)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.white.opacity(0.05), in: Capsule())
-                Spacer()
+                if row.detailText != nil || conversation.text.contains("\n") || conversation.text.count > 80 {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label(conversation.text, systemImage: row.systemImage)
+                            .font(NexusIOSTheme.bodyFont(12, relativeTo: .caption, weight: .medium))
+                            .foregroundStyle(NexusIOSTheme.mutedText)
+                        if let detailText = row.detailText {
+                            structuredSessionMarkdownText(
+                                detailText,
+                                font: NexusIOSTheme.bodyFont(14),
+                                color: .white.opacity(0.92)
+                            )
+                        }
+                    }
+                    .padding(14)
+                    .frame(maxWidth: 520, alignment: .leading)
+                    .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(NexusIOSTheme.softLine, lineWidth: 1)
+                    }
+                    Spacer(minLength: 48)
+                } else {
+                    Spacer()
+                    Label(conversation.text, systemImage: row.systemImage)
+                        .font(NexusIOSTheme.bodyFont(11, relativeTo: .caption))
+                        .foregroundStyle(NexusIOSTheme.mutedText)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.white.opacity(0.05), in: Capsule())
+                    Spacer()
+                }
             }
         }
+    }
+
+    private func structuredSessionMarkdownText(_ text: String, font: Font, color: Color) -> some View {
+        let attributed = (try? AttributedString(
+            markdown: text,
+            options: .init(interpretedSyntax: .full, failurePolicy: .returnPartiallyParsedIfPossible)
+        )) ?? AttributedString(text)
+
+        return Text(attributed)
+            .font(font)
+            .foregroundStyle(color)
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private func structuredSessionApprovalRequestView(

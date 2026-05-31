@@ -1590,6 +1590,11 @@ struct ContentView: View {
                         proxy.scrollTo("conversation-bottom", anchor: .bottom)
                     }
                 }
+                .onChange(of: presentation.feed.activityRows.last) { _, _ in
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        proxy.scrollTo("conversation-bottom", anchor: .bottom)
+                    }
+                }
                 .onChange(of: presentation.feed.pendingApprovalRequests.count) { _, _ in
                     withAnimation(.easeOut(duration: 0.18)) {
                         proxy.scrollTo("conversation-bottom", anchor: .bottom)
@@ -1721,11 +1726,11 @@ struct ContentView: View {
                         Text(label)
                             .font(NexusMacTheme.bodyFont(10, relativeTo: .caption).weight(.medium))
                             .foregroundStyle(NexusMacTheme.mutedText)
-                        Text(conversation.text)
-                            .font(NexusMacTheme.bodyFont(13))
-                            .foregroundStyle(.white.opacity(0.94))
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
+                        structuredSessionMarkdownText(
+                            conversation.text,
+                            font: NexusMacTheme.bodyFont(13),
+                            color: .white.opacity(0.94)
+                        )
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
@@ -1741,7 +1746,7 @@ struct ContentView: View {
         case .command:
             return AnyView(
                 HStack {
-                    VStack(alignment: .leading, spacing: 5) {
+                    VStack(alignment: .leading, spacing: 8) {
                         Label(row.title, systemImage: row.systemImage)
                             .font(NexusMacTheme.monoFont(10, relativeTo: .caption))
                             .foregroundStyle(accent)
@@ -1750,6 +1755,19 @@ struct ContentView: View {
                             .foregroundStyle(.white.opacity(0.92))
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
+                        if let detailText = row.detailText {
+                            ScrollView(.vertical) {
+                                Text(detailText)
+                                    .font(NexusMacTheme.monoFont(11, relativeTo: .callout))
+                                    .foregroundStyle(.white.opacity(0.84))
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .frame(maxHeight: 220)
+                            .padding(10)
+                            .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
                     }
                     .frame(maxWidth: 620, alignment: .leading)
                     Spacer()
@@ -1787,17 +1805,59 @@ struct ContentView: View {
         case .system:
             return AnyView(
                 HStack {
-                    Spacer()
-                    Label(conversation.text, systemImage: row.systemImage)
-                        .font(NexusMacTheme.bodyFont(11, relativeTo: .caption))
-                        .foregroundStyle(NexusMacTheme.mutedText)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color.white.opacity(0.05), in: Capsule())
-                    Spacer()
+                    if row.detailText != nil || conversation.text.contains("\n") || conversation.text.count > 80 {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label(conversation.text, systemImage: row.systemImage)
+                                .font(NexusMacTheme.bodyFont(11, relativeTo: .caption).weight(.medium))
+                                .foregroundStyle(NexusMacTheme.mutedText)
+                            if let detailText = row.detailText {
+                                structuredSessionMarkdownText(
+                                    detailText,
+                                    font: NexusMacTheme.bodyFont(13),
+                                    color: .white.opacity(0.92)
+                                )
+                            }
+                        }
+                        .frame(maxWidth: 620, alignment: .leading)
+                        Spacer()
+                    } else {
+                        Spacer()
+                        Label(conversation.text, systemImage: row.systemImage)
+                            .font(NexusMacTheme.bodyFont(11, relativeTo: .caption))
+                            .foregroundStyle(NexusMacTheme.mutedText)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.white.opacity(0.05), in: Capsule())
+                        Spacer()
+                    }
+                }
+                .padding(row.detailText != nil || conversation.text.contains("\n") || conversation.text.count > 80 ? 12 : 0)
+                .background(
+                    row.detailText != nil || conversation.text.contains("\n") || conversation.text.count > 80
+                        ? AnyShapeStyle(Color.white.opacity(0.06))
+                        : AnyShapeStyle(Color.clear)
+                , in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay {
+                    if row.detailText != nil || conversation.text.contains("\n") || conversation.text.count > 80 {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(NexusMacTheme.softLine, lineWidth: 1)
+                    }
                 }
             )
         }
+    }
+
+    private func structuredSessionMarkdownText(_ text: String, font: Font, color: Color) -> some View {
+        let attributed = (try? AttributedString(
+            markdown: text,
+            options: .init(interpretedSyntax: .full, failurePolicy: .returnPartiallyParsedIfPossible)
+        )) ?? AttributedString(text)
+
+        return Text(attributed)
+            .font(font)
+            .foregroundStyle(color)
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private func structuredSessionThinkingIndicatorView(_ indicator: StructuredSessionThinkingIndicator) -> some View {

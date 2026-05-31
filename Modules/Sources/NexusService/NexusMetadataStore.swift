@@ -1009,6 +1009,16 @@ final class NexusMetadataStore {
         }
     }
 
+    func deleteSessionRecordAdapterMetadata(sessionID: UUID) throws {
+        try withLock {
+            let statement = try prepare("DELETE FROM session_record_adapter_metadata WHERE session_id = ?;")
+            defer { sqlite3_finalize(statement) }
+
+            try bind(sessionID.uuidString, at: 1, in: statement)
+            try stepDone(statement)
+        }
+    }
+
     func createDefaultSession(
         workspaceID: UUID,
         providerID: ProviderID,

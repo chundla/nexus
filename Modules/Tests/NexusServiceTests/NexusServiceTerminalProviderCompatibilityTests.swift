@@ -81,7 +81,7 @@ struct NexusServiceTerminalProviderCompatibilityTests {
         #expect(codexScreen.activityItems.isEmpty)
         #expect(piScreen.primarySurface == .structuredActivityFeed)
         #expect(piScreen.transcript.isEmpty)
-        #expect(piScreen.activityItems.map(\.text) == ["Pi shared Session stream connected"])
+        #expect(piScreen.activityItems.map(\.text) == ["Session stream connected"])
         #expect(piScreen.activityItems.map(\.kind) == [.status])
     }
 }
@@ -142,7 +142,7 @@ private struct CompatibilitySessionRuntimeLauncher: SessionRuntimeLaunching {
             CompatibilityStaticSessionRuntime(
                 primarySurface: .structuredActivityFeed,
                 transcript: "",
-                activityItems: [SessionActivityItem(kind: .status, text: "Pi shared Session stream connected")]
+                activityItems: [SessionActivityItem(kind: .status, text: "Session stream connected")]
             )
         case .ibmBob:
             CompatibilityStaticSessionRuntime(transcript: "")
