@@ -4,7 +4,11 @@ import Network
 import NexusDomain
 import NexusIPC
 
-nonisolated final class RemotePairingServer: @unchecked Sendable {
+protocol RemotePairingServing: AnyObject {
+    var endpoint: RemotePairingEndpoint { get }
+}
+
+nonisolated final class RemotePairingServer: RemotePairingServing, @unchecked Sendable {
     private static let revokedPairingMessage = "Pair this iPhone again to browse this Paired Mac"
 
     let displayHost: String

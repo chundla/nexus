@@ -34,6 +34,14 @@ struct SessionControllerSummary: Equatable {
 @MainActor
 @Observable
 final class NexusAppModel {
+    private enum RemotePairingServerBootstrapError: LocalizedError {
+        case unavailable
+
+        var errorDescription: String? {
+            "Remote Access server is unavailable in this Nexus build context."
+        }
+    }
+
     var serviceStatus: NexusServiceStatus?
     var serviceErrorMessage: String?
     var workspaceGroups: [WorkspaceGroup] = []
@@ -47,22 +55,25 @@ final class NexusAppModel {
     var pairedDevices: [PairedDevice] = []
     var focusedSessionScreen: SessionScreen?
     var focusedStructuredSessionDraft = ""
-    let remotePairingEndpoint: RemotePairingEndpoint?
+    private(set) var remotePairingEndpoint: RemotePairingEndpoint?
 
     private let client: any NexusServiceClient
     private let embeddedService: (any NexusEmbeddedServiceSession)?
-    private let remotePairingServer: RemotePairingServer?
+    private var remotePairingServer: (any RemotePairingServing)?
+    private let remotePairingServerFactory: (() throws -> any RemotePairingServing)?
     private var focusedSessionObservation: (any SessionScreenObservation)?
     private var staleWorkspaceOverviewRefreshTasks: [UUID: Task<Void, Never>] = [:]
 
     init(
         client: any NexusServiceClient,
         embeddedService: (any NexusEmbeddedServiceSession)? = nil,
-        remotePairingServer: RemotePairingServer? = nil
+        remotePairingServer: (any RemotePairingServing)? = nil,
+        remotePairingServerFactory: (() throws -> any RemotePairingServing)? = nil
     ) {
         self.client = client
         self.embeddedService = embeddedService
         self.remotePairingServer = remotePairingServer
+        self.remotePairingServerFactory = remotePairingServerFactory
         self.remotePairingEndpoint = remotePairingServer?.endpoint
     }
 
@@ -79,8 +90,9 @@ final class NexusAppModel {
     static func live(listeningPort: Int? = 9234) throws -> NexusAppModel {
         let service = try NexusEmbeddedServiceBootstrap.bootstrap()
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
-        let remotePairingServer = try RemotePairingServer(client: client, listeningPort: listeningPort)
-        return NexusAppModel(client: client, embeddedService: service, remotePairingServer: remotePairingServer)
+        return NexusAppModel(client: client, embeddedService: service) {
+            try RemotePairingServer(client: client, listeningPort: listeningPort)
+        }
     }
 
     func refresh() async {
@@ -152,20 +164,59 @@ final class NexusAppModel {
     func refreshRemoteAccess() async throws {
         async let remoteAccessState = client.getRemoteAccessState()
         async let pairedDevices = client.listPairedDevices()
-        self.remoteAccessState = try await remoteAccessState
-        self.pairedDevices = try await pairedDevices
+        let loadedRemoteAccessState = try await remoteAccessState
+        let loadedPairedDevices = try await pairedDevices
+        self.remoteAccessState = loadedRemoteAccessState
+        self.pairedDevices = loadedPairedDevices
+
+        if loadedRemoteAccessState.isEnabled || loadedRemoteAccessState.activePairing != nil {
+            try ensureRemotePairingServerIfAvailable()
+        } else {
+            stopRemotePairingServer()
+        }
     }
 
     func setRemoteAccessEnabled(_ isEnabled: Bool) async throws -> RemoteAccessState {
         let state = try await client.setRemoteAccessEnabled(isEnabled)
         remoteAccessState = state
+        if state.isEnabled {
+            try ensureRemotePairingServerIfAvailable()
+        } else {
+            stopRemotePairingServer()
+        }
         return state
     }
 
     func startPairing() async throws -> PairingCeremony {
+        try requireRemotePairingServer()
         let pairing = try await client.startPairing()
         remoteAccessState = RemoteAccessState(isEnabled: remoteAccessState?.isEnabled ?? true, activePairing: pairing)
         return pairing
+    }
+
+    private func ensureRemotePairingServerIfAvailable() throws {
+        if let remotePairingServer {
+            remotePairingEndpoint = remotePairingServer.endpoint
+            return
+        }
+        guard let remotePairingServerFactory else {
+            return
+        }
+        let remotePairingServer = try remotePairingServerFactory()
+        self.remotePairingServer = remotePairingServer
+        remotePairingEndpoint = remotePairingServer.endpoint
+    }
+
+    private func requireRemotePairingServer() throws {
+        try ensureRemotePairingServerIfAvailable()
+        guard remotePairingServer != nil else {
+            throw RemotePairingServerBootstrapError.unavailable
+        }
+    }
+
+    private func stopRemotePairingServer() {
+        remotePairingServer = nil
+        remotePairingEndpoint = nil
     }
 
     func revokePairedDevice(deviceID: UUID) async throws -> Bool {

@@ -6272,6 +6272,137 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelDefersRemotePairingServerUntilRemoteAccessIsEnabled() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let endpoint = RemotePairingEndpoint(host: "127.0.0.1", port: 9234)
+        var factoryCallCount = 0
+        let client = TrackingServiceClient(
+            workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []),
+            session: session,
+            screen: SessionScreen(session: session, transcript: "Claude ready"),
+            remoteAccessState: RemoteAccessState(isEnabled: false, activePairing: nil)
+        )
+        let model = NexusAppModel(
+            client: client,
+            remotePairingServerFactory: {
+                factoryCallCount += 1
+                return FakeRemotePairingServer(endpoint: endpoint)
+            }
+        )
+
+        try await model.refreshRemoteAccess()
+
+        #expect(factoryCallCount == 0)
+        #expect(model.remotePairingEndpoint == nil)
+
+        _ = try await model.setRemoteAccessEnabled(true)
+
+        #expect(factoryCallCount == 1)
+        #expect(model.remotePairingEndpoint == endpoint)
+    }
+
+    @MainActor
+    @Test func appModelRefreshRemoteAccessRestoresRemotePairingEndpointWhenRemoteAccessIsAlreadyEnabled() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let pairing = PairingCeremony(
+            id: UUID(),
+            code: "123456",
+            qrPayload: "nexus://pair?code=123456",
+            createdAt: Date(timeIntervalSince1970: 10),
+            expiresAt: Date(timeIntervalSince1970: 610)
+        )
+        let endpoint = RemotePairingEndpoint(host: "127.0.0.1", port: 9234)
+        var factoryCallCount = 0
+        let client = TrackingServiceClient(
+            workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []),
+            session: session,
+            screen: SessionScreen(session: session, transcript: "Claude ready"),
+            remoteAccessState: RemoteAccessState(isEnabled: true, activePairing: pairing)
+        )
+        let model = NexusAppModel(
+            client: client,
+            remotePairingServerFactory: {
+                factoryCallCount += 1
+                return FakeRemotePairingServer(endpoint: endpoint)
+            }
+        )
+
+        try await model.refreshRemoteAccess()
+
+        #expect(factoryCallCount == 1)
+        #expect(model.remotePairingEndpoint == endpoint)
+        #expect(model.remoteAccessState == RemoteAccessState(isEnabled: true, activePairing: pairing))
+    }
+
+    @MainActor
+    @Test func appModelStartPairingBootstrapsRemotePairingServerOnDemand() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let endpoint = RemotePairingEndpoint(host: "127.0.0.1", port: 9234)
+        var factoryCallCount = 0
+        let client = TrackingServiceClient(
+            workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []),
+            session: session,
+            screen: SessionScreen(session: session, transcript: "Claude ready"),
+            remoteAccessState: RemoteAccessState(isEnabled: true, activePairing: nil)
+        )
+        let model = NexusAppModel(
+            client: client,
+            remotePairingServerFactory: {
+                factoryCallCount += 1
+                return FakeRemotePairingServer(endpoint: endpoint)
+            }
+        )
+
+        let pairing = try await model.startPairing()
+
+        #expect(factoryCallCount == 1)
+        #expect(model.remotePairingEndpoint == endpoint)
+        #expect(model.remoteAccessState == RemoteAccessState(isEnabled: true, activePairing: pairing))
+    }
+
+    @MainActor
     @Test func appModelLoadsHostsAndCachesHostDetailOnDemand() async throws {
         let group = WorkspaceGroup(id: UUID(), name: "Group")
         let workspace = Workspace(
@@ -8855,6 +8986,14 @@ private final class ControlledWorkspaceOverviewLoader: @unchecked Sendable {
         lock.lock()
         continuations[workspaceID] = continuation
         lock.unlock()
+    }
+}
+
+private final class FakeRemotePairingServer: RemotePairingServing {
+    let endpoint: RemotePairingEndpoint
+
+    init(endpoint: RemotePairingEndpoint) {
+        self.endpoint = endpoint
     }
 }
 
