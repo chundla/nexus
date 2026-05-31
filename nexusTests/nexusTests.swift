@@ -8990,7 +8990,7 @@ private final class ControlledWorkspaceOverviewLoader: @unchecked Sendable {
 }
 
 private final class FakeRemotePairingServer: RemotePairingServing {
-    let endpoint: RemotePairingEndpoint
+    nonisolated let endpoint: RemotePairingEndpoint
 
     init(endpoint: RemotePairingEndpoint) {
         self.endpoint = endpoint

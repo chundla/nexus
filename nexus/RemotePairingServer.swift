@@ -5,7 +5,7 @@ import NexusDomain
 import NexusIPC
 
 protocol RemotePairingServing: AnyObject {
-    var endpoint: RemotePairingEndpoint { get }
+    nonisolated var endpoint: RemotePairingEndpoint { get }
 }
 
 nonisolated final class RemotePairingServer: RemotePairingServing, @unchecked Sendable {
@@ -14,7 +14,7 @@ nonisolated final class RemotePairingServer: RemotePairingServing, @unchecked Se
     let displayHost: String
     let macName: String
 
-    var endpoint: RemotePairingEndpoint {
+    nonisolated var endpoint: RemotePairingEndpoint {
         RemotePairingEndpoint(host: displayHost, port: port)
     }
 
