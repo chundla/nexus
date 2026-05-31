@@ -2629,12 +2629,12 @@ private struct PresentedError: Identifiable {
     let message: String
 }
 
-enum SessionTerminalCapturedInput: Equatable {
+nonisolated enum SessionTerminalCapturedInput: Equatable {
     case text(String)
     case key(SessionInputKey)
 }
 
-func mapSessionTerminalInput(
+nonisolated func mapSessionTerminalInput(
     modifierFlags: NSEvent.ModifierFlags,
     keyCode: UInt16,
     characters: String?,

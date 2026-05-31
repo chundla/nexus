@@ -8495,18 +8495,48 @@ struct StubExecutableResolver: ProviderExecutableResolving {
 }
 
 final class MutableExecutableResolver: ProviderExecutableResolving {
-    var executables: [String: String]
-    var searchedDirectories: [String] = ["/tmp/search-a", "/tmp/search-b"]
-    var homeDirectories: [String] = ["/tmp/home"]
-    var pathEnvironment: String? = "/tmp/search-a:/tmp/search-b"
+    private final class State: @unchecked Sendable {
+        private let lock = NSLock()
+        private var executables: [String: String]
+
+        init(executables: [String: String]) {
+            self.executables = executables
+        }
+
+        func getExecutables() -> [String: String] {
+            lock.lock()
+            defer { lock.unlock() }
+            return executables
+        }
+
+        func setExecutables(_ executables: [String: String]) {
+            lock.lock()
+            self.executables = executables
+            lock.unlock()
+        }
+    }
+
+    var executables: [String: String] {
+        get { state.getExecutables() }
+        set { state.setExecutables(newValue) }
+    }
+
+    let searchedDirectories: [String]
+    let homeDirectories: [String]
+    let pathEnvironment: String?
+
+    private let state: State
 
     init(executables: [String: String]) {
-        self.executables = executables
+        self.state = State(executables: executables)
+        self.searchedDirectories = ["/tmp/search-a", "/tmp/search-b"]
+        self.homeDirectories = ["/tmp/home"]
+        self.pathEnvironment = "/tmp/search-a:/tmp/search-b"
     }
 
     func resolveExecutable(named command: String) -> ProviderExecutableResolution {
         ProviderExecutableResolution(
-            resolvedExecutable: executables[command],
+            resolvedExecutable: state.getExecutables()[command],
             searchedDirectories: searchedDirectories,
             homeDirectories: homeDirectories,
             pathEnvironment: pathEnvironment
