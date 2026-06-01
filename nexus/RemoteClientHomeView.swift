@@ -1992,85 +1992,116 @@ private struct RemoteSessionScreenView: View {
     ) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
-                    if let extensionUI, extensionUI.pendingDialogs.isEmpty == false {
-                        VStack(alignment: .leading, spacing: 10) {
-                            ForEach(extensionUI.pendingDialogs) { dialog in
-                                structuredSessionExtensionDialogView(dialog)
-                            }
-                        }
-                    }
-
-                    if presentation.feed.pendingApprovalRequests.isEmpty == false {
-                        VStack(alignment: .leading, spacing: 10) {
-                            ForEach(presentation.feed.pendingApprovalRequests) { request in
-                                structuredSessionApprovalRequestView(request, presentation: presentation.approvalRequest)
-                            }
-                        }
-                    }
-
-                    if let extensionUI,
-                       extensionUI.title != nil || extensionUI.statuses.isEmpty == false || extensionUI.notifications.isEmpty == false {
-                        structuredSessionExtensionSummaryView(extensionUI)
-                    }
-
-                    if presentation.feed.activityRows.isEmpty {
-                        RemoteUnavailableInsetCard(
-                            title: presentation.feed.copy.emptyStateTitle,
-                            detail: presentation.feed.copy.emptyStateDescription,
-                            accent: NexusIOSTheme.gold
-                        )
-                    } else {
-                        LazyVStack(spacing: 10) {
-                            ForEach(presentation.feed.activityRows) { row in
-                                structuredSessionActivityRowView(row, screen: screen)
-                                    .id(row.id)
-                            }
-
-                            if let thinkingIndicator = presentation.feed.thinkingIndicator {
-                                structuredSessionThinkingIndicatorView(thinkingIndicator)
-                            }
-
-                            Color.clear
-                                .frame(height: 1)
-                                .id(conversationBottomID)
-                        }
-                    }
-                }
-                .padding(.horizontal, horizontalPadding)
-                .padding(.top, 14)
-                .padding(.bottom, 120)
+                structuredSessionScrollBody(screen, presentation: presentation)
             }
             .onAppear {
                 DispatchQueue.main.async {
-                    proxy.scrollTo(conversationBottomID, anchor: .bottom)
+                    scrollStructuredSessionToBottom(using: proxy, animated: false)
                 }
             }
             .onChange(of: presentation.feed.activityRows.count) { _, _ in
-                withAnimation(.easeOut(duration: 0.18)) {
-                    proxy.scrollTo(conversationBottomID, anchor: .bottom)
-                }
+                scrollStructuredSessionToBottom(using: proxy)
             }
             .onChange(of: presentation.feed.activityRows.last) { _, _ in
-                withAnimation(.easeOut(duration: 0.18)) {
-                    proxy.scrollTo(conversationBottomID, anchor: .bottom)
-                }
+                scrollStructuredSessionToBottom(using: proxy)
             }
             .onChange(of: presentation.feed.pendingApprovalRequests.count) { _, _ in
-                withAnimation(.easeOut(duration: 0.18)) {
-                    proxy.scrollTo(conversationBottomID, anchor: .bottom)
-                }
+                scrollStructuredSessionToBottom(using: proxy)
             }
             .onChange(of: extensionUI?.pendingDialogs.count ?? 0) { _, _ in
-                withAnimation(.easeOut(duration: 0.18)) {
-                    proxy.scrollTo(conversationBottomID, anchor: .bottom)
-                }
+                scrollStructuredSessionToBottom(using: proxy)
             }
             .onChange(of: extensionUI?.notifications.count ?? 0) { _, _ in
-                withAnimation(.easeOut(duration: 0.18)) {
-                    proxy.scrollTo(conversationBottomID, anchor: .bottom)
+                scrollStructuredSessionToBottom(using: proxy)
+            }
+        }
+    }
+
+    private func structuredSessionScrollBody(
+        _ screen: SessionScreen,
+        presentation: StructuredSessionPresentation
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            structuredSessionSupplementaryContent(presentation: presentation)
+            structuredSessionActivityFeed(screen, presentation: presentation)
+        }
+        .padding(.horizontal, horizontalPadding)
+        .padding(.top, 14)
+        .padding(.bottom, 120)
+    }
+
+    @ViewBuilder
+    private func structuredSessionSupplementaryContent(
+        presentation: StructuredSessionPresentation
+    ) -> some View {
+        if let extensionUI, extensionUI.pendingDialogs.isEmpty == false {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(extensionUI.pendingDialogs) { dialog in
+                    structuredSessionExtensionDialogView(dialog)
                 }
             }
+        }
+
+        if presentation.feed.pendingApprovalRequests.isEmpty == false {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(presentation.feed.pendingApprovalRequests) { request in
+                    structuredSessionApprovalRequestView(request, presentation: presentation.approvalRequest)
+                }
+            }
+        }
+
+        if let extensionUI, shouldShowStructuredSessionExtensionSummary(extensionUI) {
+            structuredSessionExtensionSummaryView(extensionUI)
+        }
+    }
+
+    @ViewBuilder
+    private func structuredSessionActivityFeed(
+        _ screen: SessionScreen,
+        presentation: StructuredSessionPresentation
+    ) -> some View {
+        if presentation.feed.activityRows.isEmpty {
+            RemoteUnavailableInsetCard(
+                title: presentation.feed.copy.emptyStateTitle,
+                detail: presentation.feed.copy.emptyStateDescription,
+                accent: NexusIOSTheme.gold
+            )
+        } else {
+            LazyVStack(spacing: 10) {
+                ForEach(presentation.feed.activityRows) { row in
+                    structuredSessionActivityRowView(row, screen: screen)
+                        .id(row.id)
+                }
+
+                if let thinkingIndicator = presentation.feed.thinkingIndicator {
+                    structuredSessionThinkingIndicatorView(thinkingIndicator)
+                }
+
+                Color.clear
+                    .frame(height: 1)
+                    .id(conversationBottomID)
+            }
+        }
+    }
+
+    private func shouldShowStructuredSessionExtensionSummary(_ extensionUI: SessionExtensionUIState) -> Bool {
+        extensionUI.title != nil || extensionUI.statuses.isEmpty == false || extensionUI.notifications.isEmpty == false
+    }
+
+    private func scrollStructuredSessionToBottom(
+        using proxy: ScrollViewProxy,
+        animated: Bool = true
+    ) {
+        let scroll = {
+            proxy.scrollTo(conversationBottomID, anchor: .bottom)
+        }
+
+        if animated {
+            withAnimation(.easeOut(duration: 0.18)) {
+                scroll()
+            }
+        } else {
+            scroll()
         }
     }
 
