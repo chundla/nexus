@@ -7,10 +7,6 @@ import SwiftUI
 struct ContentView: View {
     @Bindable var appModel: NexusAppModel
 
-    private let showsSidebar: Bool
-    private let autoRefresh: Bool
-    private let allowsInteractions: Bool
-
     @State private var selection: SidebarSelection?
     @State private var isShowingCreateWorkspaceGroupSheet = false
     @State private var isShowingQuickSwitchSheet = false
@@ -31,55 +27,28 @@ struct ContentView: View {
 
     private let terminalLayout = TerminalViewportLayout.live
 
-    init(
-        appModel: NexusAppModel,
-        forcedSessionID: UUID? = nil,
-        showsSidebar: Bool = true,
-        autoRefresh: Bool = true,
-        allowsInteractions: Bool = true
-    ) {
-        self.appModel = appModel
-        self.showsSidebar = showsSidebar
-        self.autoRefresh = autoRefresh
-        self.allowsInteractions = allowsInteractions
-        _selection = State(initialValue: forcedSessionID.map(SidebarSelection.session))
-    }
-
     var body: some View {
         ZStack {
             NexusBackdrop()
 
-            if showsSidebar {
-                NavigationSplitView {
-                    sidebarContent
-                } detail: {
-                    detailView
-                        .padding(detailPadding)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                }
-#if os(macOS)
-                .navigationSplitViewStyle(.balanced)
-#endif
-            } else {
+            NavigationSplitView {
+                sidebarContent
+            } detail: {
                 detailView
                     .padding(detailPadding)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
+#if os(macOS)
+            .navigationSplitViewStyle(.balanced)
+#endif
         }
         .preferredColorScheme(.dark)
         .task {
-            guard autoRefresh else {
-                return
-            }
             if appModel.serviceStatus == nil, appModel.serviceErrorMessage == nil {
                 await appModel.refresh()
             }
         }
         .task(id: selection) {
-            guard autoRefresh else {
-                return
-            }
-
             switch selection {
             case .workspaceGroup:
                 sidebarMode = .groups
@@ -108,15 +77,9 @@ struct ContentView: View {
             }
         }
         .task(id: appModel.workspaces.map(\.id)) {
-            guard autoRefresh else {
-                return
-            }
             selectDefaultIfNeeded()
         }
         .task(id: appModel.recentNavigation.map(\.id)) {
-            guard autoRefresh else {
-                return
-            }
             selectDefaultIfNeeded()
         }
         .sheet(isPresented: $isShowingCreateWorkspaceGroupSheet) {
@@ -882,44 +845,42 @@ struct ContentView: View {
 
                     Spacer()
 
-                    if allowsInteractions {
-                        Menu {
-                            if isRemote, isReady {
-                                Button("Detach") {
-                                    detachSession(screen.session)
-                                }
+                    Menu {
+                        if isRemote, isReady {
+                            Button("Detach") {
+                                detachSession(screen.session)
                             }
+                        }
 
-                            if isReady {
-                                Button("Stop Session") {
-                                    stopSession(
-                                        screen.session,
-                                        workspaceID: screen.session.workspaceID,
-                                        providerID: screen.session.providerID
-                                    )
-                                }
+                        if isReady {
+                            Button("Stop Session") {
+                                stopSession(
+                                    screen.session,
+                                    workspaceID: screen.session.workspaceID,
+                                    providerID: screen.session.providerID
+                                )
                             }
+                        }
 
-                            if isReady == false {
-                                Button("Relaunch Session") {
-                                    Task {
-                                        do {
-                                            let session = try await appModel.relaunchFocusedSession()
-                                            selection = .session(session.id)
-                                        } catch {
-                                            presentedError = PresentedError(message: error.localizedDescription)
-                                        }
+                        if isReady == false {
+                            Button("Relaunch Session") {
+                                Task {
+                                    do {
+                                        let session = try await appModel.relaunchFocusedSession()
+                                        selection = .session(session.id)
+                                    } catch {
+                                        presentedError = PresentedError(message: error.localizedDescription)
                                     }
                                 }
                             }
-                        } label: {
-                            Image(systemName: "ellipsis.circle")
-                                .font(.title3)
-                                .foregroundStyle(.white.opacity(0.86))
                         }
-                        .menuStyle(.borderlessButton)
-                        .buttonStyle(.plain)
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.title3)
+                            .foregroundStyle(.white.opacity(0.86))
                     }
+                    .menuStyle(.borderlessButton)
+                    .buttonStyle(.plain)
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
@@ -1524,36 +1485,27 @@ struct ContentView: View {
                 Color.clear
                     .onAppear {
                         terminalViewportSize = proxy.size
-                        if allowsInteractions {
-                            reportTerminalSize(proxy.size)
-                            if isReady {
-                                terminalFocusToken = UUID()
-                            }
+                        reportTerminalSize(proxy.size)
+                        if isReady {
+                            terminalFocusToken = UUID()
                         }
                     }
                     .onChange(of: proxy.size) { _, newSize in
                         terminalViewportSize = newSize
-                        if allowsInteractions {
-                            reportTerminalSize(newSize)
-                        }
+                        reportTerminalSize(newSize)
                     }
             }
         }
         .background {
-            if allowsInteractions {
-                SessionTerminalKeyCaptureView(
-                    isEnabled: isReady,
-                    focusToken: terminalFocusToken,
-                    onText: handleTerminalTypedText,
-                    onKey: handleTerminalInputKey
-                )
-                .frame(width: 0, height: 0)
-            }
+            SessionTerminalKeyCaptureView(
+                isEnabled: isReady,
+                focusToken: terminalFocusToken,
+                onText: handleTerminalTypedText,
+                onKey: handleTerminalInputKey
+            )
+            .frame(width: 0, height: 0)
         }
         .onTapGesture {
-            guard allowsInteractions else {
-                return
-            }
             terminalFocusToken = UUID()
             reportTerminalSize(terminalViewportSize)
         }
@@ -1655,7 +1607,7 @@ struct ContentView: View {
                 }
             }
 
-            if isReady, allowsInteractions {
+            if isReady {
                 VStack(alignment: .leading, spacing: 8) {
                     if presentation.slashCommandMenu.isVisible {
                         macStructuredSessionSlashCommandMenu(presentation.slashCommandMenu)
@@ -1956,7 +1908,7 @@ struct ContentView: View {
                 }
                 .buttonStyle(NexusAccentButtonStyle())
             }
-            .disabled(allowsInteractions == false || presentation.actionsAreEnabled == false)
+            .disabled(presentation.actionsAreEnabled == false)
 
             if presentation.actionsAreEnabled == false, let disabledReason = presentation.disabledReason {
                 Text(disabledReason)
