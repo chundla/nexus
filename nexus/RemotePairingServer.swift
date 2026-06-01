@@ -10,6 +10,7 @@ protocol RemotePairingServing: AnyObject {
 
 nonisolated final class RemotePairingServer: RemotePairingServing, @unchecked Sendable {
     private static let revokedPairingMessage = "Pair this iPhone again to browse this Paired Mac"
+    private static let catalogWorkspaceOverviewGracePeriodNanoseconds: UInt64 = 500_000_000
 
     let displayHost: String
     let macName: String
@@ -137,14 +138,14 @@ nonisolated final class RemotePairingServer: RemotePairingServing, @unchecked Se
                 request: request,
                 over: connection
             ) { [self] in
-                let workspaceGroups = try await self.client.listWorkspaceGroups()
-                let recentNavigation = try await self.client.listRecentNavigation(limit: 10)
+                async let workspaceGroups = self.client.listWorkspaceGroups()
+                async let recentNavigation = self.client.listRecentNavigation(limit: 10)
                 let workspaces = try await self.client.listWorkspaces()
-                let workspaceOverviews = try await self.client.getWorkspaceOverviews(workspaceIDs: workspaces.map(\.id))
+                let workspaceOverviews = try await self.fetchCatalogWorkspaceOverviewsSummaryFirst(workspaces: workspaces)
 
                 return RemoteWorkspaceCatalog(
-                    workspaceGroups: workspaceGroups,
-                    recentNavigation: recentNavigation,
+                    workspaceGroups: try await workspaceGroups,
+                    recentNavigation: try await recentNavigation,
                     workspaceOverviews: workspaceOverviews
                 )
             }
@@ -757,6 +758,98 @@ nonisolated final class RemotePairingServer: RemotePairingServing, @unchecked Se
         }
 
         return SessionScreenRequest(sessionID: sessionID)
+    }
+
+    private func fetchCatalogWorkspaceOverviewsSummaryFirst(
+        workspaces: [Workspace]
+    ) async throws -> [WorkspaceOverview] {
+        let overviewsTask = Task {
+            try await client.getWorkspaceOverviews(workspaceIDs: workspaces.map(\.id))
+        }
+
+        if let overviews = try await awaitCatalogWorkspaceOverviewsWithinGracePeriod(overviewsTask) {
+            return overviews
+        }
+
+        return workspaces.map(summaryFirstCatalogOverview)
+    }
+
+    private func awaitCatalogWorkspaceOverviewsWithinGracePeriod(
+        _ overviewsTask: Task<[WorkspaceOverview], Error>
+    ) async throws -> [WorkspaceOverview]? {
+        enum RaceResult {
+            case overviews([WorkspaceOverview])
+            case timeout
+            case failure(Error)
+        }
+
+        let stream = AsyncStream<RaceResult> { continuation in
+            Task {
+                do {
+                    continuation.yield(.overviews(try await overviewsTask.value))
+                } catch {
+                    continuation.yield(.failure(error))
+                }
+                continuation.finish()
+            }
+
+            Task {
+                try? await Task.sleep(nanoseconds: Self.catalogWorkspaceOverviewGracePeriodNanoseconds)
+                continuation.yield(.timeout)
+                continuation.finish()
+            }
+        }
+
+        for await result in stream {
+            switch result {
+            case .overviews(let overviews):
+                return overviews
+            case .timeout:
+                return nil
+            case .failure(let error):
+                throw error
+            }
+        }
+
+        return nil
+    }
+
+    private func summaryFirstCatalogOverview(for workspace: Workspace) -> WorkspaceOverview {
+        WorkspaceOverview(
+            workspace: workspace,
+            providerCards: ProviderID.allCases.map { providerID in
+                let health = ProviderHealthSummary(
+                    state: .notChecked,
+                    summary: "Checking \(providerID.displayName) on this Paired Mac",
+                    launchability: .notChecked
+                )
+                return WorkspaceProviderCard(
+                    provider: Provider(id: providerID),
+                    health: health,
+                    capabilities: ProviderCapabilities(
+                        launchDefaultSession: ProviderCapability(
+                            action: .launchDefaultSession,
+                            isSupported: true,
+                            isEnabled: false,
+                            disabledReason: health.summary
+                        ),
+                        createNamedSession: ProviderCapability(
+                            action: .createNamedSession,
+                            isSupported: true,
+                            isEnabled: false,
+                            disabledReason: health.summary
+                        )
+                    ),
+                    prelaunchPrimarySurface: providerID == .claude ? .terminal : .structuredActivityFeed,
+                    defaultSession: ProviderDefaultSessionSummary(
+                        state: .notCreated,
+                        summary: "No default session yet",
+                        actionTitle: "Launch"
+                    )
+                )
+            },
+            usesStaleBrowseFacts: true
+        )
     }
 
     private func send<T: Encodable>(statusCode: Int, body: T, over connection: NWConnection) {

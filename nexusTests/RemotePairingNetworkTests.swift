@@ -122,6 +122,59 @@ struct RemotePairingNetworkTests {
         #expect(claudeCard.capabilities.launchDefaultSession.disabledReason == claudeCard.health.summary)
     }
 
+    @Test func fetchesCatalogWithPlaceholderOverviewsBeforeSlowHealthChecksTimeoutOverDedicatedNetworkAPI() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: AvailableRemotePairingProviderHealthEvaluator(),
+            providerModuleRegistry: ProviderModuleRegistry(
+                modules: Dictionary(uniqueKeysWithValues: ProviderID.allCases.map { providerID in
+                    (providerID, SlowCatalogReadProviderModule(providerID: providerID, delayNanoseconds: 1_500_000_000))
+                })
+            )
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
+
+        _ = try await client.setRemoteAccessEnabled(true)
+        let pairing = try await client.startPairing()
+        let group = try await client.createWorkspaceGroup(name: "Client Work")
+        let workspace = try await client.createLocalWorkspace(
+            name: "Nexus",
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+
+        let remoteClient = RemotePairingHTTPClient()
+        let pairedMac = try await remoteClient.completePairing(
+            host: server.displayHost,
+            port: server.port,
+            pairingCode: pairing.code,
+            deviceName: "Chris’s iPhone"
+        )
+
+        let clock = ContinuousClock()
+        let start = clock.now
+        let catalog = try await remoteClient.fetchCatalog(for: pairedMac)
+        let elapsed = start.duration(to: clock.now)
+        let overview = try #require(catalog.workspaceOverviews.first(where: { $0.workspace.id == workspace.id }))
+        let piCard = try #require(overview.providerCards.first(where: { $0.provider.id == .pi }))
+
+        #expect(catalog.workspaceGroups == [group])
+        #expect(elapsed < .seconds(10))
+        #expect(overview.usesStaleBrowseFacts)
+        #expect(piCard.health.state == .notChecked)
+        #expect(piCard.capabilities.launchDefaultSession.isSupported)
+        #expect(piCard.capabilities.launchDefaultSession.isEnabled == false)
+        #expect(piCard.capabilities.launchDefaultSession.disabledReason == piCard.health.summary)
+    }
+
     @Test func revokedPairingReturnsProductShapedRecoveryErrorOverDedicatedNetworkAPI() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)
@@ -2611,6 +2664,83 @@ private struct RemotePairingTestCommandRunner: ProviderCommandRunning {
         case .success(let stdout, let stderr, let exitStatus):
             return ProviderCommandResult(exitStatus: exitStatus, stdout: stdout, stderr: stderr)
         }
+    }
+}
+
+private struct AvailableRemotePairingProviderHealthEvaluator: ProviderHealthEvaluating {
+    func healthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> ProviderHealthSummary {
+        ProviderHealthSummary(
+            state: .available,
+            summary: "\(providerID.displayName) is available",
+            resolvedExecutable: "/tmp/fake-\(providerID.rawValue)",
+            launchability: .launchable
+        )
+    }
+}
+
+private struct SlowCatalogReadProviderModule: ProviderModule {
+    let provider: Provider
+    let delayNanoseconds: UInt64
+
+    init(providerID: ProviderID, delayNanoseconds: UInt64) {
+        self.provider = Provider(id: providerID)
+        self.delayNanoseconds = delayNanoseconds
+    }
+
+    func supportsDefaultSessionLaunch(in workspace: Workspace) -> Bool { true }
+
+    func supportsNamedSessions(in workspace: Workspace) -> Bool { true }
+
+    func providerHealthSummary(
+        for workspace: Workspace,
+        remoteContext: RemoteWorkspaceHealthContext?,
+        providerHealthEvaluator: any ProviderHealthEvaluating
+    ) async -> ProviderHealthSummary {
+        await providerHealthEvaluator.healthSummary(for: provider.id, workspace: workspace, remoteContext: remoteContext)
+    }
+
+    func readCatalog(
+        _ request: ProviderModuleCatalogReadRequest,
+        actions: ProviderModuleCatalogReadActions
+    ) async throws -> ProviderModuleCatalogReadResult {
+        try await Task.sleep(nanoseconds: delayNanoseconds)
+        let health = try await actions.providerHealthSummary()
+        return ProviderModuleCatalogReadResult(
+            health: health,
+            capabilities: providerCapabilities(in: request.workspace, health: health, defaultSession: request.defaultSession),
+            prelaunchPrimarySurface: prelaunchPrimarySurface(in: request.workspace),
+            defaultSession: defaultSessionSummary(for: request.defaultSession)
+        )
+    }
+
+    func providerCapabilities(
+        in workspace: Workspace,
+        health: ProviderHealthSummary,
+        defaultSession: Session?
+    ) -> ProviderCapabilities {
+        makeProviderCapabilities(
+            provider: provider,
+            supportsDefaultSessionLaunch: true,
+            supportsNamedSessions: true,
+            health: health,
+            defaultSession: defaultSession
+        )
+    }
+
+    func prelaunchPrimarySurface(in workspace: Workspace) -> SessionSurface {
+        switch provider.id {
+        case .claude:
+            .terminal
+        case .codex, .ibmBob, .pi:
+            .structuredActivityFeed
+        }
+    }
+
+    func reusesRemoteHealthSnapshot(
+        _ snapshot: ProviderHealthSummary,
+        remoteContext: RemoteWorkspaceHealthContext?
+    ) -> Bool {
+        false
     }
 }
 
