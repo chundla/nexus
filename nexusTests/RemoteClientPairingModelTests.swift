@@ -1281,6 +1281,71 @@ struct RemoteClientPairingModelTests {
         ])
     }
 
+    @Test func focusRemoteSessionFallsBackToFetchedScreenWhenObservationStartupStalls() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: UUID()
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let screen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [SessionActivityItem(kind: .status, text: "Pi shared Session stream connected")]
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let observationStartGate = AsyncGate()
+        let client = StubRemotePairingClient(
+            result: pairedMac,
+            sessionScreen: screen,
+            observeSessionStartGate: observationStartGate
+        )
+        let model = RemoteClientPairingModel(client: client, store: store)
+
+        let focusTask = Task {
+            await model.focusRemoteSession(sessionID: session.id)
+        }
+
+        for _ in 0 ..< 20 {
+            if model.focusedSessionScreen == screen {
+                break
+            }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        #expect(model.focusedSessionScreen == screen)
+        #expect(client.requestLog == [
+            "observeSessionScreen",
+            "fetchSessionScreen"
+        ])
+
+        await observationStartGate.open()
+        await focusTask.value
+    }
+
     @Test func forgetsRevokedPairedMacAfterUnauthorizedObservedSessionDisconnect() async throws {
         let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -4501,6 +4566,7 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
     private let initialObservedScreen: SessionScreen?
     private let observedScreenBeforeSendSessionTextResponse: SessionScreen?
     private let observedScreenBeforeSendSessionInputKeyResponse: SessionScreen?
+    private let observeSessionStartGate: AsyncGate?
     private var observationRegistration: ObservationRegistration?
     private(set) var takeSessionControlRequests: [TakeSessionControlRequest] = []
     private(set) var releaseSessionControlRequests: [UUID] = []
@@ -4565,7 +4631,8 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
         emitsInitialObservedScreenAsynchronously: Bool = false,
         initialObservedScreen: SessionScreen? = nil,
         observedScreenBeforeSendSessionTextResponse: SessionScreen? = nil,
-        observedScreenBeforeSendSessionInputKeyResponse: SessionScreen? = nil
+        observedScreenBeforeSendSessionInputKeyResponse: SessionScreen? = nil,
+        observeSessionStartGate: AsyncGate? = nil
     ) {
         self.result = result
         self.status = status
@@ -4595,6 +4662,7 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
         self.initialObservedScreen = initialObservedScreen
         self.observedScreenBeforeSendSessionTextResponse = observedScreenBeforeSendSessionTextResponse
         self.observedScreenBeforeSendSessionInputKeyResponse = observedScreenBeforeSendSessionInputKeyResponse
+        self.observeSessionStartGate = observeSessionStartGate
     }
 
     func fetchStatus(host: String, port: Int) async throws -> RemotePairedMacStatus {
@@ -4847,6 +4915,7 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
     ) async throws -> any SessionScreenObservation {
         requestLog.append("observeSessionScreen")
         observationRegistration = ObservationRegistration(onUpdate: onUpdate, onDisconnect: onDisconnect)
+        await observeSessionStartGate?.wait()
         if emitsInitialObservedScreen {
             let initialScreen: SessionScreen
             if let providedInitialObservedScreen = initialObservedScreen {

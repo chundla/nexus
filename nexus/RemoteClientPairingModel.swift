@@ -165,6 +165,7 @@ final class RemoteClientPairingModel {
     private let client: any RemotePairingClient
     private let store: any PairedMacStore
     private var focusedSessionObservation: (any SessionScreenObservation)?
+    private var focusedSessionObservationStartupTask: Task<Void, Never>?
     private var focusedSessionReconnectTask: Task<Void, Never>?
 
     var activePairedMac: PairedMac? {
@@ -990,12 +991,27 @@ final class RemoteClientPairingModel {
 
         if forceRestart {
             await cancelFocusedSessionObservation()
-        } else if focusedSessionObservation != nil {
+        } else if focusedSessionObservation != nil || focusedSessionObservationStartupTask != nil {
             return
         }
 
-        do {
-            let observation = try await client.observeSessionScreen(
+        let startupTask = Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+            await self.establishFocusedSessionObservation(sessionID: sessionID, pairedMac: pairedMac)
+        }
+        focusedSessionObservationStartupTask = startupTask
+        await startupTask.value
+    }
+
+    private func establishFocusedSessionObservation(sessionID: UUID, pairedMac: PairedMac) async {
+        defer {
+            focusedSessionObservationStartupTask = nil
+        }
+
+        let observationTask = Task<any SessionScreenObservation, Error> {
+            try await client.observeSessionScreen(
                 for: pairedMac,
                 sessionID: sessionID,
                 onUpdate: { [weak self] screen in
@@ -1029,37 +1045,45 @@ final class RemoteClientPairingModel {
                     }
                 }
             )
-            focusedSessionObservation = observation
+        }
 
-            // HTTP observation startup can queue the initial screen back onto the MainActor.
-            // Yield once so that update lands before we decide whether a fallback fetch is needed.
-            await Task.yield()
+        defer {
+            if Task.isCancelled {
+                observationTask.cancel()
+            }
+        }
 
-            if focusedSessionScreen?.session.id != sessionID {
-                do {
-                    let initialScreen = try await client.fetchSessionScreen(for: pairedMac, sessionID: sessionID)
-                    if focusedSessionID == sessionID,
-                       focusedSessionScreen?.session.id != sessionID {
-                        focusedSessionScreen = initialScreen
-                        focusedSessionIsStale = false
-                        focusedSessionErrorMessage = nil
-                    }
-                } catch {
-                    if focusedSessionScreen?.session.id != sessionID {
-                        await cancelFocusedSessionObservation()
-                        if handleUnauthorizedPairedMac(error, pairedMacID: pairedMac.id) {
-                            return
-                        }
+        do {
+            let initialScreen = try await client.fetchSessionScreen(for: pairedMac, sessionID: sessionID)
+            if focusedSessionID == sessionID,
+               focusedSessionScreen?.session.id != sessionID {
+                focusedSessionScreen = initialScreen
+                focusedSessionIsStale = false
+                focusedSessionErrorMessage = nil
+            }
+        } catch {
+            if handleUnauthorizedPairedMac(error, pairedMacID: pairedMac.id) {
+                observationTask.cancel()
+                return
+            }
+        }
 
-                        applyFocusedSessionObservationError(error, sessionID: sessionID)
-                        scheduleFocusedSessionReconnect(for: sessionID)
-                        return
-                    }
-                }
+        do {
+            let observation = try await awaitFocusedSessionObservationStartup(observationTask)
+            guard Task.isCancelled == false else {
+                await observation.cancel()
+                return
+            }
+            guard focusedSessionID == sessionID else {
+                await observation.cancel()
+                return
             }
 
+            focusedSessionObservation = observation
             focusedSessionReconnectTask?.cancel()
             focusedSessionReconnectTask = nil
+        } catch is CancellationError {
+            observationTask.cancel()
         } catch {
             if handleUnauthorizedPairedMac(error, pairedMacID: pairedMac.id) {
                 return
@@ -1070,9 +1094,31 @@ final class RemoteClientPairingModel {
         }
     }
 
+    private func awaitFocusedSessionObservationStartup(
+        _ observationTask: Task<any SessionScreenObservation, Error>
+    ) async throws -> any SessionScreenObservation {
+        try await withThrowingTaskGroup(of: (any SessionScreenObservation).self) { group in
+            group.addTask {
+                try await observationTask.value
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: 1_000_000_000)
+                observationTask.cancel()
+                throw RemoteClientPairingModelError.sessionObservationTimedOut
+            }
+
+            let observation = try await group.next()!
+            group.cancelAll()
+            return observation
+        }
+    }
+
     private func cancelFocusedSessionObservation() async {
         focusedSessionReconnectTask?.cancel()
         focusedSessionReconnectTask = nil
+
+        focusedSessionObservationStartupTask?.cancel()
+        focusedSessionObservationStartupTask = nil
 
         let observation = focusedSessionObservation
         focusedSessionObservation = nil
@@ -1210,6 +1256,7 @@ enum RemoteClientPairingModelError: LocalizedError {
     case sessionInputControllerRequired
     case approvalRequestControllerRequired
     case extensionDialogControllerRequired
+    case sessionObservationTimedOut
     case actionRecovery(String)
 
     var errorDescription: String? {
@@ -1228,6 +1275,8 @@ enum RemoteClientPairingModelError: LocalizedError {
             "Take Controller on this iPhone before responding to Approval Requests"
         case .extensionDialogControllerRequired:
             "Take Controller on this iPhone before responding to Extension UI dialogs"
+        case .sessionObservationTimedOut:
+            "Live Session updates are taking longer than expected on this Paired Mac"
         case .actionRecovery(let message):
             message
         }
