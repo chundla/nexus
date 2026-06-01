@@ -6316,6 +6316,54 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelRefreshStartsRemotePairingServerWhenRemoteAccessIsAlreadyEnabled() async {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let pairing = PairingCeremony(
+            id: UUID(),
+            code: "123456",
+            qrPayload: "nexus://pair?code=123456",
+            createdAt: Date(timeIntervalSince1970: 10),
+            expiresAt: Date(timeIntervalSince1970: 610)
+        )
+        let endpoint = RemotePairingEndpoint(host: "127.0.0.1", port: 9234)
+        var factoryCallCount = 0
+        let client = TrackingServiceClient(
+            workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []),
+            session: session,
+            screen: SessionScreen(session: session, transcript: "Claude ready"),
+            remoteAccessState: RemoteAccessState(isEnabled: true, activePairing: pairing)
+        )
+        let model = NexusAppModel(
+            client: client,
+            remotePairingServerFactory: {
+                factoryCallCount += 1
+                return FakeRemotePairingServer(endpoint: endpoint)
+            }
+        )
+
+        await model.refresh()
+
+        #expect(factoryCallCount == 1)
+        #expect(model.remotePairingEndpoint == endpoint)
+        #expect(model.remoteAccessState == RemoteAccessState(isEnabled: true, activePairing: pairing))
+        #expect(model.serviceErrorMessage == nil)
+    }
+
+    @MainActor
     @Test func appModelRefreshRemoteAccessRestoresRemotePairingEndpointWhenRemoteAccessIsAlreadyEnabled() async throws {
         let group = WorkspaceGroup(id: UUID(), name: "Group")
         let workspace = Workspace(

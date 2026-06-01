@@ -124,6 +124,11 @@ final class NexusAppModel {
             self.recentNavigation = loadedRecentNavigation
             self.remoteAccessState = loadedRemoteAccessState
             self.pairedDevices = loadedPairedDevices
+            if loadedRemoteAccessState.isEnabled || loadedRemoteAccessState.activePairing != nil {
+                try ensureRemotePairingServerIfAvailable()
+            } else {
+                stopRemotePairingServer()
+            }
             self.serviceErrorMessage = nil
 
             let client = self.client
