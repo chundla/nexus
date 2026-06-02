@@ -4,6 +4,31 @@ import Foundation
 import NexusDomain
 import NexusIPC
 
+private let nexusDebug9C1FLogURL = URL(fileURLWithPath: "/tmp/nexus-debug-9c1f.log")
+private let nexusDebug9C1FLock = NSLock()
+
+private func nexusDebug9C1F(_ message: @autoclosure () -> String) {
+#if DEBUG
+    let timestamp = ISO8601DateFormatter().string(from: Date())
+    let line = "[DEBUG-9C1F] \(timestamp) SERVICE[\(ProcessInfo.processInfo.processIdentifier)] \(message())\n"
+    guard let data = line.data(using: .utf8) else {
+        return
+    }
+
+    nexusDebug9C1FLock.lock()
+    defer { nexusDebug9C1FLock.unlock() }
+
+    if FileManager.default.fileExists(atPath: nexusDebug9C1FLogURL.path),
+       let handle = FileHandle(forWritingAtPath: nexusDebug9C1FLogURL.path) {
+        defer { handle.closeFile() }
+        handle.seekToEndOfFile()
+        handle.write(data)
+    } else {
+        try? data.write(to: nexusDebug9C1FLogURL)
+    }
+#endif
+}
+
 public protocol NexusEmbeddedServiceSession: AnyObject {
     var listenerEndpoint: NSXPCListenerEndpoint { get }
     var storeURL: URL { get }
@@ -311,6 +336,7 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Se
             }
             return true
         }
+        nexusDebug9C1F("runtimeManager launchOrResume session=\(session.id) shouldCreateRuntime=\(shouldCreateRuntime)")
 
         guard shouldCreateRuntime else {
             return
@@ -324,6 +350,7 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Se
         try withLock {
             runtimes[session.id] = runtime
         }
+        nexusDebug9C1F("runtimeManager launchOrResume installed runtime session=\(session.id)")
         notifyRuntimeChange(for: session.id)
     }
 
@@ -341,10 +368,12 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Se
 
     func remove(session: Session) {
         lock.lock()
+        let removedObserverCount = updateObservers[session.id]?.count ?? 0
         runtimes.removeValue(forKey: session.id)?.setChangeHandler(nil)
         updateObservers.removeValue(forKey: session.id)
         observedSessionIDs = observedSessionIDs.filter { $0.value != session.id }
         lock.unlock()
+        nexusDebug9C1F("runtimeManager remove session=\(session.id) removedObservers=\(removedObserverCount)")
     }
 
     func hasRuntime(for session: Session) -> Bool {
@@ -410,21 +439,26 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Se
         lock.lock()
         updateObservers[session.id, default: [:]][observationID] = observer
         observedSessionIDs[observationID] = session.id
+        let observerCount = updateObservers[session.id]?.count ?? 0
         lock.unlock()
+        nexusDebug9C1F("runtimeManager addUpdateObserver observation=\(observationID) session=\(session.id) observerCount=\(observerCount)")
     }
 
     func removeUpdateObserver(id: UUID) {
         lock.lock()
         guard let sessionID = observedSessionIDs.removeValue(forKey: id) else {
             lock.unlock()
+            nexusDebug9C1F("runtimeManager removeUpdateObserver observation=\(id) session=<none>")
             return
         }
 
         updateObservers[sessionID]?.removeValue(forKey: id)
+        let observerCount = updateObservers[sessionID]?.count ?? 0
         if updateObservers[sessionID]?.isEmpty == true {
             updateObservers.removeValue(forKey: sessionID)
         }
         lock.unlock()
+        nexusDebug9C1F("runtimeManager removeUpdateObserver observation=\(id) session=\(sessionID) remainingObservers=\(observerCount)")
     }
 
     func sendInput(_ text: String, to session: Session) throws -> SessionScreen {
@@ -511,6 +545,7 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Se
         observers = Array(updateObservers[sessionID, default: [:]].values)
         lock.unlock()
 
+        nexusDebug9C1F("runtimeManager notifyRuntimeChange session=\(sessionID) observerCount=\(observers.count)")
         runtimeChangeHandler?(sessionID)
         for observer in observers {
             observer()
@@ -1919,6 +1954,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
 
     private func resetPiSession(_ session: Session) throws -> SessionScreen {
         let resolvedSession = try reconcileSessionRuntimeState(session)
+        nexusDebug9C1F("resetPiSession start session=\(resolvedSession.id) hasRuntime=\(sessionRuntimeManager.hasRuntime(for: resolvedSession))")
 
         if sessionRuntimeManager.hasRuntime(for: resolvedSession) {
             sessionRuntimeManager.remove(session: resolvedSession)
@@ -1927,7 +1963,9 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         try sessionRecordStore.deleteSessionRecordAdapterMetadata(sessionID: resolvedSession.id)
         let readySession = try sessionRecordStore.updateSession(id: resolvedSession.id, state: .ready, failureMessage: nil)
         let relaunchedSession = try launchOrResumeSession(sessionID: readySession.id)
-        return normalizedSessionScreen(try sessionRuntimeManager.sessionScreen(for: relaunchedSession))
+        let screen = normalizedSessionScreen(try sessionRuntimeManager.sessionScreen(for: relaunchedSession))
+        nexusDebug9C1F("resetPiSession end session=\(resolvedSession.id) items=\(screen.activityItems.count) thinking=\(screen.isAgentTurnInProgress)")
+        return screen
     }
 
     func deleteSessionRecord(sessionID: UUID) throws -> Bool {

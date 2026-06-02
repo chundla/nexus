@@ -3,6 +3,31 @@ import Foundation
 import NexusDomain
 import NexusIPC
 
+private let nexusDebug9C1FLogURL = URL(fileURLWithPath: "/tmp/nexus-debug-9c1f.log")
+private let nexusDebug9C1FLock = NSLock()
+
+private func nexusDebug9C1F(_ message: @autoclosure () -> String) {
+#if DEBUG
+    let timestamp = ISO8601DateFormatter().string(from: Date())
+    let line = "[DEBUG-9C1F] \(timestamp) SERVICE-INTERACTION[\(ProcessInfo.processInfo.processIdentifier)] \(message())\n"
+    guard let data = line.data(using: .utf8) else {
+        return
+    }
+
+    nexusDebug9C1FLock.lock()
+    defer { nexusDebug9C1FLock.unlock() }
+
+    if FileManager.default.fileExists(atPath: nexusDebug9C1FLogURL.path),
+       let handle = FileHandle(forWritingAtPath: nexusDebug9C1FLogURL.path) {
+        defer { handle.closeFile() }
+        handle.seekToEndOfFile()
+        handle.write(data)
+    } else {
+        try? data.write(to: nexusDebug9C1FLogURL)
+    }
+#endif
+}
+
 protocol SessionInteractionManaging: AnyObject {
     func getSessionScreen(sessionID: UUID) throws -> SessionScreen
     func sendSessionInput(sessionID: UUID, text: String) async throws -> SessionScreen
@@ -152,6 +177,9 @@ final class ServiceSessionInteraction: SessionInteractionManaging, @unchecked Se
         let screen = try getSessionScreen(sessionID: sessionID)
         let start = dependencies.sessionScreenObservationStart(observationID, screen)
         let revisionState = StructuredObservationRevisionState(start.structuredSnapshot?.revision)
+        nexusDebug9C1F(
+            "observeSessionScreen start observation=\(observationID) session=\(sessionID) items=\(screen.activityItems.count) thinking=\(screen.isAgentTurnInProgress) revision=\(start.structuredSnapshot?.revision.description ?? "nil")"
+        )
 
         dependencies.addUpdateObserver(observationID, screen.session) { [weak self] in
             guard let self else {
@@ -164,6 +192,9 @@ final class ServiceSessionInteraction: SessionInteractionManaging, @unchecked Se
                     currentScreen.session.id,
                     revisionState.value
                 )
+                nexusDebug9C1F(
+                    "observeSessionScreen runtime-update observation=\(observationID) session=\(sessionID) items=\(currentScreen.activityItems.count) thinking=\(currentScreen.isAgentTurnInProgress) updates=\(updates.count) last=\(currentScreen.activityItems.last?.text ?? "<none>")"
+                )
 
                 if updates.isEmpty {
                     onUpdate(.screen(currentScreen))
@@ -174,14 +205,18 @@ final class ServiceSessionInteraction: SessionInteractionManaging, @unchecked Se
                     switch update {
                     case let .structuredDelta(delta):
                         revisionState.value = delta.revision
+                        nexusDebug9C1F("observeSessionScreen delta observation=\(observationID) session=\(sessionID) revision=\(delta.revision)")
                     case let .structuredGap(currentRevision):
                         revisionState.value = currentRevision
+                        nexusDebug9C1F("observeSessionScreen gap observation=\(observationID) session=\(sessionID) revision=\(currentRevision)")
                     case .screen:
                         revisionState.value = nil
+                        nexusDebug9C1F("observeSessionScreen full-screen observation=\(observationID) session=\(sessionID)")
                     }
                     onUpdate(update)
                 }
             } catch {
+                nexusDebug9C1F("observeSessionScreen runtime-update failed observation=\(observationID) session=\(sessionID) error=\(error.localizedDescription)")
                 return
             }
         }
@@ -190,6 +225,7 @@ final class ServiceSessionInteraction: SessionInteractionManaging, @unchecked Se
     }
 
     func cancelSessionScreenObservation(observationID: UUID) {
+        nexusDebug9C1F("cancelSessionScreenObservation observation=\(observationID)")
         dependencies.removeUpdateObserver(observationID)
     }
 
@@ -199,10 +235,19 @@ final class ServiceSessionInteraction: SessionInteractionManaging, @unchecked Se
 
     func sendSessionInput(sessionID: UUID, prompt: SessionPrompt) async throws -> SessionScreen {
         let resolvedSession = try await readyMacControlledSession(sessionID: sessionID)
-        if isPiSessionResetCommand(prompt, session: resolvedSession) {
-            return dependencies.normalizedSessionScreen(try dependencies.resetPiSession(resolvedSession))
+        let trimmedPrompt = prompt.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isReset = isPiSessionResetCommand(prompt, session: resolvedSession)
+        nexusDebug9C1F("sendSessionInput session=\(sessionID) prompt=\(trimmedPrompt) reset=\(isReset)")
+        if isReset {
+            let screen = dependencies.normalizedSessionScreen(try dependencies.resetPiSession(resolvedSession))
+            nexusDebug9C1F("sendSessionInput reset-response session=\(sessionID) items=\(screen.activityItems.count) thinking=\(screen.isAgentTurnInProgress)")
+            return screen
         }
-        return dependencies.normalizedSessionScreen(try dependencies.sendInput(prompt, resolvedSession))
+        let screen = dependencies.normalizedSessionScreen(try dependencies.sendInput(prompt, resolvedSession))
+        nexusDebug9C1F(
+            "sendSessionInput direct-response session=\(sessionID) prompt=\(trimmedPrompt) items=\(screen.activityItems.count) thinking=\(screen.isAgentTurnInProgress) last=\(screen.activityItems.last?.text ?? "<none>")"
+        )
+        return screen
     }
 
     func respondToApprovalRequest(

@@ -2,6 +2,31 @@
 import Foundation
 import NexusDomain
 
+private let nexusDebug9C1FLogURL = URL(fileURLWithPath: "/tmp/nexus-debug-9c1f.log")
+private let nexusDebug9C1FLock = NSLock()
+
+private func nexusDebug9C1F(_ message: @autoclosure () -> String) {
+#if DEBUG
+    let timestamp = ISO8601DateFormatter().string(from: Date())
+    let line = "[DEBUG-9C1F] \(timestamp) IPC[\(ProcessInfo.processInfo.processIdentifier)] \(message())\n"
+    guard let data = line.data(using: .utf8) else {
+        return
+    }
+
+    nexusDebug9C1FLock.lock()
+    defer { nexusDebug9C1FLock.unlock() }
+
+    if FileManager.default.fileExists(atPath: nexusDebug9C1FLogURL.path),
+       let handle = FileHandle(forWritingAtPath: nexusDebug9C1FLogURL.path) {
+        defer { handle.closeFile() }
+        handle.seekToEndOfFile()
+        handle.write(data)
+    } else {
+        try? data.write(to: nexusDebug9C1FLogURL)
+    }
+#endif
+}
+
 @objc public protocol NexusSessionScreenObserverXPCProtocol {
     func sessionScreenDidUpdate(observationID: String, payload: Data)
 }
@@ -475,28 +500,44 @@ public final class NexusIPCClient: NexusServiceClient, SessionScreenObservationE
         let observationClient = try makeObservationClient()
         let start = try await observationClient.startSessionScreenObservation(sessionID: sessionID)
         let accumulator = SessionScreenObservationAccumulator(start: start)
+        nexusDebug9C1F(
+            "observeSessionScreen start observation=\(start.observationID) session=\(sessionID) items=\(start.screen.activityItems.count) thinking=\(start.screen.isAgentTurnInProgress) revision=\(start.structuredSnapshot?.revision.description ?? "nil")"
+        )
         observationClient.sessionScreenObserverBridge.registerHandler({ update in
             do {
                 if let screen = try accumulator.apply(update) {
+                    nexusDebug9C1F(
+                        "observeSessionScreen update observation=\(start.observationID) session=\(sessionID) items=\(screen.activityItems.count) thinking=\(screen.isAgentTurnInProgress) last=\(screen.activityItems.last?.text ?? "<none>")"
+                    )
                     onUpdate(screen)
                 }
             } catch is SessionScreenObservationGapError {
+                nexusDebug9C1F("observeSessionScreen gap observation=\(start.observationID) session=\(sessionID) fetching-latest-snapshot")
                 Task {
                     guard let latestSnapshot = try? await observationClient.getSessionScreenObservationSnapshot(sessionID: sessionID) else {
+                        nexusDebug9C1F("observeSessionScreen gap fetch failed observation=\(start.observationID) session=\(sessionID)")
                         return
                     }
                     let screen = accumulator.replace(with: latestSnapshot)
+                    nexusDebug9C1F(
+                        "observeSessionScreen gap replaced observation=\(start.observationID) session=\(sessionID) items=\(screen.activityItems.count) thinking=\(screen.isAgentTurnInProgress)"
+                    )
                     onUpdate(screen)
                 }
             } catch {
+                nexusDebug9C1F("observeSessionScreen update failed observation=\(start.observationID) session=\(sessionID) error=\(error.localizedDescription)")
                 return
             }
         }, for: start.observationID)
+        nexusDebug9C1F("observeSessionScreen initial callback observation=\(start.observationID) session=\(sessionID)")
         onUpdate(start.screen)
 
         let latestSnapshot = try await observationClient.getSessionScreenObservationSnapshot(sessionID: sessionID)
         if latestSnapshot.screen != accumulator.currentScreen {
             let screen = accumulator.replace(with: latestSnapshot)
+            nexusDebug9C1F(
+                "observeSessionScreen latestSnapshot replaced observation=\(start.observationID) session=\(sessionID) items=\(screen.activityItems.count) thinking=\(screen.isAgentTurnInProgress)"
+            )
             onUpdate(screen)
         }
 

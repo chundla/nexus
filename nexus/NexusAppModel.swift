@@ -5,6 +5,31 @@ import NexusIPC
 import NexusService
 import Observation
 
+private let nexusDebug9C1FLogURL = URL(fileURLWithPath: "/tmp/nexus-debug-9c1f.log")
+private let nexusDebug9C1FLock = NSLock()
+
+private func nexusDebug9C1F(_ message: @autoclosure () -> String) {
+#if DEBUG
+    let timestamp = ISO8601DateFormatter().string(from: Date())
+    let line = "[DEBUG-9C1F] \(timestamp) APP[\(ProcessInfo.processInfo.processIdentifier)] \(message())\n"
+    guard let data = line.data(using: .utf8) else {
+        return
+    }
+
+    nexusDebug9C1FLock.lock()
+    defer { nexusDebug9C1FLock.unlock() }
+
+    if FileManager.default.fileExists(atPath: nexusDebug9C1FLogURL.path),
+       let handle = FileHandle(forWritingAtPath: nexusDebug9C1FLogURL.path) {
+        defer { handle.closeFile() }
+        handle.seekToEndOfFile()
+        handle.write(data)
+    } else {
+        try? data.write(to: nexusDebug9C1FLogURL)
+    }
+#endif
+}
+
 struct SessionPresentationContext: Equatable {
     let workspace: Workspace
     let host: NexusDomain.Host?
@@ -373,9 +398,11 @@ final class NexusAppModel {
 
     func focusSession(sessionID: UUID) async throws {
         if focusedSessionScreen?.session.id == sessionID, focusedSessionObservation != nil {
+            nexusDebug9C1F("focusSession early-return session=\(sessionID) observation-already-active")
             return
         }
 
+        nexusDebug9C1F("focusSession start session=\(sessionID)")
         await stopFocusingSession()
         let observation = try await client.observeSessionScreen(sessionID: sessionID) { [weak self] screen in
             Task { @MainActor [weak self] in
@@ -383,16 +410,21 @@ final class NexusAppModel {
                     return
                 }
 
+                nexusDebug9C1F(
+                    "observeSessionScreen callback session=\(screen.session.id) items=\(screen.activityItems.count) thinking=\(screen.isAgentTurnInProgress) last=\(screen.activityItems.last?.text ?? "<none>")"
+                )
                 try? await self.applyFocusedSessionScreen(screen)
             }
         }
         focusedSessionObservation = observation
+        nexusDebug9C1F("focusSession registered observation session=\(sessionID)")
     }
 
     func stopFocusingSession() async {
         let observation = focusedSessionObservation
         focusedSessionObservation = nil
         if let observation {
+            nexusDebug9C1F("stopFocusingSession cancelling observation currentSession=\(focusedSessionScreen?.session.id.uuidString ?? "<none>")")
             await observation.cancel()
         }
     }
@@ -432,10 +464,17 @@ final class NexusAppModel {
 
     func sendInputToFocusedSession(_ text: String) async throws {
         guard let baselineScreen = focusedSessionScreen else {
+            nexusDebug9C1F("sendInputToFocusedSession dropped text=\(text) reason=no-focused-screen")
             return
         }
 
+        nexusDebug9C1F(
+            "sendInputToFocusedSession start session=\(baselineScreen.session.id) text=\(text) baselineItems=\(baselineScreen.activityItems.count) baselineThinking=\(baselineScreen.isAgentTurnInProgress)"
+        )
         let screen = try await client.sendSessionInput(sessionID: baselineScreen.session.id, text: text)
+        nexusDebug9C1F(
+            "sendInputToFocusedSession response session=\(screen.session.id) text=\(text) items=\(screen.activityItems.count) thinking=\(screen.isAgentTurnInProgress) last=\(screen.activityItems.last?.text ?? "<none>")"
+        )
         try await applyFocusedSessionActionResponse(screen, ifCurrentScreenMatches: baselineScreen)
     }
 
@@ -664,24 +703,37 @@ final class NexusAppModel {
     ) async throws {
         guard let currentScreen = focusedSessionScreen,
               currentScreen.session.id == baselineScreen.session.id else {
+            nexusDebug9C1F(
+                "applyFocusedSessionActionResponse ignored responseSession=\(screen.session.id) baselineSession=\(baselineScreen.session.id) currentSession=\(focusedSessionScreen?.session.id.uuidString ?? "<none>") reason=session-mismatch"
+            )
             return
         }
 
         if currentScreen == baselineScreen {
+            nexusDebug9C1F("applyFocusedSessionActionResponse applying direct response session=\(screen.session.id) reason=current-matches-baseline")
             try await applyFocusedSessionScreen(screen)
             return
         }
 
+        nexusDebug9C1F(
+            "applyFocusedSessionActionResponse current-advanced session=\(currentScreen.session.id) currentItems=\(currentScreen.activityItems.count) currentThinking=\(currentScreen.isAgentTurnInProgress) baselineItems=\(baselineScreen.activityItems.count)"
+        )
         if let refreshedScreen = try? await client.getSessionScreen(sessionID: currentScreen.session.id) {
             guard focusedSessionScreen?.session.id == currentScreen.session.id else {
+                nexusDebug9C1F("applyFocusedSessionActionResponse skipped refreshed screen session=\(currentScreen.session.id) reason=focus-changed")
                 return
             }
 
+            nexusDebug9C1F(
+                "applyFocusedSessionActionResponse applying refreshed screen session=\(refreshedScreen.session.id) items=\(refreshedScreen.activityItems.count) thinking=\(refreshedScreen.isAgentTurnInProgress) last=\(refreshedScreen.activityItems.last?.text ?? "<none>")"
+            )
             try await applyFocusedSessionScreen(refreshedScreen)
             return
         }
 
-        guard actionResponseAppearsToAdvanceFocusedSession(screen, beyond: currentScreen) else {
+        let advances = actionResponseAppearsToAdvanceFocusedSession(screen, beyond: currentScreen)
+        nexusDebug9C1F("applyFocusedSessionActionResponse refreshed-screen-unavailable session=\(screen.session.id) direct-advances=\(advances)")
+        guard advances else {
             return
         }
 
@@ -722,6 +774,9 @@ final class NexusAppModel {
     private func applyFocusedSessionScreen(_ screen: SessionScreen) async throws {
         let previousScreen = focusedSessionScreen?.session.id == screen.session.id ? focusedSessionScreen : nil
         let previousState = previousScreen?.session.state
+        nexusDebug9C1F(
+            "applyFocusedSessionScreen session=\(screen.session.id) prevItems=\(previousScreen?.activityItems.count ?? -1) prevThinking=\(previousScreen?.isAgentTurnInProgress.description ?? "nil") newItems=\(screen.activityItems.count) newThinking=\(screen.isAgentTurnInProgress) last=\(screen.activityItems.last?.text ?? "<none>")"
+        )
         focusedSessionScreen = screen
 
         if previousScreen?.extensionUI?.editorText != screen.extensionUI?.editorText,

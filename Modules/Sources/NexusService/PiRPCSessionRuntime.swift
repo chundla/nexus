@@ -2,6 +2,31 @@
 import Foundation
 import NexusDomain
 
+private let nexusDebug9C1FLogURL = URL(fileURLWithPath: "/tmp/nexus-debug-9c1f.log")
+private let nexusDebug9C1FLock = NSLock()
+
+private func nexusDebug9C1F(_ message: @autoclosure () -> String) {
+#if DEBUG
+    let timestamp = ISO8601DateFormatter().string(from: Date())
+    let line = "[DEBUG-9C1F] \(timestamp) PI-RUNTIME[\(ProcessInfo.processInfo.processIdentifier)] \(message())\n"
+    guard let data = line.data(using: .utf8) else {
+        return
+    }
+
+    nexusDebug9C1FLock.lock()
+    defer { nexusDebug9C1FLock.unlock() }
+
+    if FileManager.default.fileExists(atPath: nexusDebug9C1FLogURL.path),
+       let handle = FileHandle(forWritingAtPath: nexusDebug9C1FLogURL.path) {
+        defer { handle.closeFile() }
+        handle.seekToEndOfFile()
+        handle.write(data)
+    } else {
+        try? data.write(to: nexusDebug9C1FLogURL)
+    }
+#endif
+}
+
 private let piBasicThinkingLevels = ["off", "minimal", "low", "medium", "high"]
 private let piExtendedThinkingLevels = piBasicThinkingLevels + ["xhigh"]
 
@@ -595,7 +620,10 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
                 prompt: resolvedPrompt
             )
         )
+        let activityItemCount = activityItems.count
+        let thinking = isStreaming
         lock.unlock()
+        nexusDebug9C1F("submitPrompt prompt=\(trimmed) items=\(activityItemCount) thinking=\(thinking) wasStreaming=\(isCurrentlyStreaming)")
         notifyChange()
 
         var payload = promptPayload(type: "prompt", prompt: resolvedPrompt)
@@ -1732,7 +1760,9 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             toolAgentsByCallID[toolCallID] = agent
         }
         appendActivityItemLocked(SessionActivityItem(id: activityItemID, kind: .command, text: callText))
+        let activityItemCount = activityItems.count
         lock.unlock()
+        nexusDebug9C1F("handleToolExecutionStart toolCallID=\(toolCallID) toolName=\(toolName) items=\(activityItemCount)")
         notifyChange()
     }
 
@@ -1798,7 +1828,9 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         } else {
             shouldNotify = outputText.isEmpty == false
         }
+        let activityItemCount = activityItems.count
         lock.unlock()
+        nexusDebug9C1F("handleToolExecutionEnd toolCallID=\(toolCallID) outputEmpty=\(outputText.isEmpty) isError=\(isError) shouldNotify=\(shouldNotify) items=\(activityItemCount)")
 
         if shouldNotify {
             notifyChange()
@@ -1825,7 +1857,9 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         toolAgentsByCallID.removeAll()
         isStreaming = false
         lastAssistantStopReason = "stop"
+        let activityItemCount = activityItems.count
         lock.unlock()
+        nexusDebug9C1F("handleTurnEnd finalText=\(finalText) items=\(activityItemCount) thinking=false")
         requestSlashCommands()
         notifyChange()
     }
