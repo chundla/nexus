@@ -4656,10 +4656,7 @@ private final class SessionScreenObserverProxy: @unchecked Sendable {
         guard let payload = try? JSONEncoder().encode(update) else {
             return
         }
-        guard let observer = connection.remoteObjectProxyWithErrorHandler({ error in
-            NSLog("[DEBUG-MACBLANK] service proxy send failed observation=%@ error=%@", self.observationID.uuidString, String(describing: error))
-        }) as? NexusSessionScreenObserverXPCProtocol else {
-            NSLog("[DEBUG-MACBLANK] service proxy unavailable observation=%@", observationID.uuidString)
+        guard let observer = connection.remoteObjectProxyWithErrorHandler({ _ in }) as? NexusSessionScreenObserverXPCProtocol else {
             return
         }
 
