@@ -1,6 +1,7 @@
 #if os(macOS)
 import Foundation
 import NexusDomain
+import NexusIPC
 @testable import NexusService
 import Testing
 
@@ -2173,11 +2174,18 @@ struct NexusServicePiSessionStreamTests {
         )
         let session = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
         let sink = SessionScreenSink()
-        _ = try service.observeSessionScreen(observationID: UUID(), sessionID: session.id) { screen in
+        let accumulatorBox = ObservationAccumulatorBox()
+        let start = try service.observeSessionScreen(observationID: UUID(), sessionID: session.id) { update in
+            guard let accumulator = accumulatorBox.value,
+                  let screen = try? accumulator.apply(update) else {
+                return
+            }
             Task {
                 await sink.record(screen)
             }
         }
+        accumulatorBox.value = SessionScreenObservationAccumulator(start: start)
+        await sink.record(start.screen)
         _ = await sink.nextScreen()
 
         transport.emitFireAndForgetUpdates()
@@ -2608,6 +2616,10 @@ private final class QueueControlPiRPCTransport: PiRPCTransporting, @unchecked Se
         }
         stdoutLineHandler?(line)
     }
+}
+
+private final class ObservationAccumulatorBox: @unchecked Sendable {
+    var value: SessionScreenObservationAccumulator?
 }
 
 private actor SessionScreenSink {

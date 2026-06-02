@@ -20,7 +20,7 @@ protocol SessionInteractionManaging: AnyObject {
     func observeSessionScreen(
         observationID: UUID,
         sessionID: UUID,
-        onUpdate: @escaping @Sendable (SessionScreen) -> Void
+        onUpdate: @escaping @Sendable (SessionScreenObservationUpdate) -> Void
     ) throws -> SessionScreenObservationStart
     func cancelSessionScreenObservation(observationID: UUID)
     func sendRemoteSessionInput(sessionID: UUID, pairedDeviceID: UUID, text: String) async throws -> SessionScreen
@@ -99,6 +99,8 @@ struct ServiceSessionInteractionDependencies {
     let respondToExtensionDialog: (String, SessionExtensionUIDialogResponse, Session) throws -> SessionScreen
     let resetPiSession: (Session) throws -> SessionScreen
     let stabilizedScreenAfterTerminalInput: (Session, SessionScreen, SessionScreen) -> SessionScreen
+    let sessionScreenObservationStart: (UUID, SessionScreen) -> SessionScreenObservationStart
+    let sessionScreenObservationUpdates: (UUID, Int?) -> [SessionScreenObservationUpdate]
 }
 
 final class ServiceSessionInteraction: SessionInteractionManaging, @unchecked Sendable {
@@ -145,22 +147,46 @@ final class ServiceSessionInteraction: SessionInteractionManaging, @unchecked Se
     func observeSessionScreen(
         observationID: UUID,
         sessionID: UUID,
-        onUpdate: @escaping @Sendable (SessionScreen) -> Void
+        onUpdate: @escaping @Sendable (SessionScreenObservationUpdate) -> Void
     ) throws -> SessionScreenObservationStart {
         let screen = try getSessionScreen(sessionID: sessionID)
+        let start = dependencies.sessionScreenObservationStart(observationID, screen)
+        let revisionState = StructuredObservationRevisionState(start.structuredSnapshot?.revision)
+
         dependencies.addUpdateObserver(observationID, screen.session) { [weak self] in
             guard let self else {
                 return
             }
 
             do {
-                onUpdate(try self.getSessionScreen(sessionID: sessionID))
+                let currentScreen = try self.getSessionScreen(sessionID: sessionID)
+                let updates = self.dependencies.sessionScreenObservationUpdates(
+                    currentScreen.session.id,
+                    revisionState.value
+                )
+
+                if updates.isEmpty {
+                    onUpdate(.screen(currentScreen))
+                    return
+                }
+
+                for update in updates {
+                    switch update {
+                    case let .structuredDelta(delta):
+                        revisionState.value = delta.revision
+                    case let .structuredGap(currentRevision):
+                        revisionState.value = currentRevision
+                    case .screen:
+                        revisionState.value = nil
+                    }
+                    onUpdate(update)
+                }
             } catch {
                 return
             }
         }
 
-        return SessionScreenObservationStart(observationID: observationID, screen: screen)
+        return start
     }
 
     func cancelSessionScreenObservation(observationID: UUID) {
@@ -319,6 +345,28 @@ final class ServiceSessionInteraction: SessionInteractionManaging, @unchecked Se
             return false
         }
         return true
+    }
+}
+
+private final class StructuredObservationRevisionState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedValue: Int?
+
+    init(_ value: Int?) {
+        self.storedValue = value
+    }
+
+    var value: Int? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return storedValue
+        }
+        set {
+            lock.lock()
+            storedValue = newValue
+            lock.unlock()
+        }
     }
 }
 #endif

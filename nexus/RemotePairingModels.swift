@@ -300,13 +300,20 @@ nonisolated struct RemotePairingHTTPClient {
         onUpdate: @escaping @Sendable (SessionScreen) -> Void,
         onDisconnect: @escaping @Sendable (any Error) -> Void
     ) async throws -> any SessionScreenObservation {
-        let request = try authenticatedRequest(
+        let initialSnapshot = try await fetchSessionScreenObservationSnapshot(for: pairedMac, sessionID: sessionID)
+        let accumulator = SessionScreenObservationAccumulator(snapshot: initialSnapshot)
+        onUpdate(initialSnapshot.screen)
+
+        var request = try authenticatedRequest(
             for: pairedMac,
             path: "/remote-client/sessions/\(sessionID.uuidString)/observe"
         )
+        if let structuredRevision = initialSnapshot.structuredSnapshot?.revision {
+            request.setValue(String(structuredRevision), forHTTPHeaderField: "X-Nexus-Structured-Revision")
+        }
+
         let session = self.session
-        let startup = ObservationStartupSignal()
-        let task = Task.detached(priority: nil) {
+        let task = Task.detached(priority: nil) { [self] in
             do {
                 let (bytes, response) = try await session.bytes(for: request)
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -322,7 +329,6 @@ nonisolated struct RemotePairingHTTPClient {
                 }
 
                 var eventBuffer = Data()
-                var didDeliverInitialScreen = false
 
                 for try await byte in bytes {
                     if Task.isCancelled {
@@ -331,41 +337,47 @@ nonisolated struct RemotePairingHTTPClient {
 
                     eventBuffer.append(byte)
                     while let eventLines = Self.dequeueObservedEventLines(from: &eventBuffer) {
-                        try Self.emitObservedScreen(from: eventLines, onUpdate: onUpdate)
-                        if didDeliverInitialScreen == false {
-                            didDeliverInitialScreen = true
-                            await startup.succeed()
-                        }
+                        try await Self.emitObservedUpdate(
+                            from: eventLines,
+                            accumulator: accumulator,
+                            snapshotFetcher: { try await self.fetchSessionScreenObservationSnapshot(for: pairedMac, sessionID: sessionID) },
+                            onUpdate: onUpdate
+                        )
                     }
                 }
 
                 if let eventLines = Self.dequeueTrailingObservedEventLines(from: eventBuffer) {
-                    try Self.emitObservedScreen(from: eventLines, onUpdate: onUpdate)
-                    if didDeliverInitialScreen == false {
-                        didDeliverInitialScreen = true
-                        await startup.succeed()
-                    }
-                }
-
-                if didDeliverInitialScreen == false {
-                    await startup.fail(RemotePairingHTTPObservationError.connectionClosed)
+                    try await Self.emitObservedUpdate(
+                        from: eventLines,
+                        accumulator: accumulator,
+                        snapshotFetcher: { try await self.fetchSessionScreenObservationSnapshot(for: pairedMac, sessionID: sessionID) },
+                        onUpdate: onUpdate
+                    )
                 }
 
                 if Task.isCancelled == false {
                     onDisconnect(RemotePairingHTTPObservationError.connectionClosed)
                 }
-            } catch is CancellationError {
-                await startup.fail(CancellationError())
             } catch {
-                await startup.fail(error)
                 if Task.isCancelled == false {
                     onDisconnect(error)
                 }
             }
         }
 
-        try await startup.wait()
         return RemoteSessionScreenHTTPObservation(task: task)
+    }
+
+    private func fetchSessionScreenObservationSnapshot(
+        for pairedMac: PairedMac,
+        sessionID: UUID
+    ) async throws -> SessionScreenObservationSnapshotResponse {
+        let request = try authenticatedRequest(
+            for: pairedMac,
+            path: "/remote-client/sessions/\(sessionID.uuidString)/observe-start"
+        )
+        let data = try await send(request)
+        return try JSONDecoder().decode(SessionScreenObservationSnapshotResponse.self, from: data)
     }
 
     private func authenticatedRequest(for pairedMac: PairedMac, path: String) throws -> URLRequest {
@@ -388,17 +400,27 @@ nonisolated struct RemotePairingHTTPClient {
         return data
     }
 
-    private nonisolated static func emitObservedScreen(
+    private nonisolated static func emitObservedUpdate(
         from eventLines: [String],
+        accumulator: SessionScreenObservationAccumulator,
+        snapshotFetcher: @escaping @Sendable () async throws -> SessionScreenObservationSnapshotResponse,
         onUpdate: @escaping @Sendable (SessionScreen) -> Void
-    ) throws {
+    ) async throws {
         guard eventLines.isEmpty == false else {
             return
         }
 
         let payload = eventLines.joined(separator: "\n")
-        let screen = try JSONDecoder().decode(SessionScreen.self, from: Data(payload.utf8))
-        onUpdate(screen)
+        let update = try JSONDecoder().decode(SessionScreenObservationUpdate.self, from: Data(payload.utf8))
+
+        do {
+            if let screen = try accumulator.apply(update) {
+                onUpdate(screen)
+            }
+        } catch is SessionScreenObservationGapError {
+            let latestSnapshot = try await snapshotFetcher()
+            onUpdate(accumulator.replace(with: latestSnapshot))
+        }
     }
 
     private nonisolated static func dequeueObservedEventLines(from buffer: inout Data) -> [String]? {
@@ -450,42 +472,6 @@ private final class RemoteSessionScreenHTTPObservation: SessionScreenObservation
     func cancel() async {
         task.cancel()
         _ = await task.result
-    }
-}
-
-private actor ObservationStartupSignal {
-    private var result: Result<Void, Error>?
-    private var continuations: [CheckedContinuation<Void, Error>] = []
-
-    func wait() async throws {
-        if let result {
-            return try result.get()
-        }
-
-        try await withCheckedThrowingContinuation { continuation in
-            continuations.append(continuation)
-        }
-    }
-
-    func succeed() {
-        complete(with: .success(()))
-    }
-
-    func fail(_ error: Error) {
-        complete(with: .failure(error))
-    }
-
-    private func complete(with result: Result<Void, Error>) {
-        guard self.result == nil else {
-            return
-        }
-
-        self.result = result
-        let continuations = self.continuations
-        self.continuations.removeAll()
-        for continuation in continuations {
-            continuation.resume(with: result)
-        }
     }
 }
 

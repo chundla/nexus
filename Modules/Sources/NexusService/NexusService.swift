@@ -1390,6 +1390,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     private let remoteAccessRuntime: RemoteAccessRuntime
     private let ibmBobNativeSessionCleaner: any IBMBobNativeSessionCleaning
     private let sessionControllerRegistry = SessionControllerRegistry()
+    private let structuredSessionObservationStore = StructuredSessionObservationStore()
     private let piSessionRedirectLock = NSLock()
     private var pendingPiSessionRedirects: [UUID: UUID] = [:]
 
@@ -1542,10 +1543,17 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 },
                 stabilizedScreenAfterTerminalInput: { [unowned self] in
                     self.stabilizedScreenAfterTerminalInput(for: $0, screenBeforeInput: $1, immediateResponseScreen: $2)
+                },
+                sessionScreenObservationStart: { [unowned self] in
+                    self.structuredSessionObservationStore.observationStart(observationID: $0, screen: $1)
+                },
+                sessionScreenObservationUpdates: { [unowned self] in
+                    self.structuredSessionObservationStore.updates(for: $0, after: $1)
                 }
             )
         )
         self.sessionRuntimeManager.setRuntimeChangeHandler { [weak self] sessionID in
+            self?.recordStructuredSessionObservationChange(sessionID: sessionID)
             self?.handlePiSessionTransitionAfterRuntimeChange(sessionID: sessionID)
             self?.persistRuntimeLinkageAfterRuntimeChange(sessionID: sessionID)
             self?.persistPiSessionNameAfterRuntimeChange(sessionID: sessionID)
@@ -1971,10 +1979,14 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         try sessionInteraction.getSessionScreen(sessionID: sessionID)
     }
 
+    func getSessionScreenObservationSnapshot(sessionID: UUID) throws -> SessionScreenObservationSnapshotResponse {
+        structuredSessionObservationStore.snapshotResponse(for: try getSessionScreen(sessionID: sessionID))
+    }
+
     func observeSessionScreen(
         observationID: UUID,
         sessionID: UUID,
-        onUpdate: @escaping @Sendable (SessionScreen) -> Void
+        onUpdate: @escaping @Sendable (SessionScreenObservationUpdate) -> Void
     ) throws -> SessionScreenObservationStart {
         try sessionInteraction.observeSessionScreen(
             observationID: observationID,
@@ -1985,6 +1997,13 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
 
     func cancelSessionScreenObservation(observationID: UUID) {
         sessionInteraction.cancelSessionScreenObservation(observationID: observationID)
+    }
+
+    private func recordStructuredSessionObservationChange(sessionID: UUID) {
+        guard let screen = try? getSessionScreen(sessionID: sessionID) else {
+            return
+        }
+        structuredSessionObservationStore.recordChange(for: screen)
     }
 
     func sendSessionInput(sessionID: UUID, text: String) throws -> SessionScreen {
@@ -4342,6 +4361,10 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol, @unchecked Senda
         sendReply(with: { try service.getSessionScreen(sessionID: resolveUUID(sessionID)) }, reply: reply)
     }
 
+    func getSessionScreenObservationSnapshot(sessionID: String, reply: @escaping (Data?, NSString?) -> Void) {
+        sendReply(with: { try service.getSessionScreenObservationSnapshot(sessionID: resolveUUID(sessionID)) }, reply: reply)
+    }
+
     func observeSessionScreen(sessionID: String, reply: @escaping (Data?, NSString?) -> Void) {
         sendReply(
             with: {
@@ -4351,8 +4374,8 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol, @unchecked Senda
 
                 let observationID = UUID()
                 let screenObserver = SessionScreenObserverProxy(observer: observer, observationID: observationID)
-                let start = try service.observeSessionScreen(observationID: observationID, sessionID: resolveUUID(sessionID)) { screen in
-                    screenObserver.send(screen)
+                let start = try service.observeSessionScreen(observationID: observationID, sessionID: resolveUUID(sessionID)) { update in
+                    screenObserver.send(update)
                 }
 
                 lock.lock()
@@ -4632,8 +4655,8 @@ private final class SessionScreenObserverProxy: @unchecked Sendable {
         self.observationID = observationID
     }
 
-    func send(_ screen: SessionScreen) {
-        guard let payload = try? JSONEncoder().encode(screen) else {
+    func send(_ update: SessionScreenObservationUpdate) {
+        guard let payload = try? JSONEncoder().encode(update) else {
             return
         }
 

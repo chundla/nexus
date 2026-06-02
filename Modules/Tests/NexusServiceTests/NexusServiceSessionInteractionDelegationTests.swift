@@ -467,7 +467,7 @@ private final class SessionInteractionSpy: SessionInteractionManaging, @unchecke
     func observeSessionScreen(
         observationID: UUID,
         sessionID: UUID,
-        onUpdate: @escaping @Sendable (SessionScreen) -> Void
+        onUpdate: @escaping @Sendable (SessionScreenObservationUpdate) -> Void
     ) throws -> SessionScreenObservationStart {
         observeSessionScreenCalls.append(.init(observationID: observationID, sessionID: sessionID))
         return observeSessionScreenResult

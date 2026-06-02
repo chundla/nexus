@@ -1,6 +1,7 @@
 #if os(macOS)
 import Foundation
 import NexusDomain
+import NexusIPC
 @testable import NexusService
 import Testing
 
@@ -254,11 +255,18 @@ struct NexusServicePiSessionGraphTests {
             workspaceID: fixture.workspace.id,
             providerID: .pi
         )
-        let observation = try fixture.service.observeSessionScreen(observationID: UUID(), sessionID: defaultSession.id) { screen in
+        let accumulatorBox = ObservationAccumulatorBox()
+        let observation = try fixture.service.observeSessionScreen(observationID: UUID(), sessionID: defaultSession.id) { update in
+            guard let accumulator = accumulatorBox.value,
+                  let screen = try? accumulator.apply(update) else {
+                return
+            }
             Task {
                 await sink.record(screen)
             }
         }
+        accumulatorBox.value = SessionScreenObservationAccumulator(start: observation)
+        await sink.record(observation.screen)
         let detachedSession = fixture.harness.makeDetachedSession()
         fixture.harness.setPromptTransition(
             prompt: "branch-observed",
@@ -292,6 +300,10 @@ struct NexusServicePiSessionGraphTests {
         #expect(observation.screen.session.id == defaultSession.id)
         #expect(await sink.nextScreen(timeoutNanoseconds: 100_000_000) == nil)
     }
+}
+
+private final class ObservationAccumulatorBox: @unchecked Sendable {
+    var value: SessionScreenObservationAccumulator?
 }
 
 private actor PiObservedScreenSink {

@@ -1,6 +1,7 @@
 #if os(macOS)
 import Foundation
 import NexusDomain
+import NexusIPC
 @testable import NexusService
 import Testing
 
@@ -36,7 +37,10 @@ struct ServiceSessionInteractionScenariosTests {
         let session = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
         let sink = SessionScreenSink()
 
-        let start = try service.observeSessionScreen(observationID: UUID(), sessionID: session.id) { screen in
+        let start = try service.observeSessionScreen(observationID: UUID(), sessionID: session.id) { update in
+            guard case let .screen(screen) = update else {
+                return
+            }
             Task {
                 await sink.record(screen)
             }
@@ -48,6 +52,75 @@ struct ServiceSessionInteractionScenariosTests {
 
         #expect(updatedScreen.transcript.contains("Updated"))
         service.cancelSessionScreenObservation(observationID: start.observationID)
+    }
+
+    @Test func structuredObservationPublishesRevisionedDeltas() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
+
+        let launcher = StructuredControllerRuntimeLauncher()
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: StubProviderHealthFacts(
+                summariesByProvider: [
+                    .pi: ProviderHealthSummary(
+                        state: .available,
+                        summary: "Ready",
+                        resolvedExecutable: "/tmp/pi",
+                        launchability: .launchable
+                    )
+                ]
+            ),
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+        )
+        let group = try service.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try service.createLocalWorkspace(
+            name: "Local Pi",
+            folderPath: workspaceFolder.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+        let session = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+        let sink = SessionScreenObservationUpdateSink()
+
+        let start = try service.observeSessionScreen(observationID: UUID(), sessionID: session.id) { update in
+            Task {
+                await sink.record(update)
+            }
+        }
+        _ = try await service.sendSessionInput(sessionID: session.id, text: "deploy")
+        let observedUpdate = try #require(await sink.nextUpdate())
+
+        let structuredSnapshot = try #require(start.structuredSnapshot)
+        let delta = try #require({
+            if case let .structuredDelta(delta) = observedUpdate {
+                return delta
+            }
+            return nil
+        }())
+
+        #expect(structuredSnapshot.revision >= 0)
+        #expect(delta.baseRevision == structuredSnapshot.revision)
+        #expect(delta.revision == structuredSnapshot.revision + 1)
+        #expect(delta.changes.contains(.setTranscript("> deploy")))
+        #expect(delta.changes.contains(where: {
+            if case .replaceActivityItems(let activityItems) = $0 {
+                return activityItems.map(\.text) == [
+                    "Pi ready",
+                    "You: deploy",
+                    "Approval Request: Deploy?"
+                ]
+            }
+            return false
+        }))
+        #expect(delta.changes.contains(where: {
+            if case .replaceApprovalRequests(let approvalRequests) = $0 {
+                return approvalRequests.first?.title == "Deploy?" && approvalRequests.first?.state == .pending
+            }
+            return false
+        }))
     }
 
     @Test func macStructuredSessionInputAndApprovalDecisionsReturnUpdatedSessionScreen() async throws {
@@ -280,6 +353,26 @@ private actor SessionScreenSink {
             if let screen = screens.first {
                 screens.removeFirst()
                 return screen
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        return nil
+    }
+}
+
+private actor SessionScreenObservationUpdateSink {
+    private var updates: [SessionScreenObservationUpdate] = []
+
+    func record(_ update: SessionScreenObservationUpdate) {
+        updates.append(update)
+    }
+
+    func nextUpdate(timeoutNanoseconds: UInt64 = 1_000_000_000) async -> SessionScreenObservationUpdate? {
+        let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
+        while DispatchTime.now().uptimeNanoseconds < deadline {
+            if let update = updates.first {
+                updates.removeFirst()
+                return update
             }
             try? await Task.sleep(nanoseconds: 10_000_000)
         }

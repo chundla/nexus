@@ -19,14 +19,14 @@ nonisolated final class RemotePairingServer: RemotePairingServing, @unchecked Se
         RemotePairingEndpoint(host: displayHost, port: port)
     }
 
-    private let client: any NexusServiceClient
+    private let client: any SessionScreenObservationEventClient
     private let listener: NWListener
     private let queue = DispatchQueue(label: "RemotePairingServer")
 
     private(set) var port: Int = 0
 
     init(
-        client: any NexusServiceClient,
+        client: any SessionScreenObservationEventClient,
         displayHost: String = ProcessInfo.processInfo.hostName,
         macName: String = Host.current().localizedName ?? ProcessInfo.processInfo.hostName,
         listeningPort: Int? = nil
@@ -205,12 +205,33 @@ nonisolated final class RemotePairingServer: RemotePairingServing, @unchecked Se
         }
 
         if request.method == "GET",
+           let sessionScreenObservationSnapshotRequest = sessionScreenObservationSnapshotRequest(from: request) {
+            await respondToAuthorizedRequest(
+                operation: .fetchSessionScreen,
+                request: request,
+                over: connection,
+                sessionID: sessionScreenObservationSnapshotRequest.sessionID
+            ) { [self] in
+                try await self.client.getSessionScreenObservationSnapshot(sessionID: sessionScreenObservationSnapshotRequest.sessionID)
+            }
+            return
+        }
+
+        if request.method == "GET",
            let sessionScreenObservationRequest = sessionScreenObservationRequest(from: request) {
             do {
                 try await authorize(request)
                 let stream = RemoteSessionScreenStream(connection: connection, queue: queue)
-                let observation = try await client.observeSessionScreen(sessionID: sessionScreenObservationRequest.sessionID) { screen in
-                    stream.enqueue(screen)
+                let observation = try await client.observeSessionScreenUpdateEvents(sessionID: sessionScreenObservationRequest.sessionID) { update in
+                    stream.enqueue(update)
+                }
+                let expectedStructuredRevision = structuredObservationRevision(from: request)
+                if let expectedStructuredRevision {
+                    let latestSnapshot = try await client.getSessionScreenObservationSnapshot(sessionID: sessionScreenObservationRequest.sessionID)
+                    if let currentStructuredRevision = latestSnapshot.structuredSnapshot?.revision,
+                       currentStructuredRevision != expectedStructuredRevision {
+                        stream.enqueue(.structuredGap(currentRevision: currentStructuredRevision))
+                    }
                 }
                 stream.setOnClose {
                     await observation.cancel()
@@ -599,6 +620,19 @@ nonisolated final class RemotePairingServer: RemotePairingServing, @unchecked Se
         return ProviderDetailRequest(workspaceID: workspaceID, providerID: providerID)
     }
 
+    private func sessionScreenObservationSnapshotRequest(from request: ParsedRequest) -> SessionScreenObservationRequest? {
+        let components = request.path.split(separator: "/")
+        guard components.count == 4,
+              components[0] == "remote-client",
+              components[1] == "sessions",
+              let sessionID = UUID(uuidString: String(components[2])),
+              components[3] == "observe-start" else {
+            return nil
+        }
+
+        return SessionScreenObservationRequest(sessionID: sessionID)
+    }
+
     private func sessionScreenObservationRequest(from request: ParsedRequest) -> SessionScreenObservationRequest? {
         let components = request.path.split(separator: "/")
         guard components.count == 4,
@@ -610,6 +644,13 @@ nonisolated final class RemotePairingServer: RemotePairingServing, @unchecked Se
         }
 
         return SessionScreenObservationRequest(sessionID: sessionID)
+    }
+
+    private func structuredObservationRevision(from request: ParsedRequest) -> Int? {
+        guard let value = request.headers["x-nexus-structured-revision"] else {
+            return nil
+        }
+        return Int(value)
     }
 
     private func sessionLaunchRequest(from request: ParsedRequest) -> SessionScreenRequest? {
@@ -960,7 +1001,7 @@ nonisolated private final class RemoteSessionScreenStream: @unchecked Sendable {
     private let queue: DispatchQueue
     private var didStart = false
     private var isClosed = false
-    private var pendingScreens: [SessionScreen] = []
+    private var pendingUpdates: [SessionScreenObservationUpdate] = []
     private var onClose: (@Sendable () async -> Void)?
 
     init(connection: NWConnection, queue: DispatchQueue) {
@@ -968,16 +1009,16 @@ nonisolated private final class RemoteSessionScreenStream: @unchecked Sendable {
         self.queue = queue
     }
 
-    func enqueue(_ screen: SessionScreen) {
+    func enqueue(_ update: SessionScreenObservationUpdate) {
         queue.async { [weak self] in
             guard let self, self.isClosed == false else {
                 return
             }
 
             if self.didStart {
-                self.sendEvent(screen)
+                self.sendEvent(update)
             } else {
-                self.pendingScreens.append(screen)
+                self.pendingUpdates.append(update)
             }
         }
     }
@@ -997,10 +1038,10 @@ nonisolated private final class RemoteSessionScreenStream: @unchecked Sendable {
             self.didStart = true
             self.sendHeaders()
 
-            let pendingScreens = self.pendingScreens
-            self.pendingScreens.removeAll()
-            for screen in pendingScreens {
-                self.sendEvent(screen)
+            let pendingUpdates = self.pendingUpdates
+            self.pendingUpdates.removeAll()
+            for update in pendingUpdates {
+                self.sendEvent(update)
             }
         }
     }
@@ -1037,8 +1078,8 @@ nonisolated private final class RemoteSessionScreenStream: @unchecked Sendable {
         })
     }
 
-    private func sendEvent(_ screen: SessionScreen) {
-        guard let bodyData = try? JSONEncoder().encode(screen),
+    private func sendEvent(_ update: SessionScreenObservationUpdate) {
+        guard let bodyData = try? JSONEncoder().encode(update),
               let body = String(data: bodyData, encoding: .utf8) else {
             return
         }
