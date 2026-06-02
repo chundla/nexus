@@ -257,13 +257,72 @@ public final class StructuredSessionMarkdownRenderer: @unchecked Sendable {
     }
 
     private static func defaultParse(_ text: String) -> AttributedString {
-        (try? AttributedString(
-            markdown: text,
-            options: .init(
-                interpretedSyntax: .full,
+        renderPreservingBlockLayout(text)
+    }
+
+    private static func renderPreservingBlockLayout(_ text: String) -> AttributedString {
+        var rendered = AttributedString()
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        var isInsideFencedCodeBlock = false
+
+        for index in lines.indices {
+            let line = String(lines[index])
+
+            if isFencedCodeBlockDelimiter(line) {
+                isInsideFencedCodeBlock.toggle()
+                continue
+            }
+
+            if isInsideFencedCodeBlock {
+                rendered.append(AttributedString(line))
+            } else {
+                rendered.append(renderInlineMarkdown(line))
+            }
+
+            if index < lines.index(before: lines.endIndex) {
+                rendered.append(AttributedString("\n"))
+            }
+        }
+
+        return rendered
+    }
+
+    private static func renderInlineMarkdown(_ line: String) -> AttributedString {
+        guard requiresInlineMarkdownParsing(line) else {
+            return AttributedString(line)
+        }
+
+        return (try? AttributedString(
+            markdown: line,
+            options: inlineMarkdownParsingOptions()
+        )) ?? AttributedString(line)
+    }
+
+    private static func requiresInlineMarkdownParsing(_ text: String) -> Bool {
+        text.contains("`") ||
+            text.contains("*") ||
+            text.contains("_") ||
+            text.contains("[") ||
+            text.contains("!") ||
+            text.contains("~")
+    }
+
+    private static func inlineMarkdownParsingOptions() -> AttributedString.MarkdownParsingOptions {
+        if #available(macOS 13.0, iOS 16.0, *) {
+            return .init(
+                interpretedSyntax: .inlineOnlyPreservingWhitespace,
                 failurePolicy: .returnPartiallyParsedIfPossible
             )
-        )) ?? AttributedString(text)
+        }
+
+        return .init(
+            interpretedSyntax: .inlineOnly,
+            failurePolicy: .returnPartiallyParsedIfPossible
+        )
+    }
+
+    private static func isFencedCodeBlockDelimiter(_ line: String) -> Bool {
+        line.trimmingCharacters(in: .whitespaces).hasPrefix("```")
     }
 }
 

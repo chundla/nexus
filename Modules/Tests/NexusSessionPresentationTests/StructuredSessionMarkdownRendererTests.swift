@@ -80,4 +80,58 @@ struct StructuredSessionMarkdownRendererTests {
         #expect(metrics.cacheMissCount == 1)
         #expect(metrics.cachedEntryCount == 1)
     }
+
+    @Test func rendererPreservesListLineBreaksForBlockMarkdown() {
+        let renderer = StructuredSessionMarkdownRenderer(cacheLimit: 0)
+        let markdown = """
+        In `/Users/ck/source/repos/nexus`:
+
+        - `.DS_Store`
+        - `.git/`
+        - `.gitignore`
+
+        Want a recursive tree too?
+        """
+
+        let rendered = renderer.render(markdown)
+
+        #expect(
+            String(rendered.characters) == """
+            In /Users/ck/source/repos/nexus:
+
+            - .DS_Store
+            - .git/
+            - .gitignore
+
+            Want a recursive tree too?
+            """
+        )
+    }
+
+    @Test func rendererPreservesMultilineFencedCodeBlocks() {
+        let renderer = StructuredSessionMarkdownRenderer(cacheLimit: 0)
+        let markdown = """
+        Before
+
+        ```swift
+        print(1)
+        print(2)
+        ```
+
+        After
+        """
+
+        let rendered = renderer.render(markdown)
+
+        #expect(
+            String(rendered.characters) == """
+            Before
+
+            print(1)
+            print(2)
+
+            After
+            """
+        )
+    }
 }
