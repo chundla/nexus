@@ -451,14 +451,17 @@ public final class NexusIPCClient: NexusServiceClient, SessionScreenObservationE
         onUpdate: @escaping @Sendable (SessionScreenObservationUpdate) -> Void
     ) async throws -> any SessionScreenObservation {
         let start = try await startSessionScreenObservation(sessionID: sessionID)
+        debugSessionObservationLog("[DEBUG-MACBLANK] observeSessionScreenUpdateEvents start session=\(sessionID.uuidString) observation=\(start.observationID.uuidString) revision=\(start.structuredSnapshot?.revision ?? -1) items=\(start.screen.activityItems.count) providerEvents=\(start.screen.providerEvents.count)")
         sessionScreenObserverBridge.registerHandler(onUpdate, for: start.observationID)
 
         let latestSnapshot = try await getSessionScreenObservationSnapshot(sessionID: sessionID)
         if let startStructuredRevision = start.structuredSnapshot?.revision,
            let latestStructuredRevision = latestSnapshot.structuredSnapshot?.revision,
            latestStructuredRevision != startStructuredRevision {
+            debugSessionObservationLog("[DEBUG-MACBLANK] observeSessionScreenUpdateEvents initial gap session=\(sessionID.uuidString) observation=\(start.observationID.uuidString) startRevision=\(startStructuredRevision) latestRevision=\(latestStructuredRevision)")
             onUpdate(.structuredGap(currentRevision: latestStructuredRevision))
         } else if latestSnapshot.screen != start.screen {
+            debugSessionObservationLog("[DEBUG-MACBLANK] observeSessionScreenUpdateEvents initial screen mismatch session=\(sessionID.uuidString) observation=\(start.observationID.uuidString) startItems=\(start.screen.activityItems.count) latestItems=\(latestSnapshot.screen.activityItems.count)")
             onUpdate(.screen(latestSnapshot.screen))
         }
 
@@ -470,32 +473,45 @@ public final class NexusIPCClient: NexusServiceClient, SessionScreenObservationE
         onUpdate: @escaping @Sendable (SessionScreen) -> Void
     ) async throws -> any SessionScreenObservation {
         let start = try await startSessionScreenObservation(sessionID: sessionID)
+        debugSessionObservationLog("[DEBUG-MACBLANK] observeSessionScreen start session=\(sessionID.uuidString) observation=\(start.observationID.uuidString) revision=\(start.structuredSnapshot?.revision ?? -1) items=\(start.screen.activityItems.count) providerEvents=\(start.screen.providerEvents.count) inProgress=\(start.screen.isAgentTurnInProgress)")
         let accumulator = SessionScreenObservationAccumulator(start: start)
         sessionScreenObserverBridge.registerHandler({ [weak self] update in
+            debugSessionObservationLog("[DEBUG-MACBLANK] observeSessionScreen update session=\(sessionID.uuidString) observation=\(start.observationID.uuidString) kind=\(debugObservationSummary(update))")
             do {
                 if let screen = try accumulator.apply(update) {
+                    debugSessionObservationLog("[DEBUG-MACBLANK] observeSessionScreen applied session=\(sessionID.uuidString) observation=\(start.observationID.uuidString) items=\(screen.activityItems.count) providerEvents=\(screen.providerEvents.count) inProgress=\(screen.isAgentTurnInProgress) lastItem=\(debugActivitySummary(screen.activityItems.last))")
                     onUpdate(screen)
+                } else {
+                    debugSessionObservationLog("[DEBUG-MACBLANK] observeSessionScreen ignored duplicate session=\(sessionID.uuidString) observation=\(start.observationID.uuidString)")
                 }
             } catch is SessionScreenObservationGapError {
+                debugSessionObservationLog("[DEBUG-MACBLANK] observeSessionScreen gap session=\(sessionID.uuidString) observation=\(start.observationID.uuidString) currentRevision=\(accumulator.currentStructuredRevision ?? -1)")
                 guard let self else {
                     return
                 }
 
                 Task {
                     guard let latestSnapshot = try? await self.getSessionScreenObservationSnapshot(sessionID: sessionID) else {
+                        debugSessionObservationLog("[DEBUG-MACBLANK] observeSessionScreen gap snapshot fetch failed session=\(sessionID.uuidString) observation=\(start.observationID.uuidString)")
                         return
                     }
-                    onUpdate(accumulator.replace(with: latestSnapshot))
+                    let screen = accumulator.replace(with: latestSnapshot)
+                    debugSessionObservationLog("[DEBUG-MACBLANK] observeSessionScreen gap snapshot replaced session=\(sessionID.uuidString) observation=\(start.observationID.uuidString) revision=\(latestSnapshot.structuredSnapshot?.revision ?? -1) items=\(screen.activityItems.count) providerEvents=\(screen.providerEvents.count)")
+                    onUpdate(screen)
                 }
             } catch {
+                debugSessionObservationLog("[DEBUG-MACBLANK] observeSessionScreen apply error session=\(sessionID.uuidString) observation=\(start.observationID.uuidString) error=\(String(describing: error))")
                 return
             }
         }, for: start.observationID)
+        debugSessionObservationLog("[DEBUG-MACBLANK] observeSessionScreen emit start screen session=\(sessionID.uuidString) observation=\(start.observationID.uuidString) items=\(start.screen.activityItems.count) providerEvents=\(start.screen.providerEvents.count)")
         onUpdate(start.screen)
 
         let latestSnapshot = try await getSessionScreenObservationSnapshot(sessionID: sessionID)
         if latestSnapshot.screen != accumulator.currentScreen {
-            onUpdate(accumulator.replace(with: latestSnapshot))
+            let screen = accumulator.replace(with: latestSnapshot)
+            debugSessionObservationLog("[DEBUG-MACBLANK] observeSessionScreen emit latest snapshot session=\(sessionID.uuidString) observation=\(start.observationID.uuidString) revision=\(latestSnapshot.structuredSnapshot?.revision ?? -1) items=\(screen.activityItems.count) providerEvents=\(screen.providerEvents.count)")
+            onUpdate(screen)
         }
 
         return makeObservationHandle(observationID: start.observationID)
@@ -741,8 +757,10 @@ final class NexusSessionScreenObserverBridge: NSObject, NexusSessionScreenObserv
         func deliver(_ payload: Data) {
             queue.async { [handler] in
                 guard let update = try? JSONDecoder().decode(SessionScreenObservationUpdate.self, from: payload) else {
+                    debugSessionObservationLog("[DEBUG-MACBLANK] bridge decode failed payloadBytes=\(payload.count)")
                     return
                 }
+                debugSessionObservationLog("[DEBUG-MACBLANK] bridge deliver kind=\(debugObservationSummary(update))")
                 handler(update)
             }
         }
@@ -755,16 +773,19 @@ final class NexusSessionScreenObserverBridge: NSObject, NexusSessionScreenObserv
         lock.lock()
         handlers[observationID] = HandlerRegistration(observationID: observationID, handler: handler)
         lock.unlock()
+        debugSessionObservationLog("[DEBUG-MACBLANK] bridge register observation=\(observationID.uuidString)")
     }
 
     func removeHandler(for observationID: UUID) {
         lock.lock()
         handlers.removeValue(forKey: observationID)
         lock.unlock()
+        debugSessionObservationLog("[DEBUG-MACBLANK] bridge remove observation=\(observationID.uuidString)")
     }
 
     func sessionScreenDidUpdate(observationID: String, payload: Data) {
         guard let observationID = UUID(uuidString: observationID) else {
+            debugSessionObservationLog("[DEBUG-MACBLANK] bridge invalid observation id=\(observationID)")
             return
         }
 
@@ -773,8 +794,34 @@ final class NexusSessionScreenObserverBridge: NSObject, NexusSessionScreenObserv
         registration = handlers[observationID]
         lock.unlock()
 
+        debugSessionObservationLog("[DEBUG-MACBLANK] bridge received observation=\(observationID.uuidString) payloadBytes=\(payload.count) hasRegistration=\(registration != nil)")
         registration?.deliver(payload)
     }
+}
+
+private func debugSessionObservationLog(_ message: String) {
+    NSLog("[DEBUG-MACBLANK] %@", message)
+}
+
+private func debugObservationSummary(_ update: SessionScreenObservationUpdate) -> String {
+    switch update {
+    case let .screen(screen):
+        return "screen(items=\(screen.activityItems.count),providerEvents=\(screen.providerEvents.count),inProgress=\(screen.isAgentTurnInProgress),lastItem=\(debugActivitySummary(screen.activityItems.last)))"
+    case let .structuredDelta(delta):
+        return "structuredDelta(base=\(delta.baseRevision),revision=\(delta.revision),changes=\(delta.changes.count))"
+    case let .structuredGap(currentRevision):
+        return "structuredGap(currentRevision=\(currentRevision))"
+    }
+}
+
+private func debugActivitySummary(_ item: SessionActivityItem?) -> String {
+    guard let item else {
+        return "nil"
+    }
+
+    let text = item.detailText ?? item.text
+    let snippet = text.replacingOccurrences(of: "\n", with: "\\n").prefix(80)
+    return "\(item.kind.rawValue):\(snippet)"
 }
 
 private final class NexusSessionScreenObservationHandle: SessionScreenObservation, @unchecked Sendable {

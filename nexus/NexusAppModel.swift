@@ -373,9 +373,11 @@ final class NexusAppModel {
 
     func focusSession(sessionID: UUID) async throws {
         if focusedSessionScreen?.session.id == sessionID, focusedSessionObservation != nil {
+            Self.debugLog("focusSession skip existing observation session=\(sessionID.uuidString)")
             return
         }
 
+        Self.debugLog("focusSession start session=\(sessionID.uuidString)")
         await stopFocusingSession()
         let observation = try await client.observeSessionScreen(sessionID: sessionID) { [weak self] screen in
             Task { @MainActor [weak self] in
@@ -383,17 +385,23 @@ final class NexusAppModel {
                     return
                 }
 
+                Self.debugLog("focusSession onUpdate session=\(screen.session.id.uuidString) items=\(screen.activityItems.count) providerEvents=\(screen.providerEvents.count) inProgress=\(screen.isAgentTurnInProgress) state=\(String(describing: screen.session.state))")
                 try? await self.applyFocusedSessionScreen(screen)
             }
         }
         focusedSessionObservation = observation
+        Self.debugLog("focusSession observation established session=\(sessionID.uuidString)")
     }
 
     func stopFocusingSession() async {
+        let focusedSessionID = focusedSessionScreen?.session.id.uuidString ?? "nil"
+        let hadObservation = focusedSessionObservation != nil
+        Self.debugLog("stopFocusingSession session=\(focusedSessionID) hadObservation=\(hadObservation)")
         let observation = focusedSessionObservation
         focusedSessionObservation = nil
         if let observation {
             await observation.cancel()
+            Self.debugLog("stopFocusingSession cancelled session=\(focusedSessionID)")
         }
     }
 
@@ -661,20 +669,41 @@ final class NexusAppModel {
     private func applyFocusedSessionScreen(_ screen: SessionScreen) async throws {
         let previousScreen = focusedSessionScreen?.session.id == screen.session.id ? focusedSessionScreen : nil
         let previousState = previousScreen?.session.state
+        Self.debugLog("applyFocusedSessionScreen session=\(screen.session.id.uuidString) prevItems=\(previousScreen?.activityItems.count ?? -1) items=\(screen.activityItems.count) prevProviderEvents=\(previousScreen?.providerEvents.count ?? -1) providerEvents=\(screen.providerEvents.count) prevState=\(String(describing: previousState)) state=\(String(describing: screen.session.state)) inProgress=\(screen.isAgentTurnInProgress) lastItem=\(Self.debugActivitySummary(screen.activityItems.last))")
         focusedSessionScreen = screen
 
         if previousScreen?.extensionUI?.editorText != screen.extensionUI?.editorText,
            let editorText = screen.extensionUI?.editorText {
             focusedStructuredSessionDraft = editorText
+            Self.debugLog("applyFocusedSessionScreen synced editorText session=\(screen.session.id.uuidString) length=\(editorText.count)")
         }
 
         if let previousState, previousState != screen.session.state {
+            Self.debugLog("applyFocusedSessionScreen state transition session=\(screen.session.id.uuidString) from=\(String(describing: previousState)) to=\(String(describing: screen.session.state))")
             try await refreshWorkspaceOverview(for: screen.session.workspaceID)
             try await refreshProviderDetailIfLoaded(
                 workspaceID: screen.session.workspaceID,
                 providerID: screen.session.providerID
             )
         }
+    }
+}
+
+private extension NexusAppModel {
+    static func debugLog(_ message: String) {
+        NSLog("[DEBUG-MACBLANK] %@", message)
+    }
+
+    static func debugActivitySummary(_ item: SessionActivityItem?) -> String {
+        guard let item else {
+            return "nil"
+        }
+
+        let text = item.detailText ?? item.text
+        let snippet = text
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .prefix(80)
+        return "\(item.kind.rawValue):\(snippet)"
     }
 }
 
