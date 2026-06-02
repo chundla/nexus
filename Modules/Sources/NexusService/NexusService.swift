@@ -4118,8 +4118,9 @@ extension NexusService: NSXPCListenerDelegate {
         newConnection.invalidationHandler = { [weak bridge] in
             bridge?.invalidate()
         }
-        newConnection.interruptionHandler = { [weak bridge] in
-            bridge?.invalidate()
+        newConnection.interruptionHandler = {
+            // NSXPC interruptions can be transient; keep active observation registrations
+            // so they resume when the connection comes back. Cleanup belongs on invalidation.
         }
         newConnection.resume()
         return true
