@@ -6882,6 +6882,50 @@ struct nexusTests {
         ])
     }
 
+    @MainActor
+    @Test func appModelClearCommandReplacesOldPiActivityWithFreshSessionScreen() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
+            NexusTestsPiRPCTransport(promptResponseText: "world")
+        })
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthFacts(
+                executableResolver: StubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
+                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                ]),
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+            ),
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+        _ = try await model.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+        try await model.sendInputToFocusedSession("hello")
+        try await model.sendInputToFocusedSession("/clear")
+
+        let screen = try #require(model.focusedSessionScreen)
+        #expect(screen.primarySurface == .structuredActivityFeed)
+        #expect(screen.activityItems.count == 1)
+        #expect(screen.activityItems.first?.text == "Pi shared Session stream connected")
+    }
+
     @Test func localXPCPiSessionInputCarriesImagesThroughObservation() async throws {
         let workspaceFolderURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -8100,6 +8144,57 @@ struct nexusTests {
 
         #expect(model.focusedSessionScreen == observedCompletedScreen)
         #expect(model.focusedSessionScreen?.isAgentTurnInProgress == false)
+    }
+
+    @MainActor
+    @Test func appModelAppliesClearActionResponseWhenObservationHasNotAdvancedYet() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let initialScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"),
+                SessionActivityItem(kind: .message, text: "You: old prompt"),
+                SessionActivityItem(kind: .message, text: "Pi: old answer")
+            ]
+        )
+        let clearedScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [SessionActivityItem(kind: .status, text: "Pi shared Session stream connected")]
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []),
+            session: session,
+            screen: initialScreen
+        )
+        client.sendSessionInputHandler = { _, text in
+            #expect(text == "/clear")
+            return clearedScreen
+        }
+        let model = NexusAppModel(client: client)
+
+        try await model.focusSession(sessionID: session.id)
+        try await model.sendInputToFocusedSession("/clear")
+
+        #expect(model.focusedSessionScreen == clearedScreen)
+        #expect(model.focusedSessionScreen?.activityItems.map(\.text) == ["Pi shared Session stream connected"])
     }
 
     @MainActor

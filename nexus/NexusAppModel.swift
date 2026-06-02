@@ -431,65 +431,65 @@ final class NexusAppModel {
     }
 
     func sendInputToFocusedSession(_ text: String) async throws {
-        guard let sessionID = focusedSessionScreen?.session.id else {
+        guard let baselineScreen = focusedSessionScreen else {
             return
         }
 
-        let screen = try await client.sendSessionInput(sessionID: sessionID, text: text)
-        try await applyFocusedSessionActionResponse(screen)
+        let screen = try await client.sendSessionInput(sessionID: baselineScreen.session.id, text: text)
+        try await applyFocusedSessionActionResponse(screen, ifCurrentScreenMatches: baselineScreen)
     }
 
     func sendTypedTextToFocusedSession(_ text: String) async throws {
-        guard let sessionID = focusedSessionScreen?.session.id else {
+        guard let baselineScreen = focusedSessionScreen else {
             return
         }
 
-        let screen = try await client.sendSessionText(sessionID: sessionID, text: text)
-        try await applyFocusedSessionActionResponse(screen)
+        let screen = try await client.sendSessionText(sessionID: baselineScreen.session.id, text: text)
+        try await applyFocusedSessionActionResponse(screen, ifCurrentScreenMatches: baselineScreen)
     }
 
     func sendInputKeyToFocusedSession(_ key: SessionInputKey) async throws {
-        guard let sessionID = focusedSessionScreen?.session.id else {
+        guard let baselineScreen = focusedSessionScreen else {
             return
         }
 
-        let screen = try await client.sendSessionInputKey(sessionID: sessionID, key: key)
-        try await applyFocusedSessionActionResponse(screen)
+        let screen = try await client.sendSessionInputKey(sessionID: baselineScreen.session.id, key: key)
+        try await applyFocusedSessionActionResponse(screen, ifCurrentScreenMatches: baselineScreen)
     }
 
     func respondToFocusedSessionApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision) async throws {
-        guard let sessionID = focusedSessionScreen?.session.id else {
+        guard let baselineScreen = focusedSessionScreen else {
             return
         }
 
         let screen = try await client.respondToApprovalRequest(
-            sessionID: sessionID,
+            sessionID: baselineScreen.session.id,
             approvalRequestID: approvalRequestID,
             decision: decision
         )
-        try await applyFocusedSessionActionResponse(screen)
+        try await applyFocusedSessionActionResponse(screen, ifCurrentScreenMatches: baselineScreen)
     }
 
     func respondToFocusedSessionExtensionDialog(_ dialogID: String, response: SessionExtensionUIDialogResponse) async throws {
-        guard let sessionID = focusedSessionScreen?.session.id else {
+        guard let baselineScreen = focusedSessionScreen else {
             return
         }
 
         let screen = try await client.respondToExtensionDialog(
-            sessionID: sessionID,
+            sessionID: baselineScreen.session.id,
             dialogID: dialogID,
             response: response
         )
-        try await applyFocusedSessionActionResponse(screen)
+        try await applyFocusedSessionActionResponse(screen, ifCurrentScreenMatches: baselineScreen)
     }
 
     func resizeFocusedSession(columns: Int, rows: Int) async throws {
-        guard let sessionID = focusedSessionScreen?.session.id else {
+        guard let baselineScreen = focusedSessionScreen else {
             return
         }
 
-        let screen = try await client.resizeSession(sessionID: sessionID, columns: columns, rows: rows)
-        try await applyFocusedSessionActionResponse(screen)
+        let screen = try await client.resizeSession(sessionID: baselineScreen.session.id, columns: columns, rows: rows)
+        try await applyFocusedSessionActionResponse(screen, ifCurrentScreenMatches: baselineScreen)
     }
 
     func loadRecentNavigation() async throws {
@@ -658,12 +658,11 @@ final class NexusAppModel {
         try await refreshProviderDetail(workspaceID: workspaceID, providerID: providerID)
     }
 
-    private func applyFocusedSessionActionResponse(_ screen: SessionScreen) async throws {
-        guard focusedSessionScreen?.session.id == screen.session.id else {
-            return
-        }
-
-        guard focusedSessionObservation == nil else {
+    private func applyFocusedSessionActionResponse(
+        _ screen: SessionScreen,
+        ifCurrentScreenMatches baselineScreen: SessionScreen
+    ) async throws {
+        guard focusedSessionScreen == baselineScreen else {
             return
         }
 
