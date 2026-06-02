@@ -1513,11 +1513,12 @@ struct ContentView: View {
 
     @ViewBuilder
     private func structuredSessionFeed(screen: SessionScreen, isReady: Bool) -> some View {
-        let presentation = StructuredSessionPresentation(
-            screen: screen,
-            hasWriterAuthority: true,
-            draft: appModel.focusedStructuredSessionDraft,
-            isPerformingAction: screen.isAgentTurnInProgress
+        let feedPresentation = structuredSessionFeedPresentation(for: screen)
+        let approvalRequestPresentation = structuredSessionApprovalRequestPresentation(hasWriterAuthority: true)
+        let composerPresentation = structuredSessionComposerPresentation(for: screen, hasWriterAuthority: true)
+        let slashCommandMenuPresentation = structuredSessionSlashCommandMenuPresentation(
+            for: appModel.focusedStructuredSessionDraft,
+            screen: screen
         )
         let extensionUI = screen.extensionUI
         let aboveEditorWidgets = extensionUI?.widgets.filter { $0.placement == .aboveEditor } ?? []
@@ -1534,10 +1535,10 @@ struct ContentView: View {
                 .padding(.top, 14)
             }
 
-            if presentation.feed.pendingApprovalRequests.isEmpty == false {
+            if feedPresentation.pendingApprovalRequests.isEmpty == false {
                 VStack(alignment: .leading, spacing: 8) {
-                    ForEach(presentation.feed.pendingApprovalRequests) { request in
-                        structuredSessionApprovalRequestView(request, presentation: presentation.approvalRequest)
+                    ForEach(feedPresentation.pendingApprovalRequests) { request in
+                        structuredSessionApprovalRequestView(request, presentation: approvalRequestPresentation)
                     }
                 }
                 .padding(.horizontal, 14)
@@ -1553,21 +1554,21 @@ struct ContentView: View {
 
             ScrollViewReader { proxy in
                 ScrollView {
-                    if presentation.feed.activityRows.isEmpty {
+                    if feedPresentation.activityRows.isEmpty {
                         ContentUnavailableView(
-                            presentation.feed.copy.emptyStateTitle,
+                            feedPresentation.copy.emptyStateTitle,
                             systemImage: "message",
-                            description: Text(presentation.feed.copy.emptyStateDescription)
+                            description: Text(feedPresentation.copy.emptyStateDescription)
                         )
                         .frame(maxWidth: .infinity, minHeight: 220)
                     } else {
                         LazyVStack(spacing: 8) {
-                            ForEach(presentation.feed.activityRows) { row in
+                            ForEach(feedPresentation.activityRows) { row in
                                 structuredSessionActivityRowView(row, screen: screen)
                                     .id(row.id)
                             }
 
-                            if let thinkingIndicator = presentation.feed.thinkingIndicator {
+                            if let thinkingIndicator = feedPresentation.thinkingIndicator {
                                 structuredSessionThinkingIndicatorView(thinkingIndicator)
                             }
 
@@ -1585,17 +1586,17 @@ struct ContentView: View {
                         proxy.scrollTo("conversation-bottom", anchor: .bottom)
                     }
                 }
-                .onChange(of: presentation.feed.activityRows.count) { _, _ in
+                .onChange(of: feedPresentation.activityRows.count) { _, _ in
                     withAnimation(.easeOut(duration: 0.18)) {
                         proxy.scrollTo("conversation-bottom", anchor: .bottom)
                     }
                 }
-                .onChange(of: presentation.feed.activityRows.last) { _, _ in
+                .onChange(of: feedPresentation.activityRows.last) { _, _ in
                     withAnimation(.easeOut(duration: 0.18)) {
                         proxy.scrollTo("conversation-bottom", anchor: .bottom)
                     }
                 }
-                .onChange(of: presentation.feed.pendingApprovalRequests.count) { _, _ in
+                .onChange(of: feedPresentation.pendingApprovalRequests.count) { _, _ in
                     withAnimation(.easeOut(duration: 0.18)) {
                         proxy.scrollTo("conversation-bottom", anchor: .bottom)
                     }
@@ -1609,8 +1610,8 @@ struct ContentView: View {
 
             if isReady {
                 VStack(alignment: .leading, spacing: 8) {
-                    if presentation.slashCommandMenu.isVisible {
-                        macStructuredSessionSlashCommandMenu(presentation.slashCommandMenu)
+                    if slashCommandMenuPresentation.isVisible {
+                        macStructuredSessionSlashCommandMenu(slashCommandMenuPresentation)
                     }
 
                     if aboveEditorWidgets.isEmpty == false {
@@ -1618,13 +1619,13 @@ struct ContentView: View {
                     }
 
                     HStack(spacing: 8) {
-                        TextField(presentation.composer.placeholder, text: $appModel.focusedStructuredSessionDraft, axis: .vertical)
+                        TextField(composerPresentation.placeholder, text: $appModel.focusedStructuredSessionDraft, axis: .vertical)
                             .focused($isStructuredSessionPromptFocused)
                             .font(NexusMacTheme.bodyFont(13))
                             .textFieldStyle(.plain)
                             .lineLimit(1 ... 4)
                             .submitLabel(.send)
-                            .disabled(presentation.composer.isEnabled == false || screen.isAgentTurnInProgress)
+                            .disabled(composerPresentation.isEnabled == false || screen.isAgentTurnInProgress)
                             .onSubmit {
                                 sendStructuredSessionPrompt()
                             }
@@ -1848,16 +1849,7 @@ struct ContentView: View {
     }
 
     private func structuredSessionMarkdownText(_ text: String, font: Font, color: Color) -> some View {
-        let attributed = (try? AttributedString(
-            markdown: text,
-            options: .init(interpretedSyntax: .full, failurePolicy: .returnPartiallyParsedIfPossible)
-        )) ?? AttributedString(text)
-
-        return Text(attributed)
-            .font(font)
-            .foregroundStyle(color)
-            .textSelection(.enabled)
-            .fixedSize(horizontal: false, vertical: true)
+        StructuredSessionMarkdownText(markdown: text, font: font, color: color)
     }
 
     private func structuredSessionThinkingIndicatorView(_ indicator: StructuredSessionThinkingIndicator) -> some View {

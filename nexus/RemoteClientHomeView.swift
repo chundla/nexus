@@ -1445,17 +1445,53 @@ private struct RemoteSessionScreenView: View {
         )
     }
 
-    private var structuredPresentation: StructuredSessionPresentation? {
+    private var structuredFeedPresentation: StructuredSessionFeedPresentation? {
         guard let screen else {
             return nil
         }
 
-        return StructuredSessionPresentation(
-            screen: screen,
-            hasWriterAuthority: model.focusedSessionIsController,
-            draft: structuredPrompt,
+        return structuredSessionFeedPresentation(for: screen)
+    }
+
+    private var structuredComposerPresentation: StructuredSessionComposerPresentation? {
+        guard let screen else {
+            return nil
+        }
+
+        return structuredSessionComposerPresentation(
+            for: screen,
+            hasWriterAuthority: model.focusedSessionIsController
+        )
+    }
+
+    private var structuredSendAffordance: StructuredSessionComposerSendAffordance? {
+        guard let screen, let composer = structuredComposerPresentation else {
+            return nil
+        }
+
+        return structuredSessionComposerSendAffordance(
+            for: structuredPrompt,
+            composer: composer,
             isPerformingAction: isPerformingAction || screen.isAgentTurnInProgress
         )
+    }
+
+    private var structuredApprovalRequestPresentation: StructuredSessionApprovalRequestPresentation? {
+        guard screen != nil else {
+            return nil
+        }
+
+        return structuredSessionApprovalRequestPresentation(
+            hasWriterAuthority: model.focusedSessionIsController
+        )
+    }
+
+    private var structuredSlashCommandMenuPresentation: StructuredSessionSlashCommandMenuPresentation? {
+        guard let screen else {
+            return nil
+        }
+
+        return structuredSessionSlashCommandMenuPresentation(for: structuredPrompt, screen: screen)
     }
 
     private var extensionUI: SessionExtensionUIState? {
@@ -1636,8 +1672,14 @@ private struct RemoteSessionScreenView: View {
 
     private var structuredConversationView: some View {
         Group {
-            if let screen, let presentation = structuredPresentation {
-                structuredSessionContent(screen, presentation: presentation)
+            if let screen,
+               let feedPresentation = structuredFeedPresentation,
+               let approvalRequestPresentation = structuredApprovalRequestPresentation {
+                structuredSessionContent(
+                    screen,
+                    feedPresentation: feedPresentation,
+                    approvalRequestPresentation: approvalRequestPresentation
+                )
             } else if let errorMessage = model.focusedSessionErrorMessage {
                 ScrollView {
                     RemoteUnavailableInsetCard(title: "Conversation unavailable", detail: errorMessage, accent: NexusIOSTheme.coral)
@@ -1704,11 +1746,14 @@ private struct RemoteSessionScreenView: View {
 
     @ViewBuilder
     private var structuredComposerBar: some View {
-        if let screen, let presentation = structuredPresentation {
+        if let screen,
+           let composerPresentation = structuredComposerPresentation,
+           let sendAffordance = structuredSendAffordance,
+           let slashCommandMenuPresentation = structuredSlashCommandMenuPresentation {
             VStack(spacing: 8) {
-                if presentation.composer.isEnabled {
-                    if presentation.slashCommandMenu.isVisible {
-                        iosStructuredSessionSlashCommandMenu(presentation.slashCommandMenu)
+                if composerPresentation.isEnabled {
+                    if slashCommandMenuPresentation.isVisible {
+                        iosStructuredSessionSlashCommandMenu(slashCommandMenuPresentation)
                     }
 
                     if aboveEditorWidgets.isEmpty == false {
@@ -1716,7 +1761,7 @@ private struct RemoteSessionScreenView: View {
                     }
 
                     HStack(alignment: .bottom, spacing: 10) {
-                        TextField(presentation.composer.placeholder, text: $structuredPrompt, axis: .vertical)
+                        TextField(composerPresentation.placeholder, text: $structuredPrompt, axis: .vertical)
                             .focused($isStructuredPromptFocused)
                             .textInputAutocapitalization(.sentences)
                             .autocorrectionDisabled()
@@ -1725,7 +1770,7 @@ private struct RemoteSessionScreenView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .nexusIOSTextField(tint: NexusIOSTheme.gold)
 
-                        if presentation.sendAffordance.isVisible {
+                        if sendAffordance.isVisible {
                             Button {
                                 sendStructuredPrompt()
                             } label: {
@@ -1734,26 +1779,26 @@ private struct RemoteSessionScreenView: View {
                                     .foregroundStyle(.white)
                                     .frame(width: 34, height: 34)
                                     .background(
-                                        presentation.sendAffordance.isEnabled
+                                        sendAffordance.isEnabled
                                             ? NexusIOSTheme.gold
                                             : NexusIOSTheme.gold.opacity(0.32),
                                         in: Circle()
                                     )
                             }
                             .buttonStyle(.plain)
-                            .disabled(presentation.sendAffordance.isEnabled == false)
+                            .disabled(sendAffordance.isEnabled == false)
                             .accessibilityLabel("Send")
                             .transition(.scale(scale: 0.92).combined(with: .opacity))
                         }
                     }
-                    .animation(.easeOut(duration: 0.16), value: presentation.sendAffordance.isVisible)
+                    .animation(.easeOut(duration: 0.16), value: sendAffordance.isVisible)
 
                     if belowEditorWidgets.isEmpty == false {
                         structuredSessionExtensionWidgetsView(belowEditorWidgets)
                     }
                 } else {
                     HStack(spacing: 12) {
-                        Text(presentation.composer.disabledReason ?? "Take over to reply from this iPhone.")
+                        Text(composerPresentation.disabledReason ?? "Take over to reply from this iPhone.")
                             .font(NexusIOSTheme.bodyFont(13))
                             .foregroundStyle(NexusIOSTheme.mutedText)
                             .fixedSize(horizontal: false, vertical: true)
@@ -1988,24 +2033,29 @@ private struct RemoteSessionScreenView: View {
 
     private func structuredSessionContent(
         _ screen: SessionScreen,
-        presentation: StructuredSessionPresentation
+        feedPresentation: StructuredSessionFeedPresentation,
+        approvalRequestPresentation: StructuredSessionApprovalRequestPresentation
     ) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
-                structuredSessionScrollBody(screen, presentation: presentation)
+                structuredSessionScrollBody(
+                    screen,
+                    feedPresentation: feedPresentation,
+                    approvalRequestPresentation: approvalRequestPresentation
+                )
             }
             .onAppear {
                 DispatchQueue.main.async {
                     scrollStructuredSessionToBottom(using: proxy, animated: false)
                 }
             }
-            .onChange(of: presentation.feed.activityRows.count) { _, _ in
+            .onChange(of: feedPresentation.activityRows.count) { _, _ in
                 scrollStructuredSessionToBottom(using: proxy)
             }
-            .onChange(of: presentation.feed.activityRows.last) { _, _ in
+            .onChange(of: feedPresentation.activityRows.last) { _, _ in
                 scrollStructuredSessionToBottom(using: proxy)
             }
-            .onChange(of: presentation.feed.pendingApprovalRequests.count) { _, _ in
+            .onChange(of: feedPresentation.pendingApprovalRequests.count) { _, _ in
                 scrollStructuredSessionToBottom(using: proxy)
             }
             .onChange(of: extensionUI?.pendingDialogs.count ?? 0) { _, _ in
@@ -2019,11 +2069,15 @@ private struct RemoteSessionScreenView: View {
 
     private func structuredSessionScrollBody(
         _ screen: SessionScreen,
-        presentation: StructuredSessionPresentation
+        feedPresentation: StructuredSessionFeedPresentation,
+        approvalRequestPresentation: StructuredSessionApprovalRequestPresentation
     ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            structuredSessionSupplementaryContent(presentation: presentation)
-            structuredSessionActivityFeed(screen, presentation: presentation)
+            structuredSessionSupplementaryContent(
+                feedPresentation: feedPresentation,
+                approvalRequestPresentation: approvalRequestPresentation
+            )
+            structuredSessionActivityFeed(screen, feedPresentation: feedPresentation)
         }
         .padding(.horizontal, horizontalPadding)
         .padding(.top, 14)
@@ -2032,7 +2086,8 @@ private struct RemoteSessionScreenView: View {
 
     @ViewBuilder
     private func structuredSessionSupplementaryContent(
-        presentation: StructuredSessionPresentation
+        feedPresentation: StructuredSessionFeedPresentation,
+        approvalRequestPresentation: StructuredSessionApprovalRequestPresentation
     ) -> some View {
         if let extensionUI, extensionUI.pendingDialogs.isEmpty == false {
             VStack(alignment: .leading, spacing: 10) {
@@ -2042,10 +2097,10 @@ private struct RemoteSessionScreenView: View {
             }
         }
 
-        if presentation.feed.pendingApprovalRequests.isEmpty == false {
+        if feedPresentation.pendingApprovalRequests.isEmpty == false {
             VStack(alignment: .leading, spacing: 10) {
-                ForEach(presentation.feed.pendingApprovalRequests) { request in
-                    structuredSessionApprovalRequestView(request, presentation: presentation.approvalRequest)
+                ForEach(feedPresentation.pendingApprovalRequests) { request in
+                    structuredSessionApprovalRequestView(request, presentation: approvalRequestPresentation)
                 }
             }
         }
@@ -2058,22 +2113,22 @@ private struct RemoteSessionScreenView: View {
     @ViewBuilder
     private func structuredSessionActivityFeed(
         _ screen: SessionScreen,
-        presentation: StructuredSessionPresentation
+        feedPresentation: StructuredSessionFeedPresentation
     ) -> some View {
-        if presentation.feed.activityRows.isEmpty {
+        if feedPresentation.activityRows.isEmpty {
             RemoteUnavailableInsetCard(
-                title: presentation.feed.copy.emptyStateTitle,
-                detail: presentation.feed.copy.emptyStateDescription,
+                title: feedPresentation.copy.emptyStateTitle,
+                detail: feedPresentation.copy.emptyStateDescription,
                 accent: NexusIOSTheme.gold
             )
         } else {
             LazyVStack(spacing: 10) {
-                ForEach(presentation.feed.activityRows) { row in
+                ForEach(feedPresentation.activityRows) { row in
                     structuredSessionActivityRowView(row, screen: screen)
                         .id(row.id)
                 }
 
-                if let thinkingIndicator = presentation.feed.thinkingIndicator {
+                if let thinkingIndicator = feedPresentation.thinkingIndicator {
                     structuredSessionThinkingIndicatorView(thinkingIndicator)
                 }
 
@@ -2258,16 +2313,7 @@ private struct RemoteSessionScreenView: View {
     }
 
     private func structuredSessionMarkdownText(_ text: String, font: Font, color: Color) -> some View {
-        let attributed = (try? AttributedString(
-            markdown: text,
-            options: .init(interpretedSyntax: .full, failurePolicy: .returnPartiallyParsedIfPossible)
-        )) ?? AttributedString(text)
-
-        return Text(attributed)
-            .font(font)
-            .foregroundStyle(color)
-            .textSelection(.enabled)
-            .fixedSize(horizontal: false, vertical: true)
+        StructuredSessionMarkdownText(markdown: text, font: font, color: color)
     }
 
     private func structuredSessionApprovalRequestView(
