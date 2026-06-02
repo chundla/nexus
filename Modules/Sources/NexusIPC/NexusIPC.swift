@@ -182,10 +182,12 @@ public protocol SessionScreenObservationEventClient: NexusServiceClient {
 
 public final class NexusIPCClient: NexusServiceClient, SessionScreenObservationEventClient, @unchecked Sendable {
     private let connection: NSXPCConnection
+    private let listenerEndpoint: NSXPCListenerEndpoint?
     private let sessionScreenObserverBridge: NexusSessionScreenObserverBridge
 
-    private init(connection: NSXPCConnection) {
+    private init(connection: NSXPCConnection, listenerEndpoint: NSXPCListenerEndpoint?) {
         self.connection = connection
+        self.listenerEndpoint = listenerEndpoint
         self.sessionScreenObserverBridge = NexusSessionScreenObserverBridge()
         self.connection.remoteObjectInterface = NSXPCInterface(with: NexusXPCProtocol.self)
         self.connection.exportedInterface = NSXPCInterface(with: NexusSessionScreenObserverXPCProtocol.self)
@@ -198,7 +200,7 @@ public final class NexusIPCClient: NexusServiceClient, SessionScreenObservationE
     }
 
     nonisolated public static func connect(to endpoint: NSXPCListenerEndpoint) throws -> NexusIPCClient {
-        NexusIPCClient(connection: NSXPCConnection(listenerEndpoint: endpoint))
+        NexusIPCClient(connection: NSXPCConnection(listenerEndpoint: endpoint), listenerEndpoint: endpoint)
     }
 
     nonisolated public func getServiceStatus() async throws -> NexusServiceStatus {
@@ -450,11 +452,12 @@ public final class NexusIPCClient: NexusServiceClient, SessionScreenObservationE
         sessionID: UUID,
         onUpdate: @escaping @Sendable (SessionScreenObservationUpdate) -> Void
     ) async throws -> any SessionScreenObservation {
-        let start = try await startSessionScreenObservation(sessionID: sessionID)
+        let observationClient = try makeObservationClient()
+        let start = try await observationClient.startSessionScreenObservation(sessionID: sessionID)
         debugSessionObservationLog("[DEBUG-MACBLANK] observeSessionScreenUpdateEvents start session=\(sessionID.uuidString) observation=\(start.observationID.uuidString) revision=\(start.structuredSnapshot?.revision ?? -1) items=\(start.screen.activityItems.count) providerEvents=\(start.screen.providerEvents.count)")
-        sessionScreenObserverBridge.registerHandler(onUpdate, for: start.observationID)
+        observationClient.sessionScreenObserverBridge.registerHandler(onUpdate, for: start.observationID)
 
-        let latestSnapshot = try await getSessionScreenObservationSnapshot(sessionID: sessionID)
+        let latestSnapshot = try await observationClient.getSessionScreenObservationSnapshot(sessionID: sessionID)
         if let startStructuredRevision = start.structuredSnapshot?.revision,
            let latestStructuredRevision = latestSnapshot.structuredSnapshot?.revision,
            latestStructuredRevision != startStructuredRevision {
@@ -465,17 +468,18 @@ public final class NexusIPCClient: NexusServiceClient, SessionScreenObservationE
             onUpdate(.screen(latestSnapshot.screen))
         }
 
-        return makeObservationHandle(observationID: start.observationID)
+        return observationClient.makeObservationHandle(observationID: start.observationID)
     }
 
     nonisolated public func observeSessionScreen(
         sessionID: UUID,
         onUpdate: @escaping @Sendable (SessionScreen) -> Void
     ) async throws -> any SessionScreenObservation {
-        let start = try await startSessionScreenObservation(sessionID: sessionID)
+        let observationClient = try makeObservationClient()
+        let start = try await observationClient.startSessionScreenObservation(sessionID: sessionID)
         debugSessionObservationLog("[DEBUG-MACBLANK] observeSessionScreen start session=\(sessionID.uuidString) observation=\(start.observationID.uuidString) revision=\(start.structuredSnapshot?.revision ?? -1) items=\(start.screen.activityItems.count) providerEvents=\(start.screen.providerEvents.count) inProgress=\(start.screen.isAgentTurnInProgress)")
         let accumulator = SessionScreenObservationAccumulator(start: start)
-        sessionScreenObserverBridge.registerHandler({ [weak self] update in
+        observationClient.sessionScreenObserverBridge.registerHandler({ update in
             debugSessionObservationLog("[DEBUG-MACBLANK] observeSessionScreen update session=\(sessionID.uuidString) observation=\(start.observationID.uuidString) kind=\(debugObservationSummary(update))")
             do {
                 if let screen = try accumulator.apply(update) {
@@ -486,12 +490,8 @@ public final class NexusIPCClient: NexusServiceClient, SessionScreenObservationE
                 }
             } catch is SessionScreenObservationGapError {
                 debugSessionObservationLog("[DEBUG-MACBLANK] observeSessionScreen gap session=\(sessionID.uuidString) observation=\(start.observationID.uuidString) currentRevision=\(accumulator.currentStructuredRevision ?? -1)")
-                guard let self else {
-                    return
-                }
-
                 Task {
-                    guard let latestSnapshot = try? await self.getSessionScreenObservationSnapshot(sessionID: sessionID) else {
+                    guard let latestSnapshot = try? await observationClient.getSessionScreenObservationSnapshot(sessionID: sessionID) else {
                         debugSessionObservationLog("[DEBUG-MACBLANK] observeSessionScreen gap snapshot fetch failed session=\(sessionID.uuidString) observation=\(start.observationID.uuidString)")
                         return
                     }
@@ -507,14 +507,14 @@ public final class NexusIPCClient: NexusServiceClient, SessionScreenObservationE
         debugSessionObservationLog("[DEBUG-MACBLANK] observeSessionScreen emit start screen session=\(sessionID.uuidString) observation=\(start.observationID.uuidString) items=\(start.screen.activityItems.count) providerEvents=\(start.screen.providerEvents.count)")
         onUpdate(start.screen)
 
-        let latestSnapshot = try await getSessionScreenObservationSnapshot(sessionID: sessionID)
+        let latestSnapshot = try await observationClient.getSessionScreenObservationSnapshot(sessionID: sessionID)
         if latestSnapshot.screen != accumulator.currentScreen {
             let screen = accumulator.replace(with: latestSnapshot)
             debugSessionObservationLog("[DEBUG-MACBLANK] observeSessionScreen emit latest snapshot session=\(sessionID.uuidString) observation=\(start.observationID.uuidString) revision=\(latestSnapshot.structuredSnapshot?.revision ?? -1) items=\(screen.activityItems.count) providerEvents=\(screen.providerEvents.count)")
             onUpdate(screen)
         }
 
-        return makeObservationHandle(observationID: start.observationID)
+        return observationClient.makeObservationHandle(observationID: start.observationID)
     }
 
     nonisolated public func sendSessionInput(sessionID: UUID, text: String) async throws -> SessionScreen {
@@ -687,6 +687,17 @@ public final class NexusIPCClient: NexusServiceClient, SessionScreenObservationE
         try await requestDecodable { proxy, reply in
             proxy.observeSessionScreen(sessionID: sessionID.uuidString, reply: reply)
         }
+    }
+
+    private nonisolated func makeObservationClient() throws -> NexusIPCClient {
+        guard let listenerEndpoint else {
+            throw CocoaError(.coderInvalidValue)
+        }
+
+        return NexusIPCClient(
+            connection: NSXPCConnection(listenerEndpoint: listenerEndpoint),
+            listenerEndpoint: listenerEndpoint
+        )
     }
 
     private nonisolated func makeObservationHandle(
