@@ -1346,6 +1346,101 @@ struct RemoteClientPairingModelTests {
         await focusTask.value
     }
 
+    @Test func focusRemoteSessionKeepsSlowObservationStartupAliveLongEnoughToReceiveUpdates() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: UUID()
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let initialScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [SessionActivityItem(kind: .status, text: "Pi shared Session stream connected")]
+        )
+        let updatedScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "You: list files\nPi: Done",
+            activityItems: [
+                SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"),
+                SessionActivityItem(kind: .message, text: "You: list files"),
+                SessionActivityItem(kind: .message, text: "Pi: Done")
+            ]
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let observationStartGate = AsyncGate()
+        let client = StubRemotePairingClient(
+            result: pairedMac,
+            sessionScreen: initialScreen,
+            emitsInitialObservedScreen: false,
+            observeSessionStartGate: observationStartGate
+        )
+        let model = RemoteClientPairingModel(
+            client: client,
+            store: store,
+            focusedSessionObservationStartupTimeoutNanoseconds: 2_000_000_000
+        )
+
+        let focusTask = Task {
+            await model.focusRemoteSession(sessionID: session.id)
+        }
+
+        for _ in 0 ..< 20 {
+            if model.focusedSessionScreen == initialScreen {
+                break
+            }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        #expect(model.focusedSessionScreen == initialScreen)
+        #expect(client.requestLog == [
+            "observeSessionScreen",
+            "fetchSessionScreen"
+        ])
+
+        try await Task.sleep(nanoseconds: 1_100_000_000)
+        await observationStartGate.open()
+        await focusTask.value
+        await client.emitObservedScreen(updatedScreen)
+
+        for _ in 0 ..< 20 {
+            if model.focusedSessionScreen == updatedScreen {
+                break
+            }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        #expect(model.focusedSessionScreen == updatedScreen)
+        #expect(client.requestLog == [
+            "observeSessionScreen",
+            "fetchSessionScreen"
+        ])
+    }
+
     @Test func forgetsRevokedPairedMacAfterUnauthorizedObservedSessionDisconnect() async throws {
         let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

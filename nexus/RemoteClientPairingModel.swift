@@ -164,6 +164,7 @@ final class RemoteClientPairingModel {
 
     private let client: any RemotePairingClient
     private let store: any PairedMacStore
+    private let focusedSessionObservationStartupTimeoutNanoseconds: UInt64
     private var focusedSessionObservation: (any SessionScreenObservation)?
     private var focusedSessionObservationStartupTask: Task<Void, Never>?
     private var focusedSessionReconnectTask: Task<Void, Never>?
@@ -192,9 +193,14 @@ final class RemoteClientPairingModel {
         return sessionSurfaceSupport(for: focusedSessionScreen, on: .remoteClient)
     }
 
-    init(client: any RemotePairingClient, store: any PairedMacStore) {
+    init(
+        client: any RemotePairingClient,
+        store: any PairedMacStore,
+        focusedSessionObservationStartupTimeoutNanoseconds: UInt64 = 5_000_000_000
+    ) {
         self.client = client
         self.store = store
+        self.focusedSessionObservationStartupTimeoutNanoseconds = focusedSessionObservationStartupTimeoutNanoseconds
         self.pairedMacs = store.loadPairedMacs()
         self.activePairedMacID = Self.resolveActivePairedMacID(
             preferredID: store.loadActivePairedMacID(),
@@ -1102,7 +1108,7 @@ final class RemoteClientPairingModel {
                 try await observationTask.value
             }
             group.addTask {
-                try await Task.sleep(nanoseconds: 1_000_000_000)
+                try await Task.sleep(nanoseconds: self.focusedSessionObservationStartupTimeoutNanoseconds)
                 observationTask.cancel()
                 throw RemoteClientPairingModelError.sessionObservationTimedOut
             }
