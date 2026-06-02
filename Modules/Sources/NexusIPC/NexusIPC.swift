@@ -728,13 +728,32 @@ public final class NexusIPCClient: NexusServiceClient, SessionScreenObservationE
     }
 }
 
-private final class NexusSessionScreenObserverBridge: NSObject, NexusSessionScreenObserverXPCProtocol {
+final class NexusSessionScreenObserverBridge: NSObject, NexusSessionScreenObserverXPCProtocol, @unchecked Sendable {
+    private final class HandlerRegistration: @unchecked Sendable {
+        let queue: DispatchQueue
+        let handler: @Sendable (SessionScreenObservationUpdate) -> Void
+
+        init(observationID: UUID, handler: @escaping @Sendable (SessionScreenObservationUpdate) -> Void) {
+            self.queue = DispatchQueue(label: "NexusSessionScreenObserverBridge.\(observationID.uuidString)")
+            self.handler = handler
+        }
+
+        func deliver(_ payload: Data) {
+            queue.async { [handler] in
+                guard let update = try? JSONDecoder().decode(SessionScreenObservationUpdate.self, from: payload) else {
+                    return
+                }
+                handler(update)
+            }
+        }
+    }
+
     private let lock = NSLock()
-    private var handlers: [UUID: @Sendable (SessionScreenObservationUpdate) -> Void] = [:]
+    private var handlers: [UUID: HandlerRegistration] = [:]
 
     func registerHandler(_ handler: @escaping @Sendable (SessionScreenObservationUpdate) -> Void, for observationID: UUID) {
         lock.lock()
-        handlers[observationID] = handler
+        handlers[observationID] = HandlerRegistration(observationID: observationID, handler: handler)
         lock.unlock()
     }
 
@@ -749,21 +768,12 @@ private final class NexusSessionScreenObserverBridge: NSObject, NexusSessionScre
             return
         }
 
-        let handler: (@Sendable (SessionScreenObservationUpdate) -> Void)?
+        let registration: HandlerRegistration?
         lock.lock()
-        handler = handlers[observationID]
+        registration = handlers[observationID]
         lock.unlock()
 
-        guard let handler else {
-            return
-        }
-
-        do {
-            let update = try JSONDecoder().decode(SessionScreenObservationUpdate.self, from: payload)
-            handler(update)
-        } catch {
-            return
-        }
+        registration?.deliver(payload)
     }
 }
 

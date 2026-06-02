@@ -54,7 +54,7 @@ let package = Package(
         ),
         .testTarget(
             name: "NexusServiceTests",
-            dependencies: ["NexusService"]
+            dependencies: ["NexusService", "NexusIPC"]
         )
     ]
 )
