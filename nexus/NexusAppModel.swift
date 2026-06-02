@@ -436,7 +436,7 @@ final class NexusAppModel {
         }
 
         let screen = try await client.sendSessionInput(sessionID: sessionID, text: text)
-        focusedSessionScreen = screen
+        try await applyFocusedSessionActionResponse(screen)
     }
 
     func sendTypedTextToFocusedSession(_ text: String) async throws {
@@ -445,7 +445,7 @@ final class NexusAppModel {
         }
 
         let screen = try await client.sendSessionText(sessionID: sessionID, text: text)
-        focusedSessionScreen = screen
+        try await applyFocusedSessionActionResponse(screen)
     }
 
     func sendInputKeyToFocusedSession(_ key: SessionInputKey) async throws {
@@ -454,7 +454,7 @@ final class NexusAppModel {
         }
 
         let screen = try await client.sendSessionInputKey(sessionID: sessionID, key: key)
-        focusedSessionScreen = screen
+        try await applyFocusedSessionActionResponse(screen)
     }
 
     func respondToFocusedSessionApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision) async throws {
@@ -467,7 +467,7 @@ final class NexusAppModel {
             approvalRequestID: approvalRequestID,
             decision: decision
         )
-        focusedSessionScreen = screen
+        try await applyFocusedSessionActionResponse(screen)
     }
 
     func respondToFocusedSessionExtensionDialog(_ dialogID: String, response: SessionExtensionUIDialogResponse) async throws {
@@ -480,7 +480,7 @@ final class NexusAppModel {
             dialogID: dialogID,
             response: response
         )
-        focusedSessionScreen = screen
+        try await applyFocusedSessionActionResponse(screen)
     }
 
     func resizeFocusedSession(columns: Int, rows: Int) async throws {
@@ -489,7 +489,7 @@ final class NexusAppModel {
         }
 
         let screen = try await client.resizeSession(sessionID: sessionID, columns: columns, rows: rows)
-        focusedSessionScreen = screen
+        try await applyFocusedSessionActionResponse(screen)
     }
 
     func loadRecentNavigation() async throws {
@@ -656,6 +656,18 @@ final class NexusAppModel {
         }
 
         try await refreshProviderDetail(workspaceID: workspaceID, providerID: providerID)
+    }
+
+    private func applyFocusedSessionActionResponse(_ screen: SessionScreen) async throws {
+        guard focusedSessionScreen?.session.id == screen.session.id else {
+            return
+        }
+
+        guard focusedSessionObservation == nil else {
+            return
+        }
+
+        try await applyFocusedSessionScreen(screen)
     }
 
     private func applyFocusedSessionScreen(_ screen: SessionScreen) async throws {

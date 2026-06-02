@@ -8008,6 +8008,101 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelSendInputDoesNotClobberNewerObservedStructuredScreenWithStaleActionResponse() async throws {
+        actor ReturnGate {
+            private var continuation: CheckedContinuation<Void, Never>?
+
+            func wait() async {
+                await withCheckedContinuation { continuation in
+                    self.continuation = continuation
+                }
+            }
+
+            func open() {
+                continuation?.resume()
+                continuation = nil
+            }
+        }
+
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let prompt = "What files are in this folder?"
+        let initialScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [SessionActivityItem(kind: .status, text: "Pi shared Session stream connected")]
+        )
+        let observedCompletedScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"),
+                SessionActivityItem(kind: .message, text: "You: \(prompt)"),
+                SessionActivityItem(kind: .message, text: "Pi: README.md\nSources\nTests")
+            ],
+            isAgentTurnInProgress: false
+        )
+        let staleActionResponseScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"),
+                SessionActivityItem(kind: .message, text: "You: \(prompt)")
+            ],
+            isAgentTurnInProgress: true
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []),
+            session: session,
+            screen: initialScreen
+        )
+        let returnGate = ReturnGate()
+        client.sendSessionInputHandler = { [weak client] _, _ in
+            guard let client else {
+                return staleActionResponseScreen
+            }
+
+            await client.emitObservedScreen(observedCompletedScreen)
+            await returnGate.wait()
+            return staleActionResponseScreen
+        }
+        let model = NexusAppModel(client: client)
+
+        try await model.focusSession(sessionID: session.id)
+
+        let sendTask = Task {
+            try await model.sendInputToFocusedSession(prompt)
+        }
+
+        let observedScreen = try await waitForObservedFocusedSessionScreen(model: model) { screen in
+            screen == observedCompletedScreen
+        }
+        #expect(observedScreen.isAgentTurnInProgress == false)
+
+        await returnGate.open()
+        try await sendTask.value
+
+        #expect(model.focusedSessionScreen == observedCompletedScreen)
+        #expect(model.focusedSessionScreen?.isAgentTurnInProgress == false)
+    }
+
+    @MainActor
     @Test func appModelRespondsToFocusedSessionApprovalRequestThroughServiceClient() async throws {
         let group = WorkspaceGroup(id: UUID(), name: "Group")
         let workspace = Workspace(
@@ -9117,6 +9212,8 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
     private let workspaceOverviewBatchLoader: (@Sendable ([UUID]) async throws -> [WorkspaceOverview])?
     private var observedScreenHandlers: [UUID: @Sendable (SessionScreen) -> Void] = [:]
 
+    var sendSessionInputHandler: (@Sendable (UUID, String) async throws -> SessionScreen)?
+
     var workspaceOverviewRequestCount = 0
     var workspaceOverviewBatchRequestCount = 0
     var refreshWorkspaceOverviewRequestCount = 0
@@ -9555,6 +9652,10 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
     }
 
     func sendSessionInput(sessionID: UUID, text: String) async throws -> SessionScreen {
+        if let sendSessionInputHandler {
+            return try await sendSessionInputHandler(sessionID, text)
+        }
+
         screenValue = SessionScreen(session: sessionValue, transcript: screenValue.transcript + "\n> \(text)")
         return screenValue
     }
