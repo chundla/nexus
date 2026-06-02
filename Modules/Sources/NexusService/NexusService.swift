@@ -4369,12 +4369,8 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol, @unchecked Senda
     func observeSessionScreen(sessionID: String, reply: @escaping (Data?, NSString?) -> Void) {
         sendReply(
             with: {
-                guard let observer = connection.remoteObjectProxyWithErrorHandler({ _ in }) as? NexusSessionScreenObserverXPCProtocol else {
-                    throw CocoaError(.coderInvalidValue)
-                }
-
                 let observationID = UUID()
-                let screenObserver = SessionScreenObserverProxy(observer: observer, observationID: observationID)
+                let screenObserver = SessionScreenObserverProxy(connection: connection, observationID: observationID)
                 let start = try service.observeSessionScreen(observationID: observationID, sessionID: resolveUUID(sessionID)) { update in
                     screenObserver.send(update)
                 }
@@ -4648,16 +4644,22 @@ private struct AsyncEncodedReplyOperation<T: Encodable>: @unchecked Sendable {
 }
 
 private final class SessionScreenObserverProxy: @unchecked Sendable {
-    private let observer: any NexusSessionScreenObserverXPCProtocol
+    private let connection: NSXPCConnection
     private let observationID: UUID
 
-    init(observer: any NexusSessionScreenObserverXPCProtocol, observationID: UUID) {
-        self.observer = observer
+    init(connection: NSXPCConnection, observationID: UUID) {
+        self.connection = connection
         self.observationID = observationID
     }
 
     func send(_ update: SessionScreenObservationUpdate) {
         guard let payload = try? JSONEncoder().encode(update) else {
+            return
+        }
+        guard let observer = connection.remoteObjectProxyWithErrorHandler({ error in
+            NSLog("[DEBUG-MACBLANK] service proxy send failed observation=%@ error=%@", self.observationID.uuidString, String(describing: error))
+        }) as? NexusSessionScreenObserverXPCProtocol else {
+            NSLog("[DEBUG-MACBLANK] service proxy unavailable observation=%@", observationID.uuidString)
             return
         }
 
