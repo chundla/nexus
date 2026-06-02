@@ -8147,6 +8147,104 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelRefreshesFocusedSessionAfterObservationAdvancesBeforeActionResponseReturns() async throws {
+        actor ReturnGate {
+            private var continuation: CheckedContinuation<Void, Never>?
+
+            func wait() async {
+                await withCheckedContinuation { continuation in
+                    self.continuation = continuation
+                }
+            }
+
+            func open() {
+                continuation?.resume()
+                continuation = nil
+            }
+        }
+
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let prompt = "What files are in this folder?"
+        let initialScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [SessionActivityItem(kind: .status, text: "Pi shared Session stream connected")]
+        )
+        let observedThinkingScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"),
+                SessionActivityItem(kind: .message, text: "You: \(prompt)")
+            ],
+            isAgentTurnInProgress: true
+        )
+        let finalActionResponseScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"),
+                SessionActivityItem(kind: .message, text: "You: \(prompt)"),
+                SessionActivityItem(kind: .message, text: "Pi: README.md\nSources\nTests")
+            ],
+            isAgentTurnInProgress: false
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []),
+            session: session,
+            screen: initialScreen
+        )
+        client.getSessionScreenHandler = { _ in
+            finalActionResponseScreen
+        }
+        let returnGate = ReturnGate()
+        client.sendSessionInputHandler = { [weak client] _, _ in
+            guard let client else {
+                return finalActionResponseScreen
+            }
+
+            await client.emitObservedScreen(observedThinkingScreen)
+            await returnGate.wait()
+            return finalActionResponseScreen
+        }
+        let model = NexusAppModel(client: client)
+
+        try await model.focusSession(sessionID: session.id)
+
+        let sendTask = Task {
+            try await model.sendInputToFocusedSession(prompt)
+        }
+
+        let observedThinking = try await waitForObservedFocusedSessionScreen(model: model) { screen in
+            screen == observedThinkingScreen
+        }
+        #expect(observedThinking.isAgentTurnInProgress)
+
+        await returnGate.open()
+        try await sendTask.value
+
+        #expect(model.focusedSessionScreen == finalActionResponseScreen)
+        #expect(model.focusedSessionScreen?.isAgentTurnInProgress == false)
+    }
+
+    @MainActor
     @Test func appModelAppliesClearActionResponseWhenObservationHasNotAdvancedYet() async throws {
         let group = WorkspaceGroup(id: UUID(), name: "Group")
         let workspace = Workspace(
@@ -9307,6 +9405,7 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
     private let workspaceOverviewBatchLoader: (@Sendable ([UUID]) async throws -> [WorkspaceOverview])?
     private var observedScreenHandlers: [UUID: @Sendable (SessionScreen) -> Void] = [:]
 
+    var getSessionScreenHandler: (@Sendable (UUID) async throws -> SessionScreen)?
     var sendSessionInputHandler: (@Sendable (UUID, String) async throws -> SessionScreen)?
 
     var workspaceOverviewRequestCount = 0
@@ -9724,6 +9823,10 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
     }
 
     func getSessionScreen(sessionID: UUID) async throws -> SessionScreen {
+        if let getSessionScreenHandler {
+            return try await getSessionScreenHandler(sessionID)
+        }
+
         guard sessionValue.id == sessionID else {
             throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Session not found"])
         }

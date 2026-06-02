@@ -662,11 +662,61 @@ final class NexusAppModel {
         _ screen: SessionScreen,
         ifCurrentScreenMatches baselineScreen: SessionScreen
     ) async throws {
-        guard focusedSessionScreen == baselineScreen else {
+        guard let currentScreen = focusedSessionScreen,
+              currentScreen.session.id == baselineScreen.session.id else {
+            return
+        }
+
+        if currentScreen == baselineScreen {
+            try await applyFocusedSessionScreen(screen)
+            return
+        }
+
+        if let refreshedScreen = try? await client.getSessionScreen(sessionID: currentScreen.session.id) {
+            guard focusedSessionScreen?.session.id == currentScreen.session.id else {
+                return
+            }
+
+            try await applyFocusedSessionScreen(refreshedScreen)
+            return
+        }
+
+        guard actionResponseAppearsToAdvanceFocusedSession(screen, beyond: currentScreen) else {
             return
         }
 
         try await applyFocusedSessionScreen(screen)
+    }
+
+    private func actionResponseAppearsToAdvanceFocusedSession(
+        _ candidateScreen: SessionScreen,
+        beyond currentScreen: SessionScreen
+    ) -> Bool {
+        guard candidateScreen.session.id == currentScreen.session.id else {
+            return false
+        }
+
+        if candidateScreen == currentScreen {
+            return true
+        }
+
+        if currentScreen.isAgentTurnInProgress, candidateScreen.isAgentTurnInProgress == false {
+            return true
+        }
+
+        if candidateScreen.activityItems.count > currentScreen.activityItems.count {
+            return true
+        }
+
+        if candidateScreen.transcript.count > currentScreen.transcript.count {
+            return true
+        }
+
+        if candidateScreen.providerEvents.count > currentScreen.providerEvents.count {
+            return true
+        }
+
+        return false
     }
 
     private func applyFocusedSessionScreen(_ screen: SessionScreen) async throws {
