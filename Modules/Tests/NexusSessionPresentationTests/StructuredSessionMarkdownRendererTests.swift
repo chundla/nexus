@@ -36,4 +36,48 @@ struct StructuredSessionMarkdownRendererTests {
         #expect(String(second.characters) == "rendered: **bold**")
         #expect(parseCallCount == 1)
     }
+
+    @Test func rendererEvictsLeastRecentlyUsedMarkdownWhenCacheLimitIsReached() {
+        var parseCallCount = 0
+        let renderer = StructuredSessionMarkdownRenderer(
+            cacheLimit: 2,
+            parser: { text in
+                parseCallCount += 1
+                return AttributedString("rendered: \(text)")
+            }
+        )
+
+        _ = renderer.render("**first**")
+        _ = renderer.render("**second**")
+        _ = renderer.render("**first**")
+        _ = renderer.render("**third**")
+        _ = renderer.render("**second**")
+
+        #expect(parseCallCount == 4)
+    }
+
+    @Test func rendererTracksCacheAndParseMetrics() {
+        var parseCallCount = 0
+        let renderer = StructuredSessionMarkdownRenderer(
+            cacheLimit: 2,
+            parser: { text in
+                parseCallCount += 1
+                return AttributedString("rendered: \(text)")
+            }
+        )
+
+        renderer.resetMetrics()
+        _ = renderer.render("plain text")
+        _ = renderer.render("**bold**")
+        _ = renderer.render("**bold**")
+
+        let metrics = renderer.metricsSnapshot()
+
+        #expect(parseCallCount == 1)
+        #expect(metrics.plainTextBypassCount == 1)
+        #expect(metrics.parseCount == 1)
+        #expect(metrics.cacheHitCount == 1)
+        #expect(metrics.cacheMissCount == 1)
+        #expect(metrics.cachedEntryCount == 1)
+    }
 }
