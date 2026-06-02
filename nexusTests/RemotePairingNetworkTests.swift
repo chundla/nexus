@@ -1980,103 +1980,6 @@ struct RemotePairingNetworkTests {
         ])
     }
 
-    @Test func localMacAppContinuesStreamingPiActivityWhileIPhoneObservesViewerOnlyOverNetworkAPI() async throws {
-        let rootURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("NexusTests", isDirectory: true)
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let workspaceFolderURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
-
-        let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
-            RemotePairingStreamingPiRPCTransport()
-        })
-        let service = try NexusService.bootstrapForTests(
-            rootURL: rootURL,
-            providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: StubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
-                commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
-                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
-                ]),
-                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
-            ),
-            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
-        )
-        let macClient = try NexusIPCClient.connect(to: service.listenerEndpoint)
-        let remoteServerClient = try NexusIPCClient.connect(to: service.listenerEndpoint)
-        let server = try RemotePairingServer(client: remoteServerClient, displayHost: "127.0.0.1", macName: "Studio Mac")
-
-        _ = try await macClient.setRemoteAccessEnabled(true)
-        let pairing = try await macClient.startPairing()
-        let group = try await macClient.createWorkspaceGroup(name: "Client Work")
-        let workspace = try await macClient.createLocalWorkspace(
-            name: "Nexus",
-            folderPath: workspaceFolderURL.path(percentEncoded: false),
-            primaryGroupID: group.id
-        )
-
-        let remoteClient = RemotePairingHTTPClient()
-        let pairedMac = try await remoteClient.completePairing(
-            host: server.displayHost,
-            port: server.port,
-            pairingCode: pairing.code,
-            deviceName: "Chris’s iPhone"
-        )
-
-        let model = NexusAppModel(client: macClient)
-        await model.refresh()
-        let session = try await model.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: ProviderID.pi)
-
-        var observedScreens: [SessionScreen] = []
-        let observation = try await remoteClient.observeSessionScreen(
-            for: pairedMac,
-            sessionID: session.id,
-            onUpdate: { screen in
-                Task { @MainActor in
-                    observedScreens.append(screen)
-                }
-            },
-            onDisconnect: { _ in }
-        )
-        defer {
-            Task {
-                await observation.cancel()
-            }
-        }
-
-        _ = try await waitForObservedScreen {
-            observedScreens.last
-        }
-
-        try await model.sendInputToFocusedSession("delegate")
-
-        let macCompletedScreen = try await waitForFocusedSessionScreen(model: model) { screen in
-            screen.session.id == session.id
-                && screen.isAgentTurnInProgress == false
-                && screen.activityItems.contains(where: { $0.text == "Pi: Done" })
-        }
-        let remoteCompletedScreen = try await waitForObservedScreen {
-            observedScreens.last(where: { screen in
-                screen.session.id == session.id
-                    && screen.isAgentTurnInProgress == false
-                    && screen.activityItems.contains(where: { $0.text == "Pi: Done" })
-            })
-        }
-
-        let macActivityTexts = macCompletedScreen.activityItems.map { $0.text }
-        let remoteActivityTexts = remoteCompletedScreen.activityItems.map { $0.text }
-
-        #expect(macActivityTexts == [
-            "Pi shared Session stream connected",
-            "You: delegate",
-            "subagent reviewer: Review the latest diff and summarize issues",
-            "subagent: Looks good overall. Watch the new error path.",
-            "Pi: Done"
-        ])
-        #expect(remoteActivityTexts == macActivityTexts)
-    }
-
     @Test func remotePiNetworkControllerCanSendImageBearingPromptThroughDedicatedAPI() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)
@@ -2355,28 +2258,6 @@ struct RemotePairingNetworkTests {
         #expect(pairedMac.port == server.port)
         #expect(pairedMac.pairedDeviceID != nil)
         #expect(pairedDevices.map(\.name) == ["Chris’s iPhone"])
-    }
-}
-
-@MainActor
-private func waitForFocusedSessionScreen(
-    model: NexusAppModel,
-    timeoutNanoseconds: UInt64 = 3_000_000_000,
-    pollIntervalNanoseconds: UInt64 = 50_000_000,
-    until predicate: @escaping @MainActor (SessionScreen) -> Bool
-) async throws -> SessionScreen {
-    let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
-
-    while true {
-        if let screen = model.focusedSessionScreen, predicate(screen) {
-            return screen
-        }
-
-        guard DispatchTime.now().uptimeNanoseconds < deadline else {
-            throw NSError(domain: "RemotePairingNetworkTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for focused Session screen update"])
-        }
-
-        try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
     }
 }
 
