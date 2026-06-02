@@ -704,6 +704,7 @@ public final class NexusIPCClient: NexusServiceClient, SessionScreenObservationE
         observationID: UUID
     ) -> NexusSessionScreenObservationHandle {
         NexusSessionScreenObservationHandle(
+            owner: self,
             observationID: observationID,
             observerBridge: sessionScreenObserverBridge
         ) { [weak self] observationID in
@@ -836,16 +837,19 @@ private func debugActivitySummary(_ item: SessionActivityItem?) -> String {
 }
 
 private final class NexusSessionScreenObservationHandle: SessionScreenObservation, @unchecked Sendable {
+    private let owner: NexusIPCClient
     private let observationID: UUID
     private let observerBridge: NexusSessionScreenObserverBridge
     private let cancelRemote: @Sendable (UUID) async -> Void
     private let cancellationState = ObservationCancellationState()
 
     init(
+        owner: NexusIPCClient,
         observationID: UUID,
         observerBridge: NexusSessionScreenObserverBridge,
         cancelRemote: @escaping @Sendable (UUID) async -> Void
     ) {
+        self.owner = owner
         self.observationID = observationID
         self.observerBridge = observerBridge
         self.cancelRemote = cancelRemote
