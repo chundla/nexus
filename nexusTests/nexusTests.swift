@@ -6889,7 +6889,10 @@ struct nexusTests {
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
         let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
-            DelayedPromptNexusTestsPiRPCTransport(promptResponseText: "README.md\nSources\nTests")
+            DelayedPromptNexusTestsPiRPCTransport(
+                promptResponseText: "README.md\nSources\nTests",
+                delayNanoseconds: 1_000_000_000
+            )
         })
 
         let service = try NexusService.bootstrapForTests(

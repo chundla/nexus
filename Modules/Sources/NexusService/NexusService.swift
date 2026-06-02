@@ -57,6 +57,7 @@ protocol SessionRuntimeManaging: AnyObject {
     func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) async throws
     func stop(session: Session) throws
     func remove(session: Session)
+    func remove(session: Session, preservingObservers: Bool)
     func hasRuntime(for session: Session) -> Bool
     func runtimeState(for session: Session) -> Session.State?
     func sessionRecordAdapterMetadata(for session: Session) -> SessionRecordAdapterMetadata?
@@ -311,6 +312,13 @@ enum NexusSessionExtensionUIError: LocalizedError {
     }
 }
 
+extension SessionRuntimeManaging {
+    func remove(session: Session, preservingObservers: Bool) {
+        _ = preservingObservers
+        remove(session: session)
+    }
+}
+
 final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Sendable {
     private let launcher: any SessionRuntimeLaunching
     private let lock = NSLock()
@@ -367,13 +375,19 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Se
     }
 
     func remove(session: Session) {
+        remove(session: session, preservingObservers: false)
+    }
+
+    func remove(session: Session, preservingObservers: Bool) {
         lock.lock()
         let removedObserverCount = updateObservers[session.id]?.count ?? 0
         runtimes.removeValue(forKey: session.id)?.setChangeHandler(nil)
-        updateObservers.removeValue(forKey: session.id)
-        observedSessionIDs = observedSessionIDs.filter { $0.value != session.id }
+        if preservingObservers == false {
+            updateObservers.removeValue(forKey: session.id)
+            observedSessionIDs = observedSessionIDs.filter { $0.value != session.id }
+        }
         lock.unlock()
-        nexusDebug9C1F("runtimeManager remove session=\(session.id) removedObservers=\(removedObserverCount)")
+        nexusDebug9C1F("runtimeManager remove session=\(session.id) preservingObservers=\(preservingObservers) removedObservers=\(removedObserverCount)")
     }
 
     func hasRuntime(for session: Session) -> Bool {
@@ -1957,7 +1971,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         nexusDebug9C1F("resetPiSession start session=\(resolvedSession.id) hasRuntime=\(sessionRuntimeManager.hasRuntime(for: resolvedSession))")
 
         if sessionRuntimeManager.hasRuntime(for: resolvedSession) {
-            sessionRuntimeManager.remove(session: resolvedSession)
+            sessionRuntimeManager.remove(session: resolvedSession, preservingObservers: true)
         }
 
         try sessionRecordStore.deleteSessionRecordAdapterMetadata(sessionID: resolvedSession.id)
