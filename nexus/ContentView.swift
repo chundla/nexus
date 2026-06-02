@@ -27,22 +27,6 @@ struct ContentView: View {
 
     private let terminalLayout = TerminalViewportLayout.live
 
-    private func debugStructuredSessionFeed(_ label: String, screen: SessionScreen, rowCount: Int) {
-        guard NexusAppModel.focusedSessionDebugLoggingEnabled() else {
-            return
-        }
-
-        let lastRow = rowCount > 0
-            ? structuredSessionConversationPresentation(
-                for: structuredSessionActivityRows(for: screen)[rowCount - 1],
-                screen: screen
-            ).text.replacingOccurrences(of: "\n", with: "\\n")
-            : "<none>"
-        print(
-            "NEXUS_DEBUG_FOCUSED_SESSION structuredSessionFeed \(label) session=\(screen.session.id) surface=\(screen.primarySurface.rawValue) rowCount=\(rowCount) itemCount=\(screen.activityItems.count) lastRow=\(lastRow)"
-        )
-    }
-
     var body: some View {
         ZStack {
             NexusBackdrop()
@@ -1663,15 +1647,6 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .nexusPanel(tint: NexusMacTheme.teal, radius: 22)
-        .onAppear {
-            debugStructuredSessionFeed("appear", screen: screen, rowCount: presentation.feed.activityRows.count)
-        }
-        .onChange(of: presentation.feed.activityRows.count) { _, newValue in
-            debugStructuredSessionFeed("rowsChanged", screen: screen, rowCount: newValue)
-        }
-        .onChange(of: screen.activityItems.last?.id) { _, _ in
-            debugStructuredSessionFeed("lastItemChanged", screen: screen, rowCount: presentation.feed.activityRows.count)
-        }
     }
 
     @ViewBuilder

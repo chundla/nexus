@@ -87,13 +87,6 @@ final class NexusAppModel {
         return defaultRemoteAccessListeningPort
     }
 
-    nonisolated static func focusedSessionDebugLoggingEnabled(
-        environment: [String: String] = ProcessInfo.processInfo.environment,
-        arguments: [String] = ProcessInfo.processInfo.arguments
-    ) -> Bool {
-        environment["NEXUS_DEBUG_FOCUSED_SESSION"] == "1" || arguments.contains("--nexus-debug-focused-session")
-    }
-
     static func live(listeningPort: Int? = 9234) throws -> NexusAppModel {
         let service = try NexusEmbeddedServiceBootstrap.bootstrap()
         let listenerEndpoint = service.listenerEndpoint
@@ -444,7 +437,6 @@ final class NexusAppModel {
 
         let screen = try await client.sendSessionInput(sessionID: sessionID, text: text)
         focusedSessionScreen = screen
-        debugFocusedSessionEvent("sendInputToFocusedSession response", screen: screen)
     }
 
     func sendTypedTextToFocusedSession(_ text: String) async throws {
@@ -670,10 +662,6 @@ final class NexusAppModel {
         let previousScreen = focusedSessionScreen?.session.id == screen.session.id ? focusedSessionScreen : nil
         let previousState = previousScreen?.session.state
         focusedSessionScreen = screen
-        debugFocusedSessionEvent(
-            "applyFocusedSessionScreen previousCount=\(previousScreen?.activityItems.count ?? -1)",
-            screen: screen
-        )
 
         if previousScreen?.extensionUI?.editorText != screen.extensionUI?.editorText,
            let editorText = screen.extensionUI?.editorText {
@@ -687,17 +675,6 @@ final class NexusAppModel {
                 providerID: screen.session.providerID
             )
         }
-    }
-
-    private func debugFocusedSessionEvent(_ label: String, screen: SessionScreen) {
-        guard Self.focusedSessionDebugLoggingEnabled() else {
-            return
-        }
-
-        let lastItem = screen.activityItems.last?.text.replacingOccurrences(of: "\n", with: "\\n") ?? "<none>"
-        print(
-            "NEXUS_DEBUG_FOCUSED_SESSION \(label) session=\(screen.session.id) state=\(screen.session.state.rawValue) surface=\(screen.primarySurface.rawValue) activityCount=\(screen.activityItems.count) inProgress=\(screen.isAgentTurnInProgress) lastItem=\(lastItem)"
-        )
     }
 }
 
