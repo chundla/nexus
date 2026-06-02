@@ -6883,6 +6883,112 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelPiSessionContinuesObservingUpdatesAfterClearThenPrompt() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
+            DelayedPromptNexusTestsPiRPCTransport(promptResponseText: "README.md\nSources\nTests")
+        })
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthFacts(
+                executableResolver: StubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
+                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                ]),
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+            ),
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+        _ = try await model.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+        try await model.sendInputToFocusedSession("/clear")
+        try await model.sendInputToFocusedSession("What files are in this folder?")
+
+        let finalScreen = try await waitForObservedFocusedSessionScreen(model: model) { screen in
+            screen.isAgentTurnInProgress == false
+                && screen.activityItems.contains(where: { $0.text == "Pi: README.md\nSources\nTests" })
+        }
+
+        #expect(finalScreen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "You: What files are in this folder?",
+            "Pi: README.md\nSources\nTests"
+        ])
+    }
+
+    @MainActor
+    @Test func appModelReconnectedPiSessionStreamsToolActivityAfterClearThenPrompt() async throws {
+        let workspaceFolderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
+            StreamingNexusTestsPiRPCTransport()
+        })
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthFacts(
+                executableResolver: StubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
+                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                ]),
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+            ),
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+        )
+
+        let firstClient = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        _ = try await firstClient.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await firstClient.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: nil
+        )
+        let session = try await firstClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+
+        let secondClient = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        let model = NexusAppModel(client: secondClient)
+        await model.refresh()
+        try await model.focusSession(sessionID: session.id)
+        try await model.sendInputToFocusedSession("/clear")
+        try await model.sendInputToFocusedSession("delegate")
+
+        let finalScreen = try await waitForObservedFocusedSessionScreen(model: model) { screen in
+            screen.session.id == session.id
+                && screen.isAgentTurnInProgress == false
+                && screen.activityItems.contains(where: { $0.text == "Pi: Done" })
+        }
+
+        #expect(finalScreen.activityItems.map(\.text) == [
+            "Pi shared Session stream connected",
+            "You: delegate",
+            "subagent reviewer: Review the latest diff and summarize issues",
+            "subagent: Looks good overall. Watch the new error path.",
+            "Pi: Done"
+        ])
+    }
+
+    @MainActor
     @Test func appModelClearCommandReplacesOldPiActivityWithFreshSessionScreen() async throws {
         let workspaceFolderURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -8989,6 +9095,72 @@ private final class NexusTestsPiRPCTransport: NexusTestsBasePiRPCTransport, @unc
                     ]
                 ]
             ])
+        default:
+            return
+        }
+    }
+}
+
+private final class DelayedPromptNexusTestsPiRPCTransport: NexusTestsBasePiRPCTransport, @unchecked Sendable {
+    private let promptResponseText: String
+    private let delayNanoseconds: UInt64
+
+    init(promptResponseText: String = "", delayNanoseconds: UInt64 = 50_000_000) {
+        self.promptResponseText = promptResponseText
+        self.delayNanoseconds = delayNanoseconds
+    }
+
+    override func sendLine(_ line: String) throws {
+        guard let data = line.data(using: .utf8),
+              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = object["type"] as? String else {
+            return
+        }
+
+        switch type {
+        case "get_state":
+            emit([
+                "id": object["id"] as? String ?? "state",
+                "type": "response",
+                "command": "get_state",
+                "success": true,
+                "data": [
+                    "sessionId": "pi-session-1"
+                ]
+            ])
+        case "prompt":
+            emit([
+                "type": "response",
+                "command": "prompt",
+                "success": true
+            ])
+            guard promptResponseText.isEmpty == false else {
+                return
+            }
+            Task { [weak self] in
+                guard let self else {
+                    return
+                }
+                try? await Task.sleep(nanoseconds: self.delayNanoseconds)
+                self.emit([
+                    "type": "message_update",
+                    "assistantMessageEvent": [
+                        "type": "text_delta",
+                        "delta": self.promptResponseText
+                    ]
+                ])
+                self.emit([
+                    "type": "turn_end",
+                    "message": [
+                        "content": [
+                            [
+                                "type": "text",
+                                "text": self.promptResponseText
+                            ]
+                        ]
+                    ]
+                ])
+            }
         default:
             return
         }
