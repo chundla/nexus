@@ -14,14 +14,24 @@ public struct StructuredSessionActivityRow: Identifiable, Equatable {
     public let systemImage: String
     public let text: String
     public let detailText: String?
+    public let isDetailTextTruncated: Bool
     public let emphasis: StructuredSessionActivityEmphasis
 
-    public init(id: UUID, title: String, systemImage: String, text: String, detailText: String? = nil, emphasis: StructuredSessionActivityEmphasis) {
+    public init(
+        id: UUID,
+        title: String,
+        systemImage: String,
+        text: String,
+        detailText: String? = nil,
+        isDetailTextTruncated: Bool = false,
+        emphasis: StructuredSessionActivityEmphasis
+    ) {
         self.id = id
         self.title = title
         self.systemImage = systemImage
         self.text = text
         self.detailText = detailText
+        self.isDetailTextTruncated = isDetailTextTruncated
         self.emphasis = emphasis
     }
 }
@@ -232,12 +242,15 @@ public struct StructuredSessionPresentation: Equatable {
 
 public func structuredSessionActivityRows(for screen: SessionScreen) -> [StructuredSessionActivityRow] {
     screen.activityItems.map { item in
-        StructuredSessionActivityRow(
+        let detailPreview = item.detailText.map { structuredSessionDetailTextPreview(for: $0) }
+
+        return StructuredSessionActivityRow(
             id: item.id,
             title: structuredSessionActivityTitle(for: item.kind),
             systemImage: structuredSessionActivitySystemImage(for: item.kind),
             text: item.text,
-            detailText: item.detailText,
+            detailText: detailPreview?.text,
+            isDetailTextTruncated: detailPreview?.isTruncated ?? false,
             emphasis: structuredSessionActivityEmphasis(for: item.kind)
         )
     }

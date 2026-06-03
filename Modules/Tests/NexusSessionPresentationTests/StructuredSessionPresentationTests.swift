@@ -59,6 +59,28 @@ struct StructuredSessionPresentationTests {
         ))
     }
 
+    @Test func structuredSessionActivityRowsStoreDetailPreviewsInsteadOfFullOutput() throws {
+        let fullDetail = (1 ... 16).map { "line \($0)" }.joined(separator: "\n")
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let screen = SessionScreen(
+            session: session,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .command, text: "git status", detailText: fullDetail)
+            ]
+        )
+
+        let row = try #require(structuredSessionActivityRows(for: screen).first)
+        #expect(row.detailText == (1 ... 12).map { "line \($0)" }.joined(separator: "\n"))
+        #expect(row.isDetailTextTruncated)
+    }
+
     @Test func structuredSessionPresentationCopyUsesProviderDisplayName() {
         let codexScreen = SessionScreen(
             session: Session(

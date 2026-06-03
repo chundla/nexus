@@ -1567,7 +1567,8 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity, minHeight: 220)
                     } else {
                         LazyVStack(spacing: 8) {
-                            ForEach(feedPresentation.activityRows) { row in
+                            ForEach(feedPresentation.activityRows.indices, id: \.self) { index in
+                                let row = feedPresentation.activityRows[index]
                                 structuredSessionActivityRowView(row, screen: screen)
                                     .id(row.id)
                             }
@@ -1765,6 +1766,7 @@ struct ContentView: View {
                         if let detailText = row.detailText {
                             structuredSessionDetailTextView(
                                 detailText,
+                                isTruncated: row.isDetailTextTruncated,
                                 font: NexusMacTheme.monoFont(11, relativeTo: .callout)
                             )
                         }
@@ -1816,6 +1818,12 @@ struct ContentView: View {
                                     font: NexusMacTheme.bodyFont(13),
                                     color: .white.opacity(0.92)
                                 )
+
+                                if row.isDetailTextTruncated {
+                                    Text("Output preview truncated for smooth scrolling.")
+                                        .font(NexusMacTheme.bodyFont(10, relativeTo: .caption))
+                                        .foregroundStyle(NexusMacTheme.mutedText)
+                                }
                             }
                         }
                         .frame(maxWidth: 620, alignment: .leading)
@@ -1852,17 +1860,15 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func structuredSessionDetailTextView(_ text: String, font: Font) -> some View {
-        let preview = structuredSessionDetailTextPreview(for: text)
-
+    private func structuredSessionDetailTextView(_ text: String, isTruncated: Bool, font: Font) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(preview.text)
+            Text(text)
                 .font(font)
                 .foregroundStyle(.white.opacity(0.84))
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            if preview.isTruncated {
+            if isTruncated {
                 Text("Output preview truncated for smooth scrolling.")
                     .font(NexusMacTheme.bodyFont(10, relativeTo: .caption))
                     .foregroundStyle(NexusMacTheme.mutedText)

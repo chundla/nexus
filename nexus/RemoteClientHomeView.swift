@@ -2130,7 +2130,8 @@ private struct RemoteSessionScreenView: View {
             )
         } else {
             LazyVStack(spacing: 10) {
-                ForEach(feedPresentation.activityRows) { row in
+                ForEach(feedPresentation.activityRows.indices, id: \.self) { index in
+                    let row = feedPresentation.activityRows[index]
                     structuredSessionActivityRowView(row, screen: screen)
                         .id(row.id)
                 }
@@ -2242,6 +2243,7 @@ private struct RemoteSessionScreenView: View {
                     if let detailText = row.detailText {
                         structuredSessionDetailTextView(
                             detailText,
+                            isTruncated: row.isDetailTextTruncated,
                             font: NexusIOSTheme.monoFont(12, relativeTo: .callout)
                         )
                     }
@@ -2288,6 +2290,12 @@ private struct RemoteSessionScreenView: View {
                                 font: NexusIOSTheme.bodyFont(14),
                                 color: .white.opacity(0.92)
                             )
+
+                            if row.isDetailTextTruncated {
+                                Text("Output preview truncated for smoother scrolling.")
+                                    .font(NexusIOSTheme.bodyFont(11, relativeTo: .caption))
+                                    .foregroundStyle(NexusIOSTheme.mutedText)
+                            }
                         }
                     }
                     .padding(14)
@@ -2317,17 +2325,15 @@ private struct RemoteSessionScreenView: View {
     }
 
     @ViewBuilder
-    private func structuredSessionDetailTextView(_ text: String, font: Font) -> some View {
-        let preview = structuredSessionDetailTextPreview(for: text)
-
+    private func structuredSessionDetailTextView(_ text: String, isTruncated: Bool, font: Font) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(preview.text)
+            Text(text)
                 .font(font)
                 .foregroundStyle(.white.opacity(0.84))
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            if preview.isTruncated {
+            if isTruncated {
                 Text("Output preview truncated for smoother scrolling.")
                     .font(NexusIOSTheme.bodyFont(11, relativeTo: .caption))
                     .foregroundStyle(NexusIOSTheme.mutedText)
