@@ -2078,11 +2078,14 @@ private struct RemoteSessionScreenView: View {
             }
             .onAppear {
                 DispatchQueue.main.async {
-                    scrollStructuredSessionToBottom(using: proxy, animated: false)
+                    scrollStructuredSessionToBottom(using: proxy, animation: .immediate)
                 }
             }
-            .onChange(of: autoScrollTrigger) { _, _ in
-                scrollStructuredSessionToBottom(using: proxy)
+            .onChange(of: autoScrollTrigger) { oldTrigger, newTrigger in
+                scrollStructuredSessionToBottom(
+                    using: proxy,
+                    animation: structuredSessionAutoScrollAnimation(previous: oldTrigger, current: newTrigger)
+                )
             }
         }
     }
@@ -2164,18 +2167,19 @@ private struct RemoteSessionScreenView: View {
 
     private func scrollStructuredSessionToBottom(
         using proxy: ScrollViewProxy,
-        animated: Bool = true
+        animation: StructuredSessionAutoScrollAnimation = .animated
     ) {
         let scroll = {
             proxy.scrollTo(conversationBottomID, anchor: .bottom)
         }
 
-        if animated {
+        switch animation {
+        case .immediate:
+            scroll()
+        case .animated:
             withAnimation(.easeOut(duration: 0.18)) {
                 scroll()
             }
-        } else {
-            scroll()
         }
     }
 

@@ -1496,9 +1496,18 @@ struct ContentView: View {
                         proxy.scrollTo("conversation-bottom", anchor: .bottom)
                     }
                 }
-                .onChange(of: autoScrollTrigger) { _, _ in
-                    withAnimation(.easeOut(duration: 0.18)) {
+                .onChange(of: autoScrollTrigger) { oldTrigger, newTrigger in
+                    let scroll = {
                         proxy.scrollTo("conversation-bottom", anchor: .bottom)
+                    }
+
+                    switch structuredSessionAutoScrollAnimation(previous: oldTrigger, current: newTrigger) {
+                    case .immediate:
+                        scroll()
+                    case .animated:
+                        withAnimation(.easeOut(duration: 0.18)) {
+                            scroll()
+                        }
                     }
                 }
             }

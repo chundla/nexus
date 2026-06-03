@@ -377,6 +377,22 @@ public struct StructuredSessionAutoScrollTrigger: Equatable {
     }
 }
 
+public enum StructuredSessionAutoScrollAnimation: Equatable {
+    case immediate
+    case animated
+}
+
+public func structuredSessionAutoScrollAnimation(
+    previous: StructuredSessionAutoScrollTrigger,
+    current: StructuredSessionAutoScrollTrigger
+) -> StructuredSessionAutoScrollAnimation {
+    if previous.lastActivityRowID != current.lastActivityRowID {
+        return .immediate
+    }
+
+    return .animated
+}
+
 public func structuredSessionAutoScrollTrigger(for screen: SessionScreen) -> StructuredSessionAutoScrollTrigger {
     StructuredSessionAutoScrollTrigger(
         lastActivityRowID: screen.activityItems.last?.id,

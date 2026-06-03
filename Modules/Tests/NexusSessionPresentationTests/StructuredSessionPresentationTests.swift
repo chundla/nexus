@@ -195,6 +195,43 @@ struct StructuredSessionPresentationTests {
         #expect(structuredSessionAutoScrollTrigger(for: baseScreen) == structuredSessionAutoScrollTrigger(for: updatedScreen))
     }
 
+    @Test func structuredSessionAutoScrollAnimationUsesImmediateScrollForAppendedActivityRows() {
+        let firstActivityID = UUID()
+        let secondActivityID = UUID()
+        let previous = StructuredSessionAutoScrollTrigger(
+            lastActivityRowID: firstActivityID,
+            pendingApprovalRequestIDs: [],
+            pendingDialogIDs: [],
+            notificationIDs: []
+        )
+        let current = StructuredSessionAutoScrollTrigger(
+            lastActivityRowID: secondActivityID,
+            pendingApprovalRequestIDs: [],
+            pendingDialogIDs: [],
+            notificationIDs: []
+        )
+
+        #expect(structuredSessionAutoScrollAnimation(previous: previous, current: current) == .immediate)
+    }
+
+    @Test func structuredSessionAutoScrollAnimationKeepsAnimatedScrollForNewPendingApprovals() {
+        let activityID = UUID()
+        let previous = StructuredSessionAutoScrollTrigger(
+            lastActivityRowID: activityID,
+            pendingApprovalRequestIDs: [],
+            pendingDialogIDs: [],
+            notificationIDs: []
+        )
+        let current = StructuredSessionAutoScrollTrigger(
+            lastActivityRowID: activityID,
+            pendingApprovalRequestIDs: [UUID()],
+            pendingDialogIDs: [],
+            notificationIDs: []
+        )
+
+        #expect(structuredSessionAutoScrollAnimation(previous: previous, current: current) == .animated)
+    }
+
     @Test func structuredSessionPresentationCopyUsesProviderDisplayName() {
         let codexScreen = SessionScreen(
             session: Session(
