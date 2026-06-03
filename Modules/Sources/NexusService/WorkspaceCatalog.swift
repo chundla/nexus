@@ -61,6 +61,8 @@ struct WorkspaceCatalogDependencies {
 }
 
 final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
+    private static let maxConcurrentWorkspaceProviderCardLoads = 2
+
     private let dependencies: WorkspaceCatalogDependencies
 
     init(dependencies: WorkspaceCatalogDependencies) {
@@ -485,45 +487,36 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
     ) async throws -> ([WorkspaceProviderCard], Bool) {
         let providerIDs = Array(ProviderID.allCases)
         let loadedProviderCards = try await withThrowingTaskGroup(of: LoadedWorkspaceProviderCard.self, returning: [LoadedWorkspaceProviderCard].self) { group in
-            for (index, providerID) in providerIDs.enumerated() {
-                group.addTask { [self] in
-                    let providerModule = providerModule(for: providerID)
-                    let (sessions, loadSessionsStep) = try measuredStep("loadSessions.\(providerID.rawValue)") {
-                        try dependencies.sessionRecordStore.listSessions(workspaceID: workspaceID, providerID: providerID)
-                            .map(reconcileSessionRuntimeState)
-                    }
-                    let defaultSession = sessions.first(where: \.isDefault)
-                    let (catalogReadResult, readProviderCatalogStep) = try await measuredStep("readProviderCatalog.\(providerID.rawValue)") {
-                        try await self.workspaceOverviewCatalogRead(
-                            providerID: providerID,
-                            providerModule: providerModule,
-                            workspace: workspace,
-                            remoteContext: remoteContext,
-                            defaultSession: defaultSession,
-                            mode: mode
-                        )
-                    }
-                    let (catalogRead, usesStaleBrowseFacts) = catalogReadResult
+            var nextProviderIndex = 0
 
-                    return LoadedWorkspaceProviderCard(
-                        index: index,
-                        card: WorkspaceProviderCard(
-                            provider: Provider(id: providerID),
-                            health: catalogRead.health,
-                            capabilities: catalogRead.capabilities,
-                            prelaunchPrimarySurface: catalogRead.prelaunchPrimarySurface,
-                            defaultSession: catalogRead.defaultSession,
-                            alternateSessionCount: sessions.filter { $0.isDefault == false }.count
-                        ),
-                        performanceSteps: [loadSessionsStep, readProviderCatalogStep],
-                        usesStaleBrowseFacts: usesStaleBrowseFacts
+            func addNextTaskIfNeeded() {
+                guard nextProviderIndex < providerIDs.count else {
+                    return
+                }
+
+                let providerIndex = nextProviderIndex
+                let providerID = providerIDs[providerIndex]
+                nextProviderIndex += 1
+                group.addTask { [self] in
+                    try await loadWorkspaceProviderCard(
+                        index: providerIndex,
+                        providerID: providerID,
+                        workspaceID: workspaceID,
+                        workspace: workspace,
+                        remoteContext: remoteContext,
+                        mode: mode
                     )
                 }
             }
 
+            for _ in 0..<min(providerIDs.count, Self.maxConcurrentWorkspaceProviderCardLoads) {
+                addNextTaskIfNeeded()
+            }
+
             var orderedProviderCards = Array<LoadedWorkspaceProviderCard?>(repeating: nil, count: providerIDs.count)
-            for try await loadedProviderCard in group {
+            while let loadedProviderCard = try await group.next() {
                 orderedProviderCards[loadedProviderCard.index] = loadedProviderCard
+                addNextTaskIfNeeded()
             }
             return orderedProviderCards.compactMap { $0 }
         }
@@ -534,6 +527,47 @@ final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
         return (
             loadedProviderCards.map(\.card),
             loadedProviderCards.contains(where: \.usesStaleBrowseFacts)
+        )
+    }
+
+    private func loadWorkspaceProviderCard(
+        index: Int,
+        providerID: ProviderID,
+        workspaceID: UUID,
+        workspace: Workspace,
+        remoteContext: RemoteWorkspaceHealthContext?,
+        mode: WorkspaceOverviewLoadMode
+    ) async throws -> LoadedWorkspaceProviderCard {
+        let providerModule = providerModule(for: providerID)
+        let (sessions, loadSessionsStep) = try measuredStep("loadSessions.\(providerID.rawValue)") {
+            try dependencies.sessionRecordStore.listSessions(workspaceID: workspaceID, providerID: providerID)
+                .map(reconcileSessionRuntimeState)
+        }
+        let defaultSession = sessions.first(where: \.isDefault)
+        let (catalogReadResult, readProviderCatalogStep) = try await measuredStep("readProviderCatalog.\(providerID.rawValue)") {
+            try await self.workspaceOverviewCatalogRead(
+                providerID: providerID,
+                providerModule: providerModule,
+                workspace: workspace,
+                remoteContext: remoteContext,
+                defaultSession: defaultSession,
+                mode: mode
+            )
+        }
+        let (catalogRead, usesStaleBrowseFacts) = catalogReadResult
+
+        return LoadedWorkspaceProviderCard(
+            index: index,
+            card: WorkspaceProviderCard(
+                provider: Provider(id: providerID),
+                health: catalogRead.health,
+                capabilities: catalogRead.capabilities,
+                prelaunchPrimarySurface: catalogRead.prelaunchPrimarySurface,
+                defaultSession: catalogRead.defaultSession,
+                alternateSessionCount: sessions.filter { $0.isDefault == false }.count
+            ),
+            performanceSteps: [loadSessionsStep, readProviderCatalogStep],
+            usesStaleBrowseFacts: usesStaleBrowseFacts
         )
     }
 

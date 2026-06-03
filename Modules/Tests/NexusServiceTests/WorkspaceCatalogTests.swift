@@ -215,7 +215,7 @@ struct WorkspaceCatalogTests {
         #expect(overviews.map(\.workspace.id) == [secondWorkspace.id, fixture.workspace.id])
     }
 
-    @Test func workspaceOverviewAssemblesProviderCardsConcurrentlyWhilePreservingProviderOrder() async throws {
+    @Test func workspaceOverviewBoundsProviderCardConcurrencyWhilePreservingProviderOrder() async throws {
         let tracker = ProviderCatalogReadConcurrencyTracker()
         let fixture = try WorkspaceCatalogFixture(
             providerModuleRegistry: ProviderModuleRegistry(
@@ -228,7 +228,40 @@ struct WorkspaceCatalogTests {
         let overview = try await fixture.catalog.workspaceOverview(workspaceID: fixture.workspace.id)
 
         #expect(overview.providerCards.map(\.provider.id) == ProviderID.allCases)
-        #expect(await tracker.maximumConcurrentReads() > 1)
+        #expect(await tracker.maximumConcurrentReads() == 2)
+    }
+
+    @Test func workspaceOverviewBrowsePreservesStaleProviderSummariesWhileBoundingProviderCardConcurrency() async throws {
+        let now = Date(timeIntervalSince1970: 1_500)
+        let tracker = ProviderCatalogReadConcurrencyTracker()
+        let fixture = try WorkspaceCatalogFixture(
+            providerModuleRegistry: ProviderModuleRegistry(
+                modules: Dictionary(uniqueKeysWithValues: ProviderID.allCases.map { providerID in
+                    (providerID, ConcurrentCatalogReadProviderModule(providerID: providerID, tracker: tracker))
+                })
+            ),
+            currentDate: { now }
+        )
+
+        for providerID in ProviderID.allCases {
+            _ = try fixture.metadataStore.saveProviderHealth(
+                workspaceID: fixture.workspace.id,
+                providerID: providerID,
+                summary: ProviderHealthSummary(
+                    state: .unavailable,
+                    summary: "Stale \(providerID.displayName) health",
+                    launchability: .notLaunchable
+                ),
+                checkedAt: now.addingTimeInterval(-120)
+            )
+        }
+
+        let overview = try await fixture.catalog.workspaceOverview(workspaceID: fixture.workspace.id)
+
+        #expect(overview.providerCards.map(\.provider.id) == ProviderID.allCases)
+        #expect(overview.providerCards.map(\.health.summary) == ProviderID.allCases.map { "Stale \($0.displayName) health" })
+        #expect(overview.usesStaleBrowseFacts)
+        #expect(await tracker.maximumConcurrentReads() == 2)
     }
 
     @Test func workspaceOverviewReusesRecentLocalProviderHealthSnapshot() async throws {
