@@ -54,7 +54,6 @@ final class NexusAppModel {
     var remoteAccessState: RemoteAccessState?
     var pairedDevices: [PairedDevice] = []
     var focusedSessionScreen: SessionScreen?
-    var focusedStructuredSessionDraft = ""
     private(set) var remotePairingEndpoint: RemotePairingEndpoint?
 
     private let client: any NexusServiceClient
@@ -192,7 +191,6 @@ final class NexusAppModel {
             remoteAccessState = nil
             pairedDevices = []
             focusedSessionScreen = nil
-            focusedStructuredSessionDraft = ""
             serviceErrorMessage = error.localizedDescription
         }
     }
@@ -434,7 +432,6 @@ final class NexusAppModel {
         let session = focusedSessionScreen?.session
         await stopFocusingSession()
         focusedSessionScreen = nil
-        focusedStructuredSessionDraft = ""
         return session
     }
 
@@ -837,11 +834,6 @@ final class NexusAppModel {
         let previousScreen = focusedSessionScreen?.session.id == screen.session.id ? focusedSessionScreen : nil
         let previousState = previousScreen?.session.state
         focusedSessionScreen = screen
-
-        if previousScreen?.extensionUI?.editorText != screen.extensionUI?.editorText,
-           let editorText = screen.extensionUI?.editorText {
-            focusedStructuredSessionDraft = editorText
-        }
 
         if let previousState, previousState != screen.session.state {
             try await refreshWorkspaceOverview(for: screen.session.workspaceID)

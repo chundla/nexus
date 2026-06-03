@@ -8827,55 +8827,40 @@ struct nexusTests {
         #expect(model.focusedSessionScreen?.extensionUI?.pendingDialogs.isEmpty == true)
     }
 
-    @MainActor
-    @Test func appModelAppliesExtensionEditorTextToFocusedStructuredDraftWithoutClobberingIdenticalLaterUpdates() async throws {
-        let group = WorkspaceGroup(id: UUID(), name: "Group")
-        let workspace = Workspace(
-            id: UUID(),
-            name: "Workspace",
-            kind: .local,
-            folderPath: "/tmp/workspace",
-            primaryGroupID: group.id
-        )
-        let session = Session(
-            id: UUID(),
-            workspaceID: workspace.id,
-            providerID: .pi,
-            isDefault: true,
-            state: .ready
-        )
-        let initialScreen = SessionScreen(session: session, transcript: "")
-        let client = TrackingServiceClient(
-            workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []),
-            session: session,
-            screen: initialScreen
-        )
-        let model = NexusAppModel(client: client)
+    @Test func structuredSessionComposerDraftStateHydratesFromChangedEditorTextWithoutClobberingMatchingLaterUpdates() {
+        var state = StructuredSessionComposerDraftState()
 
-        try await model.focusSession(sessionID: session.id)
-        await client.emitObservedScreen(
-            SessionScreen(
-                session: session,
-                transcript: "",
-                extensionUI: SessionExtensionUIState(editorText: "This text was set by the rpc-demo extension.")
-            )
+        state.observe(editorText: "This text was set by the rpc-demo extension.")
+        #expect(state.draft == "This text was set by the rpc-demo extension.")
+
+        state.updateDraft("User edits")
+        state.observe(editorText: "This text was set by the rpc-demo extension.")
+        #expect(state.draft == "User edits")
+
+        state.observe(editorText: "A refreshed extension draft")
+        #expect(state.draft == "A refreshed extension draft")
+    }
+
+    @Test func structuredSessionComposerDraftStateClearsAndAppliesSlashCommands() {
+        var state = StructuredSessionComposerDraftState()
+        let command = StructuredSessionSlashCommand(
+            matchText: "goal",
+            displayText: "/goal <objective>",
+            insertionText: "/goal ",
+            summary: "Set or view the goal for a long-running task.",
+            acceptsArguments: true
         )
-        await Task.yield()
 
-        #expect(model.focusedStructuredSessionDraft == "This text was set by the rpc-demo extension.")
+        state.updateDraft("  /go")
+        state.apply(command)
+        #expect(state.draft == "  /goal ")
 
-        model.focusedStructuredSessionDraft = "User edits"
-        await client.emitObservedScreen(
-            SessionScreen(
-                session: session,
-                transcript: "",
-                activityItems: [SessionActivityItem(kind: .status, text: "Still connected")],
-                extensionUI: SessionExtensionUIState(editorText: "This text was set by the rpc-demo extension.")
-            )
-        )
-        await Task.yield()
+        state.clear()
+        #expect(state.draft.isEmpty)
 
-        #expect(model.focusedStructuredSessionDraft == "User edits")
+        state.observe(editorText: nil)
+        state.observe(editorText: "Seed")
+        #expect(state.draft == "Seed")
     }
 
     @MainActor

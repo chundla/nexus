@@ -25,7 +25,6 @@ struct ContentView: View {
     @State private var terminalViewportResizeCoordinator = TerminalViewportResizeCoordinator()
     @State private var terminalFocusToken = UUID()
     @State private var presentedError: PresentedError?
-    @FocusState private var isStructuredSessionPromptFocused: Bool
 
     private let terminalLayout = TerminalViewportLayout.live
 
@@ -921,9 +920,6 @@ struct ContentView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .onChange(of: sessionID) { _, _ in
-            appModel.focusedStructuredSessionDraft = ""
-        }
     }
 
     private func sessionSubtitle(for context: SessionPresentationContext, surface: SessionSurface) -> String {
@@ -1522,18 +1518,9 @@ struct ContentView: View {
     private func structuredSessionFeed(screen: SessionScreen, isReady: Bool) -> some View {
         let feedPresentation = structuredSessionFeedPresentation(for: screen)
         let approvalRequestPresentation = structuredSessionApprovalRequestPresentation(hasWriterAuthority: true)
-        let composerPresentation = structuredSessionComposerPresentation(for: screen, hasWriterAuthority: true)
-        let slashCommandMenuPresentation = structuredSessionSlashCommandMenuPresentation(
-            for: appModel.focusedStructuredSessionDraft,
-            screen: screen
-        )
         let extensionUI = screen.extensionUI
         let aboveEditorWidgets = extensionUI?.widgets.filter { $0.placement == .aboveEditor } ?? []
         let belowEditorWidgets = extensionUI?.widgets.filter { $0.placement == .belowEditor } ?? []
-        let statusBarPresentation = structuredSessionStatusBarPresentation(
-            for: screen,
-            workspaceLocation: structuredSessionWorkspaceLocation(for: screen.session)
-        )
         let autoScrollTrigger = structuredSessionAutoScrollTrigger(for: screen)
 
         VStack(spacing: 0) {
@@ -1605,97 +1592,20 @@ struct ContentView: View {
             }
 
             if isReady {
-                VStack(alignment: .leading, spacing: 8) {
-                    if slashCommandMenuPresentation.isVisible {
-                        macStructuredSessionSlashCommandMenu(slashCommandMenuPresentation)
+                MacStructuredSessionComposerSection(
+                    screen: screen,
+                    appModel: appModel,
+                    workspaceLocation: structuredSessionWorkspaceLocation(for: screen.session),
+                    aboveEditorWidgets: aboveEditorWidgets,
+                    belowEditorWidgets: belowEditorWidgets,
+                    onError: { message in
+                        presentedError = PresentedError(message: message)
                     }
-
-                    if aboveEditorWidgets.isEmpty == false {
-                        structuredSessionExtensionWidgetsView(aboveEditorWidgets)
-                    }
-
-                    macStructuredSessionStatusBar(statusBarPresentation)
-
-                    HStack(spacing: 8) {
-                        TextField(composerPresentation.placeholder, text: $appModel.focusedStructuredSessionDraft, axis: .vertical)
-                            .focused($isStructuredSessionPromptFocused)
-                            .font(NexusMacTheme.bodyFont(13))
-                            .textFieldStyle(.plain)
-                            .lineLimit(1 ... 4)
-                            .submitLabel(.send)
-                            .disabled(composerPresentation.isEnabled == false || screen.isAgentTurnInProgress)
-                            .onSubmit {
-                                sendStructuredSessionPrompt()
-                            }
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 10)
-                            .background(Color.white.opacity(0.08), in: Capsule())
-                            .overlay {
-                                Capsule()
-                                    .stroke(NexusMacTheme.softLine, lineWidth: 1)
-                            }
-                    }
-
-                    if belowEditorWidgets.isEmpty == false {
-                        structuredSessionExtensionWidgetsView(belowEditorWidgets)
-                    }
-                }
-                .padding(14)
-                .background(Color.white.opacity(0.02))
+                )
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .nexusPanel(tint: NexusMacTheme.teal, radius: 22)
-    }
-
-    @ViewBuilder
-    private func macStructuredSessionSlashCommandMenu(_ menu: StructuredSessionSlashCommandMenuPresentation) -> some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 4) {
-                ForEach(menu.commands) { command in
-                    Button {
-                        appModel.focusedStructuredSessionDraft = menu.applying(command, to: appModel.focusedStructuredSessionDraft)
-                        isStructuredSessionPromptFocused = true
-                    } label: {
-                        HStack(alignment: .top, spacing: 12) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(command.displayText)
-                                    .font(NexusMacTheme.monoFont(12, relativeTo: .callout))
-                                    .foregroundStyle(.white)
-                                Text(command.summary)
-                                    .font(NexusMacTheme.bodyFont(11, relativeTo: .caption))
-                                    .foregroundStyle(NexusMacTheme.mutedText)
-                                    .multilineTextAlignment(.leading)
-                            }
-                            Spacer(minLength: 0)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 9)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(Color.white.opacity(0.03))
-                    )
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(NexusMacTheme.softLine.opacity(0.8), lineWidth: 1)
-                    }
-                }
-            }
-            .padding(8)
-        }
-        .frame(maxWidth: .infinity)
-        .frame(maxHeight: 220)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color.black.opacity(0.88))
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(NexusMacTheme.softLine, lineWidth: 1)
-        }
     }
 
     private func structuredSessionActivityRowView(_ row: StructuredSessionActivityRow, screen: SessionScreen) -> some View {
@@ -1990,28 +1900,6 @@ struct ContentView: View {
         .nexusPanel(tint: NexusMacTheme.teal, radius: 16)
     }
 
-    private func structuredSessionExtensionWidgetsView(_ widgets: [SessionExtensionUIWidget]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(widgets) { widget in
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(widget.key)
-                        .font(NexusMacTheme.bodyFont(10, relativeTo: .caption).weight(.semibold))
-                        .foregroundStyle(NexusMacTheme.mutedText)
-                    ForEach(Array(widget.lines.enumerated()), id: \.offset) { _, line in
-                        Text(line)
-                            .font(NexusMacTheme.bodyFont(12))
-                            .foregroundStyle(.white.opacity(0.92))
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            }
-        }
-    }
-
     private func structuredSessionExtensionNotificationColor(_ kind: SessionExtensionUINotificationKind) -> Color {
         switch kind {
         case .info:
@@ -2038,64 +1926,6 @@ struct ContentView: View {
 
     private func structuredSessionWorkspaceLocation(for session: Session) -> String {
         appModel.sessionPresentationContext(for: session)?.targetSummary ?? "Workspace unavailable"
-    }
-
-    @ViewBuilder
-    private func macStructuredSessionStatusBar(_ presentation: StructuredSessionStatusBarPresentation) -> some View {
-        HStack(spacing: 12) {
-            Label {
-                Text(presentation.workspaceLocation)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            } icon: {
-                Image(systemName: "folder")
-            }
-
-            Spacer(minLength: 12)
-
-            Label(presentation.tokenUsageText, systemImage: "gauge.with.dots.needle.33percent")
-                .foregroundStyle(macStructuredSessionTokenUsageColor(presentation.tokenUsagePercent))
-        }
-        .font(NexusMacTheme.bodyFont(11, relativeTo: .caption))
-        .foregroundStyle(NexusMacTheme.mutedText)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(NexusMacTheme.softLine, lineWidth: 1)
-        }
-    }
-
-    private func macStructuredSessionTokenUsageColor(_ percent: Int?) -> Color {
-        guard let percent else {
-            return NexusMacTheme.mutedText
-        }
-
-        switch percent {
-        case 85...:
-            return NexusMacTheme.coral
-        case 60...:
-            return NexusMacTheme.gold
-        default:
-            return NexusMacTheme.teal
-        }
-    }
-
-    private func sendStructuredSessionPrompt() {
-        let prompt = appModel.focusedStructuredSessionDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard prompt.isEmpty == false else {
-            return
-        }
-
-        Task { @MainActor in
-            do {
-                try await appModel.sendInputToFocusedSession(prompt)
-                appModel.focusedStructuredSessionDraft = ""
-            } catch {
-                presentedError = PresentedError(message: error.localizedDescription)
-            }
-        }
     }
 
     private func respondToStructuredSessionApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision) {
@@ -2297,6 +2127,212 @@ struct ContentView: View {
         )
     }
 
+}
+
+private struct MacStructuredSessionComposerSection: View {
+    let screen: SessionScreen
+    let appModel: NexusAppModel
+    let workspaceLocation: String
+    let aboveEditorWidgets: [SessionExtensionUIWidget]
+    let belowEditorWidgets: [SessionExtensionUIWidget]
+    let onError: (String) -> Void
+
+    @State private var draftState = StructuredSessionComposerDraftState()
+    @FocusState private var isPromptFocused: Bool
+
+    var body: some View {
+        let composerPresentation = structuredSessionComposerPresentation(for: screen, hasWriterAuthority: true)
+        let slashCommandMenuPresentation = structuredSessionSlashCommandMenuPresentation(
+            for: draftState.draft,
+            screen: screen
+        )
+        let statusBarPresentation = structuredSessionStatusBarPresentation(
+            for: screen,
+            workspaceLocation: workspaceLocation
+        )
+
+        VStack(alignment: .leading, spacing: 8) {
+            if slashCommandMenuPresentation.isVisible {
+                slashCommandMenu(slashCommandMenuPresentation)
+            }
+
+            if aboveEditorWidgets.isEmpty == false {
+                extensionWidgetsView(aboveEditorWidgets)
+            }
+
+            statusBar(statusBarPresentation)
+
+            HStack(spacing: 8) {
+                TextField(composerPresentation.placeholder, text: draftBinding, axis: .vertical)
+                    .focused($isPromptFocused)
+                    .font(NexusMacTheme.bodyFont(13))
+                    .textFieldStyle(.plain)
+                    .lineLimit(1 ... 4)
+                    .submitLabel(.send)
+                    .disabled(composerPresentation.isEnabled == false || screen.isAgentTurnInProgress)
+                    .onSubmit {
+                        sendStructuredSessionPrompt()
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Color.white.opacity(0.08), in: Capsule())
+                    .overlay {
+                        Capsule()
+                            .stroke(NexusMacTheme.softLine, lineWidth: 1)
+                    }
+            }
+
+            if belowEditorWidgets.isEmpty == false {
+                extensionWidgetsView(belowEditorWidgets)
+            }
+        }
+        .padding(14)
+        .background(Color.white.opacity(0.02))
+        .task(id: screen.session.id) {
+            draftState = StructuredSessionComposerDraftState()
+            draftState.observe(editorText: screen.extensionUI?.editorText)
+        }
+        .onChange(of: screen.extensionUI?.editorText) { _, editorText in
+            draftState.observe(editorText: editorText)
+        }
+    }
+
+    private var draftBinding: Binding<String> {
+        Binding(
+            get: { draftState.draft },
+            set: { draftState.updateDraft($0) }
+        )
+    }
+
+    @ViewBuilder
+    private func slashCommandMenu(_ menu: StructuredSessionSlashCommandMenuPresentation) -> some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 4) {
+                ForEach(menu.commands) { command in
+                    Button {
+                        draftState.apply(command)
+                        isPromptFocused = true
+                    } label: {
+                        HStack(alignment: .top, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(command.displayText)
+                                    .font(NexusMacTheme.monoFont(12, relativeTo: .callout))
+                                    .foregroundStyle(.white)
+                                Text(command.summary)
+                                    .font(NexusMacTheme.bodyFont(11, relativeTo: .caption))
+                                    .foregroundStyle(NexusMacTheme.mutedText)
+                                    .multilineTextAlignment(.leading)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color.white.opacity(0.03))
+                    )
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(NexusMacTheme.softLine.opacity(0.8), lineWidth: 1)
+                    }
+                }
+            }
+            .padding(8)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(maxHeight: 220)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.black.opacity(0.88))
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(NexusMacTheme.softLine, lineWidth: 1)
+        }
+    }
+
+    private func extensionWidgetsView(_ widgets: [SessionExtensionUIWidget]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(widgets) { widget in
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(widget.key)
+                        .font(NexusMacTheme.bodyFont(10, relativeTo: .caption).weight(.semibold))
+                        .foregroundStyle(NexusMacTheme.mutedText)
+                    ForEach(Array(widget.lines.enumerated()), id: \.offset) { _, line in
+                        Text(line)
+                            .font(NexusMacTheme.bodyFont(12))
+                            .foregroundStyle(.white.opacity(0.92))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func statusBar(_ presentation: StructuredSessionStatusBarPresentation) -> some View {
+        HStack(spacing: 12) {
+            Label {
+                Text(presentation.workspaceLocation)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            } icon: {
+                Image(systemName: "folder")
+            }
+
+            Spacer(minLength: 12)
+
+            Label(presentation.tokenUsageText, systemImage: "gauge.with.dots.needle.33percent")
+                .foregroundStyle(tokenUsageColor(presentation.tokenUsagePercent))
+        }
+        .font(NexusMacTheme.bodyFont(11, relativeTo: .caption))
+        .foregroundStyle(NexusMacTheme.mutedText)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(NexusMacTheme.softLine, lineWidth: 1)
+        }
+    }
+
+    private func tokenUsageColor(_ percent: Int?) -> Color {
+        guard let percent else {
+            return NexusMacTheme.mutedText
+        }
+
+        switch percent {
+        case 85...:
+            return NexusMacTheme.coral
+        case 60...:
+            return NexusMacTheme.gold
+        default:
+            return NexusMacTheme.teal
+        }
+    }
+
+    private func sendStructuredSessionPrompt() {
+        let prompt = draftState.draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard prompt.isEmpty == false else {
+            return
+        }
+
+        Task { @MainActor in
+            do {
+                try await appModel.sendInputToFocusedSession(prompt)
+                draftState.clear()
+            } catch {
+                onError(error.localizedDescription)
+            }
+        }
+    }
 }
 
 private struct RemoteWorkspaceCreationSheet: View {
