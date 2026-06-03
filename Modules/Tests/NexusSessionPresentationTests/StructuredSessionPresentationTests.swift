@@ -81,6 +81,120 @@ struct StructuredSessionPresentationTests {
         #expect(row.isDetailTextTruncated)
     }
 
+    @Test func structuredSessionAutoScrollTriggerTracksStableFeedIdentity() {
+        let pendingApprovalID = UUID()
+        let notificationID = UUID()
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let screen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .message, text: "You: Ship it"),
+                SessionActivityItem(kind: .message, text: "Pi: On it")
+            ],
+            approvalRequests: [
+                SessionApprovalRequest(id: pendingApprovalID, title: "Deploy", text: "Deploy now?", state: .pending),
+                SessionApprovalRequest(title: "Cleanup", text: "Delete temp files?", state: .approved)
+            ],
+            extensionUI: SessionExtensionUIState(
+                title: "Plan",
+                pendingDialogs: [
+                    SessionExtensionUIDialog(id: "dialog-1", kind: .input, title: "Name")
+                ],
+                notifications: [
+                    SessionExtensionUINotification(id: notificationID, kind: .info, message: "Saved")
+                ],
+                statuses: [SessionExtensionUIStatus(key: "sync", text: "Synced")],
+                widgets: [SessionExtensionUIWidget(key: "summary", lines: ["Ready"])],
+                editorText: "draft"
+            ),
+            providerEvents: [
+                SessionProviderEvent(
+                    sequence: 0,
+                    providerID: .pi,
+                    type: "response",
+                    family: .response,
+                    rawPayload: "{}"
+                )
+            ],
+            isAgentTurnInProgress: true
+        )
+
+        #expect(structuredSessionAutoScrollTrigger(for: screen) == StructuredSessionAutoScrollTrigger(
+            lastActivityRowID: screen.activityItems.last?.id,
+            pendingApprovalRequestIDs: [pendingApprovalID],
+            pendingDialogIDs: ["dialog-1"],
+            notificationIDs: [notificationID]
+        ))
+    }
+
+    @Test func structuredSessionAutoScrollTriggerIgnoresNonFeedPresentationChanges() {
+        let activityID = UUID()
+        let approvalID = UUID()
+        let notificationID = UUID()
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .codex,
+            isDefault: true,
+            state: .ready
+        )
+        let baseScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "base transcript",
+            activityItems: [SessionActivityItem(id: activityID, kind: .message, text: "Codex: Ready")],
+            approvalRequests: [SessionApprovalRequest(id: approvalID, title: "Deploy", text: "Deploy?", state: .pending)],
+            extensionUI: SessionExtensionUIState(
+                title: "Base",
+                pendingDialogs: [SessionExtensionUIDialog(id: "dialog-1", kind: .confirm, title: "Continue")],
+                notifications: [SessionExtensionUINotification(id: notificationID, kind: .info, message: "Saved")],
+                statuses: [SessionExtensionUIStatus(key: "base", text: "Idle")],
+                widgets: [SessionExtensionUIWidget(key: "base", lines: ["One"])],
+                editorText: "draft"
+            ),
+            providerEvents: [],
+            isAgentTurnInProgress: false
+        )
+        let updatedScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "updated transcript",
+            activityItems: [SessionActivityItem(id: activityID, kind: .message, text: "Codex: Updated body")],
+            approvalRequests: [
+                SessionApprovalRequest(id: approvalID, title: "Deploy", text: "Deploy later?", state: .pending),
+                SessionApprovalRequest(title: "Cleanup", text: "Delete temp files?", state: .approved)
+            ],
+            extensionUI: SessionExtensionUIState(
+                title: "Updated",
+                pendingDialogs: [SessionExtensionUIDialog(id: "dialog-1", kind: .input, title: "Reason")],
+                notifications: [SessionExtensionUINotification(id: notificationID, kind: .warning, message: "Changed")],
+                statuses: [SessionExtensionUIStatus(key: "updated", text: "Busy")],
+                widgets: [SessionExtensionUIWidget(key: "updated", lines: ["Two"])],
+                editorText: "new draft"
+            ),
+            providerEvents: [
+                SessionProviderEvent(
+                    sequence: 99,
+                    providerID: .codex,
+                    type: "response",
+                    family: .response,
+                    rawPayload: "{}"
+                )
+            ],
+            isAgentTurnInProgress: true
+        )
+
+        #expect(structuredSessionAutoScrollTrigger(for: baseScreen) == structuredSessionAutoScrollTrigger(for: updatedScreen))
+    }
+
     @Test func structuredSessionPresentationCopyUsesProviderDisplayName() {
         let codexScreen = SessionScreen(
             session: Session(

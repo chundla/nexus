@@ -2043,6 +2043,8 @@ private struct RemoteSessionScreenView: View {
         feedPresentation: StructuredSessionFeedPresentation,
         approvalRequestPresentation: StructuredSessionApprovalRequestPresentation
     ) -> some View {
+        let autoScrollTrigger = structuredSessionAutoScrollTrigger(for: screen)
+
         ScrollViewReader { proxy in
             ScrollView {
                 structuredSessionScrollBody(
@@ -2056,19 +2058,7 @@ private struct RemoteSessionScreenView: View {
                     scrollStructuredSessionToBottom(using: proxy, animated: false)
                 }
             }
-            .onChange(of: feedPresentation.activityRows.count) { _, _ in
-                scrollStructuredSessionToBottom(using: proxy)
-            }
-            .onChange(of: feedPresentation.activityRows.last?.id) { _, _ in
-                scrollStructuredSessionToBottom(using: proxy)
-            }
-            .onChange(of: feedPresentation.pendingApprovalRequests.count) { _, _ in
-                scrollStructuredSessionToBottom(using: proxy)
-            }
-            .onChange(of: extensionUI?.pendingDialogs.count ?? 0) { _, _ in
-                scrollStructuredSessionToBottom(using: proxy)
-            }
-            .onChange(of: extensionUI?.notifications.count ?? 0) { _, _ in
+            .onChange(of: autoScrollTrigger) { _, _ in
                 scrollStructuredSessionToBottom(using: proxy)
             }
         }
@@ -2130,8 +2120,7 @@ private struct RemoteSessionScreenView: View {
             )
         } else {
             VStack(spacing: 10) {
-                ForEach(feedPresentation.activityRows.indices, id: \.self) { index in
-                    let row = feedPresentation.activityRows[index]
+                ForEach(feedPresentation.activityRows) { row in
                     structuredSessionActivityRowView(row, screen: screen)
                 }
 

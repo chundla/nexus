@@ -1530,6 +1530,7 @@ struct ContentView: View {
             for: screen,
             workspaceLocation: structuredSessionWorkspaceLocation(for: screen.session)
         )
+        let autoScrollTrigger = structuredSessionAutoScrollTrigger(for: screen)
 
         VStack(spacing: 0) {
             if let extensionUI, extensionUI.pendingDialogs.isEmpty == false {
@@ -1570,8 +1571,7 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity, minHeight: 220)
                     } else {
                         VStack(spacing: 8) {
-                            ForEach(feedPresentation.activityRows.indices, id: \.self) { index in
-                                let row = feedPresentation.activityRows[index]
+                            ForEach(feedPresentation.activityRows) { row in
                                 structuredSessionActivityRowView(row, screen: screen)
                             }
 
@@ -1593,22 +1593,7 @@ struct ContentView: View {
                         proxy.scrollTo("conversation-bottom", anchor: .bottom)
                     }
                 }
-                .onChange(of: feedPresentation.activityRows.count) { _, _ in
-                    withAnimation(.easeOut(duration: 0.18)) {
-                        proxy.scrollTo("conversation-bottom", anchor: .bottom)
-                    }
-                }
-                .onChange(of: feedPresentation.activityRows.last?.id) { _, _ in
-                    withAnimation(.easeOut(duration: 0.18)) {
-                        proxy.scrollTo("conversation-bottom", anchor: .bottom)
-                    }
-                }
-                .onChange(of: feedPresentation.pendingApprovalRequests.count) { _, _ in
-                    withAnimation(.easeOut(duration: 0.18)) {
-                        proxy.scrollTo("conversation-bottom", anchor: .bottom)
-                    }
-                }
-                .onChange(of: extensionUI?.pendingDialogs.count ?? 0) { _, _ in
+                .onChange(of: autoScrollTrigger) { _, _ in
                     withAnimation(.easeOut(duration: 0.18)) {
                         proxy.scrollTo("conversation-bottom", anchor: .bottom)
                     }

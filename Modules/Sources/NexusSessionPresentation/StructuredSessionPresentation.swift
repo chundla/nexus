@@ -269,6 +269,36 @@ public func structuredSessionFeedPresentation(for screen: SessionScreen) -> Stru
     )
 }
 
+public struct StructuredSessionAutoScrollTrigger: Equatable {
+    public let lastActivityRowID: UUID?
+    public let pendingApprovalRequestIDs: [UUID]
+    public let pendingDialogIDs: [String]
+    public let notificationIDs: [UUID]
+
+    public init(
+        lastActivityRowID: UUID?,
+        pendingApprovalRequestIDs: [UUID],
+        pendingDialogIDs: [String],
+        notificationIDs: [UUID]
+    ) {
+        self.lastActivityRowID = lastActivityRowID
+        self.pendingApprovalRequestIDs = pendingApprovalRequestIDs
+        self.pendingDialogIDs = pendingDialogIDs
+        self.notificationIDs = notificationIDs
+    }
+}
+
+public func structuredSessionAutoScrollTrigger(for screen: SessionScreen) -> StructuredSessionAutoScrollTrigger {
+    StructuredSessionAutoScrollTrigger(
+        lastActivityRowID: screen.activityItems.last?.id,
+        pendingApprovalRequestIDs: screen.approvalRequests
+            .filter { $0.state == .pending }
+            .map(\.id),
+        pendingDialogIDs: screen.extensionUI?.pendingDialogs.map(\.id) ?? [],
+        notificationIDs: screen.extensionUI?.notifications.map(\.id) ?? []
+    )
+}
+
 public func structuredSessionPresentationCopy(for screen: SessionScreen) -> StructuredSessionPresentationCopy {
     StructuredSessionPresentationCopy(
         emptyStateTitle: "No Session activity yet",
