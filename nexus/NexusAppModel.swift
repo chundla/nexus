@@ -643,20 +643,8 @@ final class NexusAppModel {
         for workspaceIDs: [UUID],
         refreshGeneration: UInt64
     ) async throws {
-        let client = self.client
-
-        try await withThrowingTaskGroup(of: WorkspaceOverview.self) { group in
-            for workspaceID in workspaceIDs {
-                group.addTask {
-                    try Task.checkCancellation()
-                    return try await client.getWorkspaceOverview(workspaceID: workspaceID)
-                }
-            }
-
-            for try await overview in group {
-                applyWorkspaceOverview(overview, refreshGeneration: refreshGeneration)
-            }
-        }
+        let overviews = try await client.getWorkspaceOverviews(workspaceIDs: workspaceIDs)
+        applyWorkspaceOverviews(overviews, refreshGeneration: refreshGeneration)
     }
 
     private func prioritizedWorkspaceOverviewIDs(
@@ -706,15 +694,39 @@ final class NexusAppModel {
         _ overview: WorkspaceOverview,
         refreshGeneration: UInt64? = nil
     ) {
-        if let refreshGeneration {
-            guard workspaceOverviewRefreshGeneration == refreshGeneration,
-                  workspaces.contains(where: { $0.id == overview.workspace.id }) else {
-                return
-            }
+        applyWorkspaceOverviews([overview], refreshGeneration: refreshGeneration)
+    }
+
+    private func applyWorkspaceOverviews(
+        _ overviews: [WorkspaceOverview],
+        refreshGeneration: UInt64? = nil
+    ) {
+        let applicableOverviews = overviews.filter { shouldApplyWorkspaceOverview($0, refreshGeneration: refreshGeneration) }
+        guard applicableOverviews.isEmpty == false else {
+            return
         }
 
-        workspaceOverviews[overview.workspace.id] = overview
-        syncStaleWorkspaceOverviewRefreshTask(for: overview)
+        var updatedWorkspaceOverviews = workspaceOverviews
+        for overview in applicableOverviews {
+            updatedWorkspaceOverviews[overview.workspace.id] = overview
+        }
+        workspaceOverviews = updatedWorkspaceOverviews
+
+        for overview in applicableOverviews {
+            syncStaleWorkspaceOverviewRefreshTask(for: overview)
+        }
+    }
+
+    private func shouldApplyWorkspaceOverview(
+        _ overview: WorkspaceOverview,
+        refreshGeneration: UInt64?
+    ) -> Bool {
+        guard let refreshGeneration else {
+            return true
+        }
+
+        return workspaceOverviewRefreshGeneration == refreshGeneration
+            && workspaces.contains(where: { $0.id == overview.workspace.id })
     }
 
     private func syncStaleWorkspaceOverviewRefreshTask(for overview: WorkspaceOverview) {

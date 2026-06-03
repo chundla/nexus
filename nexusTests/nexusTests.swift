@@ -6286,7 +6286,7 @@ struct nexusTests {
     }
 
     @MainActor
-    @Test func appModelRefreshPublishesWorkspacesBeforeWorkspaceOverviewsFinishLoading() async throws {
+    @Test func appModelRefreshPublishesImmediateWorkspaceOverviewsAsOneBatch() async throws {
         let group = WorkspaceGroup(id: UUID(), name: "Group")
         let firstWorkspace = Workspace(
             id: UUID(),
@@ -6352,8 +6352,8 @@ struct nexusTests {
             workspaces: [firstWorkspace, secondWorkspace],
             workspaceGroups: [group],
             workspaceOverviewsByID: overviewsByID,
-            workspaceOverviewLoader: { workspaceID in
-                try await loader.load(workspaceID: workspaceID, overview: overviewsByID[workspaceID]!)
+            workspaceOverviewBatchLoader: { workspaceIDs in
+                try await loader.loadBatch(workspaceIDs: workspaceIDs, overviewsByID: overviewsByID)
             }
         )
         let model = NexusAppModel(client: client)
@@ -6372,24 +6372,16 @@ struct nexusTests {
         #expect(client.providerDetailRequestCount == 0)
 
         loader.resume(workspaceID: firstWorkspace.id, with: firstOverview)
+        try await Task.sleep(nanoseconds: 100_000_000)
 
-        let firstOverviewDeadline = ContinuousClock.now.advanced(by: .seconds(5))
-        while model.workspaceOverview(for: firstWorkspace.id) == nil {
-            guard ContinuousClock.now < firstOverviewDeadline else {
-                Issue.record("Timed out waiting for the first Workspace Overview")
-                break
-            }
-
-            try await Task.sleep(nanoseconds: 50_000_000)
-        }
-
-        #expect(model.workspaceOverview(for: firstWorkspace.id)?.providerCards.first?.health.summary == "Alpha Claude available")
+        #expect(model.workspaceOverview(for: firstWorkspace.id) == nil)
         #expect(model.workspaceOverview(for: secondWorkspace.id) == nil)
         #expect(client.providerDetailRequestCount == 0)
 
         loader.resume(workspaceID: secondWorkspace.id, with: secondOverview)
         await refreshTask.value
 
+        #expect(model.workspaceOverview(for: firstWorkspace.id)?.providerCards.first?.health.summary == "Alpha Claude available")
         #expect(model.workspaceOverview(for: secondWorkspace.id)?.providerCards.first?.health.summary == "Beta Pi available")
         #expect(client.providerDetailRequestCount == 0)
     }
@@ -9288,8 +9280,8 @@ struct WorkspaceOverviewRefreshStagingTests {
             workspaces: [alphaWorkspace, betaWorkspace, gammaWorkspace, deltaWorkspace],
             workspaceGroups: [group],
             workspaceOverviewsByID: overviewsByID,
-            workspaceOverviewLoader: { workspaceID in
-                try await loader.load(workspaceID: workspaceID, overview: overviewsByID[workspaceID]!)
+            workspaceOverviewBatchLoader: { workspaceIDs in
+                try await loader.loadBatch(workspaceIDs: workspaceIDs, overviewsByID: overviewsByID)
             },
             recentNavigation: [
                 NavigationItem(target: .workspace(deltaWorkspace.id), title: deltaWorkspace.name, subtitle: deltaWorkspace.folderPath),
@@ -9393,8 +9385,8 @@ struct WorkspaceOverviewRefreshStagingTests {
             workspaces: [alphaWorkspace, betaWorkspace, gammaWorkspace, zetaWorkspace],
             workspaceGroups: [group],
             workspaceOverviewsByID: overviewsByID,
-            workspaceOverviewLoader: { workspaceID in
-                try await loader.load(workspaceID: workspaceID, overview: overviewsByID[workspaceID]!)
+            workspaceOverviewBatchLoader: { workspaceIDs in
+                try await loader.loadBatch(workspaceIDs: workspaceIDs, overviewsByID: overviewsByID)
             }
         )
         let model = NexusAppModel(client: client)
@@ -10191,6 +10183,7 @@ private final class ControlledWorkspaceOverviewLoader: @unchecked Sendable {
     private var modeByWorkspaceID: [UUID: Mode]
     private var requestedWorkspaceIDsValue: [UUID] = []
     private var continuations: [UUID: CheckedContinuation<WorkspaceOverview, Error>] = [:]
+    private var pendingResumes: [UUID: WorkspaceOverview] = [:]
 
     init(modeByWorkspaceID: [UUID: Mode] = [:]) {
         self.modeByWorkspaceID = modeByWorkspaceID
@@ -10220,11 +10213,48 @@ private final class ControlledWorkspaceOverviewLoader: @unchecked Sendable {
         }
     }
 
+    func loadBatch(workspaceIDs: [UUID], overviewsByID: [UUID: WorkspaceOverview]) async throws -> [WorkspaceOverview] {
+        let requests = workspaceIDs.map { workspaceID in
+            (workspaceID, appendRequestedWorkspaceID(workspaceID))
+        }
+
+        return try await withThrowingTaskGroup(of: (Int, WorkspaceOverview).self, returning: [WorkspaceOverview].self) { group in
+            for (index, request) in requests.enumerated() {
+                let (workspaceID, mode) = request
+                switch mode {
+                case .immediate:
+                    let overview = overviewsByID[workspaceID]!
+                    group.addTask {
+                        (index, overview)
+                    }
+                case .suspended:
+                    group.addTask { [self] in
+                        let overview = try await withCheckedThrowingContinuation { continuation in
+                            storeContinuation(continuation, for: workspaceID)
+                        }
+                        return (index, overview)
+                    }
+                }
+            }
+
+            var orderedOverviews = Array<WorkspaceOverview?>(repeating: nil, count: workspaceIDs.count)
+            for try await (index, overview) in group {
+                orderedOverviews[index] = overview
+            }
+            return orderedOverviews.compactMap { $0 }
+        }
+    }
+
     func resume(workspaceID: UUID, with overview: WorkspaceOverview) {
         lock.lock()
-        let continuation = continuations.removeValue(forKey: workspaceID)
+        if let continuation = continuations.removeValue(forKey: workspaceID) {
+            lock.unlock()
+            continuation.resume(returning: overview)
+            return
+        }
+
+        pendingResumes[workspaceID] = overview
         lock.unlock()
-        continuation?.resume(returning: overview)
     }
 
     private func appendRequestedWorkspaceID(_ workspaceID: UUID) -> Mode {
@@ -10239,6 +10269,12 @@ private final class ControlledWorkspaceOverviewLoader: @unchecked Sendable {
         for workspaceID: UUID
     ) {
         lock.lock()
+        if let pendingOverview = pendingResumes.removeValue(forKey: workspaceID) {
+            lock.unlock()
+            continuation.resume(returning: pendingOverview)
+            return
+        }
+
         continuations[workspaceID] = continuation
         lock.unlock()
     }
@@ -10549,11 +10585,19 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
         }
 
         if let workspaceOverviewLoader {
-            var overviews: [WorkspaceOverview] = []
-            for workspaceID in workspaceIDs {
-                overviews.append(try await workspaceOverviewLoader(workspaceID))
+            return try await withThrowingTaskGroup(of: (Int, WorkspaceOverview).self, returning: [WorkspaceOverview].self) { group in
+                for (index, workspaceID) in workspaceIDs.enumerated() {
+                    group.addTask {
+                        (index, try await workspaceOverviewLoader(workspaceID))
+                    }
+                }
+
+                var orderedOverviews = Array<WorkspaceOverview?>(repeating: nil, count: workspaceIDs.count)
+                for try await (index, overview) in group {
+                    orderedOverviews[index] = overview
+                }
+                return orderedOverviews.compactMap { $0 }
             }
-            return overviews
         }
 
         return workspaceIDs.map { workspaceOverviewValuesByID[$0] ?? workspaceOverviewValue }
