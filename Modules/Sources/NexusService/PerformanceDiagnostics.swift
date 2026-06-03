@@ -1,4 +1,3 @@
-#if os(macOS)
 import Foundation
 import NexusDomain
 
@@ -86,4 +85,3 @@ private extension UInt64 {
         self >= other ? self - other : 0
     }
 }
-#endif
