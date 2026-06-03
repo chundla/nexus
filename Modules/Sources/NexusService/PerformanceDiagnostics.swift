@@ -59,6 +59,7 @@ struct PerformanceDiagnosticTrace {
 
     func finish(
         outcome: PerformanceDiagnosticOutcome,
+        metrics: [String: Int] = [:],
         failureMessage: String? = nil
     ) -> PerformanceDiagnosticRecord {
         PerformanceDiagnosticRecord(
@@ -69,6 +70,7 @@ struct PerformanceDiagnosticTrace {
             sessionID: sessionID,
             totalElapsedMilliseconds: elapsedMilliseconds(since: startedAtUptimeNanoseconds),
             steps: steps,
+            metrics: metrics,
             failureMessage: failureMessage,
             recordedAt: recordedAt
         )

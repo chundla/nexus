@@ -6,6 +6,7 @@ public enum PerformanceDiagnosticOperation: String, Codable, Equatable, Sendable
     case launchDefaultSession
     case createNamedSession
     case launchSession
+    case structuredSessionObservation
 }
 
 public enum PerformanceDiagnosticOutcome: String, Codable, Equatable, Sendable {
@@ -32,6 +33,7 @@ public struct PerformanceDiagnosticRecord: Codable, Equatable, Identifiable, Sen
     public let sessionID: UUID?
     public let totalElapsedMilliseconds: Int
     public let steps: [PerformanceDiagnosticStep]
+    public let metrics: [String: Int]
     public let failureMessage: String?
     public let recordedAt: Date
 
@@ -44,6 +46,7 @@ public struct PerformanceDiagnosticRecord: Codable, Equatable, Identifiable, Sen
         sessionID: UUID? = nil,
         totalElapsedMilliseconds: Int,
         steps: [PerformanceDiagnosticStep],
+        metrics: [String: Int] = [:],
         failureMessage: String? = nil,
         recordedAt: Date = Date()
     ) {
@@ -55,6 +58,7 @@ public struct PerformanceDiagnosticRecord: Codable, Equatable, Identifiable, Sen
         self.sessionID = sessionID
         self.totalElapsedMilliseconds = totalElapsedMilliseconds
         self.steps = steps
+        self.metrics = metrics
         self.failureMessage = failureMessage
         self.recordedAt = recordedAt
     }

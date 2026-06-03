@@ -8,24 +8,71 @@ final class StructuredSessionObservationStore: @unchecked Sendable {
         var deltas: [StructuredSessionObservationDelta]
     }
 
+    private struct DeltaBuildSummary {
+        let baseRevision: Int
+        let revision: Int
+        let changes: [StructuredSessionObservationChange]
+        let snapshot: StructuredSessionObservationSnapshot
+        let elapsedMilliseconds: Int
+    }
+
+    private struct EntryResolution {
+        let entry: Entry
+        let deltaBuildSummary: DeltaBuildSummary?
+    }
+
     private let lock = NSLock()
     private let maxRetainedDeltas: Int
+    private let recordPerformanceDiagnostic: (PerformanceDiagnosticRecord) -> Void
+    private let currentDate: () -> Date
+    private let currentUptimeNanoseconds: () -> UInt64
     private var entries: [UUID: Entry] = [:]
 
-    init(maxRetainedDeltas: Int = 64) {
+    init(
+        maxRetainedDeltas: Int = 64,
+        recordPerformanceDiagnostic: @escaping (PerformanceDiagnosticRecord) -> Void = { _ in },
+        currentDate: @escaping () -> Date = Date.init,
+        currentUptimeNanoseconds: @escaping () -> UInt64 = { DispatchTime.now().uptimeNanoseconds }
+    ) {
         self.maxRetainedDeltas = max(1, maxRetainedDeltas)
+        self.recordPerformanceDiagnostic = recordPerformanceDiagnostic
+        self.currentDate = currentDate
+        self.currentUptimeNanoseconds = currentUptimeNanoseconds
     }
 
     func snapshotResponse(for screen: SessionScreen) -> SessionScreenObservationSnapshotResponse {
-        withLock {
-            guard screen.primarySurface == .structuredActivityFeed else {
+        guard screen.primarySurface == .structuredActivityFeed else {
+            return withLock {
                 entries.removeValue(forKey: screen.session.id)
                 return SessionScreenObservationSnapshotResponse(screen: screen)
             }
-
-            let entry = ensureCurrentEntryLocked(for: screen)
-            return SessionScreenObservationSnapshotResponse(screen: entry.snapshot.screen, structuredSnapshot: entry.snapshot)
         }
+
+        var trace = makeTrace(for: screen.session)
+        var deltaBuildSummary: DeltaBuildSummary?
+        let response = trace.measure("buildStructuredSnapshot") {
+            withLock {
+                let resolution = ensureCurrentEntryLocked(for: screen)
+                deltaBuildSummary = resolution.deltaBuildSummary
+                return SessionScreenObservationSnapshotResponse(
+                    screen: resolution.entry.snapshot.screen,
+                    structuredSnapshot: resolution.entry.snapshot
+                )
+            }
+        }
+
+        if let deltaBuildSummary {
+            recordPerformanceDiagnostic(deltaDiagnostic(for: screen.session, summary: deltaBuildSummary))
+        }
+        if let structuredSnapshot = response.structuredSnapshot {
+            recordPerformanceDiagnostic(
+                trace.finish(
+                    outcome: .success,
+                    metrics: snapshotMetrics(from: structuredSnapshot)
+                )
+            )
+        }
+        return response
     }
 
     func observationStart(observationID: UUID, screen: SessionScreen) -> SessionScreenObservationStart {
@@ -38,17 +85,25 @@ final class StructuredSessionObservationStore: @unchecked Sendable {
     }
 
     func recordChange(for screen: SessionScreen) {
-        withLock {
-            guard screen.primarySurface == .structuredActivityFeed else {
+        guard screen.primarySurface == .structuredActivityFeed else {
+            _ = withLock {
                 entries.removeValue(forKey: screen.session.id)
-                return
             }
-            _ = ensureCurrentEntryLocked(for: screen)
+            return
+        }
+
+        let deltaBuildSummary = withLock {
+            ensureCurrentEntryLocked(for: screen).deltaBuildSummary
+        }
+        if let deltaBuildSummary {
+            recordPerformanceDiagnostic(deltaDiagnostic(for: screen.session, summary: deltaBuildSummary))
         }
     }
 
     func updates(for sessionID: UUID, after revision: Int?) -> [SessionScreenObservationUpdate] {
-        withLock {
+        let startedAt = currentUptimeNanoseconds()
+        var gapRecord: PerformanceDiagnosticRecord?
+        let updates: [SessionScreenObservationUpdate] = withLock {
             guard let revision,
                   let entry = entries[sessionID] else {
                 return []
@@ -62,25 +117,43 @@ final class StructuredSessionObservationStore: @unchecked Sendable {
             let expectedRevisions = Array((revision + 1)...currentRevision)
             let matchingDeltas = entry.deltas.filter { $0.revision > revision }
             guard matchingDeltas.count == expectedRevisions.count else {
-                return [.structuredGap(currentRevision: currentRevision)]
+                gapRecord = gapDiagnostic(
+                    for: entry.snapshot.session,
+                    requestedRevision: revision,
+                    currentRevision: currentRevision,
+                    retainedDeltaCount: entry.deltas.count,
+                    elapsedMilliseconds: elapsedMilliseconds(since: startedAt)
+                )
+                return [SessionScreenObservationUpdate.structuredGap(currentRevision: currentRevision)]
             }
 
             let sortedDeltas = matchingDeltas.sorted { $0.revision < $1.revision }
             var previousRevision = revision
             for (expectedRevision, delta) in zip(expectedRevisions, sortedDeltas) {
                 guard delta.baseRevision == previousRevision, delta.revision == expectedRevision else {
-                    return [.structuredGap(currentRevision: currentRevision)]
+                    gapRecord = gapDiagnostic(
+                        for: entry.snapshot.session,
+                        requestedRevision: revision,
+                        currentRevision: currentRevision,
+                        retainedDeltaCount: entry.deltas.count,
+                        elapsedMilliseconds: elapsedMilliseconds(since: startedAt)
+                    )
+                    return [SessionScreenObservationUpdate.structuredGap(currentRevision: currentRevision)]
                 }
                 previousRevision = delta.revision
             }
 
             return sortedDeltas.map(SessionScreenObservationUpdate.structuredDelta)
         }
+        if let gapRecord {
+            recordPerformanceDiagnostic(gapRecord)
+        }
+        return updates
     }
 
-    private func ensureCurrentEntryLocked(for screen: SessionScreen) -> Entry {
+    private func ensureCurrentEntryLocked(for screen: SessionScreen) -> EntryResolution {
         if let entry = entries[screen.session.id], entry.snapshot.screen == screen {
-            return entry
+            return EntryResolution(entry: entry, deltaBuildSummary: nil)
         }
 
         guard var entry = entries[screen.session.id] else {
@@ -89,22 +162,25 @@ final class StructuredSessionObservationStore: @unchecked Sendable {
                 deltas: []
             )
             entries[screen.session.id] = initialEntry
-            return initialEntry
+            return EntryResolution(entry: initialEntry, deltaBuildSummary: nil)
         }
 
+        let deltaStartedAt = currentUptimeNanoseconds()
         let changes = makeChanges(from: entry.snapshot, to: screen)
+        let deltaElapsedMilliseconds = elapsedMilliseconds(since: deltaStartedAt)
         guard changes.isEmpty == false else {
             let refreshedEntry = Entry(
                 snapshot: StructuredSessionObservationSnapshot(revision: entry.snapshot.revision, screen: screen),
                 deltas: entry.deltas
             )
             entries[screen.session.id] = refreshedEntry
-            return refreshedEntry
+            return EntryResolution(entry: refreshedEntry, deltaBuildSummary: nil)
         }
 
-        let nextRevision = entry.snapshot.revision + 1
+        let baseRevision = entry.snapshot.revision
+        let nextRevision = baseRevision + 1
         let delta = StructuredSessionObservationDelta(
-            baseRevision: entry.snapshot.revision,
+            baseRevision: baseRevision,
             revision: nextRevision,
             changes: changes
         )
@@ -114,7 +190,16 @@ final class StructuredSessionObservationStore: @unchecked Sendable {
             entry.deltas.removeFirst(entry.deltas.count - maxRetainedDeltas)
         }
         entries[screen.session.id] = entry
-        return entry
+        return EntryResolution(
+            entry: entry,
+            deltaBuildSummary: DeltaBuildSummary(
+                baseRevision: baseRevision,
+                revision: nextRevision,
+                changes: changes,
+                snapshot: entry.snapshot,
+                elapsedMilliseconds: deltaElapsedMilliseconds
+            )
+        )
     }
 
     private func makeChanges(
@@ -207,9 +292,117 @@ final class StructuredSessionObservationStore: @unchecked Sendable {
         return appendedEvents.isEmpty ? [.replaceProviderEvents(newEvents)] : [.appendProviderEvents(appendedEvents)]
     }
 
+    private func makeTrace(for session: Session) -> PerformanceDiagnosticTrace {
+        PerformanceDiagnosticTrace(
+            operation: .structuredSessionObservation,
+            workspaceID: session.workspaceID,
+            providerID: session.providerID,
+            sessionID: session.id,
+            recordedAt: currentDate(),
+            currentUptimeNanoseconds: currentUptimeNanoseconds
+        )
+    }
+
+    private func snapshotMetrics(from snapshot: StructuredSessionObservationSnapshot) -> [String: Int] {
+        [
+            "snapshotBuildCount": 1,
+            "structuredRevision": snapshot.revision,
+            "activityItemCount": snapshot.activityItems.count,
+            "approvalRequestCount": snapshot.approvalRequests.count,
+            "providerEventCount": snapshot.providerEvents.count,
+            "slashCommandCount": snapshot.slashCommands?.count ?? 0,
+            "transcriptCharacterCount": snapshot.transcript.count,
+            "extensionDialogVisibleCount": snapshot.extensionUI == nil ? 0 : 1,
+            "agentTurnInProgressCount": snapshot.isAgentTurnInProgress ? 1 : 0
+        ]
+    }
+
+    private func deltaDiagnostic(for session: Session, summary: DeltaBuildSummary) -> PerformanceDiagnosticRecord {
+        PerformanceDiagnosticRecord(
+            operation: .structuredSessionObservation,
+            outcome: .success,
+            workspaceID: session.workspaceID,
+            providerID: session.providerID,
+            sessionID: session.id,
+            totalElapsedMilliseconds: summary.elapsedMilliseconds,
+            steps: [
+                PerformanceDiagnosticStep(
+                    name: "buildStructuredDelta",
+                    elapsedMilliseconds: summary.elapsedMilliseconds
+                )
+            ],
+            metrics: deltaMetrics(from: summary),
+            recordedAt: currentDate()
+        )
+    }
+
+    private func deltaMetrics(from summary: DeltaBuildSummary) -> [String: Int] {
+        let fullReplaceActivityItemsCount = summary.changes.reduce(into: 0) { count, change in
+            if case .replaceActivityItems = change {
+                count += 1
+            }
+        }
+        let fullReplaceProviderEventsCount = summary.changes.reduce(into: 0) { count, change in
+            if case .replaceProviderEvents = change {
+                count += 1
+            }
+        }
+
+        var metrics = snapshotMetrics(from: summary.snapshot)
+        metrics["snapshotBuildCount"] = 0
+        metrics["deltaBuildCount"] = 1
+        metrics["baseRevision"] = summary.baseRevision
+        metrics["structuredRevision"] = summary.revision
+        metrics["changeCount"] = summary.changes.count
+        metrics["fullReplaceActivityItemsCount"] = fullReplaceActivityItemsCount
+        metrics["fullReplaceProviderEventsCount"] = fullReplaceProviderEventsCount
+        metrics["fullReplaceFallbackCount"] = fullReplaceActivityItemsCount + fullReplaceProviderEventsCount
+        return metrics
+    }
+
+    private func gapDiagnostic(
+        for session: Session,
+        requestedRevision: Int,
+        currentRevision: Int,
+        retainedDeltaCount: Int,
+        elapsedMilliseconds: Int
+    ) -> PerformanceDiagnosticRecord {
+        PerformanceDiagnosticRecord(
+            operation: .structuredSessionObservation,
+            outcome: .success,
+            workspaceID: session.workspaceID,
+            providerID: session.providerID,
+            sessionID: session.id,
+            totalElapsedMilliseconds: elapsedMilliseconds,
+            steps: [
+                PerformanceDiagnosticStep(
+                    name: "resolveStructuredGap",
+                    elapsedMilliseconds: elapsedMilliseconds
+                )
+            ],
+            metrics: [
+                "gapFallbackCount": 1,
+                "requestedRevision": requestedRevision,
+                "currentRevision": currentRevision,
+                "retainedDeltaCount": retainedDeltaCount
+            ],
+            recordedAt: currentDate()
+        )
+    }
+
+    private func elapsedMilliseconds(since startedAt: UInt64) -> Int {
+        Int(currentUptimeNanoseconds().saturatingSubtract(startedAt) / 1_000_000)
+    }
+
     private func withLock<T>(_ operation: () -> T) -> T {
         lock.lock()
         defer { lock.unlock() }
         return operation()
+    }
+}
+
+private extension UInt64 {
+    func saturatingSubtract(_ other: UInt64) -> UInt64 {
+        self >= other ? self - other : 0
     }
 }

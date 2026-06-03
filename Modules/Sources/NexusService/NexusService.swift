@@ -1405,7 +1405,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     private let remoteAccessRuntime: RemoteAccessRuntime
     private let ibmBobNativeSessionCleaner: any IBMBobNativeSessionCleaning
     private let sessionControllerRegistry = SessionControllerRegistry()
-    private let structuredSessionObservationStore = StructuredSessionObservationStore()
+    private let structuredSessionObservationStore: StructuredSessionObservationStore
     private let piSessionRedirectLock = NSLock()
     private var pendingPiSessionRedirects: [UUID: UUID] = [:]
 
@@ -1433,6 +1433,11 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         self.workspaceAvailabilityEvaluator = workspaceAvailabilityEvaluator
         self.sessionRuntimeManager = sessionRuntimeManager
         self.providerModuleRegistry = providerModuleRegistry
+        self.structuredSessionObservationStore = StructuredSessionObservationStore(
+            recordPerformanceDiagnostic: { [metadataStore] in
+                try? metadataStore.recordPerformanceDiagnostic($0)
+            }
+        )
         self.workspaceCatalog = WorkspaceCatalog(
             dependencies: WorkspaceCatalogDependencies(
                 metadataStore: metadataStore,

@@ -163,6 +163,7 @@ final class NexusMetadataStore {
                 session_id TEXT,
                 total_elapsed_ms INTEGER NOT NULL,
                 steps_json TEXT NOT NULL,
+                metrics_json TEXT NOT NULL DEFAULT '{}',
                 failure_message TEXT,
                 recorded_at INTEGER NOT NULL
             );
@@ -170,6 +171,11 @@ final class NexusMetadataStore {
             CREATE INDEX IF NOT EXISTS idx_performance_diagnostics_recorded_at
             ON performance_diagnostics(recorded_at DESC);
             """
+        )
+        try ensureColumnExists(
+            table: "performance_diagnostics",
+            column: "metrics_json",
+            definition: "TEXT NOT NULL DEFAULT '{}'"
         )
         try ensureColumnExists(
             table: "sessions",
@@ -425,8 +431,8 @@ final class NexusMetadataStore {
             let statement = try prepare(
                 """
                 INSERT INTO performance_diagnostics (
-                    id, operation, outcome, workspace_id, provider_id, session_id, total_elapsed_ms, steps_json, failure_message, recorded_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    id, operation, outcome, workspace_id, provider_id, session_id, total_elapsed_ms, steps_json, metrics_json, failure_message, recorded_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """
             )
             defer { sqlite3_finalize(statement) }
@@ -439,8 +445,9 @@ final class NexusMetadataStore {
             try bind(diagnostic.sessionID?.uuidString, at: 6, in: statement)
             try bind(Int64(diagnostic.totalElapsedMilliseconds), at: 7, in: statement)
             try bind(try encodePerformanceDiagnosticSteps(diagnostic.steps), at: 8, in: statement)
-            try bind(diagnostic.failureMessage, at: 9, in: statement)
-            try bind(recordedAtMilliseconds, at: 10, in: statement)
+            try bind(try encodePerformanceDiagnosticMetrics(diagnostic.metrics), at: 9, in: statement)
+            try bind(diagnostic.failureMessage, at: 10, in: statement)
+            try bind(recordedAtMilliseconds, at: 11, in: statement)
             try stepDone(statement)
 
             let trimStatement = try prepare(
@@ -466,7 +473,7 @@ final class NexusMetadataStore {
         return try withLock {
             let statement = try prepare(
                 """
-                SELECT id, operation, outcome, workspace_id, provider_id, session_id, total_elapsed_ms, steps_json, failure_message, recorded_at
+                SELECT id, operation, outcome, workspace_id, provider_id, session_id, total_elapsed_ms, steps_json, metrics_json, failure_message, recorded_at
                 FROM performance_diagnostics
                 ORDER BY recorded_at DESC, rowid DESC
                 LIMIT ?;
@@ -1589,8 +1596,9 @@ final class NexusMetadataStore {
             sessionID: try readOptionalUUID(column: 5, from: statement),
             totalElapsedMilliseconds: Int(sqlite3_column_int64(statement, 6)),
             steps: try decodePerformanceDiagnosticSteps(from: readString(column: 7, from: statement)),
-            failureMessage: readOptionalString(column: 8, from: statement),
-            recordedAt: Date(timeIntervalSince1970: Double(sqlite3_column_int64(statement, 9)) / 1_000)
+            metrics: try decodePerformanceDiagnosticMetrics(from: readString(column: 8, from: statement)),
+            failureMessage: readOptionalString(column: 9, from: statement),
+            recordedAt: Date(timeIntervalSince1970: Double(sqlite3_column_int64(statement, 10)) / 1_000)
         )
     }
 
@@ -1836,6 +1844,21 @@ final class NexusMetadataStore {
             throw NexusMetadataStoreError.sqlite("Could not decode performance diagnostic steps")
         }
         return try JSONDecoder().decode([PerformanceDiagnosticStep].self, from: data)
+    }
+
+    private func encodePerformanceDiagnosticMetrics(_ metrics: [String: Int]) throws -> String {
+        let data = try JSONEncoder().encode(metrics)
+        guard let json = String(data: data, encoding: .utf8) else {
+            throw NexusMetadataStoreError.sqlite("Could not encode performance diagnostic metrics")
+        }
+        return json
+    }
+
+    private func decodePerformanceDiagnosticMetrics(from json: String) throws -> [String: Int] {
+        guard let data = json.data(using: .utf8) else {
+            throw NexusMetadataStoreError.sqlite("Could not decode performance diagnostic metrics")
+        }
+        return try JSONDecoder().decode([String: Int].self, from: data)
     }
 
     private func navigationTargetKey(_ target: NavigationTarget) -> String {
