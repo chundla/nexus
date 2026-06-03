@@ -1,6 +1,6 @@
 import Foundation
 import NexusDomain
-import NexusSessionPresentation
+@testable import NexusSessionPresentation
 import Testing
 
 struct StructuredSessionPresentationTests {
@@ -362,6 +362,102 @@ struct StructuredSessionPresentationTests {
             isVisible: false,
             commands: []
         ))
+    }
+
+    @Test func structuredSessionFeedPresenterAppendsOnlyNewStructuredSessionRowsAcrossLiveUpdates() {
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .codex,
+            isDefault: true,
+            state: .ready
+        )
+        let pendingRequest = SessionApprovalRequest(title: "Deploy", text: "Deploy to production?", state: .pending)
+        let firstActivity = SessionActivityItem(kind: .message, text: "You: Ship it")
+        let secondActivity = SessionActivityItem(kind: .progress, text: "Gathering context")
+        let thirdActivity = SessionActivityItem(kind: .completion, text: "Done")
+        var builtItemIDs: [[UUID]] = []
+        let presenter = StructuredSessionFeedPresenter { items in
+            builtItemIDs.append(items.map(\.id))
+            return items.map { item in
+                StructuredSessionActivityRow(
+                    id: item.id,
+                    title: item.kind.rawValue,
+                    systemImage: item.kind.rawValue,
+                    text: item.text,
+                    detailText: item.detailText,
+                    isDetailTextTruncated: false,
+                    emphasis: .neutral
+                )
+            }
+        }
+
+        let firstPresentation = presenter.presentation(for: SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [firstActivity, secondActivity],
+            approvalRequests: [pendingRequest]
+        ))
+        let secondPresentation = presenter.presentation(for: SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [firstActivity, secondActivity, thirdActivity],
+            approvalRequests: [pendingRequest],
+            isAgentTurnInProgress: true
+        ))
+
+        #expect(firstPresentation.activityRows.map(\.id) == [firstActivity.id, secondActivity.id])
+        #expect(secondPresentation.activityRows.map(\.id) == [firstActivity.id, secondActivity.id, thirdActivity.id])
+        #expect(secondPresentation.pendingApprovalRequests == [pendingRequest])
+        #expect(secondPresentation.thinkingIndicator == nil)
+        #expect(builtItemIDs == [[firstActivity.id, secondActivity.id], [thirdActivity.id]])
+    }
+
+    @Test func structuredSessionFeedPresenterRebuildsWhenStructuredSessionHistoryChangesInPlace() {
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let activityID = UUID()
+        let originalActivity = SessionActivityItem(id: activityID, kind: .message, text: "Pi: First draft")
+        let unchangedActivity = SessionActivityItem(kind: .progress, text: "Thinking")
+        let updatedActivity = SessionActivityItem(id: activityID, kind: .message, text: "Pi: Revised draft")
+        var builtItemTexts: [[String]] = []
+        let presenter = StructuredSessionFeedPresenter { items in
+            builtItemTexts.append(items.map(\.text))
+            return items.map { item in
+                StructuredSessionActivityRow(
+                    id: item.id,
+                    title: item.kind.rawValue,
+                    systemImage: item.kind.rawValue,
+                    text: item.text,
+                    detailText: item.detailText,
+                    isDetailTextTruncated: false,
+                    emphasis: .neutral
+                )
+            }
+        }
+
+        _ = presenter.presentation(for: SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [originalActivity, unchangedActivity]
+        ))
+        let updatedPresentation = presenter.presentation(for: SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [updatedActivity, unchangedActivity]
+        ))
+
+        #expect(updatedPresentation.activityRows.map(\.text) == ["Pi: Revised draft", "Thinking"])
+        #expect(builtItemTexts == [["Pi: First draft", "Thinking"], ["Pi: Revised draft", "Thinking"]])
     }
 
     @Test func structuredSessionConversationPresentationClassifiesSharedMessageRowsAndFallsBackToProviderLabel() {

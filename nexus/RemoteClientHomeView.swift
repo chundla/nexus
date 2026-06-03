@@ -1410,6 +1410,7 @@ private struct RemoteSessionScreenView: View {
     @State private var structuredPrompt = ""
     @State private var terminalViewportSize: CGSize = .zero
     @State private var terminalViewportResizeCoordinator = TerminalViewportResizeCoordinator()
+    @State private var structuredFeedPresenter = StructuredSessionFeedPresenter()
     @State private var isShowingStopConfirmation = false
     @State private var activeAction: RemoteSessionAction?
     @State private var activeApprovalRequestID: UUID?
@@ -1451,7 +1452,7 @@ private struct RemoteSessionScreenView: View {
             return nil
         }
 
-        return structuredSessionFeedPresentation(for: screen)
+        return structuredFeedPresenter.presentation(for: screen)
     }
 
     private var structuredComposerPresentation: StructuredSessionComposerPresentation? {

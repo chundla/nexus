@@ -24,6 +24,7 @@ struct ContentView: View {
     @State private var terminalViewportSize: CGSize = .zero
     @State private var terminalViewportResizeCoordinator = TerminalViewportResizeCoordinator()
     @State private var terminalFocusToken = UUID()
+    @State private var structuredFeedPresenter = StructuredSessionFeedPresenter()
     @State private var presentedError: PresentedError?
 
     private let terminalLayout = TerminalViewportLayout.live
@@ -1513,7 +1514,7 @@ struct ContentView: View {
 
     @ViewBuilder
     private func structuredSessionFeed(screen: SessionScreen, isReady: Bool) -> some View {
-        let feedPresentation = structuredSessionFeedPresentation(for: screen)
+        let feedPresentation = structuredFeedPresenter.presentation(for: screen)
         let approvalRequestPresentation = structuredSessionApprovalRequestPresentation(hasWriterAuthority: true)
         let extensionUI = screen.extensionUI
         let aboveEditorWidgets = extensionUI?.widgets.filter { $0.placement == .aboveEditor } ?? []

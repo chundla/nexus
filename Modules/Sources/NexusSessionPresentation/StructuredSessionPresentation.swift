@@ -240,8 +240,65 @@ public struct StructuredSessionPresentation: Equatable {
     }
 }
 
+public final class StructuredSessionFeedPresenter {
+    private let rowBuilder: ([SessionActivityItem]) -> [StructuredSessionActivityRow]
+
+    private var cachedSessionID: UUID?
+    private var cachedActivityItems: [SessionActivityItem] = []
+    private var cachedActivityRows: [StructuredSessionActivityRow] = []
+
+    public init() {
+        self.rowBuilder = structuredSessionActivityRows(for:)
+    }
+
+    init(_ rowBuilder: @escaping ([SessionActivityItem]) -> [StructuredSessionActivityRow]) {
+        self.rowBuilder = rowBuilder
+    }
+
+    public func presentation(for screen: SessionScreen) -> StructuredSessionFeedPresentation {
+        structuredSessionFeedPresentation(for: screen, activityRows: activityRows(for: screen))
+    }
+
+    private func activityRows(for screen: SessionScreen) -> [StructuredSessionActivityRow] {
+        guard cachedSessionID == screen.session.id else {
+            return rebuildActivityRows(for: screen.activityItems, sessionID: screen.session.id)
+        }
+
+        if screen.activityItems == cachedActivityItems {
+            return cachedActivityRows
+        }
+
+        if screen.activityItems.count >= cachedActivityItems.count,
+           screen.activityItems.starts(with: cachedActivityItems) {
+            let appendedItems = Array(screen.activityItems.dropFirst(cachedActivityItems.count))
+            cachedActivityItems = screen.activityItems
+            cachedActivityRows.append(contentsOf: rowBuilder(appendedItems))
+            return cachedActivityRows
+        }
+
+        return rebuildActivityRows(for: screen.activityItems, sessionID: screen.session.id)
+    }
+
+    @discardableResult
+    private func rebuildActivityRows(for activityItems: [SessionActivityItem], sessionID: UUID) -> [StructuredSessionActivityRow] {
+        let rows = rowBuilder(activityItems)
+        cachedSessionID = sessionID
+        cachedActivityItems = activityItems
+        cachedActivityRows = rows
+        return rows
+    }
+}
+
 public func structuredSessionActivityRows(for screen: SessionScreen) -> [StructuredSessionActivityRow] {
-    screen.activityItems.map { item in
+    structuredSessionActivityRows(for: screen.activityItems)
+}
+
+public func structuredSessionFeedPresentation(for screen: SessionScreen) -> StructuredSessionFeedPresentation {
+    structuredSessionFeedPresentation(for: screen, activityRows: structuredSessionActivityRows(for: screen.activityItems))
+}
+
+func structuredSessionActivityRows(for activityItems: [SessionActivityItem]) -> [StructuredSessionActivityRow] {
+    activityItems.map { item in
         let detailPreview = item.detailText.map { structuredSessionDetailTextPreview(for: $0) }
 
         return StructuredSessionActivityRow(
@@ -256,11 +313,14 @@ public func structuredSessionActivityRows(for screen: SessionScreen) -> [Structu
     }
 }
 
-public func structuredSessionFeedPresentation(for screen: SessionScreen) -> StructuredSessionFeedPresentation {
+private func structuredSessionFeedPresentation(
+    for screen: SessionScreen,
+    activityRows: [StructuredSessionActivityRow]
+) -> StructuredSessionFeedPresentation {
     let pendingApprovalRequests = screen.approvalRequests.filter { $0.state == .pending }
     return StructuredSessionFeedPresentation(
         copy: structuredSessionPresentationCopy(for: screen),
-        activityRows: structuredSessionActivityRows(for: screen),
+        activityRows: activityRows,
         pendingApprovalRequests: pendingApprovalRequests,
         thinkingIndicator: structuredSessionThinkingIndicator(
             for: screen,
