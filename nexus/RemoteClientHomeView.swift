@@ -1473,35 +1473,43 @@ private struct RemoteSessionScreenView: View {
         return model.focusedStructuredSessionPresentation
     }
 
+    private var structuredChromePresentation: FocusedStructuredSessionChromePresentation? {
+        guard model.focusedSessionID == session.id else {
+            return nil
+        }
+
+        return model.focusedStructuredSessionChromePresentation ?? screen.flatMap { NexusSessionPresentation.focusedStructuredSessionChromePresentation(for: $0) }
+    }
+
     private var structuredFeedPresentation: StructuredSessionFeedPresentation? {
         structuredPresentation?.feed
     }
 
     private var structuredComposerPresentation: StructuredSessionComposerPresentation? {
-        guard let screen else {
+        guard let structuredChromePresentation else {
             return nil
         }
 
         return structuredSessionComposerPresentation(
-            for: screen,
+            for: structuredChromePresentation,
             hasWriterAuthority: model.focusedSessionIsController
         )
     }
 
     private var structuredSendAffordance: StructuredSessionComposerSendAffordance? {
-        guard let screen, let composer = structuredComposerPresentation else {
+        guard let structuredChromePresentation, let composer = structuredComposerPresentation else {
             return nil
         }
 
         return structuredSessionComposerSendAffordance(
             for: structuredPrompt,
             composer: composer,
-            isPerformingAction: isPerformingAction || screen.isAgentTurnInProgress
+            isPerformingAction: isPerformingAction || structuredChromePresentation.isAgentTurnInProgress
         )
     }
 
     private var structuredApprovalRequestPresentation: StructuredSessionApprovalRequestPresentation? {
-        guard screen != nil else {
+        guard structuredChromePresentation != nil else {
             return nil
         }
 
@@ -1511,15 +1519,15 @@ private struct RemoteSessionScreenView: View {
     }
 
     private var structuredSlashCommandMenuPresentation: StructuredSessionSlashCommandMenuPresentation? {
-        guard let screen else {
+        guard let structuredChromePresentation else {
             return nil
         }
 
-        return structuredSessionSlashCommandMenuPresentation(for: structuredPrompt, screen: screen)
+        return structuredSessionSlashCommandMenuPresentation(for: structuredPrompt, chrome: structuredChromePresentation)
     }
 
     private var extensionUI: SessionExtensionUIState? {
-        structuredPresentation?.extensionUI ?? screen?.extensionUI
+        structuredChromePresentation?.extensionUI ?? structuredPresentation?.extensionUI ?? screen?.extensionUI
     }
 
     private var aboveEditorWidgets: [SessionExtensionUIWidget] {
@@ -1783,13 +1791,13 @@ private struct RemoteSessionScreenView: View {
 
     @ViewBuilder
     private var structuredComposerBar: some View {
-        if let screen,
+        if let structuredChromePresentation,
            let composerPresentation = structuredComposerPresentation,
            let sendAffordance = structuredSendAffordance,
            let slashCommandMenuPresentation = structuredSlashCommandMenuPresentation {
             let statusBarPresentation = structuredSessionStatusBarPresentation(
-                for: screen,
-                workspaceLocation: structuredSessionWorkspaceLocation(for: screen.session)
+                for: structuredChromePresentation,
+                workspaceLocation: structuredSessionWorkspaceLocation(for: structuredChromePresentation.session)
             )
 
             VStack(spacing: 8) {
@@ -1810,7 +1818,7 @@ private struct RemoteSessionScreenView: View {
                             .textInputAutocapitalization(.sentences)
                             .autocorrectionDisabled()
                             .lineLimit(1 ... 6)
-                            .disabled(isPerformingAction || screen.isAgentTurnInProgress)
+                            .disabled(isPerformingAction || structuredChromePresentation.isAgentTurnInProgress)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .nexusIOSTextField(tint: NexusIOSTheme.gold)
 

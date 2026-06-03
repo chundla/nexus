@@ -167,6 +167,8 @@ final class RemoteClientPairingModel {
     private(set) var focusedSessionWorkspaceLocation: String?
     var focusedSessionScreen: SessionScreen?
     private(set) var focusedStructuredSessionPresentation: FocusedStructuredSessionPresentation?
+    private(set) var focusedStructuredSessionChromePresentation: FocusedStructuredSessionChromePresentation?
+    private(set) var focusedSessionIsController = false
     var focusedSessionIsStale = false
     var focusedSessionErrorMessage: String?
     var remoteFailureBreadcrumbs: [RemoteClientDiagnosticBreadcrumb] = []
@@ -189,14 +191,6 @@ final class RemoteClientPairingModel {
         }
 
         return pairedMacs.first(where: { $0.id == activePairedMacID })
-    }
-
-    var focusedSessionIsController: Bool {
-        guard let pairedDeviceID = activePairedMac?.pairedDeviceID else {
-            return false
-        }
-
-        return focusedSessionScreen?.controller == .pairedDevice(pairedDeviceID)
     }
 
     var focusedSessionSurfaceSupport: SessionSurfaceSupport? {
@@ -803,6 +797,8 @@ final class RemoteClientPairingModel {
         focusedSessionWorkspaceLocation = nil
         focusedSessionScreen = nil
         syncFocusedStructuredSessionPresentation(for: nil)
+        syncFocusedStructuredSessionChromePresentation(for: nil)
+        syncFocusedSessionControllerStatus()
         focusedSessionIsStale = false
         focusedSessionErrorMessage = nil
 
@@ -833,6 +829,7 @@ final class RemoteClientPairingModel {
         pairedMacAvailability[pairedMac.id] = .unknown
         try store.savePairedMacs(pairedMacs)
         activePairedMacID = pairedMac.id
+        syncFocusedSessionControllerStatus()
         clearRemoteBrowseState()
         pairingRecoveryMessage = nil
         store.saveActivePairedMacID(activePairedMacID)
@@ -844,6 +841,7 @@ final class RemoteClientPairingModel {
         }
 
         activePairedMacID = id
+        syncFocusedSessionControllerStatus()
         clearRemoteBrowseState()
         pairingRecoveryMessage = nil
         store.saveActivePairedMacID(activePairedMacID)
@@ -853,6 +851,7 @@ final class RemoteClientPairingModel {
         pairedMacs.removeAll { $0.id == id }
         pairedMacAvailability[id] = nil
         activePairedMacID = Self.resolveActivePairedMacID(preferredID: activePairedMacID, pairedMacs: pairedMacs)
+        syncFocusedSessionControllerStatus()
         clearRemoteBrowseState()
         pairingRecoveryMessage = nil
         try store.savePairedMacs(pairedMacs)
@@ -1119,6 +1118,8 @@ final class RemoteClientPairingModel {
     private func applyFocusedSessionScreen(_ screen: SessionScreen) {
         focusedSessionScreen = screen
         syncFocusedStructuredSessionPresentation(for: screen)
+        syncFocusedStructuredSessionChromePresentation(for: screen)
+        syncFocusedSessionControllerStatus()
         setFocusedSessionWorkspaceID(screen.session.workspaceID)
     }
 
@@ -1126,6 +1127,26 @@ final class RemoteClientPairingModel {
         let presentation = screen.flatMap { focusedStructuredSessionPresenter.presentation(for: $0) }
         if focusedStructuredSessionPresentation != presentation {
             focusedStructuredSessionPresentation = presentation
+        }
+    }
+
+    private func syncFocusedStructuredSessionChromePresentation(for screen: SessionScreen?) {
+        let presentation = screen.flatMap { NexusSessionPresentation.focusedStructuredSessionChromePresentation(for: $0) }
+        if focusedStructuredSessionChromePresentation != presentation {
+            focusedStructuredSessionChromePresentation = presentation
+        }
+    }
+
+    private func syncFocusedSessionControllerStatus() {
+        let isController: Bool
+        if let pairedDeviceID = activePairedMac?.pairedDeviceID {
+            isController = focusedSessionScreen?.controller == .pairedDevice(pairedDeviceID)
+        } else {
+            isController = false
+        }
+
+        if focusedSessionIsController != isController {
+            focusedSessionIsController = isController
         }
     }
 
@@ -1152,6 +1173,8 @@ final class RemoteClientPairingModel {
         guard let sessionID = focusedSessionID else {
             focusedSessionScreen = nil
             syncFocusedStructuredSessionPresentation(for: nil)
+            syncFocusedStructuredSessionChromePresentation(for: nil)
+            syncFocusedSessionControllerStatus()
             focusedSessionIsStale = false
             focusedSessionErrorMessage = nil
             await cancelFocusedSessionObservation()
@@ -1161,6 +1184,8 @@ final class RemoteClientPairingModel {
         guard let pairedMac = activePairedMac else {
             focusedSessionScreen = nil
             syncFocusedStructuredSessionPresentation(for: nil)
+            syncFocusedStructuredSessionChromePresentation(for: nil)
+            syncFocusedSessionControllerStatus()
             focusedSessionIsStale = false
             focusedSessionErrorMessage = nil
             await cancelFocusedSessionObservation()
@@ -1329,6 +1354,8 @@ final class RemoteClientPairingModel {
         } else {
             focusedSessionScreen = nil
             syncFocusedStructuredSessionPresentation(for: nil)
+            syncFocusedStructuredSessionChromePresentation(for: nil)
+            syncFocusedSessionControllerStatus()
             focusedSessionIsStale = false
         }
 

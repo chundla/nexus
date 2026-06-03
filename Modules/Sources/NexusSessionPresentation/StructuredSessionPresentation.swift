@@ -269,6 +269,28 @@ public struct FocusedStructuredSessionPresentation: Equatable {
     }
 }
 
+public struct FocusedStructuredSessionChromePresentation: Equatable {
+    public let session: Session
+    public let extensionUI: SessionExtensionUIState?
+    public let isAgentTurnInProgress: Bool
+    public let tokenUsage: StructuredSessionTokenUsagePresentation?
+    public let slashCommands: [StructuredSessionSlashCommand]
+
+    public init(
+        session: Session,
+        extensionUI: SessionExtensionUIState?,
+        isAgentTurnInProgress: Bool,
+        tokenUsage: StructuredSessionTokenUsagePresentation?,
+        slashCommands: [StructuredSessionSlashCommand]
+    ) {
+        self.session = session
+        self.extensionUI = extensionUI
+        self.isAgentTurnInProgress = isAgentTurnInProgress
+        self.tokenUsage = tokenUsage
+        self.slashCommands = slashCommands
+    }
+}
+
 public final class FocusedStructuredSessionPresenter {
     private let feedPresenter = StructuredSessionFeedPresenter()
 
@@ -287,6 +309,22 @@ public final class FocusedStructuredSessionPresenter {
             isAgentTurnInProgress: screen.isAgentTurnInProgress
         )
     }
+}
+
+public func focusedStructuredSessionChromePresentation(
+    for screen: SessionScreen
+) -> FocusedStructuredSessionChromePresentation? {
+    guard screen.primarySurface == .structuredActivityFeed else {
+        return nil
+    }
+
+    return FocusedStructuredSessionChromePresentation(
+        session: screen.session,
+        extensionUI: screen.extensionUI,
+        isAgentTurnInProgress: screen.isAgentTurnInProgress,
+        tokenUsage: structuredSessionTokenUsagePresentation(for: screen),
+        slashCommands: structuredSessionSlashCommands(for: screen)
+    )
 }
 
 public final class StructuredSessionFeedPresenter {
@@ -451,10 +489,14 @@ public func structuredSessionAutoScrollTrigger(for screen: SessionScreen) -> Str
 }
 
 public func structuredSessionPresentationCopy(for screen: SessionScreen) -> StructuredSessionPresentationCopy {
+    structuredSessionPresentationCopy(providerDisplayName: screen.session.providerID.displayName)
+}
+
+private func structuredSessionPresentationCopy(providerDisplayName: String) -> StructuredSessionPresentationCopy {
     StructuredSessionPresentationCopy(
         emptyStateTitle: "No Session activity yet",
-        emptyStateDescription: "Send a prompt to start the \(screen.session.providerID.displayName) Session.",
-        composerPlaceholder: "Send a prompt to \(screen.session.providerID.displayName)"
+        emptyStateDescription: "Send a prompt to start the \(providerDisplayName) Session.",
+        composerPlaceholder: "Send a prompt to \(providerDisplayName)"
     )
 }
 
@@ -504,7 +546,27 @@ public func structuredSessionComposerPresentation(
     for screen: SessionScreen,
     hasWriterAuthority: Bool
 ) -> StructuredSessionComposerPresentation {
-    let copy = structuredSessionPresentationCopy(for: screen)
+    structuredSessionComposerPresentation(
+        providerDisplayName: screen.session.providerID.displayName,
+        hasWriterAuthority: hasWriterAuthority
+    )
+}
+
+public func structuredSessionComposerPresentation(
+    for chrome: FocusedStructuredSessionChromePresentation,
+    hasWriterAuthority: Bool
+) -> StructuredSessionComposerPresentation {
+    structuredSessionComposerPresentation(
+        providerDisplayName: chrome.session.providerID.displayName,
+        hasWriterAuthority: hasWriterAuthority
+    )
+}
+
+private func structuredSessionComposerPresentation(
+    providerDisplayName: String,
+    hasWriterAuthority: Bool
+) -> StructuredSessionComposerPresentation {
+    let copy = structuredSessionPresentationCopy(providerDisplayName: providerDisplayName)
     return StructuredSessionComposerPresentation(
         placeholder: copy.composerPlaceholder,
         isEnabled: hasWriterAuthority,
@@ -531,6 +593,16 @@ public func structuredSessionStatusBarPresentation(
     StructuredSessionStatusBarPresentation(
         workspaceLocation: workspaceLocation,
         tokenUsage: structuredSessionTokenUsagePresentation(for: screen)
+    )
+}
+
+public func structuredSessionStatusBarPresentation(
+    for chrome: FocusedStructuredSessionChromePresentation,
+    workspaceLocation: String
+) -> StructuredSessionStatusBarPresentation {
+    StructuredSessionStatusBarPresentation(
+        workspaceLocation: workspaceLocation,
+        tokenUsage: chrome.tokenUsage
     )
 }
 
@@ -617,11 +689,30 @@ public func structuredSessionSlashCommandMenuPresentation(
     for draft: String,
     screen: SessionScreen
 ) -> StructuredSessionSlashCommandMenuPresentation {
+    structuredSessionSlashCommandMenuPresentation(
+        for: draft,
+        commands: structuredSessionSlashCommands(for: screen)
+    )
+}
+
+public func structuredSessionSlashCommandMenuPresentation(
+    for draft: String,
+    chrome: FocusedStructuredSessionChromePresentation
+) -> StructuredSessionSlashCommandMenuPresentation {
+    structuredSessionSlashCommandMenuPresentation(
+        for: draft,
+        commands: chrome.slashCommands
+    )
+}
+
+private func structuredSessionSlashCommandMenuPresentation(
+    for draft: String,
+    commands: [StructuredSessionSlashCommand]
+) -> StructuredSessionSlashCommandMenuPresentation {
     guard let context = structuredSessionSlashCommandContext(for: draft) else {
         return StructuredSessionSlashCommandMenuPresentation(isVisible: false, commands: [])
     }
 
-    let commands = structuredSessionSlashCommands(for: screen)
     let normalizedQuery = context.query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
     let prefixMatches = commands.filter { command in

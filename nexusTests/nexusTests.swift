@@ -7703,6 +7703,78 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelFocusedStructuredSessionChromePresentationStaysStableDuringAppendOnlyUpdates() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let initialActivity = SessionActivityItem(kind: .message, text: "Pi: Ready")
+        let appendedActivity = SessionActivityItem(kind: .message, text: "Pi: Streaming more output")
+        let initialScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "Pi shared Session stream connected",
+            activityItems: [initialActivity]
+        )
+        let updatedScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "Pi shared Session stream connected\nPi: Streaming more output",
+            activityItems: [initialActivity, appendedActivity]
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []),
+            session: session,
+            screen: initialScreen
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+        try await model.focusSession(sessionID: session.id)
+        let initialChrome = try #require(model.focusedStructuredSessionChromePresentation)
+        let initialFeed = try #require(model.focusedStructuredSessionPresentation)
+        #expect(initialFeed.feed.activityRows.map(\.text) == [initialActivity.text])
+
+        @MainActor
+        final class ObservationChangeState {
+            var changed = false
+        }
+
+        let chromeChanged = ObservationChangeState()
+        withObservationTracking {
+            _ = model.focusedStructuredSessionChromePresentation
+        } onChange: {
+            Task { @MainActor in
+                chromeChanged.changed = true
+            }
+        }
+
+        await client.emitObservedScreen(updatedScreen)
+        for _ in 0 ..< 20 where model.focusedSessionScreen?.transcript != updatedScreen.transcript {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(model.focusedStructuredSessionPresentation?.feed.activityRows.map(\.text) == [
+            initialActivity.text,
+            appendedActivity.text
+        ])
+        #expect(chromeChanged.changed == false)
+        #expect(model.focusedStructuredSessionChromePresentation == initialChrome)
+    }
+
+    @MainActor
     @Test func appModelFocusedSessionControllerSummaryNamesRemoteController() async throws {
         let group = WorkspaceGroup(id: UUID(), name: "Group")
         let workspace = Workspace(

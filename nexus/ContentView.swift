@@ -1442,9 +1442,10 @@ struct ContentView: View {
     @ViewBuilder
     private func structuredSessionFeed(screen: SessionScreen, isReady: Bool) -> some View {
         let structuredPresentation = appModel.focusedStructuredSessionPresentation
+        let structuredChrome = appModel.focusedStructuredSessionChromePresentation ?? NexusSessionPresentation.focusedStructuredSessionChromePresentation(for: screen)
         let feedPresentation = structuredPresentation?.feed ?? structuredFeedPresenter.presentation(for: screen)
         let approvalRequestPresentation = structuredSessionApprovalRequestPresentation(hasWriterAuthority: true)
-        let extensionUI = structuredPresentation?.extensionUI ?? screen.extensionUI
+        let extensionUI = structuredChrome?.extensionUI ?? structuredPresentation?.extensionUI ?? screen.extensionUI
         let aboveEditorWidgets = extensionUI?.widgets.filter { $0.placement == .aboveEditor } ?? []
         let belowEditorWidgets = extensionUI?.widgets.filter { $0.placement == .belowEditor } ?? []
         let autoScrollTrigger = structuredPresentation?.autoScrollTrigger ?? structuredSessionAutoScrollTrigger(for: screen)
@@ -1528,11 +1529,11 @@ struct ContentView: View {
                 }
             }
 
-            if isReady {
+            if isReady, let structuredChrome {
                 MacStructuredSessionComposerSection(
-                    screen: screen,
+                    chrome: structuredChrome,
                     appModel: appModel,
-                    workspaceLocation: structuredSessionWorkspaceLocation(for: screen.session),
+                    workspaceLocation: structuredSessionWorkspaceLocation(for: structuredChrome.session),
                     aboveEditorWidgets: aboveEditorWidgets,
                     belowEditorWidgets: belowEditorWidgets,
                     onError: { message in
@@ -2061,7 +2062,7 @@ struct ContentView: View {
 }
 
 private struct MacStructuredSessionComposerSection: View {
-    let screen: SessionScreen
+    let chrome: FocusedStructuredSessionChromePresentation
     let appModel: NexusAppModel
     let workspaceLocation: String
     let aboveEditorWidgets: [SessionExtensionUIWidget]
@@ -2072,13 +2073,13 @@ private struct MacStructuredSessionComposerSection: View {
     @FocusState private var isPromptFocused: Bool
 
     var body: some View {
-        let composerPresentation = structuredSessionComposerPresentation(for: screen, hasWriterAuthority: true)
+        let composerPresentation = structuredSessionComposerPresentation(for: chrome, hasWriterAuthority: true)
         let slashCommandMenuPresentation = structuredSessionSlashCommandMenuPresentation(
             for: draftState.draft,
-            screen: screen
+            chrome: chrome
         )
         let statusBarPresentation = structuredSessionStatusBarPresentation(
-            for: screen,
+            for: chrome,
             workspaceLocation: workspaceLocation
         )
 
@@ -2100,7 +2101,7 @@ private struct MacStructuredSessionComposerSection: View {
                     .textFieldStyle(.plain)
                     .lineLimit(1 ... 4)
                     .submitLabel(.send)
-                    .disabled(composerPresentation.isEnabled == false || screen.isAgentTurnInProgress)
+                    .disabled(composerPresentation.isEnabled == false || chrome.isAgentTurnInProgress)
                     .onSubmit {
                         sendStructuredSessionPrompt()
                     }
@@ -2119,11 +2120,11 @@ private struct MacStructuredSessionComposerSection: View {
         }
         .padding(14)
         .background(Color.white.opacity(0.02))
-        .task(id: screen.session.id) {
+        .task(id: chrome.session.id) {
             draftState = StructuredSessionComposerDraftState()
-            draftState.observe(editorText: screen.extensionUI?.editorText)
+            draftState.observe(editorText: chrome.extensionUI?.editorText)
         }
-        .onChange(of: screen.extensionUI?.editorText) { _, editorText in
+        .onChange(of: chrome.extensionUI?.editorText) { _, editorText in
             draftState.observe(editorText: editorText)
         }
     }
