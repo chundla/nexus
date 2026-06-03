@@ -1120,8 +1120,8 @@ struct NexusServicePiSessionStreamTests {
         #expect(screen.activityItems.map(\.text) == [
             "Session stream connected",
             "/session-stats",
-            "Pi Session stats — user: 5 · assistant: 4 · tool calls: 12 · tool results: 12 · total: 21 · cost: $0.45",
-            "Pi context usage — 60000 / 200000 tokens (30%)"
+            "Session stats — user: 5 · assistant: 4 · tool calls: 12 · tool results: 12 · total: 21 · cost: $0.45",
+            "Context usage — 60000 / 200000 tokens (30%)"
         ])
         #expect(screen.activityItems.map(\.kind) == [.status, .command, .status, .status])
     }
@@ -1160,6 +1160,7 @@ struct NexusServicePiSessionStreamTests {
 
         #expect(transport.sentLines.contains(where: { $0.contains("\"id\":\"nexus-pi-session-stats-auto-") && $0.contains("\"type\":\"get_session_stats\"") }))
         #expect(screen.providerEvents.contains(where: { $0.command == "get_session_stats" && $0.rawPayload.contains("\"contextWindow\":200000") }))
+        #expect(screen.activityItems.allSatisfy { $0.text.contains("Session stats —") == false && $0.text.contains("Context usage —") == false })
     }
 
     @Test func localPiRuntimeShowsLastAssistantTextViaBuiltInCommand() throws {

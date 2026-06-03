@@ -856,6 +856,10 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         }
     }
 
+    private func isAutomaticSessionStatsRequestID(_ requestID: String?) -> Bool {
+        requestID?.hasPrefix("nexus-pi-session-stats-auto-") == true
+    }
+
     private func submitGetLastAssistantTextCommand(commandText: String) throws {
         lock.lock()
         draft = ""
@@ -1315,7 +1319,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         }
 
         if command == "get_session_stats" {
-            handleGetSessionStatsResponse(response)
+            handleGetSessionStatsResponse(response, requestID: id)
             return
         }
 
@@ -2307,7 +2311,11 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         notifyChange()
     }
 
-    private func handleGetSessionStatsResponse(_ response: [String: Any]) {
+    private func handleGetSessionStatsResponse(_ response: [String: Any], requestID: String?) {
+        guard isAutomaticSessionStatsRequestID(requestID) == false else {
+            return
+        }
+
         lock.lock()
         if bool(for: "success", in: response) == true,
            let data = response["data"] as? [String: Any] {
