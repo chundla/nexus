@@ -141,6 +141,15 @@ enum RemoteBrowseNavigationError: LocalizedError {
     }
 }
 
+struct RemoteWorkspaceBrowsePresentation: Equatable {
+    let availableWorkspaceGroups: [WorkspaceGroup]
+    let workspaceOverviews: [WorkspaceOverview]
+
+    var availableWorkspaceGroupIDs: [UUID] {
+        availableWorkspaceGroups.map(\.id)
+    }
+}
+
 @MainActor
 @Observable
 final class RemoteClientPairingModel {
@@ -153,6 +162,8 @@ final class RemoteClientPairingModel {
     var providerDetails: [RemoteProviderDetailKey: ProviderDetail] = [:]
     var providerDetailErrorMessages: [RemoteProviderDetailKey: String] = [:]
     var focusedSessionID: UUID?
+    private(set) var focusedSessionWorkspaceID: UUID?
+    private(set) var focusedSessionWorkspaceLocation: String?
     var focusedSessionScreen: SessionScreen?
     var focusedSessionIsStale = false
     var focusedSessionErrorMessage: String?
@@ -238,6 +249,7 @@ final class RemoteClientPairingModel {
 
         do {
             catalog = try await client.fetchCatalog(for: pairedMac)
+            syncFocusedSessionWorkspaceLocation()
             catalogErrorMessage = nil
             pairingRecoveryMessage = nil
         } catch {
@@ -279,6 +291,40 @@ final class RemoteClientPairingModel {
         }
 
         return session(in: detail, sessionID: sessionID)
+    }
+
+    func workspaceBrowsePresentation(showingGroupsOnly: Bool, selectedGroupID: UUID?) -> RemoteWorkspaceBrowsePresentation? {
+        guard let catalog else {
+            return nil
+        }
+
+        let availableWorkspaceGroups = catalog.workspaceGroups
+            .filter { group in
+                catalog.workspaceOverviews.contains { $0.workspace.primaryGroupID == group.id }
+            }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+
+        let ranking = workspaceRecencyRanking(catalog: catalog, currentFocusedWorkspaceID: focusedSessionWorkspaceID)
+        let sortedWorkspaceOverviews = catalog.workspaceOverviews.sorted { lhs, rhs in
+            let lhsRank = ranking[lhs.workspace.id] ?? Int.max
+            let rhsRank = ranking[rhs.workspace.id] ?? Int.max
+            if lhsRank != rhsRank {
+                return lhsRank < rhsRank
+            }
+            return lhs.workspace.name.localizedCaseInsensitiveCompare(rhs.workspace.name) == .orderedAscending
+        }
+
+        let workspaceOverviews: [WorkspaceOverview]
+        if showingGroupsOnly, let selectedGroupID {
+            workspaceOverviews = sortedWorkspaceOverviews.filter { $0.workspace.primaryGroupID == selectedGroupID }
+        } else {
+            workspaceOverviews = sortedWorkspaceOverviews
+        }
+
+        return RemoteWorkspaceBrowsePresentation(
+            availableWorkspaceGroups: availableWorkspaceGroups,
+            workspaceOverviews: workspaceOverviews
+        )
     }
 
     func browseDestination(for target: NavigationTarget) async throws -> RemoteBrowseDestination {
@@ -471,8 +517,9 @@ final class RemoteClientPairingModel {
         }
     }
 
-    func focusRemoteSession(sessionID: UUID) async {
+    func focusRemoteSession(sessionID: UUID, workspaceID: UUID? = nil) async {
         focusedSessionID = sessionID
+        setFocusedSessionWorkspaceID(workspaceID ?? resolvedWorkspaceID(for: sessionID))
         await startFocusedSessionObservation(forceRestart: true)
     }
 
@@ -487,11 +534,13 @@ final class RemoteClientPairingModel {
         }
 
         do {
-            focusedSessionScreen = try await client.takeSessionControl(
-                for: pairedMac,
-                sessionID: sessionID,
-                columns: columns,
-                rows: rows
+            applyFocusedSessionScreen(
+                try await client.takeSessionControl(
+                    for: pairedMac,
+                    sessionID: sessionID,
+                    columns: columns,
+                    rows: rows
+                )
             )
             focusedSessionIsStale = false
             focusedSessionErrorMessage = nil
@@ -513,7 +562,7 @@ final class RemoteClientPairingModel {
         }
 
         do {
-            focusedSessionScreen = try await client.releaseSessionControl(for: pairedMac, sessionID: sessionID)
+            applyFocusedSessionScreen(try await client.releaseSessionControl(for: pairedMac, sessionID: sessionID))
             focusedSessionIsStale = false
             focusedSessionErrorMessage = nil
         } catch {
@@ -538,11 +587,13 @@ final class RemoteClientPairingModel {
         }
 
         do {
-            focusedSessionScreen = try await client.takeSessionControl(
-                for: pairedMac,
-                sessionID: sessionID,
-                columns: columns,
-                rows: rows
+            applyFocusedSessionScreen(
+                try await client.takeSessionControl(
+                    for: pairedMac,
+                    sessionID: sessionID,
+                    columns: columns,
+                    rows: rows
+                )
             )
             focusedSessionIsStale = false
             focusedSessionErrorMessage = nil
@@ -736,7 +787,7 @@ final class RemoteClientPairingModel {
             || receivedObservedUpdateDuringRequest == false
 
         if shouldApplyResponse {
-            focusedSessionScreen = screen
+            applyFocusedSessionScreen(screen)
         }
 
         focusedSessionIsStale = false
@@ -745,6 +796,8 @@ final class RemoteClientPairingModel {
 
     func stopFocusingRemoteSession() {
         focusedSessionID = nil
+        focusedSessionWorkspaceID = nil
+        focusedSessionWorkspaceLocation = nil
         focusedSessionScreen = nil
         focusedSessionIsStale = false
         focusedSessionErrorMessage = nil
@@ -960,19 +1013,124 @@ final class RemoteClientPairingModel {
         return detail.failedSessions.first(where: { $0.id == sessionID })
     }
 
+    private func workspaceRecencyRanking(
+        catalog: RemoteWorkspaceCatalog,
+        currentFocusedWorkspaceID: UUID?
+    ) -> [UUID: Int] {
+        var workspaceIDs: [UUID] = []
+
+        if let currentFocusedWorkspaceID {
+            workspaceIDs.append(currentFocusedWorkspaceID)
+        }
+
+        for item in catalog.recentNavigation {
+            switch item.target.kind {
+            case .workspace, .provider:
+                if let workspaceID = item.target.workspaceID {
+                    workspaceIDs.append(workspaceID)
+                }
+            case .session:
+                if let sessionID = item.target.sessionID,
+                   let workspaceID = browseWorkspaceID(forSessionID: sessionID, catalog: catalog) {
+                    workspaceIDs.append(workspaceID)
+                }
+            }
+        }
+
+        var ranking: [UUID: Int] = [:]
+        for (index, workspaceID) in workspaceIDs.enumerated() where ranking[workspaceID] == nil {
+            ranking[workspaceID] = index
+        }
+        return ranking
+    }
+
+    private func browseWorkspaceID(forSessionID sessionID: UUID, catalog: RemoteWorkspaceCatalog) -> UUID? {
+        for overview in catalog.workspaceOverviews {
+            if overview.providerCards.contains(where: { $0.defaultSession.sessionID == sessionID }) {
+                return overview.workspace.id
+            }
+
+            for providerCard in overview.providerCards {
+                let key = RemoteProviderDetailKey(workspaceID: overview.workspace.id, providerID: providerCard.provider.id)
+                if let detail = providerDetails[key], session(in: detail, sessionID: sessionID) != nil {
+                    return overview.workspace.id
+                }
+            }
+        }
+        return nil
+    }
+
+    private func resolvedWorkspaceID(for sessionID: UUID) -> UUID? {
+        if let focusedSessionScreen,
+           focusedSessionScreen.session.id == sessionID {
+            return focusedSessionScreen.session.workspaceID
+        }
+
+        if let catalog,
+           let workspaceID = browseWorkspaceID(forSessionID: sessionID, catalog: catalog) {
+            return workspaceID
+        }
+
+        return nil
+    }
+
+    private func remoteWorkspaceLocation(for workspaceID: UUID) -> String? {
+        guard let overview = workspaceOverview(id: workspaceID) else {
+            return nil
+        }
+
+        if let remoteTarget = overview.remoteTarget {
+            return "\(remoteTarget.host.name) • \(overview.workspace.folderPath)"
+        }
+
+        return overview.workspace.folderPath
+    }
+
+    private func syncFocusedSessionWorkspaceLocation() {
+        guard let focusedSessionWorkspaceID,
+              let workspaceLocation = remoteWorkspaceLocation(for: focusedSessionWorkspaceID) else {
+            return
+        }
+
+        if focusedSessionWorkspaceLocation != workspaceLocation {
+            focusedSessionWorkspaceLocation = workspaceLocation
+        }
+    }
+
+    private func setFocusedSessionWorkspaceID(_ workspaceID: UUID?) {
+        if focusedSessionWorkspaceID != workspaceID {
+            focusedSessionWorkspaceID = workspaceID
+        }
+
+        guard workspaceID != nil else {
+            if focusedSessionWorkspaceLocation != nil {
+                focusedSessionWorkspaceLocation = nil
+            }
+            return
+        }
+
+        syncFocusedSessionWorkspaceLocation()
+    }
+
+    private func applyFocusedSessionScreen(_ screen: SessionScreen) {
+        focusedSessionScreen = screen
+        setFocusedSessionWorkspaceID(screen.session.workspaceID)
+    }
+
     private func openRemoteSessionAndRefreshBrowseState(
         sessionID: UUID,
         workspaceID: UUID,
         providerID: ProviderID
     ) {
         focusedSessionID = sessionID
+        setFocusedSessionWorkspaceID(workspaceID)
 
         Task { @MainActor [weak self] in
             guard let self else {
                 return
             }
 
-            await self.focusRemoteSession(sessionID: sessionID)
+            await self.focusRemoteSession(sessionID: sessionID, workspaceID: workspaceID)
             await self.refreshActivePairedMacCatalog()
             await self.loadProviderDetail(workspaceID: workspaceID, providerID: providerID)
         }
@@ -1026,7 +1184,7 @@ final class RemoteClientPairingModel {
                             return
                         }
 
-                        self.focusedSessionScreen = screen
+                        self.applyFocusedSessionScreen(screen)
                         self.focusedSessionIsStale = false
                         self.focusedSessionErrorMessage = nil
                     }
@@ -1063,7 +1221,7 @@ final class RemoteClientPairingModel {
             let initialScreen = try await client.fetchSessionScreen(for: pairedMac, sessionID: sessionID)
             if focusedSessionID == sessionID,
                focusedSessionScreen?.session.id != sessionID {
-                focusedSessionScreen = initialScreen
+                applyFocusedSessionScreen(initialScreen)
                 focusedSessionIsStale = false
                 focusedSessionErrorMessage = nil
             }

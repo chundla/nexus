@@ -24,82 +24,6 @@ struct RemoteClientHomeView: View {
         horizontalSizeClass == .regular ? 20 : 16
     }
 
-    private var catalog: RemoteWorkspaceCatalog? {
-        model.catalog
-    }
-
-    private var availableWorkspaceGroups: [WorkspaceGroup] {
-        guard let catalog else {
-            return []
-        }
-
-        return catalog.workspaceGroups
-            .filter { group in
-                catalog.workspaceOverviews.contains { $0.workspace.primaryGroupID == group.id }
-            }
-            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-    }
-
-    private var workspaceRecencyRanking: [UUID: Int] {
-        guard let catalog else {
-            return [:]
-        }
-
-        var workspaceIDs: [UUID] = []
-
-        if let workspaceID = model.focusedSessionScreen?.session.workspaceID {
-            workspaceIDs.append(workspaceID)
-        }
-
-        for item in catalog.recentNavigation {
-            switch item.target.kind {
-            case .workspace, .provider:
-                if let workspaceID = item.target.workspaceID {
-                    workspaceIDs.append(workspaceID)
-                }
-            case .session:
-                if let sessionID = item.target.sessionID,
-                   let workspaceID = workspaceID(forSessionID: sessionID, catalog: catalog) {
-                    workspaceIDs.append(workspaceID)
-                }
-            }
-        }
-
-        var ranking: [UUID: Int] = [:]
-        for (index, workspaceID) in workspaceIDs.enumerated() where ranking[workspaceID] == nil {
-            ranking[workspaceID] = index
-        }
-        return ranking
-    }
-
-    private var sortedWorkspaceOverviews: [WorkspaceOverview] {
-        guard let catalog else {
-            return []
-        }
-
-        let ranking = workspaceRecencyRanking
-        return catalog.workspaceOverviews.sorted { lhs, rhs in
-            let lhsRank = ranking[lhs.workspace.id] ?? Int.max
-            let rhsRank = ranking[rhs.workspace.id] ?? Int.max
-            if lhsRank != rhsRank {
-                return lhsRank < rhsRank
-            }
-            return lhs.workspace.name.localizedCaseInsensitiveCompare(rhs.workspace.name) == .orderedAscending
-        }
-    }
-
-    private var filteredWorkspaceOverviews: [WorkspaceOverview] {
-        switch workspaceBrowseMode {
-        case .all:
-            return sortedWorkspaceOverviews
-        case .groups:
-            guard let selectedWorkspaceGroupID else {
-                return sortedWorkspaceOverviews
-            }
-            return sortedWorkspaceOverviews.filter { $0.workspace.primaryGroupID == selectedWorkspaceGroupID }
-        }
-    }
-
     var body: some View {
         NavigationStack {
             ZStack {
@@ -107,10 +31,22 @@ struct RemoteClientHomeView: View {
 
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: sectionSpacing) {
-                        heroCard
+                        RemoteHomeHeroSection(
+                            model: model,
+                            horizontalSizeClass: horizontalSizeClass,
+                            isRefreshingAvailability: isRefreshingAvailability,
+                            onRefreshAvailability: {
+                                Task {
+                                    await refreshAvailability()
+                                }
+                            },
+                            onShowPairingForm: {
+                                isShowingPairingForm = true
+                            }
+                        )
 
                         if let pairingRecoveryMessage = model.pairingRecoveryMessage {
-                            messageCard(
+                            RemoteMessageCard(
                                 eyebrow: "Pairing required",
                                 title: "Reconnect this iPhone.",
                                 detail: pairingRecoveryMessage,
@@ -118,16 +54,32 @@ struct RemoteClientHomeView: View {
                             )
                         }
 
-                        if let activePairedMac = model.activePairedMac {
-                            activePairedMacCard(activePairedMac)
-                        }
+                        RemoteActivePairedMacBoundary(
+                            model: model,
+                            isShowingPairedMacs: $isShowingPairedMacs
+                        )
 
                         if model.pairedMacs.isEmpty == false {
-                            pairedMacsSection
+                            RemotePairedMacsBoundary(
+                                model: model,
+                                isShowingPairedMacs: isShowingPairedMacs,
+                                onSelectActivePairedMac: selectActivePairedMac,
+                                onForgetPairedMac: forgetPairedMac
+                            )
                         }
 
-                        catalogSection
-                        pairingSection
+                        RemoteWorkspaceCatalogBoundary(
+                            model: model,
+                            workspaceBrowseMode: $workspaceBrowseMode,
+                            selectedWorkspaceGroupID: $selectedWorkspaceGroupID
+                        )
+
+                        RemotePairingSection(
+                            model: model,
+                            isShowingPairingForm: isShowingPairingForm,
+                            isPairing: isPairing,
+                            onCompletePairing: completePairing
+                        )
                     }
                     .padding(.horizontal, horizontalPadding)
                     .padding(.top, 12)
@@ -162,324 +114,9 @@ struct RemoteClientHomeView: View {
                 isShowingPairingForm = true
             }
         }
-        .onChange(of: availableWorkspaceGroups.map(\.id)) { _, groupIDs in
-            if let selectedWorkspaceGroupID, groupIDs.contains(selectedWorkspaceGroupID) == false {
-                self.selectedWorkspaceGroupID = nil
-            }
-        }
         .alert(item: $presentedError) { error in
             Alert(title: Text("Nexus Remote"), message: Text(error.message))
         }
-    }
-
-    private var heroCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 14) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Nexus")
-                        .font(NexusIOSTheme.displayFont(horizontalSizeClass == .regular ? 34 : 30, relativeTo: .largeTitle))
-                        .foregroundStyle(.white)
-
-                    Text("Simple remote chats for your workspaces.")
-                        .font(NexusIOSTheme.bodyFont(15))
-                        .foregroundStyle(NexusIOSTheme.mutedText)
-                }
-
-                Spacer(minLength: 0)
-
-                if let activePairedMac = model.activePairedMac {
-                    NexusIOSStatusPill(
-                        text: availabilityTitle(for: activePairedMac),
-                        color: availabilityColor(for: activePairedMac)
-                    )
-                }
-            }
-
-            Text(model.pairedMacs.isEmpty
-                 ? "Pair your Mac, then jump straight into workspace conversations."
-                 : "Workspaces float to the top when you use them, and groups stay tucked away until you need a filter.")
-                .font(NexusIOSTheme.bodyFont(14))
-                .foregroundStyle(NexusIOSTheme.mutedText)
-                .fixedSize(horizontal: false, vertical: true)
-
-            HStack(spacing: 10) {
-                Button(isRefreshingAvailability ? "Refreshing…" : "Refresh") {
-                    Task {
-                        await refreshAvailability()
-                    }
-                }
-                .buttonStyle(NexusIOSSecondaryButtonStyle())
-                .disabled(isRefreshingAvailability)
-
-                Button(model.pairedMacs.isEmpty ? "Pair a Mac" : "Add Mac") {
-                    isShowingPairingForm = true
-                }
-                .buttonStyle(NexusIOSPrimaryButtonStyle())
-            }
-        }
-        .padding(horizontalSizeClass == .regular ? 24 : 20)
-        .nexusIOSPanel(tint: NexusIOSTheme.gold, radius: 26, raised: true)
-    }
-
-    private func activePairedMacCard(_ pairedMac: PairedMac) -> some View {
-        let availability = model.availability(for: pairedMac)
-        let accent = availabilityColor(for: pairedMac)
-
-        return Button {
-            withAnimation {
-                isShowingPairedMacs.toggle()
-            }
-        } label: {
-            HStack(spacing: 14) {
-                Image(systemName: availability == .available ? "laptopcomputer.and.iphone" : "wifi.exclamationmark")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(accent)
-                    .frame(width: 42, height: 42)
-                    .background(accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(pairedMac.name)
-                        .font(NexusIOSTheme.bodyFont(17, weight: .semibold))
-                        .foregroundStyle(.white)
-                    Text(availability.summary)
-                        .font(NexusIOSTheme.bodyFont(13))
-                        .foregroundStyle(NexusIOSTheme.mutedText)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer(minLength: 0)
-
-                VStack(alignment: .trailing, spacing: 6) {
-                    Text("\(pairedMac.host):\(pairedMac.port)")
-                        .font(NexusIOSTheme.monoFont(11, relativeTo: .caption))
-                        .foregroundStyle(NexusIOSTheme.mutedText)
-                    Image(systemName: isShowingPairedMacs ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.55))
-                }
-            }
-            .padding(18)
-            .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .nexusIOSPanel(tint: accent, radius: 22)
-    }
-
-    @ViewBuilder
-    private var pairedMacsSection: some View {
-        if isShowingPairedMacs || model.pairedMacs.count == 1 {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("Paired Macs")
-                        .font(NexusIOSTheme.bodyFont(16, weight: .semibold))
-                        .foregroundStyle(.white)
-                    Spacer()
-                    Text("\(model.pairedMacs.count)")
-                        .font(NexusIOSTheme.bodyFont(12, relativeTo: .caption, weight: .medium))
-                        .foregroundStyle(NexusIOSTheme.mutedText)
-                }
-                .padding(.horizontal, 4)
-
-                ForEach(model.pairedMacs) { pairedMac in
-                    pairedMacCard(pairedMac)
-                }
-            }
-        }
-    }
-
-    private func pairedMacCard(_ pairedMac: PairedMac) -> some View {
-        let isActive = model.activePairedMac?.id == pairedMac.id
-        let accent = isActive ? availabilityColor(for: pairedMac) : Color.white.opacity(0.72)
-
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 8) {
-                        Text(pairedMac.name)
-                            .font(NexusIOSTheme.bodyFont(16, weight: .semibold))
-                            .foregroundStyle(.white)
-                        if isActive {
-                            NexusIOSStatusPill(text: "Current", color: availabilityColor(for: pairedMac))
-                        }
-                    }
-
-                    Text(model.availability(for: pairedMac).summary)
-                        .font(NexusIOSTheme.bodyFont(13))
-                        .foregroundStyle(isActive ? availabilityColor(for: pairedMac) : NexusIOSTheme.mutedText)
-                }
-
-                Spacer(minLength: 0)
-
-                Text("\(pairedMac.host):\(pairedMac.port)")
-                    .font(NexusIOSTheme.monoFont(11, relativeTo: .caption))
-                    .foregroundStyle(NexusIOSTheme.mutedText)
-            }
-
-            HStack(spacing: 10) {
-                if isActive == false {
-                    Button("Use This Mac") {
-                        selectActivePairedMac(pairedMac)
-                    }
-                    .buttonStyle(NexusIOSPrimaryButtonStyle())
-                }
-
-                Button("Forget") {
-                    forgetPairedMac(pairedMac)
-                }
-                .buttonStyle(NexusIOSDangerButtonStyle())
-            }
-        }
-        .padding(16)
-        .nexusIOSPanel(tint: accent, radius: 20)
-    }
-
-    @ViewBuilder
-    private var catalogSection: some View {
-        if catalog != nil {
-            VStack(alignment: .leading, spacing: 14) {
-                if filteredWorkspaceOverviews.isEmpty {
-                    messageCard(
-                        eyebrow: workspaceBrowseMode == .groups ? "No workspaces in this filter" : "No workspaces yet",
-                        title: workspaceBrowseMode == .groups ? "Try another group." : "Nothing remote is ready yet.",
-                        detail: workspaceBrowseMode == .groups
-                            ? "This group is empty right now. Switch back to All or pick another group."
-                            : "Once your paired Mac shares a catalog, your workspace conversations will show up here.",
-                        accent: NexusIOSTheme.gold
-                    )
-                } else {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack(alignment: .firstTextBaseline) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Workspaces")
-                                    .font(NexusIOSTheme.bodyFont(22, relativeTo: .title3, weight: .semibold))
-                                    .foregroundStyle(.white)
-                                Text("Your most recently used workspaces rise to the top.")
-                                    .font(NexusIOSTheme.bodyFont(13))
-                                    .foregroundStyle(NexusIOSTheme.mutedText)
-                            }
-
-                            Spacer(minLength: 0)
-
-                            Text("\(filteredWorkspaceOverviews.count)")
-                                .font(NexusIOSTheme.bodyFont(12, relativeTo: .caption, weight: .medium))
-                                .foregroundStyle(NexusIOSTheme.mutedText)
-                        }
-                        .padding(.horizontal, 4)
-
-                        if availableWorkspaceGroups.isEmpty == false {
-                            Picker("Browse", selection: $workspaceBrowseMode) {
-                                ForEach(RemoteWorkspaceBrowseMode.allCases) { mode in
-                                    Text(mode.title).tag(mode)
-                                }
-                            }
-                            .pickerStyle(.segmented)
-
-                            if workspaceBrowseMode == .groups {
-                                ScrollView(.horizontal, showsIndicators: false) {
-                                    HStack(spacing: 8) {
-                                        groupFilterChip(title: "All Groups", groupID: nil)
-                                        ForEach(availableWorkspaceGroups) { group in
-                                            groupFilterChip(title: group.name, groupID: group.id)
-                                        }
-                                    }
-                                    .padding(.horizontal, 2)
-                                }
-                                .transition(.opacity.combined(with: .move(edge: .top)))
-                            }
-                        }
-                    }
-
-                    ForEach(filteredWorkspaceOverviews, id: \.workspace.id) { overview in
-                        NavigationLink {
-                            RemoteWorkspaceDetailView(model: model, overview: overview)
-                        } label: {
-                            RemoteWorkspaceSummaryCard(
-                                overview: overview,
-                                groupName: groupName(for: overview.workspace.primaryGroupID),
-                                showsGroupName: workspaceBrowseMode == .groups && selectedWorkspaceGroupID == nil
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-        } else if let activePairedMac = model.activePairedMac,
-                  model.availability(for: activePairedMac) == .available {
-            messageCard(
-                eyebrow: "Workspace catalog",
-                title: model.catalogErrorMessage == nil ? "Loading your workspaces…" : "Catalog unavailable right now.",
-                detail: model.catalogErrorMessage ?? "Nexus is fetching workspace conversations from \(activePairedMac.name).",
-                accent: model.catalogErrorMessage == nil ? NexusIOSTheme.gold : NexusIOSTheme.coral
-            )
-        }
-    }
-
-    @ViewBuilder
-    private var pairingSection: some View {
-        if model.pairedMacs.isEmpty || isShowingPairingForm {
-            VStack(alignment: .leading, spacing: 16) {
-                NexusIOSCardTitle(
-                    eyebrow: "Pair a Mac",
-                    title: "Bring your workspaces over.",
-                    detail: "Use the Remote Access address and pairing code from your Mac.",
-                    accent: NexusIOSTheme.gold
-                )
-
-                VStack(spacing: 12) {
-                    TextField("Mac Address", text: $model.macHost)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
-                        .nexusIOSTextField()
-
-                    TextField("Port", text: $model.macPort)
-                        .keyboardType(.numberPad)
-                        .nexusIOSTextField(tint: NexusIOSTheme.teal)
-
-                    TextField("Pairing Code", text: $model.pairingCode)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .nexusIOSTextField(tint: NexusIOSTheme.gold)
-
-                    TextField("This iPhone's Name", text: $model.deviceName)
-                        .nexusIOSTextField(tint: NexusIOSTheme.teal)
-                }
-
-                Button(isPairing ? "Pairing…" : "Complete Pairing") {
-                    completePairing()
-                }
-                .buttonStyle(NexusIOSPrimaryButtonStyle())
-                .disabled(isPairing)
-            }
-            .padding(20)
-            .nexusIOSPanel(tint: NexusIOSTheme.gold, radius: 24, raised: true)
-        }
-    }
-
-    private func groupFilterChip(title: String, groupID: UUID?) -> some View {
-        Button {
-            selectedWorkspaceGroupID = groupID
-        } label: {
-            Text(title)
-                .font(NexusIOSTheme.bodyFont(13, relativeTo: .callout, weight: .medium))
-                .foregroundStyle(selectedWorkspaceGroupID == groupID ? .white : NexusIOSTheme.mutedText)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 9)
-                .background((selectedWorkspaceGroupID == groupID ? NexusIOSTheme.gold : Color.white.opacity(0.06)), in: Capsule())
-                .overlay {
-                    Capsule()
-                        .stroke(selectedWorkspaceGroupID == groupID ? NexusIOSTheme.gold.opacity(0.3) : NexusIOSTheme.softLine, lineWidth: 1)
-                }
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func messageCard(eyebrow: String, title: String, detail: String, accent: Color) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            NexusIOSCardTitle(eyebrow: eyebrow, title: title, detail: detail, accent: accent)
-        }
-        .padding(18)
-        .nexusIOSPanel(tint: accent, radius: 22)
     }
 
     private func completePairing() {
@@ -542,44 +179,413 @@ struct RemoteClientHomeView: View {
         }
     }
 
-    private func workspaceID(forSessionID sessionID: UUID, catalog: RemoteWorkspaceCatalog) -> UUID? {
-        for overview in catalog.workspaceOverviews {
-            if overview.providerCards.contains(where: { $0.defaultSession.sessionID == sessionID }) {
-                return overview.workspace.id
+}
+
+private struct RemoteHomeHeroSection: View {
+    @Bindable var model: RemoteClientPairingModel
+    let horizontalSizeClass: UserInterfaceSizeClass?
+    let isRefreshingAvailability: Bool
+    let onRefreshAvailability: () -> Void
+    let onShowPairingForm: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 14) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Nexus")
+                        .font(NexusIOSTheme.displayFont(horizontalSizeClass == .regular ? 34 : 30, relativeTo: .largeTitle))
+                        .foregroundStyle(.white)
+
+                    Text("Simple remote chats for your workspaces.")
+                        .font(NexusIOSTheme.bodyFont(15))
+                        .foregroundStyle(NexusIOSTheme.mutedText)
+                }
+
+                Spacer(minLength: 0)
+
+                if let activePairedMac = model.activePairedMac {
+                    let availability = model.availability(for: activePairedMac)
+                    NexusIOSStatusPill(
+                        text: remotePairedMacAvailabilityTitle(availability),
+                        color: remotePairedMacAvailabilityColor(availability)
+                    )
+                }
+            }
+
+            Text(model.pairedMacs.isEmpty
+                 ? "Pair your Mac, then jump straight into workspace conversations."
+                 : "Workspaces float to the top when you use them, and groups stay tucked away until you need a filter.")
+                .font(NexusIOSTheme.bodyFont(14))
+                .foregroundStyle(NexusIOSTheme.mutedText)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 10) {
+                Button(isRefreshingAvailability ? "Refreshing…" : "Refresh") {
+                    onRefreshAvailability()
+                }
+                .buttonStyle(NexusIOSSecondaryButtonStyle())
+                .disabled(isRefreshingAvailability)
+
+                Button(model.pairedMacs.isEmpty ? "Pair a Mac" : "Add Mac") {
+                    onShowPairingForm()
+                }
+                .buttonStyle(NexusIOSPrimaryButtonStyle())
             }
         }
+        .padding(horizontalSizeClass == .regular ? 24 : 20)
+        .nexusIOSPanel(tint: NexusIOSTheme.gold, radius: 26, raised: true)
+    }
+}
+
+private struct RemoteActivePairedMacBoundary: View {
+    @Bindable var model: RemoteClientPairingModel
+    @Binding var isShowingPairedMacs: Bool
+
+    var body: some View {
+        if let pairedMac = model.activePairedMac {
+            let availability = model.availability(for: pairedMac)
+            let accent = remotePairedMacAvailabilityColor(availability)
+
+            Button {
+                withAnimation {
+                    isShowingPairedMacs.toggle()
+                }
+            } label: {
+                HStack(spacing: 14) {
+                    Image(systemName: availability == .available ? "laptopcomputer.and.iphone" : "wifi.exclamationmark")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(accent)
+                        .frame(width: 42, height: 42)
+                        .background(accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(pairedMac.name)
+                            .font(NexusIOSTheme.bodyFont(17, weight: .semibold))
+                            .foregroundStyle(.white)
+                        Text(availability.summary)
+                            .font(NexusIOSTheme.bodyFont(13))
+                            .foregroundStyle(NexusIOSTheme.mutedText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Spacer(minLength: 0)
+
+                    VStack(alignment: .trailing, spacing: 6) {
+                        Text("\(pairedMac.host):\(pairedMac.port)")
+                            .font(NexusIOSTheme.monoFont(11, relativeTo: .caption))
+                            .foregroundStyle(NexusIOSTheme.mutedText)
+                        Image(systemName: isShowingPairedMacs ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.55))
+                    }
+                }
+                .padding(18)
+                .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .nexusIOSPanel(tint: accent, radius: 22)
+        }
+    }
+}
+
+private struct RemotePairedMacsBoundary: View {
+    @Bindable var model: RemoteClientPairingModel
+    let isShowingPairedMacs: Bool
+    let onSelectActivePairedMac: (PairedMac) -> Void
+    let onForgetPairedMac: (PairedMac) -> Void
+
+    var body: some View {
+        if isShowingPairedMacs || model.pairedMacs.count == 1 {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Paired Macs")
+                        .font(NexusIOSTheme.bodyFont(16, weight: .semibold))
+                        .foregroundStyle(.white)
+                    Spacer()
+                    Text("\(model.pairedMacs.count)")
+                        .font(NexusIOSTheme.bodyFont(12, relativeTo: .caption, weight: .medium))
+                        .foregroundStyle(NexusIOSTheme.mutedText)
+                }
+                .padding(.horizontal, 4)
+
+                ForEach(model.pairedMacs) { pairedMac in
+                    let isActive = model.activePairedMac?.id == pairedMac.id
+                    let availability = model.availability(for: pairedMac)
+                    let accent = isActive ? remotePairedMacAvailabilityColor(availability) : Color.white.opacity(0.72)
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(alignment: .top, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 5) {
+                                HStack(spacing: 8) {
+                                    Text(pairedMac.name)
+                                        .font(NexusIOSTheme.bodyFont(16, weight: .semibold))
+                                        .foregroundStyle(.white)
+                                    if isActive {
+                                        NexusIOSStatusPill(text: "Current", color: remotePairedMacAvailabilityColor(availability))
+                                    }
+                                }
+
+                                Text(availability.summary)
+                                    .font(NexusIOSTheme.bodyFont(13))
+                                    .foregroundStyle(isActive ? remotePairedMacAvailabilityColor(availability) : NexusIOSTheme.mutedText)
+                            }
+
+                            Spacer(minLength: 0)
+
+                            Text("\(pairedMac.host):\(pairedMac.port)")
+                                .font(NexusIOSTheme.monoFont(11, relativeTo: .caption))
+                                .foregroundStyle(NexusIOSTheme.mutedText)
+                        }
+
+                        HStack(spacing: 10) {
+                            if isActive == false {
+                                Button("Use This Mac") {
+                                    onSelectActivePairedMac(pairedMac)
+                                }
+                                .buttonStyle(NexusIOSPrimaryButtonStyle())
+                            }
+
+                            Button("Forget") {
+                                onForgetPairedMac(pairedMac)
+                            }
+                            .buttonStyle(NexusIOSDangerButtonStyle())
+                        }
+                    }
+                    .padding(16)
+                    .nexusIOSPanel(tint: accent, radius: 20)
+                }
+            }
+        }
+    }
+}
+
+private struct RemoteWorkspaceCatalogBoundary: View {
+    @Bindable var model: RemoteClientPairingModel
+    @Binding var workspaceBrowseMode: RemoteWorkspaceBrowseMode
+    @Binding var selectedWorkspaceGroupID: UUID?
+
+    private var presentation: RemoteWorkspaceBrowsePresentation? {
+        model.workspaceBrowsePresentation(
+            showingGroupsOnly: workspaceBrowseMode == .groups,
+            selectedGroupID: selectedWorkspaceGroupID
+        )
+    }
+
+    var body: some View {
+        Group {
+            if let presentation {
+                VStack(alignment: .leading, spacing: 14) {
+                    if presentation.workspaceOverviews.isEmpty {
+                        RemoteMessageCard(
+                            eyebrow: workspaceBrowseMode == .groups ? "No workspaces in this filter" : "No workspaces yet",
+                            title: workspaceBrowseMode == .groups ? "Try another group." : "Nothing remote is ready yet.",
+                            detail: workspaceBrowseMode == .groups
+                                ? "This group is empty right now. Switch back to All or pick another group."
+                                : "Once your paired Mac shares a catalog, your workspace conversations will show up here.",
+                            accent: NexusIOSTheme.gold
+                        )
+                    } else {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(alignment: .firstTextBaseline) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Workspaces")
+                                        .font(NexusIOSTheme.bodyFont(22, relativeTo: .title3, weight: .semibold))
+                                        .foregroundStyle(.white)
+                                    Text("Your most recently used workspaces rise to the top.")
+                                        .font(NexusIOSTheme.bodyFont(13))
+                                        .foregroundStyle(NexusIOSTheme.mutedText)
+                                }
+
+                                Spacer(minLength: 0)
+
+                                Text("\(presentation.workspaceOverviews.count)")
+                                    .font(NexusIOSTheme.bodyFont(12, relativeTo: .caption, weight: .medium))
+                                    .foregroundStyle(NexusIOSTheme.mutedText)
+                            }
+                            .padding(.horizontal, 4)
+
+                            if presentation.availableWorkspaceGroups.isEmpty == false {
+                                Picker("Browse", selection: $workspaceBrowseMode) {
+                                    ForEach(RemoteWorkspaceBrowseMode.allCases) { mode in
+                                        Text(mode.title).tag(mode)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+
+                                if workspaceBrowseMode == .groups {
+                                    ScrollView(.horizontal, showsIndicators: false) {
+                                        HStack(spacing: 8) {
+                                            RemoteWorkspaceGroupFilterChip(
+                                                title: "All Groups",
+                                                isSelected: selectedWorkspaceGroupID == nil
+                                            ) {
+                                                selectedWorkspaceGroupID = nil
+                                            }
+
+                                            ForEach(presentation.availableWorkspaceGroups) { group in
+                                                RemoteWorkspaceGroupFilterChip(
+                                                    title: group.name,
+                                                    isSelected: selectedWorkspaceGroupID == group.id
+                                                ) {
+                                                    selectedWorkspaceGroupID = group.id
+                                                }
+                                            }
+                                        }
+                                        .padding(.horizontal, 2)
+                                    }
+                                    .transition(.opacity.combined(with: .move(edge: .top)))
+                                }
+                            }
+                        }
+
+                        ForEach(presentation.workspaceOverviews, id: \.workspace.id) { overview in
+                            NavigationLink {
+                                RemoteWorkspaceDetailView(model: model, overview: overview)
+                            } label: {
+                                RemoteWorkspaceSummaryCard(
+                                    overview: overview,
+                                    groupName: remoteWorkspaceGroupName(
+                                        for: overview.workspace.primaryGroupID,
+                                        groups: presentation.availableWorkspaceGroups
+                                    ),
+                                    showsGroupName: workspaceBrowseMode == .groups && selectedWorkspaceGroupID == nil
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            } else if let activePairedMac = model.activePairedMac,
+                      model.availability(for: activePairedMac) == .available {
+                RemoteMessageCard(
+                    eyebrow: "Workspace catalog",
+                    title: model.catalogErrorMessage == nil ? "Loading your workspaces…" : "Catalog unavailable right now.",
+                    detail: model.catalogErrorMessage ?? "Nexus is fetching workspace conversations from \(activePairedMac.name).",
+                    accent: model.catalogErrorMessage == nil ? NexusIOSTheme.gold : NexusIOSTheme.coral
+                )
+            }
+        }
+        .onChange(of: presentation?.availableWorkspaceGroupIDs ?? []) { _, groupIDs in
+            if let selectedWorkspaceGroupID, groupIDs.contains(selectedWorkspaceGroupID) == false {
+                self.selectedWorkspaceGroupID = nil
+            }
+        }
+    }
+}
+
+private struct RemotePairingSection: View {
+    @Bindable var model: RemoteClientPairingModel
+    let isShowingPairingForm: Bool
+    let isPairing: Bool
+    let onCompletePairing: () -> Void
+
+    var body: some View {
+        if model.pairedMacs.isEmpty || isShowingPairingForm {
+            VStack(alignment: .leading, spacing: 16) {
+                NexusIOSCardTitle(
+                    eyebrow: "Pair a Mac",
+                    title: "Bring your workspaces over.",
+                    detail: "Use the Remote Access address and pairing code from your Mac.",
+                    accent: NexusIOSTheme.gold
+                )
+
+                VStack(spacing: 12) {
+                    TextField("Mac Address", text: $model.macHost)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                        .nexusIOSTextField()
+
+                    TextField("Port", text: $model.macPort)
+                        .keyboardType(.numberPad)
+                        .nexusIOSTextField(tint: NexusIOSTheme.teal)
+
+                    TextField("Pairing Code", text: $model.pairingCode)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .nexusIOSTextField(tint: NexusIOSTheme.gold)
+
+                    TextField("This iPhone's Name", text: $model.deviceName)
+                        .nexusIOSTextField(tint: NexusIOSTheme.teal)
+                }
+
+                Button(isPairing ? "Pairing…" : "Complete Pairing") {
+                    onCompletePairing()
+                }
+                .buttonStyle(NexusIOSPrimaryButtonStyle())
+                .disabled(isPairing)
+            }
+            .padding(20)
+            .nexusIOSPanel(tint: NexusIOSTheme.gold, radius: 24, raised: true)
+        }
+    }
+}
+
+private struct RemoteWorkspaceGroupFilterChip: View {
+    let title: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(NexusIOSTheme.bodyFont(13, relativeTo: .callout, weight: .medium))
+                .foregroundStyle(isSelected ? .white : NexusIOSTheme.mutedText)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .background((isSelected ? NexusIOSTheme.gold : Color.white.opacity(0.06)), in: Capsule())
+                .overlay {
+                    Capsule()
+                        .stroke(isSelected ? NexusIOSTheme.gold.opacity(0.3) : NexusIOSTheme.softLine, lineWidth: 1)
+                }
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct RemoteMessageCard: View {
+    let eyebrow: String
+    let title: String
+    let detail: String
+    let accent: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            NexusIOSCardTitle(eyebrow: eyebrow, title: title, detail: detail, accent: accent)
+        }
+        .padding(18)
+        .nexusIOSPanel(tint: accent, radius: 22)
+    }
+}
+
+private func remoteWorkspaceGroupName(for groupID: UUID?, groups: [WorkspaceGroup]) -> String? {
+    guard let groupID else {
         return nil
     }
+    return groups.first(where: { $0.id == groupID })?.name
+}
 
-    private func groupName(for groupID: UUID?) -> String? {
-        guard let groupID else {
-            return nil
-        }
-        return availableWorkspaceGroups.first(where: { $0.id == groupID })?.name
+private func remotePairedMacAvailabilityColor(_ availability: PairedMacAvailability) -> Color {
+    switch availability {
+    case .available:
+        NexusIOSTheme.teal
+    case .unavailablePairedMac, .remoteAccessDisabled:
+        NexusIOSTheme.coral
+    case .unknown:
+        NexusIOSTheme.gold
     }
+}
 
-    private func availabilityColor(for pairedMac: PairedMac) -> Color {
-        switch model.availability(for: pairedMac) {
-        case .available:
-            NexusIOSTheme.teal
-        case .unavailablePairedMac, .remoteAccessDisabled:
-            NexusIOSTheme.coral
-        case .unknown:
-            NexusIOSTheme.gold
-        }
-    }
-
-    private func availabilityTitle(for pairedMac: PairedMac) -> String {
-        switch model.availability(for: pairedMac) {
-        case .available:
-            "Available"
-        case .unavailablePairedMac:
-            "Offline"
-        case .remoteAccessDisabled:
-            "Access Off"
-        case .unknown:
-            "Checking"
-        }
+private func remotePairedMacAvailabilityTitle(_ availability: PairedMacAvailability) -> String {
+    switch availability {
+    case .available:
+        "Available"
+    case .unavailablePairedMac:
+        "Offline"
+    case .remoteAccessDisabled:
+        "Access Off"
+    case .unknown:
+        "Checking"
     }
 }
 
@@ -1587,7 +1593,7 @@ private struct RemoteSessionScreenView: View {
             }
         }
         .task(id: session.id) {
-            await model.focusRemoteSession(sessionID: session.id)
+            await model.focusRemoteSession(sessionID: session.id, workspaceID: session.workspaceID)
         }
         .refreshable {
             await model.refreshFocusedSessionScreen()
@@ -2528,15 +2534,12 @@ private struct RemoteSessionScreenView: View {
     }
 
     private func structuredSessionWorkspaceLocation(for session: Session) -> String {
-        guard let overview = model.workspaceOverview(id: session.workspaceID) else {
-            return "Workspace unavailable"
+        if model.focusedSessionID == session.id,
+           let focusedSessionWorkspaceLocation = model.focusedSessionWorkspaceLocation {
+            return focusedSessionWorkspaceLocation
         }
 
-        if let remoteTarget = overview.remoteTarget {
-            return "\(remoteTarget.host.name) • \(overview.workspace.folderPath)"
-        }
-
-        return overview.workspace.folderPath
+        return "Workspace unavailable"
     }
 
     @ViewBuilder

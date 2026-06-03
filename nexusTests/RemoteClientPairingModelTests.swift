@@ -1,5 +1,6 @@
 import Foundation
 import NexusDomain
+import Observation
 import Testing
 @testable import nexus
 
@@ -1439,6 +1440,281 @@ struct RemoteClientPairingModelTests {
             "observeSessionScreen",
             "fetchSessionScreen"
         ])
+    }
+
+    @Test func workspaceBrowsePresentationStaysStableDuringTranscriptOnlyFocusedSessionUpdates() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let group = WorkspaceGroup(id: UUID(), name: "Client Work")
+        let alphaWorkspace = Workspace(
+            id: UUID(),
+            name: "Alpha",
+            kind: .local,
+            folderPath: "/tmp/alpha",
+            primaryGroupID: group.id
+        )
+        let zuluWorkspace = Workspace(
+            id: UUID(),
+            name: "Zulu",
+            kind: .local,
+            folderPath: "/tmp/zulu",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: zuluWorkspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let catalog = RemoteWorkspaceCatalog(
+            workspaceGroups: [group],
+            recentNavigation: [
+                NavigationItem(target: .workspace(alphaWorkspace.id), title: alphaWorkspace.name, subtitle: alphaWorkspace.folderPath)
+            ],
+            workspaceOverviews: [
+                WorkspaceOverview(workspace: alphaWorkspace, providerCards: []),
+                WorkspaceOverview(workspace: zuluWorkspace, providerCards: [])
+            ]
+        )
+        let initialScreen = SessionScreen(session: session, transcript: "Claude ready")
+        let updatedScreen = SessionScreen(session: session, transcript: "Claude ready\nUpdated transcript")
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let client = StubRemotePairingClient(
+            result: pairedMac,
+            catalog: catalog,
+            sessionScreen: initialScreen,
+            emitsInitialObservedScreen: false
+        )
+        let model = RemoteClientPairingModel(client: client, store: store)
+
+        await model.refreshActivePairedMacCatalog()
+        await model.focusRemoteSession(sessionID: session.id, workspaceID: session.workspaceID)
+
+        for _ in 0 ..< 20 where model.focusedSessionScreen != initialScreen {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        let initialPresentation = try #require(model.workspaceBrowsePresentation(showingGroupsOnly: false, selectedGroupID: nil))
+        #expect(initialPresentation.workspaceOverviews.map(\.workspace.id) == [zuluWorkspace.id, alphaWorkspace.id])
+
+        @MainActor
+        final class ObservationChangeState {
+            var changed = false
+        }
+
+        let presentationChanged = ObservationChangeState()
+        withObservationTracking {
+            _ = model.workspaceBrowsePresentation(showingGroupsOnly: false, selectedGroupID: nil)
+        } onChange: {
+            Task { @MainActor in
+                presentationChanged.changed = true
+            }
+        }
+
+        await client.emitObservedScreen(updatedScreen)
+        for _ in 0 ..< 20 where model.focusedSessionScreen != updatedScreen {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(presentationChanged.changed == false)
+        #expect(model.workspaceBrowsePresentation(showingGroupsOnly: false, selectedGroupID: nil) == initialPresentation)
+    }
+
+    @Test func workspaceBrowsePresentationStaysStableDuringPairedMacAvailabilityRefreshes() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let group = WorkspaceGroup(id: UUID(), name: "Client Work")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: group.id
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let catalog = RemoteWorkspaceCatalog(
+            workspaceGroups: [group],
+            recentNavigation: [NavigationItem(target: .workspace(workspace.id), title: workspace.name, subtitle: workspace.folderPath)],
+            workspaceOverviews: [WorkspaceOverview(workspace: workspace, providerCards: [])]
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let client = StubRemotePairingClient(
+            result: pairedMac,
+            status: .success(RemotePairedMacStatus(macName: pairedMac.name, isRemoteAccessEnabled: true)),
+            catalog: catalog
+        )
+        let model = RemoteClientPairingModel(client: client, store: store)
+
+        await model.refreshActivePairedMacCatalog()
+        let initialPresentation = try #require(model.workspaceBrowsePresentation(showingGroupsOnly: false, selectedGroupID: nil))
+
+        @MainActor
+        final class ObservationChangeState {
+            var changed = false
+        }
+
+        let presentationChanged = ObservationChangeState()
+        withObservationTracking {
+            _ = model.workspaceBrowsePresentation(showingGroupsOnly: false, selectedGroupID: nil)
+        } onChange: {
+            Task { @MainActor in
+                presentationChanged.changed = true
+            }
+        }
+
+        await model.refreshPairedMacAvailability()
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(presentationChanged.changed == false)
+        #expect(model.workspaceBrowsePresentation(showingGroupsOnly: false, selectedGroupID: nil) == initialPresentation)
+    }
+
+    @Test func focusedSessionWorkspaceLocationStaysStableDuringUnrelatedCatalogRefreshes() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let group = WorkspaceGroup(id: UUID(), name: "Client Work")
+        let host = NexusDomain.Host(id: UUID(), name: "Build Server", sshTarget: "build-box", port: 22)
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Remote API",
+            kind: .remote,
+            folderPath: "/srv/api",
+            primaryGroupID: group.id,
+            remoteHostID: host.id
+        )
+        let otherWorkspace = Workspace(
+            id: UUID(),
+            name: "Other",
+            kind: .local,
+            folderPath: "/tmp/other",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let workspaceAvailability = WorkspaceAvailabilitySnapshot(
+            workspaceID: workspace.id,
+            state: .available,
+            summary: "Available",
+            checkedAt: Date(timeIntervalSince1970: 600)
+        )
+        let remoteTarget = RemoteWorkspaceTargetOverview(
+            host: host,
+            hostValidation: nil,
+            workspaceAvailability: workspaceAvailability
+        )
+        let initialCatalog = RemoteWorkspaceCatalog(
+            workspaceGroups: [group],
+            recentNavigation: [NavigationItem(target: .workspace(otherWorkspace.id), title: otherWorkspace.name, subtitle: otherWorkspace.folderPath)],
+            workspaceOverviews: [
+                WorkspaceOverview(
+                    workspace: workspace,
+                    providerCards: [],
+                    remoteTarget: remoteTarget
+                ),
+                WorkspaceOverview(workspace: otherWorkspace, providerCards: [])
+            ]
+        )
+        let refreshedCatalog = RemoteWorkspaceCatalog(
+            workspaceGroups: [group],
+            recentNavigation: [NavigationItem(target: .workspace(workspace.id), title: workspace.name, subtitle: "/srv/api")],
+            workspaceOverviews: [
+                WorkspaceOverview(
+                    workspace: workspace,
+                    providerCards: [],
+                    remoteTarget: remoteTarget
+                ),
+                WorkspaceOverview(
+                    workspace: otherWorkspace,
+                    providerCards: [
+                        WorkspaceProviderCard(
+                            provider: Provider(id: .pi),
+                            health: ProviderHealthSummary(state: .available, summary: "Pi available"),
+                            defaultSession: ProviderDefaultSessionSummary(state: .notCreated, summary: "Not created", actionTitle: "Start")
+                        )
+                    ]
+                )
+            ]
+        )
+        let screen = SessionScreen(session: session, transcript: "Claude ready")
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let client = StubRemotePairingClient(
+            result: pairedMac,
+            catalogResults: [initialCatalog, refreshedCatalog],
+            sessionScreen: screen
+        )
+        let model = RemoteClientPairingModel(client: client, store: store)
+
+        await model.refreshActivePairedMacCatalog()
+        await model.focusRemoteSession(sessionID: session.id, workspaceID: session.workspaceID)
+
+        for _ in 0 ..< 20 where model.focusedSessionScreen != screen {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        let initialLocation = try #require(model.focusedSessionWorkspaceLocation)
+        #expect(initialLocation == "Build Server • /srv/api")
+
+        @MainActor
+        final class ObservationChangeState {
+            var changed = false
+        }
+
+        let locationChanged = ObservationChangeState()
+        withObservationTracking {
+            _ = model.focusedSessionWorkspaceLocation
+        } onChange: {
+            Task { @MainActor in
+                locationChanged.changed = true
+            }
+        }
+
+        await model.refreshActivePairedMacCatalog()
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(locationChanged.changed == false)
+        #expect(model.focusedSessionWorkspaceLocation == initialLocation)
     }
 
     @Test func forgetsRevokedPairedMacAfterUnauthorizedObservedSessionDisconnect() async throws {
@@ -4637,6 +4913,7 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
     let status: Result<RemotePairedMacStatus, any Error>
     let catalog: RemoteWorkspaceCatalog
     let catalogResult: Result<RemoteWorkspaceCatalog, any Error>?
+    private var catalogResults: [RemoteWorkspaceCatalog]
     let providerDetail: ProviderDetail
     let launchedDefaultSession: Session
     let createdNamedSession: Session
@@ -4681,6 +4958,7 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
             workspaceOverviews: []
         ),
         catalogResult: Result<RemoteWorkspaceCatalog, any Error>? = nil,
+        catalogResults: [RemoteWorkspaceCatalog] = [],
         providerDetail: ProviderDetail = ProviderDetail(
             workspace: Workspace(
                 id: UUID(),
@@ -4733,6 +5011,7 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
         self.status = status
         self.catalog = catalog
         self.catalogResult = catalogResult
+        self.catalogResults = catalogResults
         self.providerDetail = providerDetail
         self.launchedDefaultSession = launchedDefaultSession ?? sessionScreen.session
         self.createdNamedSession = createdNamedSession ?? sessionScreen.session
@@ -4772,6 +5051,10 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
         requestLog.append("fetchCatalog")
         catalogFetchStarted = true
         await catalogFetchGate?.wait()
+
+        if catalogResults.isEmpty == false {
+            return catalogResults.removeFirst()
+        }
 
         if let catalogResult {
             return try catalogResult.get()

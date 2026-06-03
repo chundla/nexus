@@ -83,6 +83,19 @@ xcodebuild test -scheme nexus -project nexus.xcodeproj -destination 'platform=ma
 
 These tests do not replace SwiftUI Instruments, but they catch service/model observation broadening before you spend time in a profiling trace.
 
+## iOS Remote Client invalidation guardrails
+
+Before running a manual SwiftUI profiling pass for the iPhone `Remote Client` browse or focused `Session` surfaces, run the focused observation-stability tests that guard the extracted presentation seams:
+
+```bash
+xcodebuild test -scheme nexus -project nexus.xcodeproj -destination 'platform=macOS' \
+  -only-testing:nexusTests/RemoteClientPairingModelTests/workspaceBrowsePresentationStaysStableDuringTranscriptOnlyFocusedSessionUpdates \
+  -only-testing:nexusTests/RemoteClientPairingModelTests/workspaceBrowsePresentationStaysStableDuringPairedMacAvailabilityRefreshes \
+  -only-testing:nexusTests/RemoteClientPairingModelTests/focusedSessionWorkspaceLocationStaysStableDuringUnrelatedCatalogRefreshes
+```
+
+These tests do not replace SwiftUI Instruments, but they catch `Remote Client` browse/session observation broadening before you spend time in a profiling trace.
+
 ## Profiling guidance
 
 Use the automated baselines first. If a regression is user-visible, then profile the matching macOS app flow on the same machine and branch so the UI trace can be compared with the service baseline output above.
