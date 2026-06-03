@@ -3,6 +3,7 @@ import Foundation
 import NexusDomain
 import NexusIPC
 import NexusSessionPresentation
+import Observation
 import SwiftUI
 @testable import NexusService
 import Testing
@@ -7023,16 +7024,75 @@ struct nexusTests {
         await model.refresh()
         try await model.focusSession(sessionID: session.id)
         #expect(model.focusedSessionScreen?.session.id == session.id)
+        #expect(model.focusedSessionID == session.id)
+        #expect(model.focusedSessionWorkspaceID == workspace.id)
         #expect(client.observedScreenHandlerCount == 1)
 
         let detachedSession = await model.detachFocusedSession()
 
         #expect(detachedSession?.id == session.id)
         #expect(model.focusedSessionScreen == nil)
+        #expect(model.focusedSessionID == nil)
+        #expect(model.focusedSessionWorkspaceID == nil)
         #expect(client.observedScreenHandlerCount == 0)
 
         await client.emitObservedScreen(SessionScreen(session: session, transcript: "Detached update"))
         #expect(model.focusedSessionScreen == nil)
+    }
+
+    @MainActor
+    @Test func appModelFocusedSessionBrowseInputsStayStableDuringTranscriptOnlyUpdates() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []),
+            session: session,
+            screen: SessionScreen(session: session, transcript: "Claude ready")
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+        try await model.focusSession(sessionID: session.id)
+        #expect(model.focusedSessionID == session.id)
+        #expect(model.focusedSessionWorkspaceID == workspace.id)
+
+        @MainActor
+        final class ObservationChangeState {
+            var changed = false
+        }
+
+        let browseInputsChanged = ObservationChangeState()
+        withObservationTracking {
+            _ = model.focusedSessionID
+            _ = model.focusedSessionWorkspaceID
+        } onChange: {
+            Task { @MainActor in
+                browseInputsChanged.changed = true
+            }
+        }
+
+        await client.emitObservedScreen(SessionScreen(session: session, transcript: "Updated transcript"))
+        for _ in 0 ..< 20 where model.focusedSessionScreen?.transcript != "Updated transcript" {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(browseInputsChanged.changed == false)
+        #expect(model.focusedSessionID == session.id)
+        #expect(model.focusedSessionWorkspaceID == workspace.id)
     }
 
     @MainActor

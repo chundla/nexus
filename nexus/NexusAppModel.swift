@@ -54,6 +54,8 @@ final class NexusAppModel {
     var remoteAccessState: RemoteAccessState?
     var pairedDevices: [PairedDevice] = []
     var focusedSessionScreen: SessionScreen?
+    private(set) var focusedSessionID: UUID?
+    private(set) var focusedSessionWorkspaceID: UUID?
     private(set) var remotePairingEndpoint: RemotePairingEndpoint?
 
     private let client: any NexusServiceClient
@@ -191,6 +193,8 @@ final class NexusAppModel {
             remoteAccessState = nil
             pairedDevices = []
             focusedSessionScreen = nil
+            focusedSessionID = nil
+            focusedSessionWorkspaceID = nil
             serviceErrorMessage = error.localizedDescription
         }
     }
@@ -392,6 +396,8 @@ final class NexusAppModel {
         if focusedSessionScreen?.session.id == sessionID {
             await stopFocusingSession()
             focusedSessionScreen = nil
+            focusedSessionID = nil
+            focusedSessionWorkspaceID = nil
         }
         try await refreshWorkspaceOverview(for: workspaceID)
         try await refreshProviderDetail(workspaceID: workspaceID, providerID: providerID)
@@ -408,6 +414,10 @@ final class NexusAppModel {
         }
 
         await stopFocusingSession()
+        focusedSessionID = sessionID
+        if focusedSessionScreen?.session.id != sessionID {
+            focusedSessionWorkspaceID = nil
+        }
         let observation = try await client.observeSessionScreen(sessionID: sessionID) { [weak self] screen in
             Task { @MainActor [weak self] in
                 guard let self else {
@@ -432,6 +442,8 @@ final class NexusAppModel {
         let session = focusedSessionScreen?.session
         await stopFocusingSession()
         focusedSessionScreen = nil
+        focusedSessionID = nil
+        focusedSessionWorkspaceID = nil
         return session
     }
 
@@ -569,11 +581,15 @@ final class NexusAppModel {
     }
 
     var focusedSessionPresentationContext: SessionPresentationContext? {
-        guard let session = focusedSessionScreen?.session else {
+        guard let workspaceID = focusedSessionWorkspaceID,
+              let workspace = workspaces.first(where: { $0.id == workspaceID }) else {
             return nil
         }
 
-        return sessionPresentationContext(for: session)
+        let host = workspace.remoteHostID.flatMap { hostID in
+            hosts.first(where: { $0.id == hostID })
+        }
+        return SessionPresentationContext(workspace: workspace, host: host)
     }
 
     var focusedSessionControllerSummary: SessionControllerSummary? {
@@ -660,7 +676,7 @@ final class NexusAppModel {
             orderedWorkspaceIDs.append(workspaceID)
         }
 
-        appendWorkspaceID(focusedSessionScreen?.session.workspaceID)
+        appendWorkspaceID(focusedSessionWorkspaceID)
 
         for key in providerDetails.keys.sorted(by: { lhs, rhs in
             lhs.workspaceID.uuidString < rhs.workspaceID.uuidString
@@ -834,6 +850,8 @@ final class NexusAppModel {
         let previousScreen = focusedSessionScreen?.session.id == screen.session.id ? focusedSessionScreen : nil
         let previousState = previousScreen?.session.state
         focusedSessionScreen = screen
+        focusedSessionID = screen.session.id
+        focusedSessionWorkspaceID = screen.session.workspaceID
 
         if let previousState, previousState != screen.session.state {
             try await refreshWorkspaceOverview(for: screen.session.workspaceID)

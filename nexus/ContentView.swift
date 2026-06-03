@@ -266,7 +266,7 @@ struct ContentView: View {
         case .provider(let workspaceID, _):
             workspaceIDs.append(workspaceID)
         case .session:
-            if let workspaceID = appModel.focusedSessionScreen?.session.workspaceID {
+            if let workspaceID = appModel.focusedSessionWorkspaceID {
                 workspaceIDs.append(workspaceID)
             }
         default:
@@ -314,8 +314,8 @@ struct ContentView: View {
     }
 
     private func workspaceID(forSessionID sessionID: UUID) -> UUID? {
-        if appModel.focusedSessionScreen?.session.id == sessionID {
-            return appModel.focusedSessionScreen?.session.workspaceID
+        if appModel.focusedSessionID == sessionID {
+            return appModel.focusedSessionWorkspaceID
         }
 
         for detail in appModel.providerDetails.values {
@@ -351,7 +351,17 @@ struct ContentView: View {
             case .provider(let workspaceID, let providerID):
                 providerDetail(workspaceID: workspaceID, providerID: providerID)
             case .session(let sessionID):
-                sessionDetail(sessionID: sessionID)
+                FocusedSessionDetailBoundary(sessionID: sessionID, appModel: appModel) { screen, context in
+                    sessionDetailContent(screen: screen, context: context)
+                } unavailable: {
+                    ContentUnavailableView(
+                        "Session unavailable",
+                        systemImage: "message",
+                        description: Text("Open the session again from its workspace to continue the conversation.")
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .nexusPanel(tint: NexusMacTheme.coral)
+                }
             }
         } else {
             overviewDetail
@@ -833,90 +843,77 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    private func sessionDetail(sessionID: UUID) -> some View {
-        let screen = appModel.focusedSessionScreen?.session.id == sessionID ? appModel.focusedSessionScreen : nil
-        let context = appModel.focusedSessionPresentationContext
+    private func sessionDetailContent(screen: SessionScreen, context: SessionPresentationContext?) -> some View {
+        let isReady = screen.session.state == .ready
+        let isRemote = context?.isRemote == true
+        let surface = screen.primarySurface
+        let stateColor = sessionStateColor(screen.session.state)
 
         return VStack(alignment: .leading, spacing: 14) {
-            if let screen {
-                let isReady = screen.session.state == .ready
-                let isRemote = context?.isRemote == true
-                let surface = screen.primarySurface
-                let stateColor = sessionStateColor(screen.session.state)
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(stateColor)
+                    .frame(width: 8, height: 8)
 
-                HStack(spacing: 10) {
-                    Circle()
-                        .fill(stateColor)
-                        .frame(width: 8, height: 8)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(screen.session.providerID.displayName)
+                        .font(NexusMacTheme.bodyFont(17).weight(.semibold))
+                        .foregroundStyle(.white)
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(screen.session.providerID.displayName)
-                            .font(NexusMacTheme.bodyFont(17).weight(.semibold))
-                            .foregroundStyle(.white)
+                    if let context {
+                        Text(sessionSubtitle(for: context, surface: surface))
+                            .font(NexusMacTheme.bodyFont(12, relativeTo: .caption))
+                            .foregroundStyle(NexusMacTheme.mutedText)
+                    }
+                }
 
-                        if let context {
-                            Text(sessionSubtitle(for: context, surface: surface))
-                                .font(NexusMacTheme.bodyFont(12, relativeTo: .caption))
-                                .foregroundStyle(NexusMacTheme.mutedText)
+                Spacer()
+
+                Menu {
+                    if isRemote, isReady {
+                        Button("Detach") {
+                            detachSession(screen.session)
                         }
                     }
 
-                    Spacer()
-
-                    Menu {
-                        if isRemote, isReady {
-                            Button("Detach") {
-                                detachSession(screen.session)
-                            }
+                    if isReady {
+                        Button("Stop Session") {
+                            stopSession(
+                                screen.session,
+                                workspaceID: screen.session.workspaceID,
+                                providerID: screen.session.providerID
+                            )
                         }
+                    }
 
-                        if isReady {
-                            Button("Stop Session") {
-                                stopSession(
-                                    screen.session,
-                                    workspaceID: screen.session.workspaceID,
-                                    providerID: screen.session.providerID
-                                )
-                            }
-                        }
-
-                        if isReady == false {
-                            Button("Relaunch Session") {
-                                Task {
-                                    do {
-                                        let session = try await appModel.relaunchFocusedSession()
-                                        selection = .session(session.id)
-                                    } catch {
-                                        presentedError = PresentedError(message: error.localizedDescription)
-                                    }
+                    if isReady == false {
+                        Button("Relaunch Session") {
+                            Task {
+                                do {
+                                    let session = try await appModel.relaunchFocusedSession()
+                                    selection = .session(session.id)
+                                } catch {
+                                    presentedError = PresentedError(message: error.localizedDescription)
                                 }
                             }
                         }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .font(.title3)
-                            .foregroundStyle(.white.opacity(0.86))
                     }
-                    .menuStyle(.borderlessButton)
-                    .buttonStyle(.plain)
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.title3)
+                        .foregroundStyle(.white.opacity(0.86))
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .nexusPanel(tint: stateColor, radius: 16)
+                .menuStyle(.borderlessButton)
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .nexusPanel(tint: stateColor, radius: 16)
 
-                if surface == .structuredActivityFeed {
-                    structuredSessionFeed(screen: screen, isReady: isReady)
-                } else {
-                    terminalSessionFeed(screen: screen, isReady: isReady)
-                }
+            if surface == .structuredActivityFeed {
+                structuredSessionFeed(screen: screen, isReady: isReady)
             } else {
-                ContentUnavailableView(
-                    "Session unavailable",
-                    systemImage: "message",
-                    description: Text("Open the session again from its workspace to continue the conversation.")
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .nexusPanel(tint: NexusMacTheme.coral)
+                terminalSessionFeed(screen: screen, isReady: isReady)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -2689,6 +2686,38 @@ private struct StructuredSessionExtensionDialogCard: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .nexusPanel(tint: NexusMacTheme.teal, radius: 16)
+    }
+}
+
+private struct FocusedSessionDetailBoundary<Content: View, Unavailable: View>: View {
+    @Bindable var appModel: NexusAppModel
+    let sessionID: UUID
+    private let content: (SessionScreen, SessionPresentationContext?) -> Content
+    private let unavailable: () -> Unavailable
+
+    init(
+        sessionID: UUID,
+        appModel: NexusAppModel,
+        @ViewBuilder content: @escaping (SessionScreen, SessionPresentationContext?) -> Content,
+        @ViewBuilder unavailable: @escaping () -> Unavailable
+    ) {
+        self.sessionID = sessionID
+        self.appModel = appModel
+        self.content = content
+        self.unavailable = unavailable
+    }
+
+    var body: some View {
+        Group {
+            if let screen = appModel.focusedSessionScreen,
+               screen.session.id == sessionID,
+               appModel.focusedSessionID == sessionID {
+                content(screen, appModel.focusedSessionPresentationContext)
+            } else {
+                unavailable()
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 
