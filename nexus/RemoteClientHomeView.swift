@@ -2640,61 +2640,39 @@ private struct RemoteSessionScreenView: View {
 
     @ViewBuilder
     private func terminalLineView(_ line: TerminalLine, row: Int, screen: SessionScreen) -> some View {
-        let cells = renderedTerminalCells(for: line, row: row, screen: screen)
+        let segments = renderedRemoteTerminalDisplaySegments(for: line, row: row, screen: screen)
 
         HStack(spacing: 0) {
-            ForEach(Array(cells.enumerated()), id: \.offset) { _, cell in
-                terminalCellView(cell)
+            ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
+                terminalSegmentView(segment)
             }
         }
         .fixedSize(horizontal: true, vertical: false)
     }
 
     @ViewBuilder
-    private func terminalCellView(_ cell: RemoteTerminalDisplayCell) -> some View {
-        let colors = resolvedTerminalColors(for: cell.style)
-        let foreground = cell.isCursor ? Color.black : colors.foreground
-        let background = cell.isCursor ? Color.white : colors.background
-        let text = Text(cell.renderedText)
+    private func terminalSegmentView(_ segment: RemoteTerminalDisplaySegment) -> some View {
+        let colors = resolvedTerminalColors(for: segment.style)
+        let foreground = segment.isCursor ? Color.black : colors.foreground
+        let background = segment.isCursor ? Color.white : colors.background
+        let text = Text(segment.renderedText)
             .font(.system(size: 17, design: .monospaced))
-            .fontWeight(cell.style.isBold ? .bold : .regular)
+            .fontWeight(segment.style.isBold ? .bold : .regular)
             .foregroundStyle(foreground)
-            .opacity(cell.style.isDim ? 0.65 : 1)
-            .frame(width: terminalCellWidth, height: terminalCellHeight)
+            .opacity(segment.style.isDim ? 0.65 : 1)
+            .frame(
+                width: terminalCellWidth * CGFloat(segment.columnCount),
+                height: terminalCellHeight,
+                alignment: .leading
+            )
             .background(background)
             .lineLimit(1)
 
-        if cell.style.isItalic {
+        if segment.style.isItalic {
             text.italic()
         } else {
             text
         }
-    }
-
-    private func renderedTerminalCells(for line: TerminalLine, row: Int, screen: SessionScreen) -> [RemoteTerminalDisplayCell] {
-        let targetColumnCount = max(1, screen.terminalColumns)
-        var cells = Array(line.cells.prefix(targetColumnCount)).map {
-            RemoteTerminalDisplayCell(text: $0.text, style: $0.style)
-        }
-
-        if cells.count < targetColumnCount {
-            cells.append(contentsOf: repeatElement(
-                RemoteTerminalDisplayCell(text: " ", style: TerminalStyle()),
-                count: targetColumnCount - cells.count
-            ))
-        }
-
-        if screen.cursorVisible, row == screen.cursorRow {
-            let cursorIndex = max(0, min(screen.cursorColumn, targetColumnCount - 1))
-            let cursorCell = cells[cursorIndex]
-            cells[cursorIndex] = RemoteTerminalDisplayCell(
-                text: cursorCell.text,
-                style: cursorCell.style,
-                isCursor: true
-            )
-        }
-
-        return cells
     }
 
     private func resolvedTerminalColors(for style: TerminalStyle) -> (foreground: Color, background: Color) {
@@ -3042,20 +3020,6 @@ private func remoteSessionStateColor(_ state: Session.State) -> Color {
         NexusIOSTheme.gold
     case .exited, .failed:
         NexusIOSTheme.coral
-    }
-}
-
-private struct RemoteTerminalDisplayCell {
-    let text: String
-    let style: TerminalStyle
-    var isCursor = false
-
-    var renderedText: String {
-        if text.isEmpty || text == " " {
-            return "\u{00A0}"
-        }
-
-        return text
     }
 }
 

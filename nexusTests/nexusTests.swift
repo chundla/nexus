@@ -117,6 +117,66 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func remoteTerminalDisplaySegmentsCoalesceAdjacentStyledCells() {
+        let accent = TerminalStyle(foregroundColor: .ansi256(153), isBold: true)
+        let line = TerminalLine(cells: [
+            TerminalCell(text: "a", style: accent),
+            TerminalCell(text: "b", style: accent),
+            TerminalCell(text: "c"),
+            TerminalCell(text: "d")
+        ])
+        let screen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .claude,
+                isDefault: true,
+                state: .ready
+            ),
+            transcript: "",
+            terminalColumns: 4,
+            terminalRows: 1,
+            styledVisibleLines: [line],
+            cursorVisible: false
+        )
+
+        #expect(renderedRemoteTerminalDisplaySegments(for: line, row: 0, screen: screen) == [
+            RemoteTerminalDisplaySegment(text: "ab", style: accent, columnCount: 2),
+            RemoteTerminalDisplaySegment(text: "cd", style: TerminalStyle(), columnCount: 2)
+        ])
+    }
+
+    @MainActor
+    @Test func remoteTerminalDisplaySegmentsSplitCursorIntoItsOwnSegmentWhilePaddingToViewportWidth() {
+        let line = TerminalLine(cells: [
+            TerminalCell(text: "h"),
+            TerminalCell(text: "i")
+        ])
+        let screen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .claude,
+                isDefault: true,
+                state: .ready
+            ),
+            transcript: "",
+            terminalColumns: 4,
+            terminalRows: 1,
+            styledVisibleLines: [line],
+            cursorRow: 0,
+            cursorColumn: 2,
+            cursorVisible: true
+        )
+
+        #expect(renderedRemoteTerminalDisplaySegments(for: line, row: 0, screen: screen) == [
+            RemoteTerminalDisplaySegment(text: "hi", style: TerminalStyle(), columnCount: 2),
+            RemoteTerminalDisplaySegment(text: " ", style: TerminalStyle(), columnCount: 1, isCursor: true),
+            RemoteTerminalDisplaySegment(text: " ", style: TerminalStyle(), columnCount: 1)
+        ])
+    }
+
+    @MainActor
     @Test func terminalViewportResizeCoordinatorSuppressesNoOpViewportReports() async {
         let sleeper = TerminalViewportResizeCoordinatorTestSleeper()
         let coordinator = TerminalViewportResizeCoordinator(delay: .milliseconds(100), sleep: sleeper.sleep(for:))
