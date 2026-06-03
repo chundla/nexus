@@ -55,20 +55,22 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
         terminationStatusMessageBuilder: @escaping (Int32) -> String,
         unexpectedTerminationState: Session.State = .failed,
         unexpectedTerminationStateEvaluator: ((Int32, String) -> Session.State)? = nil,
-        transportFactory: @escaping TransportFactory = { executable, arguments, workingDirectory in
-            try ProcessIBMBobTransport(
-                executable: executable,
-                arguments: arguments,
-                workingDirectory: workingDirectory
-            )
-        }
+        processEnvironment: [String: String]? = nil,
+        transportFactory: TransportFactory? = nil
     ) throws {
         self.executable = executable
         self.workingDirectory = workingDirectory
         self.sessionLinkage = sessionLinkage.map { IBMBobSessionLinkage(sessionID: $0.sessionID) }
         self.terminationStatusMessageBuilder = terminationStatusMessageBuilder
         self.unexpectedTerminationStateEvaluator = unexpectedTerminationStateEvaluator ?? { _, _ in unexpectedTerminationState }
-        self.transportFactory = transportFactory
+        self.transportFactory = transportFactory ?? { executable, arguments, workingDirectory in
+            try ProcessIBMBobTransport(
+                executable: executable,
+                arguments: arguments,
+                workingDirectory: workingDirectory,
+                environment: processEnvironment
+            )
+        }
         self.slashCommands = Self.discoverSlashCommands(executable: executable, workingDirectory: workingDirectory)
         let restoredActivityItems = sessionLinkage?.persistedActivityItems ?? []
         self.activityItems = restoredActivityItems.isEmpty ? Self.defaultActivityItems : restoredActivityItems
@@ -827,6 +829,7 @@ final class ProcessIBMBobTransport: IBMBobTransporting, @unchecked Sendable {
     private let executable: String
     private let arguments: [String]
     private let workingDirectory: String?
+    private let environment: [String: String]?
     private let lock = NSLock()
     private var stdoutLineHandler: (@Sendable (String) -> Void)?
     private var stderrLineHandler: (@Sendable (String) -> Void)?
@@ -837,10 +840,11 @@ final class ProcessIBMBobTransport: IBMBobTransporting, @unchecked Sendable {
     private var stdoutBuffer = Data()
     private var stderrBuffer = Data()
 
-    init(executable: String, arguments: [String], workingDirectory: String?) throws {
+    init(executable: String, arguments: [String], workingDirectory: String?, environment: [String: String]? = nil) throws {
         self.executable = executable
         self.arguments = arguments
         self.workingDirectory = workingDirectory
+        self.environment = environment
     }
 
     func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
@@ -866,6 +870,9 @@ final class ProcessIBMBobTransport: IBMBobTransporting, @unchecked Sendable {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: invocation.executable)
         process.arguments = invocation.arguments
+        if let environment {
+            process.environment = environment
+        }
         if let workingDirectory {
             process.currentDirectoryURL = URL(fileURLWithPath: workingDirectory, isDirectory: true)
         }
@@ -980,7 +987,7 @@ final class ProcessIBMBobTransport: IBMBobTransporting, @unchecked Sendable {
             return siblingExecutable
         }
 
-        return SystemProviderExecutableResolver()
+        return SystemProviderExecutableResolver(environment: environment ?? ProcessInfo.processInfo.environment)
             .resolveExecutable(named: interpreterName)
             .resolvedExecutable
     }

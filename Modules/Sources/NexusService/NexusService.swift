@@ -618,15 +618,17 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
     private let remoteSessionCommandBuilder = RemoteSessionCommandBuilder()
     private let providerModuleRegistry: ProviderModuleRegistry
     private let localShellCommandBuilder: LocalShellCommandBuilder
-    private let piTransportFactory: PiRPCSessionRuntime.TransportFactory
-    private let codexTransportFactory: CodexAppServerRuntime.TransportFactory
-    private let ibmBobTransportFactory: IBMBobSessionRuntime.TransportFactory
+    private let localShellEnvironmentResolver: any LocalShellEnvironmentResolving
+    private let piTransportFactory: PiRPCSessionRuntime.TransportFactory?
+    private let codexTransportFactory: CodexAppServerRuntime.TransportFactory?
+    private let ibmBobTransportFactory: IBMBobSessionRuntime.TransportFactory?
     private let remoteProtocolSessionCommandBuilder: RemoteProtocolSessionCommandBuilder
     private let remoteIBMBobCommandBuilder: RemoteIBMBobCommandBuilder
 
     init(
         providerModuleRegistry: ProviderModuleRegistry? = nil,
         localShellCommandBuilder: LocalShellCommandBuilder = LocalShellCommandBuilder(),
+        localShellEnvironmentResolver: (any LocalShellEnvironmentResolving)? = nil,
         piTransportFactory: PiRPCSessionRuntime.TransportFactory? = nil,
         codexTransportFactory: CodexAppServerRuntime.TransportFactory? = nil,
         ibmBobTransportFactory: IBMBobSessionRuntime.TransportFactory? = nil,
@@ -635,27 +637,11 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
     ) {
         self.providerModuleRegistry = providerModuleRegistry ?? ServiceSessionProviderRegistry.providerModules()
         self.localShellCommandBuilder = localShellCommandBuilder
-        self.piTransportFactory = piTransportFactory ?? { executable, arguments, workingDirectory in
-            try ProcessPiRPCTransport(
-                executable: executable,
-                arguments: arguments,
-                workingDirectory: workingDirectory
-            )
-        }
-        self.codexTransportFactory = codexTransportFactory ?? { executable, arguments, workingDirectory in
-            try ProcessCodexAppServerTransport(
-                executable: executable,
-                arguments: arguments,
-                workingDirectory: workingDirectory
-            )
-        }
-        self.ibmBobTransportFactory = ibmBobTransportFactory ?? { executable, arguments, workingDirectory in
-            try ProcessIBMBobTransport(
-                executable: executable,
-                arguments: arguments,
-                workingDirectory: workingDirectory
-            )
-        }
+        self.localShellEnvironmentResolver = localShellEnvironmentResolver
+            ?? LocalShellEnvironmentResolver(localShellCommandBuilder: localShellCommandBuilder)
+        self.piTransportFactory = piTransportFactory
+        self.codexTransportFactory = codexTransportFactory
+        self.ibmBobTransportFactory = ibmBobTransportFactory
         self.remoteProtocolSessionCommandBuilder = remoteProtocolSessionCommandBuilder
         self.remoteIBMBobCommandBuilder = remoteIBMBobCommandBuilder
     }
@@ -756,13 +742,26 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
     private func makeLocalPiRuntime(
         launchConfiguration: SessionRuntimeLaunchConfiguration
     ) async throws -> any SessionRuntime {
-        try await PiRPCSessionRuntime(
+        let processEnvironment = localShellEnvironmentResolver.resolvedEnvironment()
+        if let piTransportFactory {
+            return try await PiRPCSessionRuntime(
+                executable: launchConfiguration.executable,
+                workingDirectory: launchConfiguration.workingDirectory,
+                sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.piSessionLinkage,
+                restoredMetadata: launchConfiguration.sessionRecordAdapterMetadata,
+                terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
+                processEnvironment: processEnvironment,
+                transportFactory: piTransportFactory
+            )
+        }
+
+        return try await PiRPCSessionRuntime(
             executable: launchConfiguration.executable,
             workingDirectory: launchConfiguration.workingDirectory,
             sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.piSessionLinkage,
             restoredMetadata: launchConfiguration.sessionRecordAdapterMetadata,
             terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
-            transportFactory: piTransportFactory
+            processEnvironment: processEnvironment
         )
     }
 
@@ -809,7 +808,15 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
                 )
             },
             transportFactory: { _, _, _ in
-                try self.piTransportFactory("/usr/bin/ssh", bridgeArguments, nil)
+                if let piTransportFactory = self.piTransportFactory {
+                    return try piTransportFactory("/usr/bin/ssh", bridgeArguments, nil)
+                }
+
+                return try ProcessPiRPCTransport(
+                    executable: "/usr/bin/ssh",
+                    arguments: bridgeArguments,
+                    workingDirectory: nil
+                )
             }
         )
     }
@@ -817,12 +824,24 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
     private func makeLocalCodexRuntime(
         launchConfiguration: SessionRuntimeLaunchConfiguration
     ) async throws -> any SessionRuntime {
-        try await CodexAppServerRuntime(
+        let processEnvironment = localShellEnvironmentResolver.resolvedEnvironment()
+        if let codexTransportFactory {
+            return try await CodexAppServerRuntime(
+                executable: launchConfiguration.executable,
+                workingDirectory: launchConfiguration.workingDirectory,
+                sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.codexSessionLinkage,
+                terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
+                processEnvironment: processEnvironment,
+                transportFactory: codexTransportFactory
+            )
+        }
+
+        return try await CodexAppServerRuntime(
             executable: launchConfiguration.executable,
             workingDirectory: launchConfiguration.workingDirectory,
             sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.codexSessionLinkage,
             terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
-            transportFactory: codexTransportFactory
+            processEnvironment: processEnvironment
         )
     }
 
@@ -866,7 +885,15 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
                 )
             },
             transportFactory: { _, _, _ in
-                try self.codexTransportFactory("/usr/bin/ssh", bridgeArguments, nil)
+                if let codexTransportFactory = self.codexTransportFactory {
+                    return try codexTransportFactory("/usr/bin/ssh", bridgeArguments, nil)
+                }
+
+                return try ProcessCodexAppServerTransport(
+                    executable: "/usr/bin/ssh",
+                    arguments: bridgeArguments,
+                    workingDirectory: nil
+                )
             }
         )
     }
@@ -874,12 +901,24 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
     private func makeLocalIBMBobRuntime(
         launchConfiguration: SessionRuntimeLaunchConfiguration
     ) throws -> any SessionRuntime {
-        try IBMBobSessionRuntime(
+        let processEnvironment = localShellEnvironmentResolver.resolvedEnvironment()
+        if let ibmBobTransportFactory {
+            return try IBMBobSessionRuntime(
+                executable: launchConfiguration.executable,
+                workingDirectory: launchConfiguration.workingDirectory,
+                sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.ibmBobSessionLinkage,
+                terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
+                processEnvironment: processEnvironment,
+                transportFactory: ibmBobTransportFactory
+            )
+        }
+
+        return try IBMBobSessionRuntime(
             executable: launchConfiguration.executable,
             workingDirectory: launchConfiguration.workingDirectory,
             sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.ibmBobSessionLinkage,
             terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
-            transportFactory: ibmBobTransportFactory
+            processEnvironment: processEnvironment
         )
     }
 
@@ -916,16 +955,26 @@ final class ProcessSessionRuntimeLauncher: SessionRuntimeLaunching {
                 return .failed
             },
             transportFactory: { executable, arguments, workingDirectory in
-                try self.ibmBobTransportFactory(
-                    "/usr/bin/ssh",
-                    self.remoteIBMBobCommandBuilder.bridgeArguments(
-                        host: remoteHost,
-                        runtimeIdentifier: runtimeIdentifier,
-                        workingDirectory: workingDirectory ?? launchConfiguration.workingDirectory,
-                        executable: executable,
-                        providerArguments: arguments
-                    ),
-                    nil
+                let bridgeArguments = self.remoteIBMBobCommandBuilder.bridgeArguments(
+                    host: remoteHost,
+                    runtimeIdentifier: runtimeIdentifier,
+                    workingDirectory: workingDirectory ?? launchConfiguration.workingDirectory,
+                    executable: executable,
+                    providerArguments: arguments
+                )
+
+                if let ibmBobTransportFactory = self.ibmBobTransportFactory {
+                    return try ibmBobTransportFactory(
+                        "/usr/bin/ssh",
+                        bridgeArguments,
+                        nil
+                    )
+                }
+
+                return try ProcessIBMBobTransport(
+                    executable: "/usr/bin/ssh",
+                    arguments: bridgeArguments,
+                    workingDirectory: nil
                 )
             }
         )

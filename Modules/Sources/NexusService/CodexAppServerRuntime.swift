@@ -115,14 +115,18 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
         unexpectedTerminationState: Session.State = .exited,
         unexpectedTerminationMessageBuilder: ((Int32) -> String)? = nil,
         stopHandler: (() throws -> Void)? = nil,
-        transportFactory: TransportFactory = { executable, arguments, workingDirectory in
+        processEnvironment: [String: String]? = nil,
+        transportFactory: TransportFactory? = nil
+    ) throws {
+        let resolvedTransportFactory = transportFactory ?? { executable, arguments, workingDirectory in
             try ProcessCodexAppServerTransport(
                 executable: executable,
                 arguments: arguments,
-                workingDirectory: workingDirectory
+                workingDirectory: workingDirectory,
+                environment: processEnvironment
             )
         }
-    ) throws {
+
         try self.init(
             executable: executable,
             workingDirectory: workingDirectory,
@@ -131,7 +135,7 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
             unexpectedTerminationState: unexpectedTerminationState,
             unexpectedTerminationMessageBuilder: unexpectedTerminationMessageBuilder,
             stopHandler: stopHandler,
-            transportFactory: transportFactory,
+            transportFactory: resolvedTransportFactory,
             performStartup: false
         )
         try AsyncOperationSupport.blocking { try await self.completeStartup(workingDirectory: workingDirectory) }
@@ -145,14 +149,18 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
         unexpectedTerminationState: Session.State = .exited,
         unexpectedTerminationMessageBuilder: ((Int32) -> String)? = nil,
         stopHandler: (() throws -> Void)? = nil,
-        transportFactory: TransportFactory = { executable, arguments, workingDirectory in
+        processEnvironment: [String: String]? = nil,
+        transportFactory: TransportFactory? = nil
+    ) async throws {
+        let resolvedTransportFactory = transportFactory ?? { executable, arguments, workingDirectory in
             try ProcessCodexAppServerTransport(
                 executable: executable,
                 arguments: arguments,
-                workingDirectory: workingDirectory
+                workingDirectory: workingDirectory,
+                environment: processEnvironment
             )
         }
-    ) async throws {
+
         try self.init(
             executable: executable,
             workingDirectory: workingDirectory,
@@ -161,7 +169,7 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
             unexpectedTerminationState: unexpectedTerminationState,
             unexpectedTerminationMessageBuilder: unexpectedTerminationMessageBuilder,
             stopHandler: stopHandler,
-            transportFactory: transportFactory,
+            transportFactory: resolvedTransportFactory,
             performStartup: false
         )
         try await self.completeStartup(workingDirectory: workingDirectory)
@@ -1194,6 +1202,7 @@ final class ProcessCodexAppServerTransport: CodexAppServerTransporting, @uncheck
     private let executable: String
     private let arguments: [String]
     private let workingDirectory: String?
+    private let environment: [String: String]?
     private let lock = NSLock()
     private var stdoutLineHandler: (@Sendable (String) -> Void)?
     private var terminationHandler: (@Sendable (CodexAppServerTermination) -> Void)?
@@ -1204,10 +1213,11 @@ final class ProcessCodexAppServerTransport: CodexAppServerTransporting, @uncheck
     private var stdoutBuffer = Data()
     private var stderrBuffer = Data()
 
-    init(executable: String, arguments: [String], workingDirectory: String?) throws {
+    init(executable: String, arguments: [String], workingDirectory: String?, environment: [String: String]? = nil) throws {
         self.executable = executable
         self.arguments = arguments
         self.workingDirectory = workingDirectory
+        self.environment = environment
     }
 
     func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
@@ -1227,6 +1237,9 @@ final class ProcessCodexAppServerTransport: CodexAppServerTransporting, @uncheck
         let process = Process()
         process.executableURL = URL(fileURLWithPath: invocation.executable)
         process.arguments = invocation.arguments
+        if let environment {
+            process.environment = environment
+        }
         if let workingDirectory {
             process.currentDirectoryURL = URL(fileURLWithPath: workingDirectory, isDirectory: true)
         }
@@ -1358,7 +1371,7 @@ final class ProcessCodexAppServerTransport: CodexAppServerTransporting, @uncheck
             return siblingExecutable
         }
 
-        return SystemProviderExecutableResolver()
+        return SystemProviderExecutableResolver(environment: environment ?? ProcessInfo.processInfo.environment)
             .resolveExecutable(named: interpreterName)
             .resolvedExecutable
     }
