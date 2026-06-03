@@ -1409,6 +1409,7 @@ private struct RemoteSessionScreenView: View {
     @State private var terminalDraft = ""
     @State private var structuredPrompt = ""
     @State private var terminalViewportSize: CGSize = .zero
+    @State private var terminalViewportResizeCoordinator = TerminalViewportResizeCoordinator()
     @State private var isShowingStopConfirmation = false
     @State private var activeAction: RemoteSessionAction?
     @State private var activeApprovalRequestID: UUID?
@@ -1610,9 +1611,23 @@ private struct RemoteSessionScreenView: View {
             }
 
             let viewport = terminalViewport()
-            Task {
-                await model.updateFocusedRemoteSessionViewport(columns: viewport.columns, rows: viewport.rows)
-            }
+            terminalViewportResizeCoordinator.report(
+                .init(columns: viewport.columns, rows: viewport.rows),
+                currentSize: {
+                    guard let screen = model.focusedSessionScreen,
+                          screen.session.id == session.id else {
+                        return nil
+                    }
+                    return .init(columns: screen.terminalColumns, rows: screen.terminalRows)
+                },
+                submit: { size in
+                    guard model.focusedSessionID == session.id else {
+                        return
+                    }
+                    await model.updateFocusedRemoteSessionViewport(columns: size.columns, rows: size.rows)
+                },
+                onError: { _ in }
+            )
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .background {
@@ -1622,6 +1637,7 @@ private struct RemoteSessionScreenView: View {
             }
         }
         .onDisappear {
+            terminalViewportResizeCoordinator.cancel()
             if model.focusedSessionID == session.id {
                 Task {
                     await model.handleFocusedSessionScreenDisappeared(preserveAttachment: scenePhase == .background)
@@ -2045,7 +2061,7 @@ private struct RemoteSessionScreenView: View {
     ) -> some View {
         let autoScrollTrigger = structuredSessionAutoScrollTrigger(for: screen)
 
-        ScrollViewReader { proxy in
+        return ScrollViewReader { proxy in
             ScrollView {
                 structuredSessionScrollBody(
                     screen,

@@ -117,6 +117,73 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func terminalViewportResizeCoordinatorSuppressesNoOpViewportReports() async {
+        let sleeper = TerminalViewportResizeCoordinatorTestSleeper()
+        let coordinator = TerminalViewportResizeCoordinator(delay: .milliseconds(100), sleep: sleeper.sleep(for:))
+        var currentSize = TerminalViewportResizeCoordinator.Size(columns: 80, rows: 24)
+        var submittedSizes: [TerminalViewportResizeCoordinator.Size] = []
+
+        coordinator.report(
+            TerminalViewportResizeCoordinator.Size(columns: 80, rows: 24),
+            currentSize: { currentSize },
+            submit: { size in
+                submittedSizes.append(size)
+                currentSize = size
+            },
+            onError: { _ in }
+        )
+        await Task.yield()
+
+        #expect(await sleeper.waiterCount == 0)
+        #expect(submittedSizes.isEmpty)
+    }
+
+    @MainActor
+    @Test func terminalViewportResizeCoordinatorCoalescesRapidViewportChangesToFinalSize() async {
+        let sleeper = TerminalViewportResizeCoordinatorTestSleeper()
+        let coordinator = TerminalViewportResizeCoordinator(delay: .milliseconds(100), sleep: sleeper.sleep(for:))
+        var currentSize = TerminalViewportResizeCoordinator.Size(columns: 80, rows: 24)
+        var submittedSizes: [TerminalViewportResizeCoordinator.Size] = []
+
+        coordinator.report(
+            TerminalViewportResizeCoordinator.Size(columns: 90, rows: 28),
+            currentSize: { currentSize },
+            submit: { size in
+                submittedSizes.append(size)
+                currentSize = size
+            },
+            onError: { _ in }
+        )
+        coordinator.report(
+            TerminalViewportResizeCoordinator.Size(columns: 100, rows: 30),
+            currentSize: { currentSize },
+            submit: { size in
+                submittedSizes.append(size)
+                currentSize = size
+            },
+            onError: { _ in }
+        )
+        coordinator.report(
+            TerminalViewportResizeCoordinator.Size(columns: 120, rows: 36),
+            currentSize: { currentSize },
+            submit: { size in
+                submittedSizes.append(size)
+                currentSize = size
+            },
+            onError: { _ in }
+        )
+        await Task.yield()
+
+        #expect(await sleeper.waiterCount == 1)
+
+        await sleeper.resumeNext()
+        await Task.yield()
+
+        #expect(submittedSizes == [.init(columns: 120, rows: 36)])
+        #expect(currentSize == .init(columns: 120, rows: 36))
+    }
+
+    @MainActor
     @Test func focusedSessionSurfaceUsesExplicitPrimarySurfaceInsteadOfProviderIdentity() {
         let piScreen = SessionScreen(
             session: Session(
@@ -10686,5 +10753,27 @@ private actor TestObservationCancellationState {
 
         isCancelled = true
         return true
+    }
+}
+
+private actor TerminalViewportResizeCoordinatorTestSleeper {
+    private var continuations: [CheckedContinuation<Void, Never>] = []
+
+    var waiterCount: Int {
+        continuations.count
+    }
+
+    func sleep(for _: Duration) async {
+        await withCheckedContinuation { continuation in
+            continuations.append(continuation)
+        }
+    }
+
+    func resumeNext() {
+        guard continuations.isEmpty == false else {
+            return
+        }
+
+        continuations.removeFirst().resume()
     }
 }

@@ -22,6 +22,7 @@ struct ContentView: View {
     @State private var pendingWorkspaceGroupID: UUID?
     @State private var isShowingWorkspaceGroupPicker = false
     @State private var terminalViewportSize: CGSize = .zero
+    @State private var terminalViewportResizeCoordinator = TerminalViewportResizeCoordinator()
     @State private var terminalFocusToken = UUID()
     @State private var presentedError: PresentedError?
     @FocusState private var isStructuredSessionPromptFocused: Bool
@@ -1488,14 +1489,14 @@ struct ContentView: View {
                 Color.clear
                     .onAppear {
                         terminalViewportSize = proxy.size
-                        reportTerminalSize(proxy.size)
+                        reportTerminalSize(proxy.size, for: screen.session.id)
                         if isReady {
                             terminalFocusToken = UUID()
                         }
                     }
                     .onChange(of: proxy.size) { _, newSize in
                         terminalViewportSize = newSize
-                        reportTerminalSize(newSize)
+                        reportTerminalSize(newSize, for: screen.session.id)
                     }
             }
         }
@@ -1510,7 +1511,10 @@ struct ContentView: View {
         }
         .onTapGesture {
             terminalFocusToken = UUID()
-            reportTerminalSize(terminalViewportSize)
+            reportTerminalSize(terminalViewportSize, for: screen.session.id)
+        }
+        .onDisappear {
+            terminalViewportResizeCoordinator.cancel()
         }
     }
 
@@ -2254,7 +2258,7 @@ struct ContentView: View {
         )
     }
 
-    private func reportTerminalSize(_ size: CGSize) {
+    private func reportTerminalSize(_ size: CGSize, for sessionID: UUID) {
         guard appModel.focusedSessionScreen?.session.state == .ready else {
             return
         }
@@ -2272,13 +2276,25 @@ struct ContentView: View {
             return
         }
 
-        Task {
-            do {
-                try await appModel.resizeFocusedSession(columns: columns, rows: rows)
-            } catch {
+        terminalViewportResizeCoordinator.report(
+            .init(columns: columns, rows: rows),
+            currentSize: {
+                guard let screen = appModel.focusedSessionScreen,
+                      screen.session.id == sessionID else {
+                    return nil
+                }
+                return .init(columns: screen.terminalColumns, rows: screen.terminalRows)
+            },
+            submit: { size in
+                guard appModel.focusedSessionScreen?.session.id == sessionID else {
+                    return
+                }
+                try await appModel.resizeFocusedSession(columns: size.columns, rows: size.rows)
+            },
+            onError: { error in
                 presentedError = PresentedError(message: error.localizedDescription)
             }
-        }
+        )
     }
 
 }
