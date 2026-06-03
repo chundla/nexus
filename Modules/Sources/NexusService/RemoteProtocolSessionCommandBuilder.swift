@@ -53,6 +53,7 @@ struct RemoteProtocolSessionCommandBuilder {
         let providerOutputLog = "\(providerRuntimeRoot)/stdout.log"
         let providerBootstrapLog = "\(providerRuntimeRoot)/bootstrap.log"
         let launchCommand = shellCommand(executable: executable, arguments: providerArguments)
+        let shellEnvironmentMarker = "\(providerRuntimeRoot)/shell-environment.ready"
         let providerLaunchScript = [
             ": > \(shellExpressionQuoted(providerBootstrapLog))",
             "printf \"%s\\n\" \"NEXUS_REMOTE_BOOTSTRAP_STARTED\" >> \(shellExpressionQuoted(providerBootstrapLog))",
@@ -64,6 +65,12 @@ struct RemoteProtocolSessionCommandBuilder {
             "if [ \"$status\" -ne 0 ]; then printf \"NEXUS_REMOTE_PROVIDER_EXITED_WITH_STATUS:%s\\n\" \"$status\" >> \(shellExpressionQuoted(providerBootstrapLog)); fi",
             "exit \"$status\""
         ].joined(separator: "; ")
+
+        let launchViaResolvedShellCommand = RemoteShellEnvironmentCommandBuilder()
+            .commandInvokingPOSIXScriptThroughShellEnvironment(
+                providerLaunchScript,
+                markerFilePath: shellEnvironmentMarker
+            )
 
         switch launchMode {
         case .launchNew:
@@ -77,8 +84,9 @@ struct RemoteProtocolSessionCommandBuilder {
                 "rm -f \"$input_fifo\" \"$output_log\" \"$bootstrap_log\"",
                 "mkfifo \"$input_fifo\"",
                 ": > \"$output_log\"",
+                "rm -f \"$runtime_root/shell-environment.ready\"",
                 "tmux kill-session -t \(shellQuoted(runtimeIdentifier)) 2>/dev/null || true",
-                "tmux new-session -d -s \(shellQuoted(runtimeIdentifier)) \(shellQuoted("/bin/sh -lc \(shellQuoted(providerLaunchScript))")) || { echo 'NEXUS_REMOTE_TMUX_LAUNCH_FAILED' >&2; exit 1; }",
+                "tmux new-session -d -s \(shellQuoted(runtimeIdentifier)) \(shellQuoted("/bin/sh -lc \(shellQuoted(launchViaResolvedShellCommand))")) || { echo 'NEXUS_REMOTE_TMUX_LAUNCH_FAILED' >&2; exit 1; }",
                 bridgeScript(runtimeIdentifier: runtimeIdentifier, inputFIFO: "$input_fifo", outputLog: "$output_log", bootstrapLog: "$bootstrap_log")
             ].joined(separator: "; ")
         case .attachExisting:

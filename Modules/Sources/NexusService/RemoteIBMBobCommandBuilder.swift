@@ -49,6 +49,7 @@ struct RemoteIBMBobCommandBuilder {
         let outputLog = "\(runtimeRoot)/stdout.log"
         let statusFile = "\(runtimeRoot)/status"
         let bootstrapLog = "\(runtimeRoot)/bootstrap.log"
+        let shellEnvironmentMarker = "\(runtimeRoot)/shell-environment.ready"
         let launchCommand = shellCommand(executable: executable, arguments: providerArguments)
         let providerLaunchScript = [
             ": > \(shellExpressionQuoted(bootstrapLog))",
@@ -59,17 +60,23 @@ struct RemoteIBMBobCommandBuilder {
             "exit \"$status\""
         ].joined(separator: "; ")
 
+        let launchViaResolvedShellCommand = RemoteShellEnvironmentCommandBuilder()
+            .commandInvokingPOSIXScriptThroughShellEnvironment(
+                providerLaunchScript,
+                markerFilePath: shellEnvironmentMarker
+            )
+
         return [
             "runtime_root=\(shellExpressionQuoted(runtimeRoot))",
             "output_log=\(shellExpressionQuoted(outputLog))",
             "status_file=\(shellExpressionQuoted(statusFile))",
             "bootstrap_log=\(shellExpressionQuoted(bootstrapLog))",
             "mkdir -p \"$runtime_root\"",
-            "rm -f \"$output_log\" \"$status_file\" \"$bootstrap_log\"",
+            "rm -f \"$output_log\" \"$status_file\" \"$bootstrap_log\" \"$runtime_root/shell-environment.ready\"",
             ": > \"$output_log\"",
             ": > \"$bootstrap_log\"",
             "tmux kill-session -t \(shellQuoted(runtimeIdentifier)) 2>/dev/null || true",
-            "tmux new-session -d -s \(shellQuoted(runtimeIdentifier)) \(shellQuoted("/bin/sh -lc \(shellQuoted(providerLaunchScript))")) || { echo 'NEXUS_REMOTE_TMUX_LAUNCH_FAILED' >&2; exit 1; }",
+            "tmux new-session -d -s \(shellQuoted(runtimeIdentifier)) \(shellQuoted("/bin/sh -lc \(shellQuoted(launchViaResolvedShellCommand))")) || { echo 'NEXUS_REMOTE_TMUX_LAUNCH_FAILED' >&2; exit 1; }",
             "tail -n +1 -F \"$output_log\" & tail_pid=$!",
             "cleanup() { kill \"$tail_pid\" 2>/dev/null || true; wait \"$tail_pid\" 2>/dev/null || true; }",
             "trap 'cleanup' EXIT HUP INT TERM",
