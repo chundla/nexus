@@ -305,7 +305,9 @@ struct ContentView: View {
         if let selection {
             switch selection {
             case .workspaceGroup(let groupID):
-                workspaceGroupDetail(groupID: groupID)
+                WorkspaceGroupDetailBoundary(appModel: appModel, groupID: groupID) { presentation in
+                    workspaceGroupDetail(presentation: presentation)
+                }
             case .workspace(let workspaceID):
                 WorkspaceDetailBoundary(appModel: appModel, workspaceID: workspaceID) { presentation in
                     workspaceDetail(presentation: presentation)
@@ -483,9 +485,9 @@ struct ContentView: View {
         }
     }
 
-    private func workspaceGroupDetail(groupID: UUID) -> some View {
-        let group = appModel.workspaceGroups.first(where: { $0.id == groupID })
-        let workspaces = appModel.workspaces.filter { $0.primaryGroupID == groupID }
+    private func workspaceGroupDetail(presentation: WorkspaceGroupDetailPresentation) -> some View {
+        let group = presentation.group
+        let workspaces = presentation.workspaces
 
         return ScrollView {
             VStack(alignment: .leading, spacing: 20) {
@@ -507,7 +509,9 @@ struct ContentView: View {
                     .nexusPanel(tint: NexusMacTheme.teal)
                 } else {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 16)], spacing: 16) {
-                        ForEach(workspaces) { workspace in
+                        ForEach(workspaces) { summary in
+                            let workspace = summary.workspace
+
                             Button {
                                 selection = .workspace(workspace.id)
                             } label: {
@@ -526,7 +530,7 @@ struct ContentView: View {
                                         .font(NexusMacTheme.displayFont(22, relativeTo: .title3))
                                         .foregroundStyle(.white)
 
-                                    Text(appModel.workspaceTargetSummary(for: workspace))
+                                    Text(summary.targetSummary)
                                         .font(NexusMacTheme.bodyFont(13))
                                         .foregroundStyle(NexusMacTheme.mutedText)
                                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -2720,6 +2724,26 @@ private struct WorkspaceDetailBoundary<Content: View>: View {
 
     var body: some View {
         content(appModel.workspaceBrowseDetailPresentation(workspaceID: workspaceID))
+    }
+}
+
+private struct WorkspaceGroupDetailBoundary<Content: View>: View {
+    @Bindable var appModel: NexusAppModel
+    let groupID: UUID
+    private let content: (WorkspaceGroupDetailPresentation) -> Content
+
+    init(
+        appModel: NexusAppModel,
+        groupID: UUID,
+        @ViewBuilder content: @escaping (WorkspaceGroupDetailPresentation) -> Content
+    ) {
+        self.appModel = appModel
+        self.groupID = groupID
+        self.content = content
+    }
+
+    var body: some View {
+        content(appModel.workspaceGroupDetailPresentation(groupID: groupID))
     }
 }
 

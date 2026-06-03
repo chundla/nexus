@@ -57,6 +57,11 @@ struct WorkspaceBrowseDetailPresentation: Equatable {
     let overview: WorkspaceOverview?
 }
 
+struct WorkspaceGroupDetailPresentation: Equatable {
+    let group: WorkspaceGroup?
+    let workspaces: [WorkspaceBrowseWorkspaceSummary]
+}
+
 struct WorkspaceHomePresentation: Equatable {
     let recentWorkspaces: [WorkspaceBrowseWorkspaceSummary]
     let serviceStatus: NexusServiceStatus?
@@ -623,6 +628,20 @@ final class NexusAppModel {
             hostName: workspace.flatMap { workspaceHostName(for: $0) },
             groupName: workspace.flatMap { workspaceGroupName(for: $0.primaryGroupID) },
             overview: workspaceOverview(for: workspaceID)
+        )
+    }
+
+    func workspaceGroupDetailPresentation(groupID: UUID) -> WorkspaceGroupDetailPresentation {
+        WorkspaceGroupDetailPresentation(
+            group: workspaceGroups.first(where: { $0.id == groupID }),
+            workspaces: workspaces
+                .filter { $0.primaryGroupID == groupID }
+                .map { workspace in
+                    WorkspaceBrowseWorkspaceSummary(
+                        workspace: workspace,
+                        targetSummary: workspaceTargetSummary(for: workspace)
+                    )
+                }
         )
     }
 

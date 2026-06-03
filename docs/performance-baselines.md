@@ -73,6 +73,7 @@ Before running a manual SwiftUI profiling pass for the macOS browse surface, run
 ```bash
 xcodebuild test -scheme nexus -project nexus.xcodeproj -destination 'platform=macOS' \
   -only-testing:nexusTests/appModelWorkspaceHomePresentationStaysStableDuringProviderDetailLoads \
+  -only-testing:nexusTests/appModelWorkspaceGroupDetailPresentationStaysStableDuringProviderDetailLoads \
   -only-testing:nexusTests/appModelWorkspaceBrowseSidebarPresentationStaysStableDuringProviderDetailLoads \
   -only-testing:nexusTests/appModelWorkspaceBrowseSidebarPresentationUsesLoadedSessionRoutingForRecentOrdering \
   -only-testing:nexusTests/appModelWorkspaceBrowseDetailPresentationStaysStableDuringTranscriptOnlyUpdates
