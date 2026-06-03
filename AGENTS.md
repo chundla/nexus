@@ -27,3 +27,4 @@ This repo uses a single-context domain-docs layout. See `docs/agents/domain.md`.
 ### Rules
 
 - Always create a commit after you have made changes or additions to any code or documentation.
+- If using XcodeBuildMCP, use the installed XcodeBuildMCP skill before calling XcodeBuildMCP tools.
