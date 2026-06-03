@@ -88,10 +88,10 @@ These tests do not replace SwiftUI Instruments, but they catch service/model obs
 Before running a manual SwiftUI profiling pass for the iPhone `Remote Client` browse or focused `Session` surfaces, run the focused observation-stability tests that guard the extracted presentation seams:
 
 ```bash
-xcodebuild test -scheme nexus -project nexus.xcodeproj -destination 'platform=macOS' \
-  -only-testing:nexusTests/RemoteClientPairingModelTests/workspaceBrowsePresentationStaysStableDuringTranscriptOnlyFocusedSessionUpdates \
-  -only-testing:nexusTests/RemoteClientPairingModelTests/workspaceBrowsePresentationStaysStableDuringPairedMacAvailabilityRefreshes \
-  -only-testing:nexusTests/RemoteClientPairingModelTests/focusedSessionWorkspaceLocationStaysStableDuringUnrelatedCatalogRefreshes
+xcodebuildmcp macos test --project-path nexus.xcodeproj --scheme nexus \
+  --extra-args -only-testing:nexusTests/RemoteClientPairingModelTests/workspaceBrowsePresentationStaysStableDuringTranscriptOnlyFocusedSessionUpdates \
+  --extra-args -only-testing:nexusTests/RemoteClientPairingModelTests/workspaceBrowsePresentationStaysStableDuringPairedMacAvailabilityRefreshes \
+  --extra-args -only-testing:nexusTests/RemoteClientPairingModelTests/focusedSessionWorkspaceLocationStaysStableDuringUnrelatedCatalogRefreshes
 ```
 
 These tests do not replace SwiftUI Instruments, but they catch `Remote Client` browse/session observation broadening before you spend time in a profiling trace.
@@ -99,6 +99,23 @@ These tests do not replace SwiftUI Instruments, but they catch `Remote Client` b
 ### Repeatable iPhone Remote Client trace fixture
 
 For a deterministic iPhone `Remote Client` profiling pass, launch the app with `NEXUS_REMOTE_CLIENT_FIXTURE=invalidation-baseline` set in the iOS run scheme environment.
+
+A repeatable simulator dry run looks like this:
+
+```bash
+xcodebuildmcp simulator build-and-run \
+  --project-path nexus.xcodeproj \
+  --scheme nexus \
+  --simulator-id ECA0B50A-0AC8-479A-B26B-F48E05077E3B
+
+xcodebuildmcp simulator launch-app --json '{
+  "simulatorId": "ECA0B50A-0AC8-479A-B26B-F48E05077E3B",
+  "bundleId": "com.chundla.nexus",
+  "env": {
+    "NEXUS_REMOTE_CLIENT_FIXTURE": "invalidation-baseline"
+  }
+}'
+```
 
 That fixture starts with:
 - one active **Paired Mac** already selected and reachable
@@ -110,6 +127,8 @@ Suggested trace path:
 1. capture the home screen while tapping **Refresh** to exercise **Paired Mac** availability plus `Workspace Catalog` refreshes
 2. open `Baseline API` → `Pi` → **Open conversation**
 3. keep the trace running long enough to capture the automatic `Fixture update ...` activity appends on the structured `Session` surface
+
+Important: `xcrun xctrace` currently reports `The SwiftUI instrument is not supported on the Simulator` for this app flow, so use the simulator fixture for deterministic navigation rehearsal and focused test validation, but run the final SwiftUI invalidation trace from Xcode Instruments on a physical iPhone.
 
 ## Profiling guidance
 
