@@ -1595,7 +1595,7 @@ struct ContentView: View {
                         proxy.scrollTo("conversation-bottom", anchor: .bottom)
                     }
                 }
-                .onChange(of: feedPresentation.activityRows.last) { _, _ in
+                .onChange(of: feedPresentation.activityRows.last?.id) { _, _ in
                     withAnimation(.easeOut(duration: 0.18)) {
                         proxy.scrollTo("conversation-bottom", anchor: .bottom)
                     }
@@ -1763,17 +1763,10 @@ struct ContentView: View {
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
                         if let detailText = row.detailText {
-                            ScrollView(.vertical) {
-                                Text(detailText)
-                                    .font(NexusMacTheme.monoFont(11, relativeTo: .callout))
-                                    .foregroundStyle(.white.opacity(0.84))
-                                    .textSelection(.enabled)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .frame(maxHeight: 220)
-                            .padding(10)
-                            .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            structuredSessionDetailTextView(
+                                detailText,
+                                font: NexusMacTheme.monoFont(11, relativeTo: .callout)
+                            )
                         }
                     }
                     .frame(maxWidth: 620, alignment: .leading)
@@ -1856,6 +1849,28 @@ struct ContentView: View {
 
     private func structuredSessionMarkdownText(_ text: String, font: Font, color: Color) -> some View {
         StructuredSessionMarkdownText(markdown: text, font: font, color: color)
+    }
+
+    @ViewBuilder
+    private func structuredSessionDetailTextView(_ text: String, font: Font) -> some View {
+        let preview = structuredSessionDetailTextPreview(for: text)
+
+        VStack(alignment: .leading, spacing: 8) {
+            Text(preview.text)
+                .font(font)
+                .foregroundStyle(.white.opacity(0.84))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if preview.isTruncated {
+                Text("Output preview truncated for smooth scrolling.")
+                    .font(NexusMacTheme.bodyFont(10, relativeTo: .caption))
+                    .foregroundStyle(NexusMacTheme.mutedText)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private func structuredSessionThinkingIndicatorView(_ indicator: StructuredSessionThinkingIndicator) -> some View {

@@ -26,6 +26,16 @@ public struct StructuredSessionActivityRow: Identifiable, Equatable {
     }
 }
 
+public struct StructuredSessionDetailTextPreview: Equatable {
+    public let text: String
+    public let isTruncated: Bool
+
+    public init(text: String, isTruncated: Bool) {
+        self.text = text
+        self.isTruncated = isTruncated
+    }
+}
+
 public struct StructuredSessionPresentationCopy: Equatable {
     public let emptyStateTitle: String
     public let emptyStateDescription: String
@@ -252,6 +262,37 @@ public func structuredSessionPresentationCopy(for screen: SessionScreen) -> Stru
         emptyStateDescription: "Send a prompt to start the \(screen.session.providerID.displayName) Session.",
         composerPlaceholder: "Send a prompt to \(screen.session.providerID.displayName)"
     )
+}
+
+public func structuredSessionDetailTextPreview(
+    for text: String,
+    maximumLines: Int = 12,
+    maximumCharacters: Int = 4_000
+) -> StructuredSessionDetailTextPreview {
+    guard maximumLines > 0, maximumCharacters > 0 else {
+        return StructuredSessionDetailTextPreview(text: "", isTruncated: text.isEmpty == false)
+    }
+
+    let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+    let lineLimitedText: String
+    var isTruncated = false
+
+    if lines.count > maximumLines {
+        lineLimitedText = lines.prefix(maximumLines).joined(separator: "\n")
+        isTruncated = true
+    } else {
+        lineLimitedText = text
+    }
+
+    if lineLimitedText.count > maximumCharacters {
+        let endIndex = lineLimitedText.index(lineLimitedText.startIndex, offsetBy: maximumCharacters)
+        return StructuredSessionDetailTextPreview(
+            text: String(lineLimitedText[..<endIndex]).trimmingCharacters(in: .whitespacesAndNewlines),
+            isTruncated: true
+        )
+    }
+
+    return StructuredSessionDetailTextPreview(text: lineLimitedText, isTruncated: isTruncated)
 }
 
 public func structuredSessionThinkingIndicator(

@@ -41,6 +41,24 @@ struct StructuredSessionPresentationTests {
         ])
     }
 
+    @Test func structuredSessionDetailTextPreviewLeavesShortOutputUnchanged() {
+        let text = "first line\nsecond line"
+
+        #expect(structuredSessionDetailTextPreview(for: text) == StructuredSessionDetailTextPreview(
+            text: text,
+            isTruncated: false
+        ))
+    }
+
+    @Test func structuredSessionDetailTextPreviewTruncatesLongOutputByLineCount() {
+        let text = (1 ... 16).map { "line \($0)" }.joined(separator: "\n")
+
+        #expect(structuredSessionDetailTextPreview(for: text, maximumLines: 12) == StructuredSessionDetailTextPreview(
+            text: (1 ... 12).map { "line \($0)" }.joined(separator: "\n"),
+            isTruncated: true
+        ))
+    }
+
     @Test func structuredSessionPresentationCopyUsesProviderDisplayName() {
         let codexScreen = SessionScreen(
             session: Session(
