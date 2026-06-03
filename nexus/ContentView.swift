@@ -1496,7 +1496,7 @@ struct ContentView: View {
 
                 ScrollViewReader { proxy in
                     ScrollView {
-                        if feedPresentation.activityRows.isEmpty {
+                        if feedPresentation.activityRowChunks.isEmpty {
                             ContentUnavailableView(
                                 feedPresentation.copy.emptyStateTitle,
                                 systemImage: "message",

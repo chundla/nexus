@@ -85,10 +85,13 @@ public struct StructuredSessionActivityRowChunk: Identifiable, Equatable {
 
 public struct StructuredSessionFeedPresentation: Equatable {
     public let copy: StructuredSessionPresentationCopy
-    public let activityRows: [StructuredSessionActivityRow]
     public let activityRowChunks: [StructuredSessionActivityRowChunk]
     public let pendingApprovalRequests: [SessionApprovalRequest]
     public let thinkingIndicator: StructuredSessionThinkingIndicator?
+
+    public var activityRows: [StructuredSessionActivityRow] {
+        activityRowChunks.flatMap(\.rows)
+    }
 
     public init(
         copy: StructuredSessionPresentationCopy,
@@ -98,7 +101,6 @@ public struct StructuredSessionFeedPresentation: Equatable {
         thinkingIndicator: StructuredSessionThinkingIndicator?
     ) {
         self.copy = copy
-        self.activityRows = activityRows
         self.activityRowChunks = activityRowChunks ?? structuredSessionActivityRowChunks(for: activityRows)
         self.pendingApprovalRequests = pendingApprovalRequests
         self.thinkingIndicator = thinkingIndicator

@@ -2166,7 +2166,7 @@ private struct RemoteSessionScreenView: View {
     private func structuredSessionActivityFeed(
         feedPresentation: StructuredSessionFeedPresentation
     ) -> some View {
-        if feedPresentation.activityRows.isEmpty {
+        if feedPresentation.activityRowChunks.isEmpty {
             RemoteUnavailableInsetCard(
                 title: feedPresentation.copy.emptyStateTitle,
                 detail: feedPresentation.copy.emptyStateDescription,

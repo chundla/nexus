@@ -486,6 +486,37 @@ struct StructuredSessionPresentationTests {
         #expect(builtItemIDs == [[firstActivity.id, secondActivity.id], [thirdActivity.id]])
     }
 
+    @Test func structuredSessionFeedPresentationUsesChunksAsCanonicalActivityRowStorage() {
+        let firstRow = StructuredSessionActivityRow(
+            id: UUID(),
+            title: "Message",
+            systemImage: "message",
+            text: "Pi: One",
+            emphasis: .accent
+        )
+        let secondRow = StructuredSessionActivityRow(
+            id: UUID(),
+            title: "Command",
+            systemImage: "terminal",
+            text: "git status",
+            emphasis: .neutral
+        )
+
+        let presentation = StructuredSessionFeedPresentation(
+            copy: StructuredSessionPresentationCopy(
+                emptyStateTitle: "Empty",
+                emptyStateDescription: "Nothing yet",
+                composerPlaceholder: "Prompt"
+            ),
+            activityRows: [firstRow],
+            activityRowChunks: [StructuredSessionActivityRowChunk(id: 0, rows: [firstRow, secondRow])],
+            pendingApprovalRequests: [],
+            thinkingIndicator: nil
+        )
+
+        #expect(presentation.activityRows == [firstRow, secondRow])
+    }
+
     @Test func structuredSessionFeedPresenterKeepsEarlierChunksStableAcrossLongAppendOnlyBursts() {
         let session = Session(
             id: UUID(),
