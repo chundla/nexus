@@ -1447,7 +1447,7 @@ private struct RemoteSessionScreenView: View {
     }
 
     private var currentSession: Session {
-        screen?.session ?? session
+        structuredChromePresentation?.session ?? structuredPresentation?.session ?? screen?.session ?? session
     }
 
     private var isReady: Bool {
@@ -1455,14 +1455,11 @@ private struct RemoteSessionScreenView: View {
     }
 
     private var surfacePresentation: RemoteSessionSurfacePresentation? {
-        guard let screen else {
+        guard model.focusedSessionID == session.id else {
             return nil
         }
 
-        return remoteSessionSurfacePresentation(
-            for: screen,
-            isReady: isReady
-        )
+        return model.focusedSessionSurfacePresentation
     }
 
     private var structuredPresentation: FocusedStructuredSessionPresentation? {
@@ -1478,7 +1475,7 @@ private struct RemoteSessionScreenView: View {
             return nil
         }
 
-        return model.focusedStructuredSessionChromePresentation ?? screen.flatMap { NexusSessionPresentation.focusedStructuredSessionChromePresentation(for: $0) }
+        return model.focusedStructuredSessionChromePresentation
     }
 
     private var structuredFeedPresentation: StructuredSessionFeedPresentation? {
@@ -1527,7 +1524,7 @@ private struct RemoteSessionScreenView: View {
     }
 
     private var extensionUI: SessionExtensionUIState? {
-        structuredChromePresentation?.extensionUI ?? structuredPresentation?.extensionUI ?? screen?.extensionUI
+        structuredChromePresentation?.extensionUI ?? structuredPresentation?.extensionUI
     }
 
     private var aboveEditorWidgets: [SessionExtensionUIWidget] {
@@ -1581,7 +1578,7 @@ private struct RemoteSessionScreenView: View {
             NexusIOSBackdrop()
 
             VStack(spacing: 0) {
-                if model.focusedSessionIsStale, screen != nil {
+                if model.focusedSessionIsStale, model.focusedSessionID == session.id {
                     RemoteUnavailableInsetCard(
                         title: "Connection is stale",
                         detail: model.focusedSessionErrorMessage ?? "Reconnecting… showing the last known conversation.",

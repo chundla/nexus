@@ -1722,6 +1722,97 @@ struct RemoteClientPairingModelTests {
         #expect(model.focusedStructuredSessionChromePresentation == initialChrome)
     }
 
+    @Test func focusedSessionSurfacePresentationStaysStableDuringAppendOnlyStructuredUpdates() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: UUID()
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let catalog = RemoteWorkspaceCatalog(
+            workspaceGroups: [],
+            recentNavigation: [],
+            workspaceOverviews: [WorkspaceOverview(workspace: workspace, providerCards: [])]
+        )
+        let initialActivity = SessionActivityItem(kind: .message, text: "Pi: Ready")
+        let appendedActivity = SessionActivityItem(kind: .message, text: "Pi: Streaming more output")
+        let initialScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "Pi shared Session stream connected",
+            activityItems: [initialActivity]
+        )
+        let updatedScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "Pi shared Session stream connected\nPi: Streaming more output",
+            activityItems: [initialActivity, appendedActivity]
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let client = StubRemotePairingClient(
+            result: pairedMac,
+            catalog: catalog,
+            sessionScreen: initialScreen,
+            emitsInitialObservedScreen: false
+        )
+        let model = RemoteClientPairingModel(client: client, store: store)
+
+        await model.refreshActivePairedMacCatalog()
+        await model.focusRemoteSession(sessionID: session.id, workspaceID: session.workspaceID)
+
+        for _ in 0 ..< 20 where model.focusedSessionScreen != initialScreen {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        let initialSurfacePresentation = try #require(model.focusedSessionSurfacePresentation)
+        #expect(initialSurfacePresentation == remoteSessionSurfacePresentation(for: initialScreen, isReady: true))
+
+        @MainActor
+        final class ObservationChangeState {
+            var changed = false
+        }
+
+        let surfacePresentationChanged = ObservationChangeState()
+        withObservationTracking {
+            _ = model.focusedSessionSurfacePresentation
+        } onChange: {
+            Task { @MainActor in
+                surfacePresentationChanged.changed = true
+            }
+        }
+
+        await client.emitObservedScreen(updatedScreen)
+        for _ in 0 ..< 20 where model.focusedSessionScreen != updatedScreen {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(surfacePresentationChanged.changed == false)
+        #expect(model.focusedSessionSurfacePresentation == initialSurfacePresentation)
+    }
+
     @Test func workspaceBrowsePresentationStaysStableDuringPairedMacAvailabilityRefreshes() async throws {
         let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

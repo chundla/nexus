@@ -168,6 +168,7 @@ final class RemoteClientPairingModel {
     var focusedSessionScreen: SessionScreen?
     private(set) var focusedStructuredSessionPresentation: FocusedStructuredSessionPresentation?
     private(set) var focusedStructuredSessionChromePresentation: FocusedStructuredSessionChromePresentation?
+    private(set) var focusedSessionSurfacePresentation: RemoteSessionSurfacePresentation?
     private(set) var focusedSessionIsController = false
     var focusedSessionIsStale = false
     var focusedSessionErrorMessage: String?
@@ -194,11 +195,7 @@ final class RemoteClientPairingModel {
     }
 
     var focusedSessionSurfaceSupport: SessionSurfaceSupport? {
-        guard let focusedSessionScreen else {
-            return nil
-        }
-
-        return sessionSurfaceSupport(for: focusedSessionScreen, on: .remoteClient)
+        focusedSessionSurfacePresentation?.surfaceSupport
     }
 
     init(
@@ -798,6 +795,7 @@ final class RemoteClientPairingModel {
         focusedSessionScreen = nil
         syncFocusedStructuredSessionPresentation(for: nil)
         syncFocusedStructuredSessionChromePresentation(for: nil)
+        syncFocusedSessionSurfacePresentation(for: nil)
         syncFocusedSessionControllerStatus()
         focusedSessionIsStale = false
         focusedSessionErrorMessage = nil
@@ -1119,6 +1117,7 @@ final class RemoteClientPairingModel {
         focusedSessionScreen = screen
         syncFocusedStructuredSessionPresentation(for: screen)
         syncFocusedStructuredSessionChromePresentation(for: screen)
+        syncFocusedSessionSurfacePresentation(for: screen)
         syncFocusedSessionControllerStatus()
         setFocusedSessionWorkspaceID(screen.session.workspaceID)
     }
@@ -1134,6 +1133,15 @@ final class RemoteClientPairingModel {
         let presentation = screen.flatMap { NexusSessionPresentation.focusedStructuredSessionChromePresentation(for: $0) }
         if focusedStructuredSessionChromePresentation != presentation {
             focusedStructuredSessionChromePresentation = presentation
+        }
+    }
+
+    private func syncFocusedSessionSurfacePresentation(for screen: SessionScreen?) {
+        let presentation = screen.map {
+            remoteSessionSurfacePresentation(for: $0, isReady: $0.session.state == .ready)
+        }
+        if focusedSessionSurfacePresentation != presentation {
+            focusedSessionSurfacePresentation = presentation
         }
     }
 
@@ -1174,6 +1182,7 @@ final class RemoteClientPairingModel {
             focusedSessionScreen = nil
             syncFocusedStructuredSessionPresentation(for: nil)
             syncFocusedStructuredSessionChromePresentation(for: nil)
+            syncFocusedSessionSurfacePresentation(for: nil)
             syncFocusedSessionControllerStatus()
             focusedSessionIsStale = false
             focusedSessionErrorMessage = nil
@@ -1185,6 +1194,7 @@ final class RemoteClientPairingModel {
             focusedSessionScreen = nil
             syncFocusedStructuredSessionPresentation(for: nil)
             syncFocusedStructuredSessionChromePresentation(for: nil)
+            syncFocusedSessionSurfacePresentation(for: nil)
             syncFocusedSessionControllerStatus()
             focusedSessionIsStale = false
             focusedSessionErrorMessage = nil
@@ -1355,6 +1365,7 @@ final class RemoteClientPairingModel {
             focusedSessionScreen = nil
             syncFocusedStructuredSessionPresentation(for: nil)
             syncFocusedStructuredSessionChromePresentation(for: nil)
+            syncFocusedSessionSurfacePresentation(for: nil)
             syncFocusedSessionControllerStatus()
             focusedSessionIsStale = false
         }
