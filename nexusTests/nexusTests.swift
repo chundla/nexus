@@ -2684,6 +2684,204 @@ struct nexusTests {
         #expect(results.dropFirst().first?.subtitle.contains("Claude Lab") == true)
     }
 
+    @MainActor
+    @Test func quickSwitchSearchCoordinatorDebouncesRapidTypingToLatestQuery() async throws {
+        let expectedResults = [quickSwitchNavigationItem(title: "Claude Lab")]
+        let coordinator = QuickSwitchSearchCoordinator<[NavigationItem]>(debounceDuration: .milliseconds(25))
+        var searchedQueries: [String] = []
+        var appliedResults: [[NavigationItem]] = []
+        var presentedErrors: [String] = []
+
+        coordinator.updateQuery(
+            "c",
+            search: { query in
+                searchedQueries.append(query)
+                return expectedResults
+            },
+            applyResults: { appliedResults.append($0) },
+            clearResults: {},
+            handleError: { presentedErrors.append($0.localizedDescription) }
+        )
+        coordinator.updateQuery(
+            "cl",
+            search: { query in
+                searchedQueries.append(query)
+                return expectedResults
+            },
+            applyResults: { appliedResults.append($0) },
+            clearResults: {},
+            handleError: { presentedErrors.append($0.localizedDescription) }
+        )
+        coordinator.updateQuery(
+            "claude",
+            search: { query in
+                searchedQueries.append(query)
+                return expectedResults
+            },
+            applyResults: { appliedResults.append($0) },
+            clearResults: {},
+            handleError: { presentedErrors.append($0.localizedDescription) }
+        )
+
+        try await waitUntilAsync(timeoutNanoseconds: 1_000_000_000, pollIntervalNanoseconds: 10_000_000) {
+            await MainActor.run {
+                searchedQueries == ["claude"] && appliedResults == [expectedResults]
+            }
+        }
+
+        #expect(searchedQueries == ["claude"])
+        #expect(appliedResults == [expectedResults])
+        #expect(presentedErrors.isEmpty)
+    }
+
+    @MainActor
+    @Test func quickSwitchSearchCoordinatorIgnoresStaleResultsFromOlderSearches() async throws {
+        let olderResults = [quickSwitchNavigationItem(title: "Cloud Ops")]
+        let latestResults = [quickSwitchNavigationItem(title: "Claude Lab")]
+        let search = ControlledQuickSwitchSearch()
+        let coordinator = QuickSwitchSearchCoordinator<[NavigationItem]>(
+            debounceDuration: .zero,
+            sleep: { _ in }
+        )
+        var appliedResults: [NavigationItem] = []
+        var presentedErrors: [String] = []
+
+        coordinator.updateQuery(
+            "cl",
+            search: { query in
+                await search.searchIgnoringCancellation(query: query)
+            },
+            applyResults: { appliedResults = $0 },
+            clearResults: { appliedResults = [] },
+            handleError: { presentedErrors.append($0.localizedDescription) }
+        )
+
+        try await waitUntilAsync(timeoutNanoseconds: 1_000_000_000, pollIntervalNanoseconds: 10_000_000) {
+            await search.recordedQueries() == ["cl"]
+        }
+
+        coordinator.updateQuery(
+            "claude",
+            search: { query in
+                await search.searchIgnoringCancellation(query: query)
+            },
+            applyResults: { appliedResults = $0 },
+            clearResults: { appliedResults = [] },
+            handleError: { presentedErrors.append($0.localizedDescription) }
+        )
+
+        try await waitUntilAsync(timeoutNanoseconds: 1_000_000_000, pollIntervalNanoseconds: 10_000_000) {
+            await search.recordedQueries() == ["cl", "claude"]
+        }
+
+        await search.resume(query: "claude", with: latestResults)
+        try await waitUntilAsync(timeoutNanoseconds: 1_000_000_000, pollIntervalNanoseconds: 10_000_000) {
+            await MainActor.run { appliedResults == latestResults }
+        }
+
+        await search.resume(query: "cl", with: olderResults)
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(appliedResults == latestResults)
+        #expect(presentedErrors.isEmpty)
+    }
+
+    @MainActor
+    @Test func quickSwitchSearchCoordinatorIgnoresStaleResultsWhenCancelledDebounceWorkStillCompletes() async throws {
+        let olderResults = [quickSwitchNavigationItem(title: "Cloud Ops")]
+        let latestResults = [quickSwitchNavigationItem(title: "Claude Lab")]
+        let sleepGate = NonCancellingSleepGate()
+        let coordinator = QuickSwitchSearchCoordinator<[NavigationItem]>(
+            debounceDuration: .milliseconds(25),
+            sleep: { _ in await sleepGate.wait() }
+        )
+        var appliedResults: [NavigationItem] = []
+        var presentedErrors: [String] = []
+
+        coordinator.updateQuery(
+            "cl",
+            search: { _ in olderResults },
+            applyResults: { appliedResults = $0 },
+            clearResults: { appliedResults = [] },
+            handleError: { presentedErrors.append($0.localizedDescription) }
+        )
+        coordinator.updateQuery(
+            "claude",
+            search: { _ in latestResults },
+            applyResults: { appliedResults = $0 },
+            clearResults: { appliedResults = [] },
+            handleError: { presentedErrors.append($0.localizedDescription) }
+        )
+
+        try await waitUntilAsync(timeoutNanoseconds: 1_000_000_000, pollIntervalNanoseconds: 10_000_000) {
+            await sleepGate.waiterCount() == 2
+        }
+
+        await sleepGate.resume(waiterAt: 1)
+        try await waitUntilAsync(timeoutNanoseconds: 1_000_000_000, pollIntervalNanoseconds: 10_000_000) {
+            await MainActor.run { appliedResults == latestResults }
+        }
+
+        await sleepGate.resume(waiterAt: 0)
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(appliedResults == latestResults)
+        #expect(presentedErrors.isEmpty)
+    }
+
+    @MainActor
+    @Test func quickSwitchSearchCoordinatorKeepsClearedQueryResultsEmpty() async throws {
+        let staleResults = [quickSwitchNavigationItem(title: "Claude Lab")]
+        let search = ControlledQuickSwitchSearch()
+        let coordinator = QuickSwitchSearchCoordinator<[NavigationItem]>(
+            debounceDuration: .zero,
+            sleep: { _ in }
+        )
+        var appliedResults = [quickSwitchNavigationItem(title: "Recent Workspace")]
+        var clearCount = 0
+        var presentedErrors: [String] = []
+
+        coordinator.updateQuery(
+            "claude",
+            search: { query in
+                await search.searchIgnoringCancellation(query: query)
+            },
+            applyResults: { appliedResults = $0 },
+            clearResults: {
+                clearCount += 1
+                appliedResults = []
+            },
+            handleError: { presentedErrors.append($0.localizedDescription) }
+        )
+
+        try await waitUntilAsync(timeoutNanoseconds: 1_000_000_000, pollIntervalNanoseconds: 10_000_000) {
+            await search.recordedQueries() == ["claude"]
+        }
+
+        coordinator.updateQuery(
+            "   ",
+            search: { query in
+                await search.searchIgnoringCancellation(query: query)
+            },
+            applyResults: { appliedResults = $0 },
+            clearResults: {
+                clearCount += 1
+                appliedResults = []
+            },
+            handleError: { presentedErrors.append($0.localizedDescription) }
+        )
+
+        #expect(appliedResults.isEmpty)
+        #expect(clearCount == 1)
+
+        await search.resume(query: "claude", with: staleResults)
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(appliedResults.isEmpty)
+        #expect(clearCount == 1)
+        #expect(presentedErrors.isEmpty)
+    }
+
     @Test func recentNavigationPersistsWorkspaceAndSessionContextsOverIPC() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)
@@ -8769,6 +8967,14 @@ struct nexusTests {
     }
 }
 
+private func quickSwitchNavigationItem(title: String) -> NavigationItem {
+    NavigationItem(
+        target: .workspace(UUID()),
+        title: title,
+        subtitle: "/tmp/\(title.lowercased())"
+    )
+}
+
 private func waitForSessionScreen(
     client: any NexusServiceClient,
     sessionID: UUID,
@@ -8851,6 +9057,60 @@ private func waitUntil(
         }
 
         try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
+    }
+}
+
+private func waitUntilAsync(
+    timeoutNanoseconds: UInt64 = 5_000_000_000,
+    pollIntervalNanoseconds: UInt64 = 50_000_000,
+    until predicate: @escaping @Sendable () async -> Bool
+) async throws {
+    let deadline = ContinuousClock.now.advanced(by: .nanoseconds(Int64(timeoutNanoseconds)))
+
+    while await predicate() == false {
+        guard ContinuousClock.now < deadline else {
+            throw NSError(domain: "nexusTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for async condition"])
+        }
+
+        try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
+    }
+}
+
+actor NonCancellingSleepGate {
+    private var continuations: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        await withCheckedContinuation { continuation in
+            continuations.append(continuation)
+        }
+    }
+
+    func waiterCount() -> Int {
+        continuations.count
+    }
+
+    func resume(waiterAt index: Int) {
+        continuations.remove(at: index).resume()
+    }
+}
+
+actor ControlledQuickSwitchSearch {
+    private var queries: [String] = []
+    private var continuations: [String: CheckedContinuation<[NavigationItem], Never>] = [:]
+
+    func searchIgnoringCancellation(query: String) async -> [NavigationItem] {
+        queries.append(query)
+        return await withCheckedContinuation { continuation in
+            continuations[query] = continuation
+        }
+    }
+
+    func recordedQueries() -> [String] {
+        queries
+    }
+
+    func resume(query: String, with results: [NavigationItem]) {
+        continuations.removeValue(forKey: query)?.resume(returning: results)
     }
 }
 

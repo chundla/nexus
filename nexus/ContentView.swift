@@ -16,6 +16,7 @@ struct ContentView: View {
     @State private var isShowingRemoteAccessSheet = false
     @State private var quickSwitchQuery = ""
     @State private var quickSwitchResults: [NavigationItem] = []
+    @State private var quickSwitchSearchCoordinator = QuickSwitchSearchCoordinator<[NavigationItem]>()
     @State private var sidebarMode: SidebarMode = .workspaces
     @State private var pendingWorkspaceFolderPath: String?
     @State private var pendingWorkspaceGroupID: UUID?
@@ -94,6 +95,15 @@ struct ContentView: View {
         .sheet(isPresented: $isShowingQuickSwitchSheet) {
             quickSwitchSheet
         }
+        .onChange(of: isShowingQuickSwitchSheet) { _, isShowing in
+            guard isShowing == false else {
+                return
+            }
+
+            quickSwitchSearchCoordinator.cancel()
+            quickSwitchQuery = ""
+            quickSwitchResults = []
+        }
         .sheet(isPresented: $isShowingCreateRemoteWorkspaceSheet) {
             remoteWorkspaceSheet
         }
@@ -121,6 +131,7 @@ struct ContentView: View {
                     Spacer()
 
                     Button {
+                        quickSwitchSearchCoordinator.cancel()
                         quickSwitchQuery = ""
                         quickSwitchResults = []
                         isShowingQuickSwitchSheet = true
@@ -442,14 +453,21 @@ struct ContentView: View {
 
                 TextField("Search Workspaces, Providers, and Sessions", text: $quickSwitchQuery)
                     .textFieldStyle(.roundedBorder)
-                    .onChange(of: quickSwitchQuery) { _, _ in
-                        Task {
-                            await updateQuickSwitchResults()
-                        }
+                    .onChange(of: quickSwitchQuery) { _, newValue in
+                        quickSwitchSearchCoordinator.updateQuery(
+                            newValue,
+                            search: { query in
+                                try await appModel.searchNavigation(query: query)
+                            },
+                            applyResults: { quickSwitchResults = $0 },
+                            clearResults: { quickSwitchResults = [] },
+                            handleError: { presentedError = PresentedError(message: $0.localizedDescription) }
+                        )
                     }
 
                 List(quickSwitchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? quickSwitchDefaultItems : quickSwitchResults) { item in
                     Button {
+                        quickSwitchSearchCoordinator.cancel()
                         isShowingQuickSwitchSheet = false
                         navigate(to: item.target)
                     } label: {
@@ -1276,21 +1294,6 @@ struct ContentView: View {
             "square.stack.3d.up"
         case .session:
             "terminal"
-        }
-    }
-
-    @MainActor
-    private func updateQuickSwitchResults() async {
-        let query = quickSwitchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard query.isEmpty == false else {
-            quickSwitchResults = []
-            return
-        }
-
-        do {
-            quickSwitchResults = try await appModel.searchNavigation(query: query)
-        } catch {
-            presentedError = PresentedError(message: error.localizedDescription)
         }
     }
 
@@ -2846,6 +2849,57 @@ private final class SessionTerminalKeyCaptureNSView: NSView {
 
             self.window?.makeFirstResponder(self)
         }
+    }
+}
+
+@MainActor
+final class QuickSwitchSearchCoordinator<Result> {
+    private let debounceDuration: Duration
+    private let sleep: (Duration) async throws -> Void
+    private var searchTask: Task<Void, Never>?
+
+    init(
+        debounceDuration: Duration = .milliseconds(250),
+        sleep: @escaping (Duration) async throws -> Void = { duration in
+            try await Task.sleep(for: duration)
+        }
+    ) {
+        self.debounceDuration = debounceDuration
+        self.sleep = sleep
+    }
+
+    func updateQuery(
+        _ rawQuery: String,
+        search: @escaping (String) async throws -> Result,
+        applyResults: @escaping (Result) -> Void,
+        clearResults: @escaping () -> Void,
+        handleError: @escaping (Error) -> Void
+    ) {
+        let query = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        cancel()
+
+        guard query.isEmpty == false else {
+            clearResults()
+            return
+        }
+
+        searchTask = Task { @MainActor in
+            do {
+                try await sleep(debounceDuration)
+                let results = try await search(query)
+                applyResults(results)
+            } catch is CancellationError {
+            } catch {
+                handleError(error)
+            }
+
+            searchTask = nil
+        }
+    }
+
+    func cancel() {
+        searchTask?.cancel()
+        searchTask = nil
     }
 }
 
