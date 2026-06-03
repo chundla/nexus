@@ -96,6 +96,21 @@ xcodebuild test -scheme nexus -project nexus.xcodeproj -destination 'platform=ma
 
 These tests do not replace SwiftUI Instruments, but they catch `Remote Client` browse/session observation broadening before you spend time in a profiling trace.
 
+### Repeatable iPhone Remote Client trace fixture
+
+For a deterministic iPhone `Remote Client` profiling pass, launch the app with `NEXUS_REMOTE_CLIENT_FIXTURE=invalidation-baseline` set in the iOS run scheme environment.
+
+That fixture starts with:
+- one active **Paired Mac** already selected and reachable
+- a two-Workspace `Workspace Catalog` already available after refresh
+- a launchable Pi structured **Session** in `Baseline API`
+- automatic transcript-only focused `Session` updates after you open that conversation
+
+Suggested trace path:
+1. capture the home screen while tapping **Refresh** to exercise **Paired Mac** availability plus `Workspace Catalog` refreshes
+2. open `Baseline API` → `Pi` → **Open conversation**
+3. keep the trace running long enough to capture the automatic `Fixture update ...` activity appends on the structured `Session` surface
+
 ## Profiling guidance
 
 Use the automated baselines first. If a regression is user-visible, then profile the matching macOS app flow on the same machine and branch so the UI trace can be compared with the service baseline output above.

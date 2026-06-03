@@ -18,10 +18,7 @@ struct nexusApp: App {
         }
     }()
 #else
-    @State private var pairingModel = RemoteClientPairingModel(
-        client: RemotePairingHTTPClient(),
-        store: UserDefaultsPairedMacStore()
-    )
+    @State private var pairingModel = RemoteClientPairingModel.bootstrap()
 #endif
 
     var body: some Scene {
