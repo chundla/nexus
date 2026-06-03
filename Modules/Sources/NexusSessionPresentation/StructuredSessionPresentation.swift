@@ -17,6 +17,7 @@ public struct StructuredSessionActivityRow: Identifiable, Equatable {
     public let isDetailTextTruncated: Bool
     public let emphasis: StructuredSessionActivityEmphasis
     public let conversationPresentation: StructuredSessionConversationPresentation?
+    public let showsExpandedSystemCard: Bool
 
     public init(
         id: UUID,
@@ -26,7 +27,8 @@ public struct StructuredSessionActivityRow: Identifiable, Equatable {
         detailText: String? = nil,
         isDetailTextTruncated: Bool = false,
         emphasis: StructuredSessionActivityEmphasis,
-        conversationPresentation: StructuredSessionConversationPresentation? = nil
+        conversationPresentation: StructuredSessionConversationPresentation? = nil,
+        showsExpandedSystemCard: Bool? = nil
     ) {
         self.id = id
         self.title = title
@@ -36,6 +38,8 @@ public struct StructuredSessionActivityRow: Identifiable, Equatable {
         self.isDetailTextTruncated = isDetailTextTruncated
         self.emphasis = emphasis
         self.conversationPresentation = conversationPresentation
+        self.showsExpandedSystemCard = showsExpandedSystemCard
+            ?? structuredSessionActivityRowShowsExpandedSystemCard(text: text, detailText: detailText)
     }
 }
 
@@ -603,7 +607,8 @@ private func annotateStructuredSessionActivityRows(
             isDetailTextTruncated: row.isDetailTextTruncated,
             emphasis: row.emphasis,
             conversationPresentation: row.conversationPresentation
-                ?? structuredSessionConversationPresentation(for: row, providerDisplayName: providerDisplayName)
+                ?? structuredSessionConversationPresentation(for: row, providerDisplayName: providerDisplayName),
+            showsExpandedSystemCard: row.showsExpandedSystemCard
         )
     }
 }
@@ -1168,6 +1173,10 @@ private func structuredSessionConversationPrefixSplit(for text: String) -> (labe
         return nil
     }
     return (label, body)
+}
+
+private func structuredSessionActivityRowShowsExpandedSystemCard(text: String, detailText: String?) -> Bool {
+    detailText != nil || text.contains("\n") || text.count > 80
 }
 
 private struct StructuredSessionSlashCommandContext {

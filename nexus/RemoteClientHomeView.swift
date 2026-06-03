@@ -3,6 +3,19 @@ import NexusDomain
 import NexusSessionPresentation
 import SwiftUI
 
+private struct IOSEquatableStructuredSessionActivityRow<Content: View>: View, Equatable {
+    let row: StructuredSessionActivityRow
+    @ViewBuilder let content: () -> Content
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.row == rhs.row
+    }
+
+    var body: some View {
+        content()
+    }
+}
+
 struct RemoteClientHomeView: View {
     @Bindable var model: RemoteClientPairingModel
 
@@ -2144,7 +2157,9 @@ private struct RemoteSessionScreenView: View {
         } else {
             LazyVStack(spacing: 10) {
                 ForEach(feedPresentation.activityRows) { row in
-                    structuredSessionActivityRowView(row)
+                    IOSEquatableStructuredSessionActivityRow(row: row) {
+                        structuredSessionActivityRowView(row)
+                    }
                 }
 
                 if let thinkingIndicator = feedPresentation.thinkingIndicator {
@@ -2291,7 +2306,7 @@ private struct RemoteSessionScreenView: View {
             }
         case .system:
             HStack {
-                if row.detailText != nil || conversation.text.contains("\n") || conversation.text.count > 80 {
+                if row.showsExpandedSystemCard {
                     VStack(alignment: .leading, spacing: 8) {
                         Label(conversation.text, systemImage: row.systemImage)
                             .font(NexusIOSTheme.bodyFont(12, relativeTo: .caption, weight: .medium))

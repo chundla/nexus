@@ -4,6 +4,19 @@ import NexusDomain
 import NexusSessionPresentation
 import SwiftUI
 
+private struct MacEquatableStructuredSessionActivityRow<Content: View>: View, Equatable {
+    let row: StructuredSessionActivityRow
+    @ViewBuilder let content: () -> Content
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.row == rhs.row
+    }
+
+    var body: some View {
+        content()
+    }
+}
+
 struct ContentView: View {
     @Bindable var appModel: NexusAppModel
 
@@ -1476,7 +1489,9 @@ struct ContentView: View {
                     } else {
                         LazyVStack(spacing: 8) {
                             ForEach(feedPresentation.activityRows) { row in
-                                structuredSessionActivityRowView(row)
+                                MacEquatableStructuredSessionActivityRow(row: row) {
+                                    structuredSessionActivityRowView(row)
+                                }
                             }
 
                             if let thinkingIndicator = feedPresentation.thinkingIndicator {
@@ -1537,7 +1552,6 @@ struct ContentView: View {
             role: .system,
             text: row.text
         )
-        let showsExpandedSystemCard = row.detailText != nil || conversation.text.contains("\n") || conversation.text.count > 80
 
         switch conversation.role {
         case .user:
@@ -1626,7 +1640,7 @@ struct ContentView: View {
             }
         case .system:
             HStack {
-                if showsExpandedSystemCard {
+                if row.showsExpandedSystemCard {
                     VStack(alignment: .leading, spacing: 8) {
                         Label(conversation.text, systemImage: row.systemImage)
                             .font(NexusMacTheme.bodyFont(11, relativeTo: .caption).weight(.medium))
@@ -1658,14 +1672,14 @@ struct ContentView: View {
                     Spacer()
                 }
             }
-            .padding(showsExpandedSystemCard ? 12 : 0)
+            .padding(row.showsExpandedSystemCard ? 12 : 0)
             .background(
-                showsExpandedSystemCard
+                row.showsExpandedSystemCard
                     ? AnyShapeStyle(Color.white.opacity(0.06))
                     : AnyShapeStyle(Color.clear)
             , in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay {
-                if showsExpandedSystemCard {
+                if row.showsExpandedSystemCard {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .stroke(NexusMacTheme.softLine, lineWidth: 1)
                 }

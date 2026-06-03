@@ -81,6 +81,36 @@ struct StructuredSessionPresentationTests {
         #expect(row.isDetailTextTruncated)
     }
 
+    @Test func structuredSessionActivityRowsKeepShortSystemUpdatesCompact() throws {
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let screen = SessionScreen(
+            session: session,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .status, text: "Connected")
+            ]
+        )
+
+        let row = try #require(structuredSessionActivityRows(for: screen).first)
+        #expect(row.showsExpandedSystemCard == false)
+    }
+
+    @Test func structuredSessionActivityRowsPrecomputeExpandedSystemCardsForLongOrDetailedUpdates() {
+        let longStatus = String(repeating: "A", count: 81)
+        let rows = structuredSessionActivityRows(for: [
+            SessionActivityItem(kind: .status, text: longStatus),
+            SessionActivityItem(kind: .progress, text: "Planning", detailText: "step 1\nstep 2")
+        ])
+
+        #expect(rows.map(\.showsExpandedSystemCard) == [true, true])
+    }
+
     @Test func structuredSessionAutoScrollTriggerTracksStableFeedIdentity() {
         let pendingApprovalID = UUID()
         let notificationID = UUID()
