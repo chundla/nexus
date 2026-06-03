@@ -39,6 +39,34 @@ Each baseline test does two things:
 
 Save both the XCTest timing summary and the printed baseline lines when comparing before/after results.
 
+## Audited regression suite
+
+Run this focused suite before and after touching the audited browse and structured **Session** update flows.
+
+### Baseline-aligned service regression checks (#184, #185, #189)
+
+```bash
+swift test --package-path Modules --filter NexusServicePerformanceRegressionTests
+swift test --package-path Modules --filter NexusServicePerformanceBaselineTests
+```
+
+### Structured Session update guardrails (#188, #189)
+
+```bash
+swift test --package-path Modules --filter StructuredSessionPresentationTests
+swift test --package-path Modules --filter StructuredSessionObservationDiagnosticsTests
+swift test --package-path Modules --filter NexusServicePerformanceBaselineTests/testStructuredSessionActivityAppendBaseline
+```
+
+### Coverage map and intentional human-only gaps
+
+| Slice | Automated regression coverage | Remaining human-only step |
+| --- | --- | --- |
+| #185 Workspace refresh batching | `NexusServicePerformanceRegressionTests/testWorkspaceRefreshRegressionMatchesTheAuditedBaselineShape`, `NexusServicePerformanceBaselineTests/testWorkspaceRefreshBaseline`, plus the macOS browse invalidation guardrails below | Re-run the matching macOS profiling flow only when you need a new SwiftUI trace to explain a user-visible regression |
+| #186 macOS Workspace browse invalidation | the focused `nexusTests` guardrail command below | Final SwiftUI Instruments validation remains a manual macOS pass |
+| #187 iOS Remote Client invalidation | the focused `RemoteClientPairingModelTests` and `RemoteClientProfilingFixtureTests` commands below | Final SwiftUI invalidation tracing still has to run from Xcode Instruments on a physical iPhone |
+| #188 structured Session updates | `StructuredSessionPresentationTests`, `StructuredSessionObservationDiagnosticsTests`, `NexusServicePerformanceRegressionTests/testStructuredSessionActivityAppendRegressionMatchesTheAuditedBaselineShape`, and `NexusServicePerformanceBaselineTests/testStructuredSessionActivityAppendBaseline` | None beyond targeted profiling when a regression is still visible after the automated checks |
+
 ## Diagnostic fields to compare
 
 ### Workspace refresh
@@ -91,10 +119,11 @@ Before running a manual SwiftUI profiling pass for the iPhone `Remote Client` br
 xcodebuildmcp macos test --project-path nexus.xcodeproj --scheme nexus \
   --extra-args -only-testing:nexusTests/RemoteClientPairingModelTests/workspaceBrowsePresentationStaysStableDuringTranscriptOnlyFocusedSessionUpdates \
   --extra-args -only-testing:nexusTests/RemoteClientPairingModelTests/workspaceBrowsePresentationStaysStableDuringPairedMacAvailabilityRefreshes \
-  --extra-args -only-testing:nexusTests/RemoteClientPairingModelTests/focusedSessionWorkspaceLocationStaysStableDuringUnrelatedCatalogRefreshes
+  --extra-args -only-testing:nexusTests/RemoteClientPairingModelTests/focusedSessionWorkspaceLocationStaysStableDuringUnrelatedCatalogRefreshes \
+  --extra-args -only-testing:nexusTests/RemoteClientProfilingFixtureTests
 ```
 
-These tests do not replace SwiftUI Instruments, but they catch `Remote Client` browse/session observation broadening before you spend time in a profiling trace.
+These tests do not replace SwiftUI Instruments, but they catch `Remote Client` browse/session observation broadening and keep the repeatable profiling fixture healthy before you spend time in a profiling trace.
 
 ### Repeatable iPhone Remote Client trace fixture
 
