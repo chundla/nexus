@@ -7033,6 +7033,149 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelWorkspaceBrowseSidebarPresentationStaysStableDuringProviderDetailLoads() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let overview = WorkspaceOverview(
+            workspace: workspace,
+            providerCards: [
+                WorkspaceProviderCard(
+                    provider: Provider(id: .claude),
+                    health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+                    defaultSession: ProviderDefaultSessionSummary(
+                        state: .ready,
+                        summary: "Default Session ready",
+                        actionTitle: "Resume",
+                        sessionID: session.id
+                    )
+                )
+            ]
+        )
+        let detail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+            defaultSession: session,
+            alternateSessions: [],
+            failedSessions: []
+        )
+        let recentNavigation = [
+            NavigationItem(
+                target: .workspace(workspace.id),
+                title: workspace.name,
+                subtitle: workspace.folderPath
+            )
+        ]
+        let client = TrackingServiceClient(
+            workspaceOverview: overview,
+            session: session,
+            screen: SessionScreen(session: session, transcript: "Claude ready"),
+            providerDetail: detail,
+            recentNavigation: recentNavigation
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+        let initialPresentation = model.workspaceBrowseSidebarPresentation(currentWorkspaceID: nil)
+
+        @MainActor
+        final class ObservationChangeState {
+            var changed = false
+        }
+
+        let presentationChanged = ObservationChangeState()
+        withObservationTracking {
+            _ = model.workspaceBrowseSidebarPresentation(currentWorkspaceID: nil)
+        } onChange: {
+            Task { @MainActor in
+                presentationChanged.changed = true
+            }
+        }
+
+        try await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(presentationChanged.changed == false)
+        #expect(model.workspaceBrowseSidebarPresentation(currentWorkspaceID: nil) == initialPresentation)
+    }
+
+    @MainActor
+    @Test func appModelWorkspaceBrowseSidebarPresentationUsesLoadedSessionRoutingForRecentOrdering() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let alphaWorkspace = Workspace(
+            id: UUID(),
+            name: "Alpha",
+            kind: .local,
+            folderPath: "/tmp/alpha",
+            primaryGroupID: group.id
+        )
+        let zuluWorkspace = Workspace(
+            id: UUID(),
+            name: "Zulu",
+            kind: .local,
+            folderPath: "/tmp/zulu",
+            primaryGroupID: group.id
+        )
+        let alphaOverview = WorkspaceOverview(workspace: alphaWorkspace, providerCards: [])
+        let zuluOverview = WorkspaceOverview(workspace: zuluWorkspace, providerCards: [])
+        let recentSession = Session(
+            id: UUID(),
+            workspaceID: zuluWorkspace.id,
+            providerID: .claude,
+            name: "Review",
+            isDefault: false,
+            state: .ready
+        )
+        let zuluDetail = ProviderDetail(
+            workspace: zuluWorkspace,
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+            defaultSession: nil,
+            alternateSessions: [recentSession],
+            failedSessions: []
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: alphaOverview,
+            session: recentSession,
+            screen: SessionScreen(session: recentSession, transcript: "Claude ready"),
+            providerDetail: zuluDetail,
+            workspaces: [alphaWorkspace, zuluWorkspace],
+            workspaceGroups: [group],
+            workspaceOverviewsByID: [
+                alphaWorkspace.id: alphaOverview,
+                zuluWorkspace.id: zuluOverview
+            ],
+            recentNavigation: [
+                NavigationItem(
+                    target: .session(recentSession.id),
+                    title: recentSession.name ?? "Session",
+                    subtitle: "Zulu • Claude"
+                )
+            ]
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+        #expect(model.workspaceBrowseSidebarPresentation(currentWorkspaceID: nil).workspaces.map(\.workspace.id) == [alphaWorkspace.id, zuluWorkspace.id])
+
+        try await model.loadProviderDetail(workspaceID: zuluWorkspace.id, providerID: .claude)
+        #expect(model.workspaceBrowseSidebarPresentation(currentWorkspaceID: nil).workspaces.map(\.workspace.id) == [zuluWorkspace.id, alphaWorkspace.id])
+    }
+
+    @MainActor
     @Test func appModelFocusedSessionBrowseInputsStayStableDuringTranscriptOnlyUpdates() async throws {
         let group = WorkspaceGroup(id: UUID(), name: "Group")
         let workspace = Workspace(
@@ -7085,6 +7228,61 @@ struct nexusTests {
         #expect(browseInputsChanged.changed == false)
         #expect(model.focusedSessionID == session.id)
         #expect(model.focusedSessionWorkspaceID == workspace.id)
+    }
+
+    @MainActor
+    @Test func appModelWorkspaceBrowseDetailPresentationStaysStableDuringTranscriptOnlyUpdates() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let host = NexusDomain.Host(id: UUID(), name: "Build Server", sshTarget: "build-box", port: 2222)
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Remote API",
+            kind: .remote,
+            folderPath: "/srv/api",
+            primaryGroupID: group.id,
+            remoteHostID: host.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []),
+            session: session,
+            screen: SessionScreen(session: session, transcript: "Claude ready"),
+            hosts: [host]
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+        try await model.focusSession(sessionID: session.id)
+        let initialPresentation = model.workspaceBrowseDetailPresentation(workspaceID: workspace.id)
+
+        @MainActor
+        final class ObservationChangeState {
+            var changed = false
+        }
+
+        let presentationChanged = ObservationChangeState()
+        withObservationTracking {
+            _ = model.workspaceBrowseDetailPresentation(workspaceID: workspace.id)
+        } onChange: {
+            Task { @MainActor in
+                presentationChanged.changed = true
+            }
+        }
+
+        await client.emitObservedScreen(SessionScreen(session: session, transcript: "Updated transcript"))
+        for _ in 0 ..< 20 where model.focusedSessionScreen?.transcript != "Updated transcript" {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(presentationChanged.changed == false)
+        #expect(model.workspaceBrowseDetailPresentation(workspaceID: workspace.id) == initialPresentation)
     }
 
     @MainActor

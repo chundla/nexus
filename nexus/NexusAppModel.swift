@@ -31,6 +31,32 @@ struct SessionControllerSummary: Equatable {
     let message: String
 }
 
+struct WorkspaceBrowseWorkspaceSummary: Equatable, Identifiable {
+    let workspace: Workspace
+    let targetSummary: String
+
+    var id: UUID { workspace.id }
+}
+
+struct WorkspaceBrowseGroupSummary: Equatable, Identifiable {
+    let group: WorkspaceGroup
+    let workspaceCount: Int
+
+    var id: UUID { group.id }
+}
+
+struct WorkspaceBrowseSidebarPresentation: Equatable {
+    let workspaces: [WorkspaceBrowseWorkspaceSummary]
+    let workspaceGroups: [WorkspaceBrowseGroupSummary]
+}
+
+struct WorkspaceBrowseDetailPresentation: Equatable {
+    let workspace: Workspace?
+    let hostName: String?
+    let groupName: String?
+    let overview: WorkspaceOverview?
+}
+
 @MainActor
 @Observable
 final class NexusAppModel {
@@ -57,6 +83,7 @@ final class NexusAppModel {
     private(set) var focusedSessionID: UUID?
     private(set) var focusedSessionWorkspaceID: UUID?
     private(set) var remotePairingEndpoint: RemotePairingEndpoint?
+    private var recentNavigationSessionWorkspaceIDs: [UUID: UUID] = [:]
 
     private let client: any NexusServiceClient
     private let embeddedService: (any NexusEmbeddedServiceSession)?
@@ -130,7 +157,7 @@ final class NexusAppModel {
             workspaceOverviews = workspaceOverviews.filter { currentWorkspaceIDs.contains($0.key) }
             providerDetails = providerDetails.filter { currentWorkspaceIDs.contains($0.key.workspaceID) }
             cancelStaleWorkspaceOverviewRefreshTasks(excluding: currentWorkspaceIDs)
-            self.recentNavigation = loadedRecentNavigation
+            applyRecentNavigation(loadedRecentNavigation)
             self.remoteAccessState = loadedRemoteAccessState
             self.pairedDevices = loadedPairedDevices
             if loadedRemoteAccessState.isEnabled || loadedRemoteAccessState.activePairing != nil {
@@ -190,6 +217,7 @@ final class NexusAppModel {
             hostDetails = [:]
             providerDetails = [:]
             recentNavigation = []
+            recentNavigationSessionWorkspaceIDs = [:]
             remoteAccessState = nil
             pairedDevices = []
             focusedSessionScreen = nil
@@ -535,7 +563,7 @@ final class NexusAppModel {
     }
 
     func loadRecentNavigation() async throws {
-        recentNavigation = try await client.listRecentNavigation(limit: 10)
+        applyRecentNavigation(try await client.listRecentNavigation(limit: 10))
     }
 
     func recordNavigation(_ target: NavigationTarget) async throws {
@@ -545,6 +573,48 @@ final class NexusAppModel {
 
     func searchNavigation(query: String) async throws -> [NavigationItem] {
         try await client.searchNavigation(query: query)
+    }
+
+    func workspaceBrowseSidebarPresentation(currentWorkspaceID: UUID?) -> WorkspaceBrowseSidebarPresentation {
+        let ranking = workspaceBrowseRecencyRanking(currentWorkspaceID: currentWorkspaceID)
+        let workspaceSummaries = workspaces
+            .sorted { lhs, rhs in
+                let lhsRank = ranking[lhs.id] ?? Int.max
+                let rhsRank = ranking[rhs.id] ?? Int.max
+                if lhsRank != rhsRank {
+                    return lhsRank < rhsRank
+                }
+                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+            }
+            .map { workspace in
+                WorkspaceBrowseWorkspaceSummary(
+                    workspace: workspace,
+                    targetSummary: workspaceTargetSummary(for: workspace)
+                )
+            }
+        let groupSummaries = workspaceGroups
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            .map { group in
+                WorkspaceBrowseGroupSummary(
+                    group: group,
+                    workspaceCount: workspaces.filter { $0.primaryGroupID == group.id }.count
+                )
+            }
+
+        return WorkspaceBrowseSidebarPresentation(
+            workspaces: workspaceSummaries,
+            workspaceGroups: groupSummaries
+        )
+    }
+
+    func workspaceBrowseDetailPresentation(workspaceID: UUID) -> WorkspaceBrowseDetailPresentation {
+        let workspace = workspaces.first(where: { $0.id == workspaceID })
+        return WorkspaceBrowseDetailPresentation(
+            workspace: workspace,
+            hostName: workspace.flatMap { workspaceHostName(for: $0) },
+            groupName: workspace.flatMap { workspaceGroupName(for: $0.primaryGroupID) },
+            overview: workspaceOverview(for: workspaceID)
+        )
     }
 
     func workspaceGroupName(for groupID: UUID) -> String? {
@@ -713,6 +783,7 @@ final class NexusAppModel {
         workspaceOverviews = updatedWorkspaceOverviews
 
         for overview in applicableOverviews {
+            syncRecentNavigationSessionWorkspaceIDs(for: overview)
             syncStaleWorkspaceOverviewRefreshTask(for: overview)
         }
     }
@@ -780,11 +851,91 @@ final class NexusAppModel {
         }
     }
 
+    private func applyRecentNavigation(_ items: [NavigationItem]) {
+        recentNavigation = items
+        syncRecentNavigationSessionWorkspaceIDs()
+    }
+
+    private func workspaceBrowseRecencyRanking(currentWorkspaceID: UUID?) -> [UUID: Int] {
+        var workspaceIDs: [UUID] = []
+
+        if let currentWorkspaceID {
+            workspaceIDs.append(currentWorkspaceID)
+        }
+
+        for item in recentNavigation {
+            switch item.target.kind {
+            case .workspace, .provider:
+                if let workspaceID = item.target.workspaceID {
+                    workspaceIDs.append(workspaceID)
+                }
+            case .session:
+                if let sessionID = item.target.sessionID,
+                   let workspaceID = recentNavigationSessionWorkspaceID(for: sessionID) {
+                    workspaceIDs.append(workspaceID)
+                }
+            }
+        }
+
+        var ranking: [UUID: Int] = [:]
+        for (index, workspaceID) in workspaceIDs.enumerated() where ranking[workspaceID] == nil {
+            ranking[workspaceID] = index
+        }
+        return ranking
+    }
+
+    private func recentNavigationSessionWorkspaceID(for sessionID: UUID) -> UUID? {
+        if focusedSessionID == sessionID {
+            return focusedSessionWorkspaceID
+        }
+
+        return recentNavigationSessionWorkspaceIDs[sessionID]
+    }
+
+    private func syncRecentNavigationSessionWorkspaceIDs() {
+        let sessionIDs = Set(recentNavigation.compactMap(\.target.sessionID))
+        recentNavigationSessionWorkspaceIDs = recentNavigationSessionWorkspaceIDs.filter { sessionIDs.contains($0.key) }
+
+        if let focusedSessionID, let focusedSessionWorkspaceID, sessionIDs.contains(focusedSessionID) {
+            recentNavigationSessionWorkspaceIDs[focusedSessionID] = focusedSessionWorkspaceID
+        }
+
+        for overview in workspaceOverviews.values {
+            for sessionID in overview.providerCards.compactMap(\.defaultSession.sessionID) where sessionIDs.contains(sessionID) {
+                recentNavigationSessionWorkspaceIDs[sessionID] = overview.workspace.id
+            }
+        }
+
+        for detail in providerDetails.values {
+            let sessionIDsInDetail = [detail.defaultSession].compactMap { $0 } + detail.alternateSessions + detail.failedSessions
+            for session in sessionIDsInDetail where sessionIDs.contains(session.id) {
+                recentNavigationSessionWorkspaceIDs[session.id] = detail.workspace.id
+            }
+        }
+    }
+
+    private func syncRecentNavigationSessionWorkspaceIDs(for overview: WorkspaceOverview) {
+        let relevantSessionIDs = Set(recentNavigation.compactMap(\.target.sessionID))
+        for sessionID in overview.providerCards.compactMap(\.defaultSession.sessionID) where relevantSessionIDs.contains(sessionID) {
+            recentNavigationSessionWorkspaceIDs[sessionID] = overview.workspace.id
+        }
+    }
+
+    private func syncRecentNavigationSessionWorkspaceIDs(for detail: ProviderDetail) {
+        let relevantSessionIDs = Set(recentNavigation.compactMap(\.target.sessionID))
+        let sessionIDsInDetail = [detail.defaultSession].compactMap { $0 } + detail.alternateSessions + detail.failedSessions
+        for session in sessionIDsInDetail where relevantSessionIDs.contains(session.id) {
+            recentNavigationSessionWorkspaceIDs[session.id] = detail.workspace.id
+        }
+    }
+
     private func refreshProviderDetail(workspaceID: UUID, providerID: ProviderID) async throws {
-        providerDetails[ProviderDetailKey(workspaceID: workspaceID, providerID: providerID)] = try await client.getProviderDetail(
+        let detail = try await client.getProviderDetail(
             workspaceID: workspaceID,
             providerID: providerID
         )
+        providerDetails[ProviderDetailKey(workspaceID: workspaceID, providerID: providerID)] = detail
+        syncRecentNavigationSessionWorkspaceIDs(for: detail)
     }
 
     private func refreshProviderDetailIfLoaded(workspaceID: UUID, providerID: ProviderID) async throws {
@@ -864,6 +1015,9 @@ final class NexusAppModel {
         focusedSessionScreen = screen
         focusedSessionID = screen.session.id
         focusedSessionWorkspaceID = screen.session.workspaceID
+        if recentNavigation.contains(where: { $0.target.sessionID == screen.session.id }) {
+            recentNavigationSessionWorkspaceIDs[screen.session.id] = screen.session.workspaceID
+        }
 
         if let previousState, previousState != screen.session.state {
             try await refreshWorkspaceOverview(for: screen.session.workspaceID)

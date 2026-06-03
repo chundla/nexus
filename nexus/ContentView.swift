@@ -117,6 +117,12 @@ struct ContentView: View {
     }
 
     private var sidebarContent: some View {
+        WorkspaceSidebarBoundary(appModel: appModel, selection: $selection) { presentation in
+            sidebarContent(presentation: presentation)
+        }
+    }
+
+    private func sidebarContent(presentation: WorkspaceBrowseSidebarPresentation) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
@@ -156,7 +162,7 @@ struct ContentView: View {
             List(selection: $selection) {
                 switch sidebarMode {
                 case .workspaces:
-                    if sortedWorkspaces.isEmpty {
+                    if presentation.workspaces.isEmpty {
                         ContentUnavailableView(
                             "No Workspaces",
                             systemImage: "bubble.left.and.text.bubble.right",
@@ -164,19 +170,19 @@ struct ContentView: View {
                         )
                         .listRowBackground(Color.clear)
                     } else {
-                        ForEach(sortedWorkspaces) { workspace in
+                        ForEach(presentation.workspaces) { summary in
                             sidebarNavigationItemView(
-                                title: workspace.name,
-                                subtitle: appModel.workspaceTargetSummary(for: workspace),
-                                systemImage: workspace.kind == .remote ? "macbook.and.iphone" : "folder.fill",
-                                accent: workspace.kind == .remote ? NexusMacTheme.teal : NexusMacTheme.gold
+                                title: summary.workspace.name,
+                                subtitle: summary.targetSummary,
+                                systemImage: summary.workspace.kind == .remote ? "macbook.and.iphone" : "folder.fill",
+                                accent: summary.workspace.kind == .remote ? NexusMacTheme.teal : NexusMacTheme.gold
                             )
-                            .tag(SidebarSelection.workspace(workspace.id))
+                            .tag(SidebarSelection.workspace(summary.workspace.id))
                             .listRowBackground(Color.clear)
                         }
                     }
                 case .groups:
-                    if appModel.workspaceGroups.isEmpty {
+                    if presentation.workspaceGroups.isEmpty {
                         ContentUnavailableView(
                             "No Workspace Groups",
                             systemImage: "line.3.horizontal.decrease.circle",
@@ -184,14 +190,14 @@ struct ContentView: View {
                         )
                         .listRowBackground(Color.clear)
                     } else {
-                        ForEach(sortedWorkspaceGroups) { group in
+                        ForEach(presentation.workspaceGroups) { summary in
                             sidebarNavigationItemView(
-                                title: group.name,
-                                subtitle: "\(workspaceCount(in: group.id)) workspace\(workspaceCount(in: group.id) == 1 ? "" : "s")",
+                                title: summary.group.name,
+                                subtitle: "\(summary.workspaceCount) workspace\(summary.workspaceCount == 1 ? "" : "s")",
                                 systemImage: "line.3.horizontal.decrease.circle.fill",
                                 accent: NexusMacTheme.gold
                             )
-                            .tag(SidebarSelection.workspaceGroup(group.id))
+                            .tag(SidebarSelection.workspaceGroup(summary.group.id))
                             .listRowBackground(Color.clear)
                         }
                     }
@@ -243,56 +249,32 @@ struct ContentView: View {
     }
 
     private var sortedWorkspaceGroups: [WorkspaceGroup] {
-        appModel.workspaceGroups.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        workspaceBrowseSidebarPresentation.workspaceGroups.map(\.group)
     }
 
     private var sortedWorkspaces: [Workspace] {
-        let ranking = workspaceRecencyRanking
-        return appModel.workspaces.sorted { lhs, rhs in
-            let lhsRank = ranking[lhs.id] ?? Int.max
-            let rhsRank = ranking[rhs.id] ?? Int.max
-            if lhsRank != rhsRank {
-                return lhsRank < rhsRank
-            }
-            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-        }
+        sortedWorkspaceSummaries.map(\.workspace)
     }
 
-    private var workspaceRecencyRanking: [UUID: Int] {
-        var workspaceIDs: [UUID] = []
+    private var sortedWorkspaceSummaries: [WorkspaceBrowseWorkspaceSummary] {
+        workspaceBrowseSidebarPresentation.workspaces
+    }
 
+    private var workspaceBrowseSidebarPresentation: WorkspaceBrowseSidebarPresentation {
+        appModel.workspaceBrowseSidebarPresentation(currentWorkspaceID: currentWorkspaceIDForBrowseSorting)
+    }
+
+    private var currentWorkspaceIDForBrowseSorting: UUID? {
         switch selection {
         case .workspace(let workspaceID):
-            workspaceIDs.append(workspaceID)
+            workspaceID
         case .provider(let workspaceID, _):
-            workspaceIDs.append(workspaceID)
+            workspaceID
         case .session:
-            if let workspaceID = appModel.focusedSessionWorkspaceID {
-                workspaceIDs.append(workspaceID)
-            }
-        default:
-            break
+            appModel.focusedSessionWorkspaceID
+        case .workspaceGroup, .none:
+            nil
         }
-
-        for item in appModel.recentNavigation {
-            switch item.target.kind {
-            case .workspace, .provider:
-                if let workspaceID = item.target.workspaceID {
-                    workspaceIDs.append(workspaceID)
-                }
-            case .session:
-                if let sessionID = item.target.sessionID,
-                   let workspaceID = workspaceID(forSessionID: sessionID) {
-                    workspaceIDs.append(workspaceID)
-                }
-            }
-        }
-
-        var ranking: [UUID: Int] = [:]
-        for (index, workspaceID) in workspaceIDs.enumerated() where ranking[workspaceID] == nil {
-            ranking[workspaceID] = index
-        }
-        return ranking
     }
 
     private var defaultSidebarSelection: SidebarSelection? {
@@ -301,38 +283,15 @@ struct ContentView: View {
     }
 
     private var quickSwitchDefaultItems: [NavigationItem] {
-        sortedWorkspaces.map { workspace in
+        sortedWorkspaceSummaries.map { summary in
             NavigationItem(
-                target: .workspace(workspace.id),
-                title: workspace.name,
-                subtitle: appModel.workspaceTargetSummary(for: workspace)
+                target: .workspace(summary.workspace.id),
+                title: summary.workspace.name,
+                subtitle: summary.targetSummary
             )
         }
     }
 
-    private func workspaceCount(in groupID: UUID) -> Int {
-        appModel.workspaces.filter { $0.primaryGroupID == groupID }.count
-    }
-
-    private func workspaceID(forSessionID sessionID: UUID) -> UUID? {
-        if appModel.focusedSessionID == sessionID {
-            return appModel.focusedSessionWorkspaceID
-        }
-
-        for detail in appModel.providerDetails.values {
-            if detail.defaultSession?.id == sessionID {
-                return detail.workspace.id
-            }
-            if detail.alternateSessions.contains(where: { $0.id == sessionID }) {
-                return detail.workspace.id
-            }
-            if detail.failedSessions.contains(where: { $0.id == sessionID }) {
-                return detail.workspace.id
-            }
-        }
-
-        return nil
-    }
 
     private func selectDefaultIfNeeded() {
         guard selection == nil, let defaultSidebarSelection else {
@@ -348,9 +307,13 @@ struct ContentView: View {
             case .workspaceGroup(let groupID):
                 workspaceGroupDetail(groupID: groupID)
             case .workspace(let workspaceID):
-                workspaceDetail(workspaceID: workspaceID)
+                WorkspaceDetailBoundary(appModel: appModel, workspaceID: workspaceID) { presentation in
+                    workspaceDetail(presentation: presentation)
+                }
             case .provider(let workspaceID, let providerID):
-                providerDetail(workspaceID: workspaceID, providerID: providerID)
+                ProviderDetailBoundary(appModel: appModel, workspaceID: workspaceID, providerID: providerID) { detail in
+                    providerDetail(workspaceID: workspaceID, providerID: providerID, detail: detail)
+                }
             case .session(let sessionID):
                 FocusedSessionDetailBoundary(sessionID: sessionID, appModel: appModel) { screen, context in
                     sessionDetailContent(screen: screen, context: context)
@@ -400,15 +363,15 @@ struct ContentView: View {
                             detail: "Nexus quietly reorders your workspaces as you move between them, so the sidebar behaves more like a conversation list."
                         )
 
-                        ForEach(sortedWorkspaces.prefix(6)) { workspace in
+                        ForEach(sortedWorkspaceSummaries.prefix(6)) { summary in
                             Button {
-                                selection = .workspace(workspace.id)
+                                selection = .workspace(summary.workspace.id)
                             } label: {
                                 sidebarNavigationItemView(
-                                    title: workspace.name,
-                                    subtitle: appModel.workspaceTargetSummary(for: workspace),
-                                    systemImage: workspace.kind == .remote ? "macbook.and.iphone" : "folder.fill",
-                                    accent: workspace.kind == .remote ? NexusMacTheme.teal : NexusMacTheme.gold
+                                    title: summary.workspace.name,
+                                    subtitle: summary.targetSummary,
+                                    systemImage: summary.workspace.kind == .remote ? "macbook.and.iphone" : "folder.fill",
+                                    accent: summary.workspace.kind == .remote ? NexusMacTheme.teal : NexusMacTheme.gold
                                 )
                             }
                             .buttonStyle(.plain)
@@ -579,9 +542,9 @@ struct ContentView: View {
         }
     }
 
-    private func workspaceDetail(workspaceID: UUID) -> some View {
-        let workspace = appModel.workspaces.first(where: { $0.id == workspaceID })
-        let overview = appModel.workspaceOverview(for: workspaceID)
+    private func workspaceDetail(presentation: WorkspaceBrowseDetailPresentation) -> some View {
+        let workspace = presentation.workspace
+        let overview = presentation.overview
 
         return ScrollView {
             VStack(alignment: .leading, spacing: 18) {
@@ -601,11 +564,11 @@ struct ContentView: View {
                         }
 
                         HStack(spacing: 10) {
-                            if let hostName = appModel.workspaceHostName(for: workspace) {
+                            if let hostName = presentation.hostName {
                                 NexusMetaBadge(icon: "network", text: hostName)
                             }
                             NexusMetaBadge(icon: workspace.kind == .remote ? "point.3.connected.trianglepath.dotted" : "folder", text: workspace.folderPath)
-                            if let groupName = appModel.workspaceGroupName(for: workspace.primaryGroupID) {
+                            if let groupName = presentation.groupName {
                                 NexusMetaBadge(icon: "line.3.horizontal.decrease.circle", text: groupName)
                             }
                         }
@@ -671,9 +634,7 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    private func providerDetail(workspaceID: UUID, providerID: ProviderID) -> some View {
-        let detail = appModel.providerDetail(for: workspaceID, providerID: providerID)
-
+    private func providerDetail(workspaceID: UUID, providerID: ProviderID, detail: ProviderDetail?) -> some View {
         return ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 if let detail {
@@ -2687,6 +2648,82 @@ private struct StructuredSessionExtensionDialogCard: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .nexusPanel(tint: NexusMacTheme.teal, radius: 16)
+    }
+}
+
+private struct WorkspaceSidebarBoundary<Content: View>: View {
+    @Bindable var appModel: NexusAppModel
+    @Binding var selection: SidebarSelection?
+    private let content: (WorkspaceBrowseSidebarPresentation) -> Content
+
+    init(
+        appModel: NexusAppModel,
+        selection: Binding<SidebarSelection?>,
+        @ViewBuilder content: @escaping (WorkspaceBrowseSidebarPresentation) -> Content
+    ) {
+        self.appModel = appModel
+        self._selection = selection
+        self.content = content
+    }
+
+    var body: some View {
+        content(appModel.workspaceBrowseSidebarPresentation(currentWorkspaceID: currentWorkspaceID))
+    }
+
+    private var currentWorkspaceID: UUID? {
+        switch selection {
+        case .workspace(let workspaceID):
+            workspaceID
+        case .provider(let workspaceID, _):
+            workspaceID
+        case .session:
+            appModel.focusedSessionWorkspaceID
+        case .workspaceGroup, .none:
+            nil
+        }
+    }
+}
+
+private struct WorkspaceDetailBoundary<Content: View>: View {
+    @Bindable var appModel: NexusAppModel
+    let workspaceID: UUID
+    private let content: (WorkspaceBrowseDetailPresentation) -> Content
+
+    init(
+        appModel: NexusAppModel,
+        workspaceID: UUID,
+        @ViewBuilder content: @escaping (WorkspaceBrowseDetailPresentation) -> Content
+    ) {
+        self.appModel = appModel
+        self.workspaceID = workspaceID
+        self.content = content
+    }
+
+    var body: some View {
+        content(appModel.workspaceBrowseDetailPresentation(workspaceID: workspaceID))
+    }
+}
+
+private struct ProviderDetailBoundary<Content: View>: View {
+    @Bindable var appModel: NexusAppModel
+    let workspaceID: UUID
+    let providerID: ProviderID
+    private let content: (ProviderDetail?) -> Content
+
+    init(
+        appModel: NexusAppModel,
+        workspaceID: UUID,
+        providerID: ProviderID,
+        @ViewBuilder content: @escaping (ProviderDetail?) -> Content
+    ) {
+        self.appModel = appModel
+        self.workspaceID = workspaceID
+        self.providerID = providerID
+        self.content = content
+    }
+
+    var body: some View {
+        content(appModel.providerDetail(for: workspaceID, providerID: providerID))
     }
 }
 
