@@ -51,6 +51,7 @@ struct ContentView: View {
     @State private var terminalViewportResizeCoordinator = TerminalViewportResizeCoordinator()
     @State private var terminalFocusToken = UUID()
     @State private var presentedError: PresentedError?
+    @State private var structuredSessionAutoScrollCoordinator = StructuredSessionAutoScrollCoordinator()
 
     private let terminalLayout = TerminalViewportLayout.live
 
@@ -1531,21 +1532,25 @@ struct ContentView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .onAppear {
-                        DispatchQueue.main.async {
+                        structuredSessionAutoScrollCoordinator.request(.immediate) { _ in
                             proxy.scrollTo("conversation-bottom", anchor: .bottom)
                         }
                     }
                     .onChange(of: autoScrollTrigger) { oldTrigger, newTrigger in
-                        let scroll = {
-                            proxy.scrollTo("conversation-bottom", anchor: .bottom)
-                        }
+                        structuredSessionAutoScrollCoordinator.request(
+                            structuredSessionAutoScrollAnimation(previous: oldTrigger, current: newTrigger)
+                        ) { animation in
+                            let scroll = {
+                                proxy.scrollTo("conversation-bottom", anchor: .bottom)
+                            }
 
-                        switch structuredSessionAutoScrollAnimation(previous: oldTrigger, current: newTrigger) {
-                        case .immediate:
-                            scroll()
-                        case .animated:
-                            withAnimation(.easeOut(duration: 0.18)) {
+                            switch animation {
+                            case .immediate:
                                 scroll()
+                            case .animated:
+                                withAnimation(.easeOut(duration: 0.18)) {
+                                    scroll()
+                                }
                             }
                         }
                     }

@@ -1447,6 +1447,7 @@ private struct RemoteSessionScreenView: View {
     @State private var activeApprovalRequestID: UUID?
     @State private var activeExtensionDialogID: String?
     @State private var presentedError: RemoteClientHomePresentedError?
+    @State private var structuredSessionAutoScrollCoordinator = StructuredSessionAutoScrollCoordinator()
     @FocusState private var isStructuredPromptFocused: Bool
     @FocusState private var isTerminalInputFocused: Bool
 
@@ -2107,15 +2108,16 @@ private struct RemoteSessionScreenView: View {
                 )
             }
             .onAppear {
-                DispatchQueue.main.async {
-                    scrollStructuredSessionToBottom(using: proxy, animation: .immediate)
+                structuredSessionAutoScrollCoordinator.request(.immediate) { animation in
+                    scrollStructuredSessionToBottom(using: proxy, animation: animation)
                 }
             }
             .onChange(of: autoScrollTrigger) { oldTrigger, newTrigger in
-                scrollStructuredSessionToBottom(
-                    using: proxy,
-                    animation: structuredSessionAutoScrollAnimation(previous: oldTrigger, current: newTrigger)
-                )
+                structuredSessionAutoScrollCoordinator.request(
+                    structuredSessionAutoScrollAnimation(previous: oldTrigger, current: newTrigger)
+                ) { animation in
+                    scrollStructuredSessionToBottom(using: proxy, animation: animation)
+                }
             }
         }
     }

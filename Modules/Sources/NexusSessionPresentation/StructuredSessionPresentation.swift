@@ -546,6 +546,44 @@ public enum StructuredSessionAutoScrollAnimation: Equatable {
     case animated
 }
 
+/// Coalesces bursty bottom-scroll requests onto the next scheduled UI turn.
+public final class StructuredSessionAutoScrollCoordinator: @unchecked Sendable {
+    private let schedule: (@escaping @Sendable () -> Void) -> Void
+    private var hasScheduledFlush = false
+    private var pendingScroll: (() -> Void)?
+
+    public init(schedule: @escaping (@escaping @Sendable () -> Void) -> Void = { work in
+        DispatchQueue.main.async(execute: work)
+    }) {
+        self.schedule = schedule
+    }
+
+    public func request(
+        _ animation: StructuredSessionAutoScrollAnimation,
+        perform: @escaping (StructuredSessionAutoScrollAnimation) -> Void
+    ) {
+        pendingScroll = {
+            perform(animation)
+        }
+
+        guard hasScheduledFlush == false else {
+            return
+        }
+
+        hasScheduledFlush = true
+        schedule { [weak self] in
+            self?.flush()
+        }
+    }
+
+    private func flush() {
+        hasScheduledFlush = false
+        let pendingScroll = pendingScroll
+        self.pendingScroll = nil
+        pendingScroll?()
+    }
+}
+
 public func structuredSessionAutoScrollAnimation(
     previous: StructuredSessionAutoScrollTrigger,
     current: StructuredSessionAutoScrollTrigger

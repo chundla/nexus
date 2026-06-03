@@ -262,6 +262,53 @@ struct StructuredSessionPresentationTests {
         #expect(structuredSessionAutoScrollAnimation(previous: previous, current: current) == .animated)
     }
 
+    @Test func structuredSessionAutoScrollCoordinatorCoalescesRapidRequestsIntoOneScroll() {
+        var scheduled: [() -> Void] = []
+        let coordinator = StructuredSessionAutoScrollCoordinator { work in
+            scheduled.append(work)
+        }
+        var performed: [StructuredSessionAutoScrollAnimation] = []
+
+        coordinator.request(.immediate) { animation in
+            performed.append(animation)
+        }
+        coordinator.request(.animated) { animation in
+            performed.append(animation)
+        }
+
+        #expect(scheduled.count == 1)
+        #expect(performed.isEmpty)
+
+        let flush = try! #require(scheduled.first)
+        flush()
+
+        #expect(performed == [.animated])
+    }
+
+    @Test func structuredSessionAutoScrollCoordinatorSchedulesAnotherFlushAfterRunningPendingScroll() {
+        var scheduled: [() -> Void] = []
+        let coordinator = StructuredSessionAutoScrollCoordinator { work in
+            scheduled.append(work)
+        }
+        var performed: [StructuredSessionAutoScrollAnimation] = []
+
+        coordinator.request(.immediate) { animation in
+            performed.append(animation)
+        }
+        let firstFlush = try! #require(scheduled.first)
+        firstFlush()
+
+        coordinator.request(.animated) { animation in
+            performed.append(animation)
+        }
+
+        #expect(scheduled.count == 2)
+        let secondFlush = try! #require(scheduled.last)
+        secondFlush()
+
+        #expect(performed == [.immediate, .animated])
+    }
+
     @Test func structuredSessionPresentationCopyUsesProviderDisplayName() {
         let codexScreen = SessionScreen(
             session: Session(
