@@ -71,6 +71,16 @@ struct WorkspaceHomePresentation: Equatable {
     let hostCount: Int
 }
 
+enum WorkspaceBrowseInitialSelection: Equatable {
+    case workspace(UUID)
+    case workspaceGroup(UUID)
+}
+
+struct WorkspaceBrowseNavigationPresentation: Equatable {
+    let initialSelection: WorkspaceBrowseInitialSelection?
+    let quickSwitchItems: [NavigationItem]
+}
+
 @MainActor
 @Observable
 final class NexusAppModel {
@@ -653,6 +663,24 @@ final class NexusAppModel {
             workspaceCount: workspaces.count,
             workspaceGroupCount: workspaceGroups.count,
             hostCount: hosts.count
+        )
+    }
+
+    func workspaceBrowseNavigationPresentation(currentWorkspaceID: UUID?) -> WorkspaceBrowseNavigationPresentation {
+        let sidebarPresentation = workspaceBrowseSidebarPresentation(currentWorkspaceID: currentWorkspaceID)
+        let initialSelection = sidebarPresentation.workspaces.first.map { WorkspaceBrowseInitialSelection.workspace($0.workspace.id) }
+            ?? sidebarPresentation.workspaceGroups.first.map { WorkspaceBrowseInitialSelection.workspaceGroup($0.group.id) }
+        let quickSwitchItems = sidebarPresentation.workspaces.map { summary in
+            NavigationItem(
+                target: .workspace(summary.workspace.id),
+                title: summary.workspace.name,
+                subtitle: summary.targetSummary
+            )
+        }
+
+        return WorkspaceBrowseNavigationPresentation(
+            initialSelection: initialSelection,
+            quickSwitchItems: quickSwitchItems
         )
     }
 

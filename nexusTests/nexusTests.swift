@@ -7321,6 +7321,154 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelWorkspaceBrowseNavigationPresentationUsesLoadedSessionRoutingForQuickSwitchOrdering() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let alphaWorkspace = Workspace(
+            id: UUID(),
+            name: "Alpha",
+            kind: .local,
+            folderPath: "/tmp/alpha",
+            primaryGroupID: group.id
+        )
+        let zuluWorkspace = Workspace(
+            id: UUID(),
+            name: "Zulu",
+            kind: .local,
+            folderPath: "/tmp/zulu",
+            primaryGroupID: group.id
+        )
+        let alphaOverview = WorkspaceOverview(workspace: alphaWorkspace, providerCards: [])
+        let zuluOverview = WorkspaceOverview(workspace: zuluWorkspace, providerCards: [])
+        let recentSession = Session(
+            id: UUID(),
+            workspaceID: zuluWorkspace.id,
+            providerID: .claude,
+            name: "Review",
+            isDefault: false,
+            state: .ready
+        )
+        let zuluDetail = ProviderDetail(
+            workspace: zuluWorkspace,
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+            defaultSession: nil,
+            alternateSessions: [recentSession],
+            failedSessions: []
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: alphaOverview,
+            session: recentSession,
+            screen: SessionScreen(session: recentSession, transcript: "Claude ready"),
+            providerDetail: zuluDetail,
+            workspaces: [alphaWorkspace, zuluWorkspace],
+            workspaceGroups: [group],
+            workspaceOverviewsByID: [
+                alphaWorkspace.id: alphaOverview,
+                zuluWorkspace.id: zuluOverview
+            ],
+            recentNavigation: [
+                NavigationItem(
+                    target: .session(recentSession.id),
+                    title: recentSession.name ?? "Session",
+                    subtitle: "Zulu • Claude"
+                )
+            ]
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+        #expect(
+            model.workspaceBrowseNavigationPresentation(currentWorkspaceID: nil).quickSwitchItems.map(\.target)
+                == [.workspace(alphaWorkspace.id), .workspace(zuluWorkspace.id)]
+        )
+
+        try await model.loadProviderDetail(workspaceID: zuluWorkspace.id, providerID: .claude)
+        #expect(
+            model.workspaceBrowseNavigationPresentation(currentWorkspaceID: nil).quickSwitchItems.map(\.target)
+                == [.workspace(zuluWorkspace.id), .workspace(alphaWorkspace.id)]
+        )
+    }
+
+    @MainActor
+    @Test func appModelWorkspaceBrowseNavigationPresentationStaysStableDuringProviderDetailLoads() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let overview = WorkspaceOverview(
+            workspace: workspace,
+            providerCards: [
+                WorkspaceProviderCard(
+                    provider: Provider(id: .claude),
+                    health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+                    defaultSession: ProviderDefaultSessionSummary(
+                        state: .ready,
+                        summary: "Default Session ready",
+                        actionTitle: "Resume",
+                        sessionID: session.id
+                    )
+                )
+            ]
+        )
+        let detail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+            defaultSession: session,
+            alternateSessions: [],
+            failedSessions: []
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: overview,
+            session: session,
+            screen: SessionScreen(session: session, transcript: "Claude ready"),
+            providerDetail: detail,
+            recentNavigation: [
+                NavigationItem(
+                    target: .workspace(workspace.id),
+                    title: workspace.name,
+                    subtitle: workspace.folderPath
+                )
+            ]
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+        let initialPresentation = model.workspaceBrowseNavigationPresentation(currentWorkspaceID: nil)
+
+        @MainActor
+        final class ObservationChangeState {
+            var changed = false
+        }
+
+        let presentationChanged = ObservationChangeState()
+        withObservationTracking {
+            _ = model.workspaceBrowseNavigationPresentation(currentWorkspaceID: nil)
+        } onChange: {
+            Task { @MainActor in
+                presentationChanged.changed = true
+            }
+        }
+
+        try await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(presentationChanged.changed == false)
+        #expect(model.workspaceBrowseNavigationPresentation(currentWorkspaceID: nil) == initialPresentation)
+    }
+
+    @MainActor
     @Test func appModelFocusedSessionBrowseInputsStayStableDuringTranscriptOnlyUpdates() async throws {
         let group = WorkspaceGroup(id: UUID(), name: "Group")
         let workspace = Workspace(

@@ -76,6 +76,8 @@ xcodebuild test -scheme nexus -project nexus.xcodeproj -destination 'platform=ma
   -only-testing:nexusTests/appModelWorkspaceGroupDetailPresentationStaysStableDuringProviderDetailLoads \
   -only-testing:nexusTests/appModelWorkspaceBrowseSidebarPresentationStaysStableDuringProviderDetailLoads \
   -only-testing:nexusTests/appModelWorkspaceBrowseSidebarPresentationUsesLoadedSessionRoutingForRecentOrdering \
+  -only-testing:nexusTests/appModelWorkspaceBrowseNavigationPresentationStaysStableDuringProviderDetailLoads \
+  -only-testing:nexusTests/appModelWorkspaceBrowseNavigationPresentationUsesLoadedSessionRoutingForQuickSwitchOrdering \
   -only-testing:nexusTests/appModelWorkspaceBrowseDetailPresentationStaysStableDuringTranscriptOnlyUpdates
 ```
 

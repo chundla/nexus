@@ -78,11 +78,8 @@ struct ContentView: View {
                 presentedError = PresentedError(message: error.localizedDescription)
             }
         }
-        .task(id: appModel.workspaces.map(\.id)) {
-            selectDefaultIfNeeded()
-        }
-        .task(id: appModel.recentNavigation.map(\.id)) {
-            selectDefaultIfNeeded()
+        .background {
+            SidebarSelectionBootstrapBoundary(appModel: appModel, selection: $selection)
         }
         .sheet(isPresented: $isShowingCreateWorkspaceGroupSheet) {
             createWorkspaceGroupSheet
@@ -248,58 +245,6 @@ struct ContentView: View {
         return 20
     }
 
-    private var sortedWorkspaceGroups: [WorkspaceGroup] {
-        workspaceBrowseSidebarPresentation.workspaceGroups.map(\.group)
-    }
-
-    private var sortedWorkspaces: [Workspace] {
-        sortedWorkspaceSummaries.map(\.workspace)
-    }
-
-    private var sortedWorkspaceSummaries: [WorkspaceBrowseWorkspaceSummary] {
-        workspaceBrowseSidebarPresentation.workspaces
-    }
-
-    private var workspaceBrowseSidebarPresentation: WorkspaceBrowseSidebarPresentation {
-        appModel.workspaceBrowseSidebarPresentation(currentWorkspaceID: currentWorkspaceIDForBrowseSorting)
-    }
-
-    private var currentWorkspaceIDForBrowseSorting: UUID? {
-        switch selection {
-        case .workspace(let workspaceID):
-            workspaceID
-        case .provider(let workspaceID, _):
-            workspaceID
-        case .session:
-            appModel.focusedSessionWorkspaceID
-        case .workspaceGroup, .none:
-            nil
-        }
-    }
-
-    private var defaultSidebarSelection: SidebarSelection? {
-        sortedWorkspaces.first.map { .workspace($0.id) }
-            ?? sortedWorkspaceGroups.first.map { .workspaceGroup($0.id) }
-    }
-
-    private var quickSwitchDefaultItems: [NavigationItem] {
-        sortedWorkspaceSummaries.map { summary in
-            NavigationItem(
-                target: .workspace(summary.workspace.id),
-                title: summary.workspace.name,
-                subtitle: summary.targetSummary
-            )
-        }
-    }
-
-
-    private func selectDefaultIfNeeded() {
-        guard selection == nil, let defaultSidebarSelection else {
-            return
-        }
-        selection = defaultSidebarSelection
-    }
-
     @ViewBuilder
     private var detailView: some View {
         if let selection {
@@ -443,31 +388,33 @@ struct ContentView: View {
                         )
                     }
 
-                List(quickSwitchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? quickSwitchDefaultItems : quickSwitchResults) { item in
-                    Button {
-                        quickSwitchSearchCoordinator.cancel()
-                        isShowingQuickSwitchSheet = false
-                        navigate(to: item.target)
-                    } label: {
-                        sidebarNavigationItemView(
-                            title: item.title,
-                            subtitle: item.subtitle,
-                            systemImage: navigationItemIcon(for: item.kind),
-                            accent: item.kind == .session ? NexusMacTheme.teal : NexusMacTheme.gold
-                        )
+                WorkspaceBrowseNavigationBoundary(appModel: appModel, selection: selection) { presentation in
+                    List(quickSwitchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? presentation.quickSwitchItems : quickSwitchResults) { item in
+                        Button {
+                            quickSwitchSearchCoordinator.cancel()
+                            isShowingQuickSwitchSheet = false
+                            navigate(to: item.target)
+                        } label: {
+                            sidebarNavigationItemView(
+                                title: item.title,
+                                subtitle: item.subtitle,
+                                systemImage: navigationItemIcon(for: item.kind),
+                                accent: item.kind == .session ? NexusMacTheme.teal : NexusMacTheme.gold
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .listRowBackground(Color.clear)
                     }
-                    .buttonStyle(.plain)
-                    .listRowBackground(Color.clear)
-                }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .overlay {
-                    if quickSwitchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false, quickSwitchResults.isEmpty {
-                        ContentUnavailableView(
-                            "No matches",
-                            systemImage: "magnifyingglass",
-                            description: Text("Try a Workspace, Provider, or Session name.")
-                        )
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    .overlay {
+                        if quickSwitchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false, quickSwitchResults.isEmpty {
+                            ContentUnavailableView(
+                                "No matches",
+                                systemImage: "magnifyingglass",
+                                description: Text("Try a Workspace, Provider, or Session name.")
+                            )
+                        }
                     }
                 }
             }
@@ -2685,6 +2632,66 @@ private struct WorkspaceSidebarBoundary<Content: View>: View {
         case .session:
             appModel.focusedSessionWorkspaceID
         case .workspaceGroup, .none:
+            nil
+        }
+    }
+}
+
+private struct WorkspaceBrowseNavigationBoundary<Content: View>: View {
+    @Bindable var appModel: NexusAppModel
+    let selection: SidebarSelection?
+    private let content: (WorkspaceBrowseNavigationPresentation) -> Content
+
+    init(
+        appModel: NexusAppModel,
+        selection: SidebarSelection?,
+        @ViewBuilder content: @escaping (WorkspaceBrowseNavigationPresentation) -> Content
+    ) {
+        self.appModel = appModel
+        self.selection = selection
+        self.content = content
+    }
+
+    var body: some View {
+        content(appModel.workspaceBrowseNavigationPresentation(currentWorkspaceID: currentWorkspaceID))
+    }
+
+    private var currentWorkspaceID: UUID? {
+        switch selection {
+        case .workspace(let workspaceID):
+            workspaceID
+        case .provider(let workspaceID, _):
+            workspaceID
+        case .session:
+            appModel.focusedSessionWorkspaceID
+        case .workspaceGroup, .none:
+            nil
+        }
+    }
+}
+
+private struct SidebarSelectionBootstrapBoundary: View {
+    @Bindable var appModel: NexusAppModel
+    @Binding var selection: SidebarSelection?
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .task(id: initialSelection) {
+                guard selection == nil, let initialSelection else {
+                    return
+                }
+                selection = initialSelection
+            }
+    }
+
+    private var initialSelection: SidebarSelection? {
+        switch appModel.workspaceBrowseNavigationPresentation(currentWorkspaceID: nil).initialSelection {
+        case .workspace(let workspaceID):
+            .workspace(workspaceID)
+        case .workspaceGroup(let groupID):
+            .workspaceGroup(groupID)
+        case .none:
             nil
         }
     }
