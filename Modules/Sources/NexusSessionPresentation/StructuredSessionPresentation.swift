@@ -16,6 +16,7 @@ public struct StructuredSessionActivityRow: Identifiable, Equatable {
     public let detailText: String?
     public let isDetailTextTruncated: Bool
     public let emphasis: StructuredSessionActivityEmphasis
+    public let conversationPresentation: StructuredSessionConversationPresentation?
 
     public init(
         id: UUID,
@@ -24,7 +25,8 @@ public struct StructuredSessionActivityRow: Identifiable, Equatable {
         text: String,
         detailText: String? = nil,
         isDetailTextTruncated: Bool = false,
-        emphasis: StructuredSessionActivityEmphasis
+        emphasis: StructuredSessionActivityEmphasis,
+        conversationPresentation: StructuredSessionConversationPresentation? = nil
     ) {
         self.id = id
         self.title = title
@@ -33,6 +35,7 @@ public struct StructuredSessionActivityRow: Identifiable, Equatable {
         self.detailText = detailText
         self.isDetailTextTruncated = isDetailTextTruncated
         self.emphasis = emphasis
+        self.conversationPresentation = conversationPresentation
     }
 }
 
@@ -260,8 +263,14 @@ public final class StructuredSessionFeedPresenter {
     }
 
     private func activityRows(for screen: SessionScreen) -> [StructuredSessionActivityRow] {
+        let providerDisplayName = screen.session.providerID.displayName
+
         guard cachedSessionID == screen.session.id else {
-            return rebuildActivityRows(for: screen.activityItems, sessionID: screen.session.id)
+            return rebuildActivityRows(
+                for: screen.activityItems,
+                sessionID: screen.session.id,
+                providerDisplayName: providerDisplayName
+            )
         }
 
         if screen.activityItems == cachedActivityItems {
@@ -272,16 +281,30 @@ public final class StructuredSessionFeedPresenter {
            screen.activityItems.starts(with: cachedActivityItems) {
             let appendedItems = Array(screen.activityItems.dropFirst(cachedActivityItems.count))
             cachedActivityItems = screen.activityItems
-            cachedActivityRows.append(contentsOf: rowBuilder(appendedItems))
+            cachedActivityRows.append(contentsOf: annotateStructuredSessionActivityRows(
+                rowBuilder(appendedItems),
+                providerDisplayName: providerDisplayName
+            ))
             return cachedActivityRows
         }
 
-        return rebuildActivityRows(for: screen.activityItems, sessionID: screen.session.id)
+        return rebuildActivityRows(
+            for: screen.activityItems,
+            sessionID: screen.session.id,
+            providerDisplayName: providerDisplayName
+        )
     }
 
     @discardableResult
-    private func rebuildActivityRows(for activityItems: [SessionActivityItem], sessionID: UUID) -> [StructuredSessionActivityRow] {
-        let rows = rowBuilder(activityItems)
+    private func rebuildActivityRows(
+        for activityItems: [SessionActivityItem],
+        sessionID: UUID,
+        providerDisplayName: String
+    ) -> [StructuredSessionActivityRow] {
+        let rows = annotateStructuredSessionActivityRows(
+            rowBuilder(activityItems),
+            providerDisplayName: providerDisplayName
+        )
         cachedSessionID = sessionID
         cachedActivityItems = activityItems
         cachedActivityRows = rows
@@ -294,7 +317,13 @@ public func structuredSessionActivityRows(for screen: SessionScreen) -> [Structu
 }
 
 public func structuredSessionFeedPresentation(for screen: SessionScreen) -> StructuredSessionFeedPresentation {
-    structuredSessionFeedPresentation(for: screen, activityRows: structuredSessionActivityRows(for: screen.activityItems))
+    structuredSessionFeedPresentation(
+        for: screen,
+        activityRows: annotateStructuredSessionActivityRows(
+            structuredSessionActivityRows(for: screen.activityItems),
+            providerDisplayName: screen.session.providerID.displayName
+        )
+    )
 }
 
 func structuredSessionActivityRows(for activityItems: [SessionActivityItem]) -> [StructuredSessionActivityRow] {
@@ -470,6 +499,16 @@ public func structuredSessionConversationPresentation(
     for row: StructuredSessionActivityRow,
     screen: SessionScreen
 ) -> StructuredSessionConversationPresentation {
+    structuredSessionConversationPresentation(
+        for: row,
+        providerDisplayName: screen.session.providerID.displayName
+    )
+}
+
+public func structuredSessionConversationPresentation(
+    for row: StructuredSessionActivityRow,
+    providerDisplayName: String
+) -> StructuredSessionConversationPresentation {
     if row.title == "Message", let split = structuredSessionConversationPrefixSplit(for: row.text) {
         if split.label.caseInsensitiveCompare("you") == .orderedSame {
             return StructuredSessionConversationPresentation(role: .user, text: split.body)
@@ -484,12 +523,31 @@ public func structuredSessionConversationPresentation(
     case "Error":
         role = .error
     case "Message":
-        role = .assistant(label: screen.session.providerID.displayName)
+        role = .assistant(label: providerDisplayName)
     default:
         role = .system
     }
 
     return StructuredSessionConversationPresentation(role: role, text: row.text)
+}
+
+private func annotateStructuredSessionActivityRows(
+    _ rows: [StructuredSessionActivityRow],
+    providerDisplayName: String
+) -> [StructuredSessionActivityRow] {
+    rows.map { row in
+        StructuredSessionActivityRow(
+            id: row.id,
+            title: row.title,
+            systemImage: row.systemImage,
+            text: row.text,
+            detailText: row.detailText,
+            isDetailTextTruncated: row.isDetailTextTruncated,
+            emphasis: row.emphasis,
+            conversationPresentation: row.conversationPresentation
+                ?? structuredSessionConversationPresentation(for: row, providerDisplayName: providerDisplayName)
+        )
+    }
 }
 
 public func structuredSessionSlashCommandMenuPresentation(

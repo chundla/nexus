@@ -339,7 +339,11 @@ struct StructuredSessionPresentationTests {
                     title: "Progress",
                     systemImage: "hourglass",
                     text: "Gathering context",
-                    emphasis: .accent
+                    emphasis: .accent,
+                    conversationPresentation: StructuredSessionConversationPresentation(
+                        role: .system,
+                        text: "Gathering context"
+                    )
                 )
             ],
             pendingApprovalRequests: [pendingRequest],
@@ -458,6 +462,35 @@ struct StructuredSessionPresentationTests {
 
         #expect(updatedPresentation.activityRows.map(\.text) == ["Pi: Revised draft", "Thinking"])
         #expect(builtItemTexts == [["Pi: First draft", "Thinking"], ["Pi: Revised draft", "Thinking"]])
+    }
+
+    @Test func structuredSessionFeedPresenterPrecomputesConversationRowsForUIAdapters() {
+        let screen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .codex,
+                isDefault: true,
+                state: .ready
+            ),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .message, text: "You: Ship it"),
+                SessionActivityItem(kind: .message, text: "Planner: Check git status"),
+                SessionActivityItem(kind: .message, text: "Still working"),
+                SessionActivityItem(kind: .command, text: "git status")
+            ]
+        )
+
+        let presentation = StructuredSessionFeedPresenter().presentation(for: screen)
+
+        #expect(presentation.activityRows.map(\.conversationPresentation) == [
+            StructuredSessionConversationPresentation(role: .user, text: "Ship it"),
+            StructuredSessionConversationPresentation(role: .assistant(label: "Planner"), text: "Check git status"),
+            StructuredSessionConversationPresentation(role: .assistant(label: "Codex"), text: "Still working"),
+            StructuredSessionConversationPresentation(role: .command, text: "git status")
+        ])
     }
 
     @Test func structuredSessionConversationPresentationClassifiesSharedMessageRowsAndFallsBackToProviderLabel() {

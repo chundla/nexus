@@ -1473,9 +1473,9 @@ struct ContentView: View {
                         )
                         .frame(maxWidth: .infinity, minHeight: 220)
                     } else {
-                        VStack(spacing: 8) {
+                        LazyVStack(spacing: 8) {
                             ForEach(feedPresentation.activityRows) { row in
-                                structuredSessionActivityRowView(row, screen: screen)
+                                structuredSessionActivityRowView(row)
                             }
 
                             if let thinkingIndicator = feedPresentation.thinkingIndicator {
@@ -1520,151 +1520,146 @@ struct ContentView: View {
         .nexusPanel(tint: NexusMacTheme.teal, radius: 22)
     }
 
-    private func structuredSessionActivityRowView(_ row: StructuredSessionActivityRow, screen: SessionScreen) -> some View {
+    @ViewBuilder
+    private func structuredSessionActivityRowView(_ row: StructuredSessionActivityRow) -> some View {
         let accent = structuredSessionActivityColor(for: row.emphasis)
-        let conversation = structuredSessionConversationPresentation(for: row, screen: screen)
+        let conversation = row.conversationPresentation ?? StructuredSessionConversationPresentation(
+            role: .system,
+            text: row.text
+        )
+        let showsExpandedSystemCard = row.detailText != nil || conversation.text.contains("\n") || conversation.text.count > 80
 
         switch conversation.role {
         case .user:
-            return AnyView(
-                HStack {
-                    Spacer(minLength: 120)
-                    Text(conversation.text)
-                        .font(NexusMacTheme.bodyFont(13))
-                        .foregroundStyle(.white)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .frame(maxWidth: 520, alignment: .leading)
-                        .background(NexusMacTheme.gold, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                }
-            )
-        case .assistant(let label):
-            return AnyView(
-                HStack {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(label)
-                            .font(NexusMacTheme.bodyFont(10, relativeTo: .caption).weight(.medium))
-                            .foregroundStyle(NexusMacTheme.mutedText)
-                        structuredSessionMarkdownText(
-                            conversation.text,
-                            font: NexusMacTheme.bodyFont(13),
-                            color: .white.opacity(0.94)
-                        )
-                    }
+            HStack {
+                Spacer(minLength: 120)
+                Text(conversation.text)
+                    .font(NexusMacTheme.bodyFont(13))
+                    .foregroundStyle(.white)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .frame(maxWidth: 520, alignment: .leading)
-                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(NexusMacTheme.softLine, lineWidth: 1)
-                    }
-                    Spacer(minLength: 120)
+                    .background(NexusMacTheme.gold, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+        case .assistant(let label):
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(label)
+                        .font(NexusMacTheme.bodyFont(10, relativeTo: .caption).weight(.medium))
+                        .foregroundStyle(NexusMacTheme.mutedText)
+                    structuredSessionMarkdownText(
+                        conversation.text,
+                        font: NexusMacTheme.bodyFont(13),
+                        color: .white.opacity(0.94)
+                    )
                 }
-            )
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .frame(maxWidth: 520, alignment: .leading)
+                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(NexusMacTheme.softLine, lineWidth: 1)
+                }
+                Spacer(minLength: 120)
+            }
         case .command:
-            return AnyView(
-                HStack {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label(row.title, systemImage: row.systemImage)
-                            .font(NexusMacTheme.monoFont(10, relativeTo: .caption))
-                            .foregroundStyle(accent)
-                        Text(conversation.text)
-                            .font(NexusMacTheme.monoFont(11, relativeTo: .callout))
-                            .foregroundStyle(.white.opacity(0.92))
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                        if let detailText = row.detailText {
-                            structuredSessionDetailTextView(
-                                detailText,
-                                isTruncated: row.isDetailTextTruncated,
-                                font: NexusMacTheme.monoFont(11, relativeTo: .callout)
-                            )
-                        }
+            HStack {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label(row.title, systemImage: row.systemImage)
+                        .font(NexusMacTheme.monoFont(10, relativeTo: .caption))
+                        .foregroundStyle(accent)
+                    Text(conversation.text)
+                        .font(NexusMacTheme.monoFont(11, relativeTo: .callout))
+                        .foregroundStyle(.white.opacity(0.92))
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let detailText = row.detailText {
+                        structuredSessionDetailTextView(
+                            detailText,
+                            isTruncated: row.isDetailTextTruncated,
+                            font: NexusMacTheme.monoFont(11, relativeTo: .callout)
+                        )
                     }
-                    .frame(maxWidth: 620, alignment: .leading)
-                    Spacer()
                 }
-                .padding(12)
-                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(accent.opacity(0.22), lineWidth: 1)
-                }
-            )
+                .frame(maxWidth: 620, alignment: .leading)
+                Spacer()
+            }
+            .padding(12)
+            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(accent.opacity(0.22), lineWidth: 1)
+            }
         case .error:
-            return AnyView(
-                HStack {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Label("Error", systemImage: row.systemImage)
-                            .font(NexusMacTheme.bodyFont(11, relativeTo: .caption).weight(.semibold))
-                            .foregroundStyle(accent)
-                        Text(conversation.text)
-                            .font(NexusMacTheme.bodyFont(13))
-                            .foregroundStyle(.white.opacity(0.94))
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .frame(maxWidth: 620, alignment: .leading)
-                    Spacer()
+            HStack {
+                VStack(alignment: .leading, spacing: 5) {
+                    Label("Error", systemImage: row.systemImage)
+                        .font(NexusMacTheme.bodyFont(11, relativeTo: .caption).weight(.semibold))
+                        .foregroundStyle(accent)
+                    Text(conversation.text)
+                        .font(NexusMacTheme.bodyFont(13))
+                        .foregroundStyle(.white.opacity(0.94))
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .padding(12)
-                .background(accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(accent.opacity(0.28), lineWidth: 1)
-                }
-            )
+                .frame(maxWidth: 620, alignment: .leading)
+                Spacer()
+            }
+            .padding(12)
+            .background(accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(accent.opacity(0.28), lineWidth: 1)
+            }
         case .system:
-            return AnyView(
-                HStack {
-                    if row.detailText != nil || conversation.text.contains("\n") || conversation.text.count > 80 {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Label(conversation.text, systemImage: row.systemImage)
-                                .font(NexusMacTheme.bodyFont(11, relativeTo: .caption).weight(.medium))
-                                .foregroundStyle(NexusMacTheme.mutedText)
-                            if let detailText = row.detailText {
-                                structuredSessionMarkdownText(
-                                    detailText,
-                                    font: NexusMacTheme.bodyFont(13),
-                                    color: .white.opacity(0.92)
-                                )
+            HStack {
+                if showsExpandedSystemCard {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label(conversation.text, systemImage: row.systemImage)
+                            .font(NexusMacTheme.bodyFont(11, relativeTo: .caption).weight(.medium))
+                            .foregroundStyle(NexusMacTheme.mutedText)
+                        if let detailText = row.detailText {
+                            structuredSessionMarkdownText(
+                                detailText,
+                                font: NexusMacTheme.bodyFont(13),
+                                color: .white.opacity(0.92)
+                            )
 
-                                if row.isDetailTextTruncated {
-                                    Text("Output preview truncated for smooth scrolling.")
-                                        .font(NexusMacTheme.bodyFont(10, relativeTo: .caption))
-                                        .foregroundStyle(NexusMacTheme.mutedText)
-                                }
+                            if row.isDetailTextTruncated {
+                                Text("Output preview truncated for smooth scrolling.")
+                                    .font(NexusMacTheme.bodyFont(10, relativeTo: .caption))
+                                    .foregroundStyle(NexusMacTheme.mutedText)
                             }
                         }
-                        .frame(maxWidth: 620, alignment: .leading)
-                        Spacer()
-                    } else {
-                        Spacer()
-                        Label(conversation.text, systemImage: row.systemImage)
-                            .font(NexusMacTheme.bodyFont(11, relativeTo: .caption))
-                            .foregroundStyle(NexusMacTheme.mutedText)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color.white.opacity(0.05), in: Capsule())
-                        Spacer()
                     }
+                    .frame(maxWidth: 620, alignment: .leading)
+                    Spacer()
+                } else {
+                    Spacer()
+                    Label(conversation.text, systemImage: row.systemImage)
+                        .font(NexusMacTheme.bodyFont(11, relativeTo: .caption))
+                        .foregroundStyle(NexusMacTheme.mutedText)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.white.opacity(0.05), in: Capsule())
+                    Spacer()
                 }
-                .padding(row.detailText != nil || conversation.text.contains("\n") || conversation.text.count > 80 ? 12 : 0)
-                .background(
-                    row.detailText != nil || conversation.text.contains("\n") || conversation.text.count > 80
-                        ? AnyShapeStyle(Color.white.opacity(0.06))
-                        : AnyShapeStyle(Color.clear)
-                , in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay {
-                    if row.detailText != nil || conversation.text.contains("\n") || conversation.text.count > 80 {
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(NexusMacTheme.softLine, lineWidth: 1)
-                    }
+            }
+            .padding(showsExpandedSystemCard ? 12 : 0)
+            .background(
+                showsExpandedSystemCard
+                    ? AnyShapeStyle(Color.white.opacity(0.06))
+                    : AnyShapeStyle(Color.clear)
+            , in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay {
+                if showsExpandedSystemCard {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(NexusMacTheme.softLine, lineWidth: 1)
                 }
-            )
+            }
         }
     }
 

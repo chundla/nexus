@@ -2142,9 +2142,9 @@ private struct RemoteSessionScreenView: View {
                 accent: NexusIOSTheme.gold
             )
         } else {
-            VStack(spacing: 10) {
+            LazyVStack(spacing: 10) {
                 ForEach(feedPresentation.activityRows) { row in
-                    structuredSessionActivityRowView(row, screen: screen)
+                    structuredSessionActivityRowView(row)
                 }
 
                 if let thinkingIndicator = feedPresentation.thinkingIndicator {
@@ -2197,12 +2197,12 @@ private struct RemoteSessionScreenView: View {
     }
 
     @ViewBuilder
-    private func structuredSessionActivityRowView(
-        _ row: StructuredSessionActivityRow,
-        screen: SessionScreen
-    ) -> some View {
+    private func structuredSessionActivityRowView(_ row: StructuredSessionActivityRow) -> some View {
         let accentColor = structuredSessionActivityColor(for: row.emphasis)
-        let conversation = structuredSessionConversationPresentation(for: row, screen: screen)
+        let conversation = row.conversationPresentation ?? StructuredSessionConversationPresentation(
+            role: .system,
+            text: row.text
+        )
 
         switch conversation.role {
         case .user:
