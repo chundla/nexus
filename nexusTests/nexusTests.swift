@@ -7775,6 +7775,85 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelFocusedStructuredSessionPresentationStaysStableDuringChromeOnlyExtensionUpdates() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let activity = SessionActivityItem(kind: .message, text: "Pi: Ready")
+        let initialScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "Pi shared Session stream connected",
+            activityItems: [activity],
+            extensionUI: SessionExtensionUIState(
+                title: "Plan",
+                statuses: [SessionExtensionUIStatus(key: "status", text: "Planning")],
+                widgets: [SessionExtensionUIWidget(key: "summary", lines: ["One"])],
+                editorText: "draft"
+            )
+        )
+        let updatedScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "Pi shared Session stream connected",
+            activityItems: [activity],
+            extensionUI: SessionExtensionUIState(
+                title: "Plan updated",
+                statuses: [SessionExtensionUIStatus(key: "status", text: "Ready")],
+                widgets: [SessionExtensionUIWidget(key: "summary", lines: ["Two"])],
+                editorText: "draft updated"
+            )
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []),
+            session: session,
+            screen: initialScreen
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+        try await model.focusSession(sessionID: session.id)
+        let initialPresentation = try #require(model.focusedStructuredSessionPresentation)
+        let initialChrome = try #require(model.focusedStructuredSessionChromePresentation)
+
+        @MainActor
+        final class ObservationChangeState {
+            var changed = false
+        }
+
+        let presentationChanged = ObservationChangeState()
+        withObservationTracking {
+            _ = model.focusedStructuredSessionPresentation
+        } onChange: {
+            Task { @MainActor in
+                presentationChanged.changed = true
+            }
+        }
+
+        await client.emitObservedScreen(updatedScreen)
+        for _ in 0 ..< 20 where model.focusedSessionScreen?.transcript != updatedScreen.transcript {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(presentationChanged.changed == false)
+        #expect(model.focusedStructuredSessionPresentation == initialPresentation)
+        #expect(model.focusedStructuredSessionChromePresentation != initialChrome)
+    }
+
+    @MainActor
     @Test func appModelFocusedSessionSummaryPresentationStaysStableDuringAppendOnlyStructuredUpdates() async throws {
         let group = WorkspaceGroup(id: UUID(), name: "Group")
         let workspace = Workspace(

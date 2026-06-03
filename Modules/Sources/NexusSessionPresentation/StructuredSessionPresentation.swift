@@ -264,21 +264,15 @@ public struct FocusedStructuredSessionPresentation: Equatable {
     public let session: Session
     public let feed: StructuredSessionFeedPresentation
     public let autoScrollTrigger: StructuredSessionAutoScrollTrigger
-    public let extensionUI: SessionExtensionUIState?
-    public let isAgentTurnInProgress: Bool
 
     public init(
         session: Session,
         feed: StructuredSessionFeedPresentation,
-        autoScrollTrigger: StructuredSessionAutoScrollTrigger,
-        extensionUI: SessionExtensionUIState?,
-        isAgentTurnInProgress: Bool
+        autoScrollTrigger: StructuredSessionAutoScrollTrigger
     ) {
         self.session = session
         self.feed = feed
         self.autoScrollTrigger = autoScrollTrigger
-        self.extensionUI = extensionUI
-        self.isAgentTurnInProgress = isAgentTurnInProgress
     }
 }
 
@@ -317,9 +311,7 @@ public final class FocusedStructuredSessionPresenter {
         return FocusedStructuredSessionPresentation(
             session: screen.session,
             feed: feedPresenter.presentation(for: screen),
-            autoScrollTrigger: structuredSessionAutoScrollTrigger(for: screen),
-            extensionUI: screen.extensionUI,
-            isAgentTurnInProgress: screen.isAgentTurnInProgress
+            autoScrollTrigger: structuredSessionAutoScrollTrigger(for: screen)
         )
     }
 }

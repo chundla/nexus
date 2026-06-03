@@ -1537,7 +1537,7 @@ private struct RemoteSessionScreenView: View {
     }
 
     private var extensionUI: SessionExtensionUIState? {
-        structuredChromePresentation?.extensionUI ?? structuredPresentation?.extensionUI
+        structuredChromePresentation?.extensionUI
     }
 
     private var aboveEditorWidgets: [SessionExtensionUIWidget] {
@@ -2141,7 +2141,7 @@ private struct RemoteSessionScreenView: View {
         presentation: FocusedStructuredSessionPresentation,
         approvalRequestPresentation: StructuredSessionApprovalRequestPresentation
     ) -> some View {
-        if let extensionUI = presentation.extensionUI, extensionUI.pendingDialogs.isEmpty == false {
+        if let extensionUI, extensionUI.pendingDialogs.isEmpty == false {
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(extensionUI.pendingDialogs) { dialog in
                     structuredSessionExtensionDialogView(dialog)
@@ -2157,7 +2157,7 @@ private struct RemoteSessionScreenView: View {
             }
         }
 
-        if let extensionUI = presentation.extensionUI, shouldShowStructuredSessionExtensionSummary(extensionUI) {
+        if let extensionUI, shouldShowStructuredSessionExtensionSummary(extensionUI) {
             structuredSessionExtensionSummaryView(extensionUI)
         }
     }

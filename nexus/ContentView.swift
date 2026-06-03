@@ -1461,7 +1461,7 @@ struct ContentView: View {
             let structuredChrome = appModel.focusedStructuredSessionChromePresentation
             let feedPresentation = structuredPresentation.feed
             let approvalRequestPresentation = structuredSessionApprovalRequestPresentation(hasWriterAuthority: true)
-            let extensionUI = structuredChrome?.extensionUI ?? structuredPresentation.extensionUI
+            let extensionUI = structuredChrome?.extensionUI
             let aboveEditorWidgets = extensionUI?.widgets.filter { $0.placement == .aboveEditor } ?? []
             let belowEditorWidgets = extensionUI?.widgets.filter { $0.placement == .belowEditor } ?? []
             let autoScrollTrigger = structuredPresentation.autoScrollTrigger

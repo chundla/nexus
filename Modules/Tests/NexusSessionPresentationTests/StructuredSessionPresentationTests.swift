@@ -625,6 +625,48 @@ struct StructuredSessionPresentationTests {
         ])
     }
 
+    @Test func focusedStructuredSessionPresenterKeepsFeedStableDuringChromeOnlyExtensionUpdates() throws {
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let activity = SessionActivityItem(kind: .message, text: "Pi: Ready")
+        let initialScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "Pi shared Session stream connected",
+            activityItems: [activity],
+            extensionUI: SessionExtensionUIState(
+                title: "Plan",
+                statuses: [SessionExtensionUIStatus(key: "status", text: "Planning")],
+                widgets: [SessionExtensionUIWidget(key: "summary", lines: ["One"])],
+                editorText: "draft"
+            )
+        )
+        let updatedScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "Pi shared Session stream connected",
+            activityItems: [activity],
+            extensionUI: SessionExtensionUIState(
+                title: "Plan updated",
+                statuses: [SessionExtensionUIStatus(key: "status", text: "Ready")],
+                widgets: [SessionExtensionUIWidget(key: "summary", lines: ["Two"])],
+                editorText: "draft updated"
+            )
+        )
+        let presenter = FocusedStructuredSessionPresenter()
+
+        let initialPresentation = try #require(presenter.presentation(for: initialScreen))
+        let updatedPresentation = try #require(presenter.presentation(for: updatedScreen))
+
+        #expect(initialPresentation == updatedPresentation)
+        #expect(focusedStructuredSessionChromePresentation(for: initialScreen) != focusedStructuredSessionChromePresentation(for: updatedScreen))
+    }
+
     @Test func structuredSessionConversationPresentationClassifiesSharedMessageRowsAndFallsBackToProviderLabel() {
         let screen = SessionScreen(
             session: Session(
