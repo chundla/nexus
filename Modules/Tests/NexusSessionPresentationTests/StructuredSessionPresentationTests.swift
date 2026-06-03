@@ -486,6 +486,71 @@ struct StructuredSessionPresentationTests {
         #expect(builtItemIDs == [[firstActivity.id, secondActivity.id], [thirdActivity.id]])
     }
 
+    @Test func structuredSessionFeedPresenterKeepsEarlierChunksStableAcrossLongAppendOnlyBursts() {
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .codex,
+            isDefault: true,
+            state: .ready
+        )
+        let firstActivity = SessionActivityItem(kind: .message, text: "You: One")
+        let secondActivity = SessionActivityItem(kind: .progress, text: "Two")
+        let thirdActivity = SessionActivityItem(kind: .command, text: "three")
+        let fourthActivity = SessionActivityItem(kind: .completion, text: "Four")
+        let fifthActivity = SessionActivityItem(kind: .message, text: "Codex: Five")
+        let presenter = StructuredSessionFeedPresenter(chunkSize: 2) { items in
+            items.map { item in
+                StructuredSessionActivityRow(
+                    id: item.id,
+                    title: item.kind.rawValue,
+                    systemImage: item.kind.rawValue,
+                    text: item.text,
+                    detailText: item.detailText,
+                    isDetailTextTruncated: false,
+                    emphasis: .neutral
+                )
+            }
+        }
+
+        let firstPresentation = presenter.presentation(for: SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [firstActivity, secondActivity, thirdActivity]
+        ))
+        let secondPresentation = presenter.presentation(for: SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [firstActivity, secondActivity, thirdActivity, fourthActivity]
+        ))
+        let thirdPresentation = presenter.presentation(for: SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [firstActivity, secondActivity, thirdActivity, fourthActivity, fifthActivity]
+        ))
+
+        #expect(firstPresentation.activityRowChunks.map(\.id) == [0, 2])
+        #expect(firstPresentation.activityRowChunks.map { $0.rows.map(\.id) } == [
+            [firstActivity.id, secondActivity.id],
+            [thirdActivity.id]
+        ])
+        #expect(secondPresentation.activityRowChunks.map { $0.rows.map(\.id) } == [
+            [firstActivity.id, secondActivity.id],
+            [thirdActivity.id, fourthActivity.id]
+        ])
+        #expect(thirdPresentation.activityRowChunks.map { $0.rows.map(\.id) } == [
+            [firstActivity.id, secondActivity.id],
+            [thirdActivity.id, fourthActivity.id],
+            [fifthActivity.id]
+        ])
+        #expect(secondPresentation.activityRowChunks[0] == firstPresentation.activityRowChunks[0])
+        #expect(thirdPresentation.activityRowChunks[0] == secondPresentation.activityRowChunks[0])
+        #expect(thirdPresentation.activityRowChunks[1] == secondPresentation.activityRowChunks[1])
+    }
+
     @Test func structuredSessionFeedPresenterRebuildsWhenStructuredSessionHistoryChangesInPlace() {
         let session = Session(
             id: UUID(),

@@ -73,20 +73,33 @@ public struct StructuredSessionThinkingIndicator: Equatable {
     }
 }
 
+public struct StructuredSessionActivityRowChunk: Identifiable, Equatable {
+    public let id: Int
+    public let rows: [StructuredSessionActivityRow]
+
+    public init(id: Int, rows: [StructuredSessionActivityRow]) {
+        self.id = id
+        self.rows = rows
+    }
+}
+
 public struct StructuredSessionFeedPresentation: Equatable {
     public let copy: StructuredSessionPresentationCopy
     public let activityRows: [StructuredSessionActivityRow]
+    public let activityRowChunks: [StructuredSessionActivityRowChunk]
     public let pendingApprovalRequests: [SessionApprovalRequest]
     public let thinkingIndicator: StructuredSessionThinkingIndicator?
 
     public init(
         copy: StructuredSessionPresentationCopy,
         activityRows: [StructuredSessionActivityRow],
+        activityRowChunks: [StructuredSessionActivityRowChunk]? = nil,
         pendingApprovalRequests: [SessionApprovalRequest],
         thinkingIndicator: StructuredSessionThinkingIndicator?
     ) {
         self.copy = copy
         self.activityRows = activityRows
+        self.activityRowChunks = activityRowChunks ?? structuredSessionActivityRowChunks(for: activityRows)
         self.pendingApprovalRequests = pendingApprovalRequests
         self.thinkingIndicator = thinkingIndicator
     }
@@ -329,21 +342,32 @@ public func focusedStructuredSessionChromePresentation(
 
 public final class StructuredSessionFeedPresenter {
     private let rowBuilder: ([SessionActivityItem]) -> [StructuredSessionActivityRow]
+    private let chunkSize: Int
 
     private var cachedSessionID: UUID?
     private var cachedActivityItems: [SessionActivityItem] = []
     private var cachedActivityRows: [StructuredSessionActivityRow] = []
+    private var cachedActivityRowChunks: [StructuredSessionActivityRowChunk] = []
 
     public init() {
         self.rowBuilder = structuredSessionActivityRows(for:)
+        self.chunkSize = structuredSessionActivityRowChunkSize
     }
 
-    init(_ rowBuilder: @escaping ([SessionActivityItem]) -> [StructuredSessionActivityRow]) {
+    init(
+        chunkSize: Int = structuredSessionActivityRowChunkSize,
+        _ rowBuilder: @escaping ([SessionActivityItem]) -> [StructuredSessionActivityRow]
+    ) {
         self.rowBuilder = rowBuilder
+        self.chunkSize = max(1, chunkSize)
     }
 
     public func presentation(for screen: SessionScreen) -> StructuredSessionFeedPresentation {
-        structuredSessionFeedPresentation(for: screen, activityRows: activityRows(for: screen))
+        structuredSessionFeedPresentation(
+            for: screen,
+            activityRows: activityRows(for: screen),
+            activityRowChunks: cachedActivityRowChunks
+        )
     }
 
     private func activityRows(for screen: SessionScreen) -> [StructuredSessionActivityRow] {
@@ -364,11 +388,17 @@ public final class StructuredSessionFeedPresenter {
         if screen.activityItems.count >= cachedActivityItems.count,
            screen.activityItems.starts(with: cachedActivityItems) {
             let appendedItems = Array(screen.activityItems.dropFirst(cachedActivityItems.count))
-            cachedActivityItems = screen.activityItems
-            cachedActivityRows.append(contentsOf: annotateStructuredSessionActivityRows(
+            let appendedRows = annotateStructuredSessionActivityRows(
                 rowBuilder(appendedItems),
                 providerDisplayName: providerDisplayName
-            ))
+            )
+            cachedActivityItems = screen.activityItems
+            cachedActivityRows.append(contentsOf: appendedRows)
+            cachedActivityRowChunks = appendStructuredSessionActivityRowChunks(
+                cachedActivityRowChunks,
+                rows: appendedRows,
+                chunkSize: chunkSize
+            )
             return cachedActivityRows
         }
 
@@ -392,6 +422,7 @@ public final class StructuredSessionFeedPresenter {
         cachedSessionID = sessionID
         cachedActivityItems = activityItems
         cachedActivityRows = rows
+        cachedActivityRowChunks = structuredSessionActivityRowChunks(for: rows, chunkSize: chunkSize)
         return rows
     }
 }
@@ -426,14 +457,69 @@ func structuredSessionActivityRows(for activityItems: [SessionActivityItem]) -> 
     }
 }
 
+private let structuredSessionActivityRowChunkSize = 40
+
+func structuredSessionActivityRowChunks(
+    for activityRows: [StructuredSessionActivityRow],
+    chunkSize: Int = structuredSessionActivityRowChunkSize
+) -> [StructuredSessionActivityRowChunk] {
+    guard activityRows.isEmpty == false else {
+        return []
+    }
+
+    let normalizedChunkSize = max(1, chunkSize)
+    return stride(from: 0, to: activityRows.count, by: normalizedChunkSize).map { startIndex in
+        let endIndex = min(startIndex + normalizedChunkSize, activityRows.count)
+        return StructuredSessionActivityRowChunk(
+            id: startIndex,
+            rows: Array(activityRows[startIndex ..< endIndex])
+        )
+    }
+}
+
+private func appendStructuredSessionActivityRowChunks(
+    _ chunks: [StructuredSessionActivityRowChunk],
+    rows: [StructuredSessionActivityRow],
+    chunkSize: Int
+) -> [StructuredSessionActivityRowChunk] {
+    guard rows.isEmpty == false else {
+        return chunks
+    }
+
+    let normalizedChunkSize = max(1, chunkSize)
+    var updatedChunks = chunks
+    var remainingRows = ArraySlice(rows)
+
+    if let lastChunk = updatedChunks.last, lastChunk.rows.count < normalizedChunkSize {
+        let appendedCount = min(normalizedChunkSize - lastChunk.rows.count, remainingRows.count)
+        updatedChunks[updatedChunks.count - 1] = StructuredSessionActivityRowChunk(
+            id: lastChunk.id,
+            rows: lastChunk.rows + remainingRows.prefix(appendedCount)
+        )
+        remainingRows = remainingRows.dropFirst(appendedCount)
+    }
+
+    var nextChunkID = updatedChunks.last.map { $0.id + $0.rows.count } ?? 0
+    while remainingRows.isEmpty == false {
+        let chunkRows = Array(remainingRows.prefix(normalizedChunkSize))
+        updatedChunks.append(StructuredSessionActivityRowChunk(id: nextChunkID, rows: chunkRows))
+        nextChunkID += chunkRows.count
+        remainingRows = remainingRows.dropFirst(chunkRows.count)
+    }
+
+    return updatedChunks
+}
+
 private func structuredSessionFeedPresentation(
     for screen: SessionScreen,
-    activityRows: [StructuredSessionActivityRow]
+    activityRows: [StructuredSessionActivityRow],
+    activityRowChunks: [StructuredSessionActivityRowChunk]? = nil
 ) -> StructuredSessionFeedPresentation {
     let pendingApprovalRequests = screen.approvalRequests.filter { $0.state == .pending }
     return StructuredSessionFeedPresentation(
         copy: structuredSessionPresentationCopy(for: screen),
         activityRows: activityRows,
+        activityRowChunks: activityRowChunks,
         pendingApprovalRequests: pendingApprovalRequests,
         thinkingIndicator: structuredSessionThinkingIndicator(
             for: screen,

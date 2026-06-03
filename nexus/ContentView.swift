@@ -17,6 +17,19 @@ private struct MacEquatableStructuredSessionActivityRow<Content: View>: View, Eq
     }
 }
 
+private struct MacEquatableStructuredSessionActivityChunk<Content: View>: View, Equatable {
+    let chunk: StructuredSessionActivityRowChunk
+    @ViewBuilder let content: () -> Content
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.chunk == rhs.chunk
+    }
+
+    var body: some View {
+        content()
+    }
+}
+
 struct ContentView: View {
     @Bindable var appModel: NexusAppModel
 
@@ -1492,9 +1505,15 @@ struct ContentView: View {
                             .frame(maxWidth: .infinity, minHeight: 220)
                         } else {
                             LazyVStack(spacing: 8) {
-                                ForEach(feedPresentation.activityRows) { row in
-                                    MacEquatableStructuredSessionActivityRow(row: row) {
-                                        structuredSessionActivityRowView(row)
+                                ForEach(feedPresentation.activityRowChunks) { chunk in
+                                    MacEquatableStructuredSessionActivityChunk(chunk: chunk) {
+                                        VStack(spacing: 8) {
+                                            ForEach(chunk.rows) { row in
+                                                MacEquatableStructuredSessionActivityRow(row: row) {
+                                                    structuredSessionActivityRowView(row)
+                                                }
+                                            }
+                                        }
                                     }
                                 }
 
