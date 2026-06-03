@@ -502,12 +502,27 @@ public struct SessionScreen: Codable, Equatable, Sendable {
         cursorColumn: Int? = nil,
         cursorVisible: Bool = true
     ) {
-        let viewport = Self.makeViewport(
-            transcript: transcript,
-            terminalColumns: terminalColumns,
-            terminalRows: terminalRows
-        )
-        let resolvedVisibleLines = visibleLines ?? viewport.visibleLines
+        let resolvedVisibleLines: [String]
+        let resolvedStyledVisibleLines: [TerminalLine]
+        let resolvedCursorRow: Int
+        let resolvedCursorColumn: Int
+
+        if let visibleLines, let cursorRow, let cursorColumn {
+            resolvedVisibleLines = visibleLines
+            resolvedStyledVisibleLines = styledVisibleLines ?? visibleLines.map(Self.defaultStyledLine)
+            resolvedCursorRow = cursorRow
+            resolvedCursorColumn = cursorColumn
+        } else {
+            let viewport = Self.makeViewport(
+                transcript: transcript,
+                terminalColumns: terminalColumns,
+                terminalRows: terminalRows
+            )
+            resolvedVisibleLines = visibleLines ?? viewport.visibleLines
+            resolvedStyledVisibleLines = styledVisibleLines ?? resolvedVisibleLines.map(Self.defaultStyledLine)
+            resolvedCursorRow = cursorRow ?? viewport.cursorRow
+            resolvedCursorColumn = cursorColumn ?? viewport.cursorColumn
+        }
 
         self.session = session
         self.primarySurface = primarySurface
@@ -522,9 +537,9 @@ public struct SessionScreen: Codable, Equatable, Sendable {
         self.providerEvents = providerEvents
         self.isAgentTurnInProgress = isAgentTurnInProgress
         self.visibleLines = resolvedVisibleLines
-        self.styledVisibleLines = styledVisibleLines ?? resolvedVisibleLines.map(Self.defaultStyledLine)
-        self.cursorRow = cursorRow ?? viewport.cursorRow
-        self.cursorColumn = cursorColumn ?? viewport.cursorColumn
+        self.styledVisibleLines = resolvedStyledVisibleLines
+        self.cursorRow = resolvedCursorRow
+        self.cursorColumn = resolvedCursorColumn
         self.cursorVisible = cursorVisible
     }
 

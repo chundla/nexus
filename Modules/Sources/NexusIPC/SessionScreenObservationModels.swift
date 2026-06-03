@@ -14,6 +14,11 @@ public struct StructuredSessionObservationSnapshot: Codable, Equatable, Sendable
     public let slashCommands: [SessionSlashCommand]?
     public let providerEvents: [SessionProviderEvent]
     public let isAgentTurnInProgress: Bool
+    public let visibleLines: [String]
+    public let styledVisibleLines: [TerminalLine]
+    public let cursorRow: Int
+    public let cursorColumn: Int
+    public let cursorVisible: Bool
 
     public init(revision: Int, screen: SessionScreen) {
         self.revision = revision
@@ -28,6 +33,11 @@ public struct StructuredSessionObservationSnapshot: Codable, Equatable, Sendable
         self.slashCommands = screen.slashCommands
         self.providerEvents = screen.providerEvents
         self.isAgentTurnInProgress = screen.isAgentTurnInProgress
+        self.visibleLines = screen.visibleLines
+        self.styledVisibleLines = screen.styledVisibleLines
+        self.cursorRow = screen.cursorRow
+        self.cursorColumn = screen.cursorColumn
+        self.cursorVisible = screen.cursorVisible
     }
 
     public var screen: SessionScreen {
@@ -43,7 +53,12 @@ public struct StructuredSessionObservationSnapshot: Codable, Equatable, Sendable
             extensionUI: extensionUI,
             slashCommands: slashCommands,
             providerEvents: providerEvents,
-            isAgentTurnInProgress: isAgentTurnInProgress
+            isAgentTurnInProgress: isAgentTurnInProgress,
+            visibleLines: visibleLines,
+            styledVisibleLines: styledVisibleLines,
+            cursorRow: cursorRow,
+            cursorColumn: cursorColumn,
+            cursorVisible: cursorVisible
         )
     }
 }
@@ -208,6 +223,11 @@ private struct StructuredSessionObservationMutableState {
     var slashCommands: [SessionSlashCommand]?
     var providerEvents: [SessionProviderEvent]
     var isAgentTurnInProgress: Bool
+    var visibleLines: [String]
+    var styledVisibleLines: [TerminalLine]
+    var cursorRow: Int
+    var cursorColumn: Int
+    var cursorVisible: Bool
 
     init(snapshot: StructuredSessionObservationSnapshot) {
         session = snapshot.session
@@ -221,6 +241,11 @@ private struct StructuredSessionObservationMutableState {
         slashCommands = snapshot.slashCommands
         providerEvents = snapshot.providerEvents
         isAgentTurnInProgress = snapshot.isAgentTurnInProgress
+        visibleLines = snapshot.visibleLines
+        styledVisibleLines = snapshot.styledVisibleLines
+        cursorRow = snapshot.cursorRow
+        cursorColumn = snapshot.cursorColumn
+        cursorVisible = snapshot.cursorVisible
     }
 
     mutating func apply(_ change: StructuredSessionObservationChange) {
@@ -279,7 +304,12 @@ private struct StructuredSessionObservationMutableState {
                 extensionUI: extensionUI,
                 slashCommands: slashCommands,
                 providerEvents: providerEvents,
-                isAgentTurnInProgress: isAgentTurnInProgress
+                isAgentTurnInProgress: isAgentTurnInProgress,
+                visibleLines: visibleLines,
+                styledVisibleLines: styledVisibleLines,
+                cursorRow: cursorRow,
+                cursorColumn: cursorColumn,
+                cursorVisible: cursorVisible
             )
         )
     }
