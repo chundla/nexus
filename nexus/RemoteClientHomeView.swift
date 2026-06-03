@@ -1416,7 +1416,6 @@ private struct RemoteSessionScreenView: View {
     @State private var structuredPrompt = ""
     @State private var terminalViewportSize: CGSize = .zero
     @State private var terminalViewportResizeCoordinator = TerminalViewportResizeCoordinator()
-    @State private var structuredFeedPresenter = StructuredSessionFeedPresenter()
     @State private var isShowingStopConfirmation = false
     @State private var activeAction: RemoteSessionAction?
     @State private var activeApprovalRequestID: UUID?
@@ -1453,12 +1452,16 @@ private struct RemoteSessionScreenView: View {
         )
     }
 
-    private var structuredFeedPresentation: StructuredSessionFeedPresentation? {
-        guard let screen else {
+    private var structuredPresentation: FocusedStructuredSessionPresentation? {
+        guard model.focusedSessionID == session.id else {
             return nil
         }
 
-        return structuredFeedPresenter.presentation(for: screen)
+        return model.focusedStructuredSessionPresentation
+    }
+
+    private var structuredFeedPresentation: StructuredSessionFeedPresentation? {
+        structuredPresentation?.feed
     }
 
     private var structuredComposerPresentation: StructuredSessionComposerPresentation? {
@@ -1503,7 +1506,7 @@ private struct RemoteSessionScreenView: View {
     }
 
     private var extensionUI: SessionExtensionUIState? {
-        screen?.extensionUI
+        structuredPresentation?.extensionUI ?? screen?.extensionUI
     }
 
     private var aboveEditorWidgets: [SessionExtensionUIWidget] {
@@ -1695,12 +1698,10 @@ private struct RemoteSessionScreenView: View {
 
     private var structuredConversationView: some View {
         Group {
-            if let screen,
-               let feedPresentation = structuredFeedPresentation,
+            if let structuredPresentation,
                let approvalRequestPresentation = structuredApprovalRequestPresentation {
                 structuredSessionContent(
-                    screen,
-                    feedPresentation: feedPresentation,
+                    structuredPresentation,
                     approvalRequestPresentation: approvalRequestPresentation
                 )
             } else if let errorMessage = model.focusedSessionErrorMessage {
@@ -2062,17 +2063,15 @@ private struct RemoteSessionScreenView: View {
     }
 
     private func structuredSessionContent(
-        _ screen: SessionScreen,
-        feedPresentation: StructuredSessionFeedPresentation,
+        _ presentation: FocusedStructuredSessionPresentation,
         approvalRequestPresentation: StructuredSessionApprovalRequestPresentation
     ) -> some View {
-        let autoScrollTrigger = structuredSessionAutoScrollTrigger(for: screen)
+        let autoScrollTrigger = presentation.autoScrollTrigger
 
         return ScrollViewReader { proxy in
             ScrollView {
                 structuredSessionScrollBody(
-                    screen,
-                    feedPresentation: feedPresentation,
+                    presentation,
                     approvalRequestPresentation: approvalRequestPresentation
                 )
             }
@@ -2091,16 +2090,15 @@ private struct RemoteSessionScreenView: View {
     }
 
     private func structuredSessionScrollBody(
-        _ screen: SessionScreen,
-        feedPresentation: StructuredSessionFeedPresentation,
+        _ presentation: FocusedStructuredSessionPresentation,
         approvalRequestPresentation: StructuredSessionApprovalRequestPresentation
     ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             structuredSessionSupplementaryContent(
-                feedPresentation: feedPresentation,
+                presentation: presentation,
                 approvalRequestPresentation: approvalRequestPresentation
             )
-            structuredSessionActivityFeed(screen, feedPresentation: feedPresentation)
+            structuredSessionActivityFeed(feedPresentation: presentation.feed)
         }
         .padding(.horizontal, horizontalPadding)
         .padding(.top, 14)
@@ -2109,10 +2107,10 @@ private struct RemoteSessionScreenView: View {
 
     @ViewBuilder
     private func structuredSessionSupplementaryContent(
-        feedPresentation: StructuredSessionFeedPresentation,
+        presentation: FocusedStructuredSessionPresentation,
         approvalRequestPresentation: StructuredSessionApprovalRequestPresentation
     ) -> some View {
-        if let extensionUI, extensionUI.pendingDialogs.isEmpty == false {
+        if let extensionUI = presentation.extensionUI, extensionUI.pendingDialogs.isEmpty == false {
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(extensionUI.pendingDialogs) { dialog in
                     structuredSessionExtensionDialogView(dialog)
@@ -2120,22 +2118,21 @@ private struct RemoteSessionScreenView: View {
             }
         }
 
-        if feedPresentation.pendingApprovalRequests.isEmpty == false {
+        if presentation.feed.pendingApprovalRequests.isEmpty == false {
             VStack(alignment: .leading, spacing: 10) {
-                ForEach(feedPresentation.pendingApprovalRequests) { request in
+                ForEach(presentation.feed.pendingApprovalRequests) { request in
                     structuredSessionApprovalRequestView(request, presentation: approvalRequestPresentation)
                 }
             }
         }
 
-        if let extensionUI, shouldShowStructuredSessionExtensionSummary(extensionUI) {
+        if let extensionUI = presentation.extensionUI, shouldShowStructuredSessionExtensionSummary(extensionUI) {
             structuredSessionExtensionSummaryView(extensionUI)
         }
     }
 
     @ViewBuilder
     private func structuredSessionActivityFeed(
-        _ screen: SessionScreen,
         feedPresentation: StructuredSessionFeedPresentation
     ) -> some View {
         if feedPresentation.activityRows.isEmpty {

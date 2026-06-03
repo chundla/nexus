@@ -3,6 +3,7 @@ import Foundation
 import NexusDomain
 import NexusIPC
 import NexusService
+import NexusSessionPresentation
 import Observation
 
 struct SessionPresentationContext: Equatable {
@@ -104,6 +105,7 @@ final class NexusAppModel {
     var remoteAccessState: RemoteAccessState?
     var pairedDevices: [PairedDevice] = []
     var focusedSessionScreen: SessionScreen?
+    private(set) var focusedStructuredSessionPresentation: FocusedStructuredSessionPresentation?
     private(set) var focusedSessionID: UUID?
     private(set) var focusedSessionWorkspaceID: UUID?
     private(set) var remotePairingEndpoint: RemotePairingEndpoint?
@@ -112,6 +114,7 @@ final class NexusAppModel {
     private let client: any NexusServiceClient
     private let embeddedService: (any NexusEmbeddedServiceSession)?
     private var remotePairingServer: (any RemotePairingServing)?
+    private let focusedStructuredSessionPresenter = FocusedStructuredSessionPresenter()
     private let remotePairingServerFactory: (() throws -> any RemotePairingServing)?
     private var focusedSessionObservation: (any SessionScreenObservation)?
     private var staleWorkspaceOverviewRefreshTasks: [UUID: Task<Void, Never>] = [:]
@@ -245,6 +248,7 @@ final class NexusAppModel {
             remoteAccessState = nil
             pairedDevices = []
             focusedSessionScreen = nil
+            syncFocusedStructuredSessionPresentation(for: nil)
             focusedSessionID = nil
             focusedSessionWorkspaceID = nil
             serviceErrorMessage = error.localizedDescription
@@ -448,6 +452,7 @@ final class NexusAppModel {
         if focusedSessionScreen?.session.id == sessionID {
             await stopFocusingSession()
             focusedSessionScreen = nil
+            syncFocusedStructuredSessionPresentation(for: nil)
             focusedSessionID = nil
             focusedSessionWorkspaceID = nil
         }
@@ -494,6 +499,7 @@ final class NexusAppModel {
         let session = focusedSessionScreen?.session
         await stopFocusingSession()
         focusedSessionScreen = nil
+        syncFocusedStructuredSessionPresentation(for: nil)
         focusedSessionID = nil
         focusedSessionWorkspaceID = nil
         return session
@@ -1080,6 +1086,7 @@ final class NexusAppModel {
         let previousScreen = focusedSessionScreen?.session.id == screen.session.id ? focusedSessionScreen : nil
         let previousState = previousScreen?.session.state
         focusedSessionScreen = screen
+        syncFocusedStructuredSessionPresentation(for: screen)
         focusedSessionID = screen.session.id
         focusedSessionWorkspaceID = screen.session.workspaceID
         if recentNavigation.contains(where: { $0.target.sessionID == screen.session.id }) {
@@ -1092,6 +1099,13 @@ final class NexusAppModel {
                 workspaceID: screen.session.workspaceID,
                 providerID: screen.session.providerID
             )
+        }
+    }
+
+    private func syncFocusedStructuredSessionPresentation(for screen: SessionScreen?) {
+        let presentation = screen.flatMap { focusedStructuredSessionPresenter.presentation(for: $0) }
+        if focusedStructuredSessionPresentation != presentation {
+            focusedStructuredSessionPresentation = presentation
         }
     }
 }

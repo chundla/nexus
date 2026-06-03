@@ -1,6 +1,7 @@
 import Foundation
 import NexusDomain
 import NexusIPC
+import NexusSessionPresentation
 import Observation
 
 protocol RemotePairingClient {
@@ -165,6 +166,7 @@ final class RemoteClientPairingModel {
     private(set) var focusedSessionWorkspaceID: UUID?
     private(set) var focusedSessionWorkspaceLocation: String?
     var focusedSessionScreen: SessionScreen?
+    private(set) var focusedStructuredSessionPresentation: FocusedStructuredSessionPresentation?
     var focusedSessionIsStale = false
     var focusedSessionErrorMessage: String?
     var remoteFailureBreadcrumbs: [RemoteClientDiagnosticBreadcrumb] = []
@@ -176,6 +178,7 @@ final class RemoteClientPairingModel {
     private let client: any RemotePairingClient
     private let store: any PairedMacStore
     private let focusedSessionObservationStartupTimeoutNanoseconds: UInt64
+    private let focusedStructuredSessionPresenter = FocusedStructuredSessionPresenter()
     private var focusedSessionObservation: (any SessionScreenObservation)?
     private var focusedSessionObservationStartupTask: Task<Void, Never>?
     private var focusedSessionReconnectTask: Task<Void, Never>?
@@ -799,6 +802,7 @@ final class RemoteClientPairingModel {
         focusedSessionWorkspaceID = nil
         focusedSessionWorkspaceLocation = nil
         focusedSessionScreen = nil
+        syncFocusedStructuredSessionPresentation(for: nil)
         focusedSessionIsStale = false
         focusedSessionErrorMessage = nil
 
@@ -1114,7 +1118,15 @@ final class RemoteClientPairingModel {
 
     private func applyFocusedSessionScreen(_ screen: SessionScreen) {
         focusedSessionScreen = screen
+        syncFocusedStructuredSessionPresentation(for: screen)
         setFocusedSessionWorkspaceID(screen.session.workspaceID)
+    }
+
+    private func syncFocusedStructuredSessionPresentation(for screen: SessionScreen?) {
+        let presentation = screen.flatMap { focusedStructuredSessionPresenter.presentation(for: $0) }
+        if focusedStructuredSessionPresentation != presentation {
+            focusedStructuredSessionPresentation = presentation
+        }
     }
 
     private func openRemoteSessionAndRefreshBrowseState(
@@ -1139,6 +1151,7 @@ final class RemoteClientPairingModel {
     private func startFocusedSessionObservation(forceRestart: Bool) async {
         guard let sessionID = focusedSessionID else {
             focusedSessionScreen = nil
+            syncFocusedStructuredSessionPresentation(for: nil)
             focusedSessionIsStale = false
             focusedSessionErrorMessage = nil
             await cancelFocusedSessionObservation()
@@ -1147,6 +1160,7 @@ final class RemoteClientPairingModel {
 
         guard let pairedMac = activePairedMac else {
             focusedSessionScreen = nil
+            syncFocusedStructuredSessionPresentation(for: nil)
             focusedSessionIsStale = false
             focusedSessionErrorMessage = nil
             await cancelFocusedSessionObservation()
@@ -1314,6 +1328,7 @@ final class RemoteClientPairingModel {
             focusedSessionIsStale = true
         } else {
             focusedSessionScreen = nil
+            syncFocusedStructuredSessionPresentation(for: nil)
             focusedSessionIsStale = false
         }
 

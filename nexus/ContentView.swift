@@ -1428,12 +1428,13 @@ struct ContentView: View {
 
     @ViewBuilder
     private func structuredSessionFeed(screen: SessionScreen, isReady: Bool) -> some View {
-        let feedPresentation = structuredFeedPresenter.presentation(for: screen)
+        let structuredPresentation = appModel.focusedStructuredSessionPresentation
+        let feedPresentation = structuredPresentation?.feed ?? structuredFeedPresenter.presentation(for: screen)
         let approvalRequestPresentation = structuredSessionApprovalRequestPresentation(hasWriterAuthority: true)
-        let extensionUI = screen.extensionUI
+        let extensionUI = structuredPresentation?.extensionUI ?? screen.extensionUI
         let aboveEditorWidgets = extensionUI?.widgets.filter { $0.placement == .aboveEditor } ?? []
         let belowEditorWidgets = extensionUI?.widgets.filter { $0.placement == .belowEditor } ?? []
-        let autoScrollTrigger = structuredSessionAutoScrollTrigger(for: screen)
+        let autoScrollTrigger = structuredPresentation?.autoScrollTrigger ?? structuredSessionAutoScrollTrigger(for: screen)
 
         VStack(spacing: 0) {
             if let extensionUI, extensionUI.pendingDialogs.isEmpty == false {
