@@ -2129,11 +2129,10 @@ private struct RemoteSessionScreenView: View {
                 accent: NexusIOSTheme.gold
             )
         } else {
-            LazyVStack(spacing: 10) {
+            VStack(spacing: 10) {
                 ForEach(feedPresentation.activityRows.indices, id: \.self) { index in
                     let row = feedPresentation.activityRows[index]
                     structuredSessionActivityRowView(row, screen: screen)
-                        .id(row.id)
                 }
 
                 if let thinkingIndicator = feedPresentation.thinkingIndicator {

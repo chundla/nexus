@@ -1566,11 +1566,10 @@ struct ContentView: View {
                         )
                         .frame(maxWidth: .infinity, minHeight: 220)
                     } else {
-                        LazyVStack(spacing: 8) {
+                        VStack(spacing: 8) {
                             ForEach(feedPresentation.activityRows.indices, id: \.self) { index in
                                 let row = feedPresentation.activityRows[index]
                                 structuredSessionActivityRowView(row, screen: screen)
-                                    .id(row.id)
                             }
 
                             if let thinkingIndicator = feedPresentation.thinkingIndicator {
