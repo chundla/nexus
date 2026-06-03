@@ -7113,6 +7113,78 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelWorkspaceHomePresentationStaysStableDuringProviderDetailLoads() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let overview = WorkspaceOverview(
+            workspace: workspace,
+            providerCards: [
+                WorkspaceProviderCard(
+                    provider: Provider(id: .claude),
+                    health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+                    defaultSession: ProviderDefaultSessionSummary(
+                        state: .ready,
+                        summary: "Default Session ready",
+                        actionTitle: "Resume",
+                        sessionID: session.id
+                    )
+                )
+            ]
+        )
+        let detail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+            defaultSession: session,
+            alternateSessions: [],
+            failedSessions: []
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: overview,
+            session: session,
+            screen: SessionScreen(session: session, transcript: "Claude ready"),
+            providerDetail: detail
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+        let initialPresentation = model.workspaceHomePresentation()
+
+        @MainActor
+        final class ObservationChangeState {
+            var changed = false
+        }
+
+        let presentationChanged = ObservationChangeState()
+        withObservationTracking {
+            _ = model.workspaceHomePresentation()
+        } onChange: {
+            Task { @MainActor in
+                presentationChanged.changed = true
+            }
+        }
+
+        try await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(presentationChanged.changed == false)
+        #expect(model.workspaceHomePresentation() == initialPresentation)
+    }
+
+    @MainActor
     @Test func appModelWorkspaceBrowseSidebarPresentationUsesLoadedSessionRoutingForRecentOrdering() async throws {
         let group = WorkspaceGroup(id: UUID(), name: "Group")
         let alphaWorkspace = Workspace(

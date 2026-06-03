@@ -57,6 +57,15 @@ struct WorkspaceBrowseDetailPresentation: Equatable {
     let overview: WorkspaceOverview?
 }
 
+struct WorkspaceHomePresentation: Equatable {
+    let recentWorkspaces: [WorkspaceBrowseWorkspaceSummary]
+    let serviceStatus: NexusServiceStatus?
+    let serviceErrorMessage: String?
+    let workspaceCount: Int
+    let workspaceGroupCount: Int
+    let hostCount: Int
+}
+
 @MainActor
 @Observable
 final class NexusAppModel {
@@ -614,6 +623,17 @@ final class NexusAppModel {
             hostName: workspace.flatMap { workspaceHostName(for: $0) },
             groupName: workspace.flatMap { workspaceGroupName(for: $0.primaryGroupID) },
             overview: workspaceOverview(for: workspaceID)
+        )
+    }
+
+    func workspaceHomePresentation() -> WorkspaceHomePresentation {
+        WorkspaceHomePresentation(
+            recentWorkspaces: workspaceBrowseSidebarPresentation(currentWorkspaceID: nil).workspaces,
+            serviceStatus: serviceStatus,
+            serviceErrorMessage: serviceErrorMessage,
+            workspaceCount: workspaces.count,
+            workspaceGroupCount: workspaceGroups.count,
+            hostCount: hosts.count
         )
     }
 

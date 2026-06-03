@@ -328,14 +328,16 @@ struct ContentView: View {
                 }
             }
         } else {
-            overviewDetail
+            WorkspaceHomeBoundary(appModel: appModel) { presentation in
+                overviewDetail(presentation: presentation)
+            }
         }
     }
 
-    private var overviewDetail: some View {
+    private func overviewDetail(presentation: WorkspaceHomePresentation) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                if sortedWorkspaces.isEmpty {
+                if presentation.recentWorkspaces.isEmpty {
                     VStack(alignment: .leading, spacing: 16) {
                         NexusSectionHeader(
                             eyebrow: "Get started",
@@ -363,7 +365,7 @@ struct ContentView: View {
                             detail: "Nexus quietly reorders your workspaces as you move between them, so the sidebar behaves more like a conversation list."
                         )
 
-                        ForEach(sortedWorkspaceSummaries.prefix(6)) { summary in
+                        ForEach(presentation.recentWorkspaces.prefix(6)) { summary in
                             Button {
                                 selection = .workspace(summary.workspace.id)
                             } label: {
@@ -381,14 +383,14 @@ struct ContentView: View {
                     .nexusPanel(tint: NexusMacTheme.gold)
                 }
 
-                if let serviceStatus = appModel.serviceStatus {
+                if let serviceStatus = presentation.serviceStatus {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 14)], spacing: 14) {
                         NexusMetricTile(title: "Service", value: serviceStatus.state.rawValue.capitalized, detail: serviceStatus.store.location.lastPathComponent, accent: NexusMacTheme.gold)
-                        NexusMetricTile(title: "Workspaces", value: "\(appModel.workspaces.count)", detail: "Your active conversation list.", accent: NexusMacTheme.teal)
-                        NexusMetricTile(title: "Groups", value: "\(appModel.workspaceGroups.count)", detail: "Hidden until you need a filter.", accent: NexusMacTheme.gold)
-                        NexusMetricTile(title: "Hosts", value: "\(appModel.hosts.count)", detail: "Remote machines on call.", accent: NexusMacTheme.coral)
+                        NexusMetricTile(title: "Workspaces", value: "\(presentation.workspaceCount)", detail: "Your active conversation list.", accent: NexusMacTheme.teal)
+                        NexusMetricTile(title: "Groups", value: "\(presentation.workspaceGroupCount)", detail: "Hidden until you need a filter.", accent: NexusMacTheme.gold)
+                        NexusMetricTile(title: "Hosts", value: "\(presentation.hostCount)", detail: "Remote machines on call.", accent: NexusMacTheme.coral)
                     }
-                } else if let serviceErrorMessage = appModel.serviceErrorMessage {
+                } else if let serviceErrorMessage = presentation.serviceErrorMessage {
                     ContentUnavailableView(
                         "Background Service unavailable",
                         systemImage: "exclamationmark.triangle",
@@ -2681,6 +2683,23 @@ private struct WorkspaceSidebarBoundary<Content: View>: View {
         case .workspaceGroup, .none:
             nil
         }
+    }
+}
+
+private struct WorkspaceHomeBoundary<Content: View>: View {
+    @Bindable var appModel: NexusAppModel
+    private let content: (WorkspaceHomePresentation) -> Content
+
+    init(
+        appModel: NexusAppModel,
+        @ViewBuilder content: @escaping (WorkspaceHomePresentation) -> Content
+    ) {
+        self.appModel = appModel
+        self.content = content
+    }
+
+    var body: some View {
+        content(appModel.workspaceHomePresentation())
     }
 }
 

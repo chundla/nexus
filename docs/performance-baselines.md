@@ -66,6 +66,20 @@ Save both the XCTest timing summary and the printed baseline lines when comparin
 - compare steps: `buildStructuredDelta`
 - compare metrics: `deltaBuildCount`, `changeCount`, `activityItemCount`, `approvalRequestCount`, `fullReplaceFallbackCount`, `structuredRevision`, `transcriptCharacterCount`
 
+## macOS workspace browse invalidation guardrails
+
+Before running a manual SwiftUI profiling pass for the macOS browse surface, run the focused observation-stability tests that guard the extracted browse presentation seams:
+
+```bash
+xcodebuild test -scheme nexus -project nexus.xcodeproj -destination 'platform=macOS' \
+  -only-testing:nexusTests/appModelWorkspaceHomePresentationStaysStableDuringProviderDetailLoads \
+  -only-testing:nexusTests/appModelWorkspaceBrowseSidebarPresentationStaysStableDuringProviderDetailLoads \
+  -only-testing:nexusTests/appModelWorkspaceBrowseSidebarPresentationUsesLoadedSessionRoutingForRecentOrdering \
+  -only-testing:nexusTests/appModelWorkspaceBrowseDetailPresentationStaysStableDuringTranscriptOnlyUpdates
+```
+
+These tests do not replace SwiftUI Instruments, but they catch service/model observation broadening before you spend time in a profiling trace.
+
 ## Profiling guidance
 
 Use the automated baselines first. If a regression is user-visible, then profile the matching macOS app flow on the same machine and branch so the UI trace can be compared with the service baseline output above.
