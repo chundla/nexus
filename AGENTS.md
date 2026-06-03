@@ -1,6 +1,6 @@
 ## Agent skills
 
-## Tools
+### Tools
 
 - For Xcode/iOS/macOS build, run, and test tasks, prefer the `xcodebuildmcp` CLI over raw `xcodebuild` when possible.
 - If using XcodeBuildMCP, use the installed XcodeBuildMCP skill before calling XcodeBuildMCP tools.
