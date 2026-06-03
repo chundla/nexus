@@ -7096,6 +7096,63 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelFocusedSessionPresentationContextStaysStableDuringTranscriptOnlyUpdates() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let host = NexusDomain.Host(id: UUID(), name: "Build Server", sshTarget: "build-box", port: 2222)
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Remote API",
+            kind: .remote,
+            folderPath: "/srv/api",
+            primaryGroupID: group.id,
+            remoteHostID: host.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []),
+            session: session,
+            screen: SessionScreen(session: session, transcript: "Claude ready"),
+            hosts: [host]
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+        try await model.focusSession(sessionID: session.id)
+        let initialContext = try #require(model.focusedSessionPresentationContext)
+
+        @MainActor
+        final class ObservationChangeState {
+            var changed = false
+        }
+
+        // Regression guard: transcript-only live Session updates should not churn the
+        // remote workspace header context that the macOS Session view reads separately.
+        let presentationContextChanged = ObservationChangeState()
+        withObservationTracking {
+            _ = model.focusedSessionPresentationContext
+        } onChange: {
+            Task { @MainActor in
+                presentationContextChanged.changed = true
+            }
+        }
+
+        await client.emitObservedScreen(SessionScreen(session: session, transcript: "Updated transcript"))
+        for _ in 0 ..< 20 where model.focusedSessionScreen?.transcript != "Updated transcript" {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(presentationContextChanged.changed == false)
+        #expect(model.focusedSessionPresentationContext == initialContext)
+    }
+
+    @MainActor
     @Test func appModelFocusedSessionControllerSummaryNamesRemoteController() async throws {
         let group = WorkspaceGroup(id: UUID(), name: "Group")
         let workspace = Workspace(
