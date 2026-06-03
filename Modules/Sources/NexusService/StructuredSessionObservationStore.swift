@@ -152,10 +152,6 @@ final class StructuredSessionObservationStore: @unchecked Sendable {
     }
 
     private func ensureCurrentEntryLocked(for screen: SessionScreen) -> EntryResolution {
-        if let entry = entries[screen.session.id], entry.snapshot.screen == screen {
-            return EntryResolution(entry: entry, deltaBuildSummary: nil)
-        }
-
         guard var entry = entries[screen.session.id] else {
             let initialEntry = Entry(
                 snapshot: StructuredSessionObservationSnapshot(revision: 0, screen: screen),
@@ -242,32 +238,33 @@ final class StructuredSessionObservationStore: @unchecked Sendable {
         from existingItems: [SessionActivityItem],
         to newItems: [SessionActivityItem]
     ) -> [StructuredSessionObservationChange] {
-        guard existingItems != newItems else {
-            return []
+        guard existingItems.count <= newItems.count else {
+            return [.replaceActivityItems(newItems)]
         }
 
-        let sharedCount = min(existingItems.count, newItems.count)
-        var changes: [StructuredSessionObservationChange] = []
+        let sharedCount = existingItems.count
+        var firstChangedIndex: Int?
 
         for index in 0..<sharedCount {
             guard existingItems[index].id == newItems[index].id else {
                 return [.replaceActivityItems(newItems)]
             }
-            if existingItems[index] != newItems[index] {
-                changes.append(.replaceActivityItem(newItems[index]))
+            if existingItems[index] != newItems[index], firstChangedIndex == nil {
+                firstChangedIndex = index
             }
         }
 
-        guard newItems.count >= existingItems.count else {
-            return [.replaceActivityItems(newItems)]
+        if let firstChangedIndex {
+            return [
+                .replaceActivityItemRange(
+                    startIndex: firstChangedIndex,
+                    items: Array(newItems.dropFirst(firstChangedIndex))
+                )
+            ]
         }
 
         let appendedItems = Array(newItems.dropFirst(sharedCount))
-        if appendedItems.isEmpty == false {
-            changes.append(.appendActivityItems(appendedItems))
-        }
-
-        return changes.isEmpty ? [.replaceActivityItems(newItems)] : changes
+        return appendedItems.isEmpty ? [] : [.appendActivityItems(appendedItems)]
     }
 
     private func providerEventChanges(
@@ -342,6 +339,11 @@ final class StructuredSessionObservationStore: @unchecked Sendable {
                 count += 1
             }
         }
+        let activityItemRangeReplaceCount = summary.changes.reduce(into: 0) { count, change in
+            if case .replaceActivityItemRange = change {
+                count += 1
+            }
+        }
         let fullReplaceProviderEventsCount = summary.changes.reduce(into: 0) { count, change in
             if case .replaceProviderEvents = change {
                 count += 1
@@ -354,6 +356,7 @@ final class StructuredSessionObservationStore: @unchecked Sendable {
         metrics["baseRevision"] = summary.baseRevision
         metrics["structuredRevision"] = summary.revision
         metrics["changeCount"] = summary.changes.count
+        metrics["activityItemRangeReplaceCount"] = activityItemRangeReplaceCount
         metrics["fullReplaceActivityItemsCount"] = fullReplaceActivityItemsCount
         metrics["fullReplaceProviderEventsCount"] = fullReplaceProviderEventsCount
         metrics["fullReplaceFallbackCount"] = fullReplaceActivityItemsCount + fullReplaceProviderEventsCount

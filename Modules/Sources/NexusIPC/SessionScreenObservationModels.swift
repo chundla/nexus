@@ -55,6 +55,7 @@ public enum StructuredSessionObservationChange: Codable, Equatable, Sendable {
     case setTerminalSize(columns: Int, rows: Int)
     case appendActivityItems([SessionActivityItem])
     case replaceActivityItem(SessionActivityItem)
+    case replaceActivityItemRange(startIndex: Int, items: [SessionActivityItem])
     case replaceActivityItems([SessionActivityItem])
     case replaceApprovalRequests([SessionApprovalRequest])
     case replaceExtensionUI(SessionExtensionUIState?)
@@ -163,7 +164,7 @@ public final class SessionScreenObservationAccumulator: @unchecked Sendable {
                 )
 
             case let .structuredDelta(delta):
-                guard var snapshot = currentStructuredSnapshot else {
+                guard let snapshot = currentStructuredSnapshot else {
                     throw SessionScreenObservationGapError.structuredGap(
                         expectedRevision: nil,
                         currentRevision: delta.revision
@@ -176,257 +177,15 @@ public final class SessionScreenObservationAccumulator: @unchecked Sendable {
                     )
                 }
 
+                var state = StructuredSessionObservationMutableState(snapshot: snapshot)
                 for change in delta.changes {
-                    apply(change, to: &snapshot)
+                    state.apply(change)
                 }
-                snapshot = StructuredSessionObservationSnapshot(revision: delta.revision, screen: snapshot.screen)
-                currentStructuredSnapshot = snapshot
-                currentScreenValue = snapshot.screen
+                let updatedSnapshot = state.snapshot(revision: delta.revision)
+                currentStructuredSnapshot = updatedSnapshot
+                currentScreenValue = updatedSnapshot.screen
                 return currentScreenValue
             }
-        }
-    }
-
-    private func apply(
-        _ change: StructuredSessionObservationChange,
-        to snapshot: inout StructuredSessionObservationSnapshot
-    ) {
-        switch change {
-        case let .replaceSession(session):
-            snapshot = StructuredSessionObservationSnapshot(
-                revision: snapshot.revision,
-                screen: SessionScreen(
-                    session: session,
-                    primarySurface: .structuredActivityFeed,
-                    controller: snapshot.controller,
-                    transcript: snapshot.transcript,
-                    terminalColumns: snapshot.terminalColumns,
-                    terminalRows: snapshot.terminalRows,
-                    activityItems: snapshot.activityItems,
-                    approvalRequests: snapshot.approvalRequests,
-                    extensionUI: snapshot.extensionUI,
-                    slashCommands: snapshot.slashCommands,
-                    providerEvents: snapshot.providerEvents,
-                    isAgentTurnInProgress: snapshot.isAgentTurnInProgress
-                )
-            )
-        case let .setController(controller):
-            snapshot = StructuredSessionObservationSnapshot(
-                revision: snapshot.revision,
-                screen: SessionScreen(
-                    session: snapshot.session,
-                    primarySurface: .structuredActivityFeed,
-                    controller: controller,
-                    transcript: snapshot.transcript,
-                    terminalColumns: snapshot.terminalColumns,
-                    terminalRows: snapshot.terminalRows,
-                    activityItems: snapshot.activityItems,
-                    approvalRequests: snapshot.approvalRequests,
-                    extensionUI: snapshot.extensionUI,
-                    slashCommands: snapshot.slashCommands,
-                    providerEvents: snapshot.providerEvents,
-                    isAgentTurnInProgress: snapshot.isAgentTurnInProgress
-                )
-            )
-        case let .setTranscript(transcript):
-            snapshot = StructuredSessionObservationSnapshot(
-                revision: snapshot.revision,
-                screen: SessionScreen(
-                    session: snapshot.session,
-                    primarySurface: .structuredActivityFeed,
-                    controller: snapshot.controller,
-                    transcript: transcript,
-                    terminalColumns: snapshot.terminalColumns,
-                    terminalRows: snapshot.terminalRows,
-                    activityItems: snapshot.activityItems,
-                    approvalRequests: snapshot.approvalRequests,
-                    extensionUI: snapshot.extensionUI,
-                    slashCommands: snapshot.slashCommands,
-                    providerEvents: snapshot.providerEvents,
-                    isAgentTurnInProgress: snapshot.isAgentTurnInProgress
-                )
-            )
-        case let .setTerminalSize(columns, rows):
-            snapshot = StructuredSessionObservationSnapshot(
-                revision: snapshot.revision,
-                screen: SessionScreen(
-                    session: snapshot.session,
-                    primarySurface: .structuredActivityFeed,
-                    controller: snapshot.controller,
-                    transcript: snapshot.transcript,
-                    terminalColumns: columns,
-                    terminalRows: rows,
-                    activityItems: snapshot.activityItems,
-                    approvalRequests: snapshot.approvalRequests,
-                    extensionUI: snapshot.extensionUI,
-                    slashCommands: snapshot.slashCommands,
-                    providerEvents: snapshot.providerEvents,
-                    isAgentTurnInProgress: snapshot.isAgentTurnInProgress
-                )
-            )
-        case let .appendActivityItems(items):
-            snapshot = StructuredSessionObservationSnapshot(
-                revision: snapshot.revision,
-                screen: SessionScreen(
-                    session: snapshot.session,
-                    primarySurface: .structuredActivityFeed,
-                    controller: snapshot.controller,
-                    transcript: snapshot.transcript,
-                    terminalColumns: snapshot.terminalColumns,
-                    terminalRows: snapshot.terminalRows,
-                    activityItems: snapshot.activityItems + items,
-                    approvalRequests: snapshot.approvalRequests,
-                    extensionUI: snapshot.extensionUI,
-                    slashCommands: snapshot.slashCommands,
-                    providerEvents: snapshot.providerEvents,
-                    isAgentTurnInProgress: snapshot.isAgentTurnInProgress
-                )
-            )
-        case let .replaceActivityItem(item):
-            let updatedItems = snapshot.activityItems.map { $0.id == item.id ? item : $0 }
-            snapshot = StructuredSessionObservationSnapshot(
-                revision: snapshot.revision,
-                screen: SessionScreen(
-                    session: snapshot.session,
-                    primarySurface: .structuredActivityFeed,
-                    controller: snapshot.controller,
-                    transcript: snapshot.transcript,
-                    terminalColumns: snapshot.terminalColumns,
-                    terminalRows: snapshot.terminalRows,
-                    activityItems: updatedItems,
-                    approvalRequests: snapshot.approvalRequests,
-                    extensionUI: snapshot.extensionUI,
-                    slashCommands: snapshot.slashCommands,
-                    providerEvents: snapshot.providerEvents,
-                    isAgentTurnInProgress: snapshot.isAgentTurnInProgress
-                )
-            )
-        case let .replaceActivityItems(items):
-            snapshot = StructuredSessionObservationSnapshot(
-                revision: snapshot.revision,
-                screen: SessionScreen(
-                    session: snapshot.session,
-                    primarySurface: .structuredActivityFeed,
-                    controller: snapshot.controller,
-                    transcript: snapshot.transcript,
-                    terminalColumns: snapshot.terminalColumns,
-                    terminalRows: snapshot.terminalRows,
-                    activityItems: items,
-                    approvalRequests: snapshot.approvalRequests,
-                    extensionUI: snapshot.extensionUI,
-                    slashCommands: snapshot.slashCommands,
-                    providerEvents: snapshot.providerEvents,
-                    isAgentTurnInProgress: snapshot.isAgentTurnInProgress
-                )
-            )
-        case let .replaceApprovalRequests(approvalRequests):
-            snapshot = StructuredSessionObservationSnapshot(
-                revision: snapshot.revision,
-                screen: SessionScreen(
-                    session: snapshot.session,
-                    primarySurface: .structuredActivityFeed,
-                    controller: snapshot.controller,
-                    transcript: snapshot.transcript,
-                    terminalColumns: snapshot.terminalColumns,
-                    terminalRows: snapshot.terminalRows,
-                    activityItems: snapshot.activityItems,
-                    approvalRequests: approvalRequests,
-                    extensionUI: snapshot.extensionUI,
-                    slashCommands: snapshot.slashCommands,
-                    providerEvents: snapshot.providerEvents,
-                    isAgentTurnInProgress: snapshot.isAgentTurnInProgress
-                )
-            )
-        case let .replaceExtensionUI(extensionUI):
-            snapshot = StructuredSessionObservationSnapshot(
-                revision: snapshot.revision,
-                screen: SessionScreen(
-                    session: snapshot.session,
-                    primarySurface: .structuredActivityFeed,
-                    controller: snapshot.controller,
-                    transcript: snapshot.transcript,
-                    terminalColumns: snapshot.terminalColumns,
-                    terminalRows: snapshot.terminalRows,
-                    activityItems: snapshot.activityItems,
-                    approvalRequests: snapshot.approvalRequests,
-                    extensionUI: extensionUI,
-                    slashCommands: snapshot.slashCommands,
-                    providerEvents: snapshot.providerEvents,
-                    isAgentTurnInProgress: snapshot.isAgentTurnInProgress
-                )
-            )
-        case let .replaceSlashCommands(slashCommands):
-            snapshot = StructuredSessionObservationSnapshot(
-                revision: snapshot.revision,
-                screen: SessionScreen(
-                    session: snapshot.session,
-                    primarySurface: .structuredActivityFeed,
-                    controller: snapshot.controller,
-                    transcript: snapshot.transcript,
-                    terminalColumns: snapshot.terminalColumns,
-                    terminalRows: snapshot.terminalRows,
-                    activityItems: snapshot.activityItems,
-                    approvalRequests: snapshot.approvalRequests,
-                    extensionUI: snapshot.extensionUI,
-                    slashCommands: slashCommands,
-                    providerEvents: snapshot.providerEvents,
-                    isAgentTurnInProgress: snapshot.isAgentTurnInProgress
-                )
-            )
-        case let .appendProviderEvents(providerEvents):
-            snapshot = StructuredSessionObservationSnapshot(
-                revision: snapshot.revision,
-                screen: SessionScreen(
-                    session: snapshot.session,
-                    primarySurface: .structuredActivityFeed,
-                    controller: snapshot.controller,
-                    transcript: snapshot.transcript,
-                    terminalColumns: snapshot.terminalColumns,
-                    terminalRows: snapshot.terminalRows,
-                    activityItems: snapshot.activityItems,
-                    approvalRequests: snapshot.approvalRequests,
-                    extensionUI: snapshot.extensionUI,
-                    slashCommands: snapshot.slashCommands,
-                    providerEvents: snapshot.providerEvents + providerEvents,
-                    isAgentTurnInProgress: snapshot.isAgentTurnInProgress
-                )
-            )
-        case let .replaceProviderEvents(providerEvents):
-            snapshot = StructuredSessionObservationSnapshot(
-                revision: snapshot.revision,
-                screen: SessionScreen(
-                    session: snapshot.session,
-                    primarySurface: .structuredActivityFeed,
-                    controller: snapshot.controller,
-                    transcript: snapshot.transcript,
-                    terminalColumns: snapshot.terminalColumns,
-                    terminalRows: snapshot.terminalRows,
-                    activityItems: snapshot.activityItems,
-                    approvalRequests: snapshot.approvalRequests,
-                    extensionUI: snapshot.extensionUI,
-                    slashCommands: snapshot.slashCommands,
-                    providerEvents: providerEvents,
-                    isAgentTurnInProgress: snapshot.isAgentTurnInProgress
-                )
-            )
-        case let .setAgentTurnInProgress(isAgentTurnInProgress):
-            snapshot = StructuredSessionObservationSnapshot(
-                revision: snapshot.revision,
-                screen: SessionScreen(
-                    session: snapshot.session,
-                    primarySurface: .structuredActivityFeed,
-                    controller: snapshot.controller,
-                    transcript: snapshot.transcript,
-                    terminalColumns: snapshot.terminalColumns,
-                    terminalRows: snapshot.terminalRows,
-                    activityItems: snapshot.activityItems,
-                    approvalRequests: snapshot.approvalRequests,
-                    extensionUI: snapshot.extensionUI,
-                    slashCommands: snapshot.slashCommands,
-                    providerEvents: snapshot.providerEvents,
-                    isAgentTurnInProgress: isAgentTurnInProgress
-                )
-            )
         }
     }
 
@@ -434,5 +193,94 @@ public final class SessionScreenObservationAccumulator: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return try operation()
+    }
+}
+
+private struct StructuredSessionObservationMutableState {
+    var session: Session
+    var controller: SessionController
+    var transcript: String
+    var terminalColumns: Int
+    var terminalRows: Int
+    var activityItems: [SessionActivityItem]
+    var approvalRequests: [SessionApprovalRequest]
+    var extensionUI: SessionExtensionUIState?
+    var slashCommands: [SessionSlashCommand]?
+    var providerEvents: [SessionProviderEvent]
+    var isAgentTurnInProgress: Bool
+
+    init(snapshot: StructuredSessionObservationSnapshot) {
+        session = snapshot.session
+        controller = snapshot.controller
+        transcript = snapshot.transcript
+        terminalColumns = snapshot.terminalColumns
+        terminalRows = snapshot.terminalRows
+        activityItems = snapshot.activityItems
+        approvalRequests = snapshot.approvalRequests
+        extensionUI = snapshot.extensionUI
+        slashCommands = snapshot.slashCommands
+        providerEvents = snapshot.providerEvents
+        isAgentTurnInProgress = snapshot.isAgentTurnInProgress
+    }
+
+    mutating func apply(_ change: StructuredSessionObservationChange) {
+        switch change {
+        case let .replaceSession(updatedSession):
+            session = updatedSession
+        case let .setController(updatedController):
+            controller = updatedController
+        case let .setTranscript(updatedTranscript):
+            transcript = updatedTranscript
+        case let .setTerminalSize(columns, rows):
+            terminalColumns = columns
+            terminalRows = rows
+        case let .appendActivityItems(items):
+            activityItems.append(contentsOf: items)
+        case let .replaceActivityItem(item):
+            guard let index = activityItems.firstIndex(where: { $0.id == item.id }) else {
+                return
+            }
+            activityItems[index] = item
+        case let .replaceActivityItemRange(startIndex, items):
+            guard startIndex <= activityItems.count else {
+                activityItems = items
+                return
+            }
+            activityItems.replaceSubrange(startIndex..<activityItems.count, with: items)
+        case let .replaceActivityItems(items):
+            activityItems = items
+        case let .replaceApprovalRequests(updatedApprovalRequests):
+            approvalRequests = updatedApprovalRequests
+        case let .replaceExtensionUI(updatedExtensionUI):
+            extensionUI = updatedExtensionUI
+        case let .replaceSlashCommands(updatedSlashCommands):
+            slashCommands = updatedSlashCommands
+        case let .appendProviderEvents(events):
+            providerEvents.append(contentsOf: events)
+        case let .replaceProviderEvents(events):
+            providerEvents = events
+        case let .setAgentTurnInProgress(updatedIsAgentTurnInProgress):
+            isAgentTurnInProgress = updatedIsAgentTurnInProgress
+        }
+    }
+
+    func snapshot(revision: Int) -> StructuredSessionObservationSnapshot {
+        StructuredSessionObservationSnapshot(
+            revision: revision,
+            screen: SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                controller: controller,
+                transcript: transcript,
+                terminalColumns: terminalColumns,
+                terminalRows: terminalRows,
+                activityItems: activityItems,
+                approvalRequests: approvalRequests,
+                extensionUI: extensionUI,
+                slashCommands: slashCommands,
+                providerEvents: providerEvents,
+                isAgentTurnInProgress: isAgentTurnInProgress
+            )
+        )
     }
 }

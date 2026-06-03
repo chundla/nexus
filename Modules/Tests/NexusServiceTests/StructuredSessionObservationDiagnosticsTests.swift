@@ -1,6 +1,7 @@
 #if os(macOS)
 import Foundation
 import NexusDomain
+import NexusIPC
 @testable import NexusService
 import Testing
 
@@ -108,6 +109,53 @@ struct StructuredSessionObservationDiagnosticsTests {
         #expect(record.metrics["fullReplaceFallbackCount"] == 1)
         #expect(record.metrics["fullReplaceActivityItemsCount"] == 1)
         #expect(record.metrics["fullReplaceProviderEventsCount"] == 0)
+    }
+
+    @Test func structuredObservationDeltaUsesTailActivityReplacementWhenSharedPrefixStaysStable() throws {
+        let recorder = PerformanceDiagnosticRecorder()
+        let store = StructuredSessionObservationStore(recordPerformanceDiagnostic: recorder.record)
+        let session = Session(id: UUID(), workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready)
+        let statusItem = SessionActivityItem(id: UUID(), kind: .status, text: "Pi ready")
+        let progressItem = SessionActivityItem(id: UUID(), kind: .progress, text: "Streaming 50%")
+        let updatedProgressItem = SessionActivityItem(id: progressItem.id, kind: .progress, text: "Streaming 100%")
+        let completionItem = SessionActivityItem(kind: .completion, text: "Done")
+
+        _ = store.snapshotResponse(
+            for: SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                transcript: "",
+                activityItems: [statusItem, progressItem]
+            )
+        )
+        store.recordChange(
+            for: SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                transcript: "",
+                activityItems: [statusItem, updatedProgressItem, completionItem]
+            )
+        )
+
+        let updates = store.updates(for: session.id, after: 0)
+        #expect(updates == [
+            .structuredDelta(
+                StructuredSessionObservationDelta(
+                    baseRevision: 0,
+                    revision: 1,
+                    changes: [
+                        .replaceActivityItemRange(startIndex: 1, items: [updatedProgressItem, completionItem])
+                    ]
+                )
+            )
+        ])
+
+        let record = try #require(recorder.records.filter {
+            $0.metrics["deltaBuildCount"] == 1
+        }.first)
+
+        #expect(record.metrics["activityItemRangeReplaceCount"] == 1)
+        #expect(record.metrics["fullReplaceFallbackCount"] == 0)
     }
 
     @Test func structuredObservationGapDiagnosticIsRecordedWhenRevisionHistoryFallsBehind() throws {
