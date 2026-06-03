@@ -37,7 +37,6 @@ struct ContentView: View {
     @State private var terminalViewportSize: CGSize = .zero
     @State private var terminalViewportResizeCoordinator = TerminalViewportResizeCoordinator()
     @State private var terminalFocusToken = UUID()
-    @State private var structuredFeedPresenter = StructuredSessionFeedPresenter()
     @State private var presentedError: PresentedError?
 
     private let terminalLayout = TerminalViewportLayout.live
@@ -275,8 +274,8 @@ struct ContentView: View {
                     providerDetail(workspaceID: workspaceID, providerID: providerID, detail: detail)
                 }
             case .session(let sessionID):
-                FocusedSessionDetailBoundary(sessionID: sessionID, appModel: appModel) { screen, context in
-                    sessionDetailContent(screen: screen, context: context)
+                FocusedSessionDetailBoundary(sessionID: sessionID, appModel: appModel) { summary, screen, context in
+                    sessionDetailContent(summary: summary, screen: screen, context: context)
                 } unavailable: {
                     ContentUnavailableView(
                         "Session unavailable",
@@ -771,11 +770,15 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    private func sessionDetailContent(screen: SessionScreen, context: SessionPresentationContext?) -> some View {
-        let isReady = screen.session.state == .ready
+    private func sessionDetailContent(
+        summary: FocusedSessionSummaryPresentation,
+        screen: SessionScreen?,
+        context: SessionPresentationContext?
+    ) -> some View {
+        let isReady = summary.session.state == .ready
         let isRemote = context?.isRemote == true
-        let surface = screen.primarySurface
-        let stateColor = sessionStateColor(screen.session.state)
+        let surface = summary.primarySurface
+        let stateColor = sessionStateColor(summary.session.state)
 
         return VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
@@ -784,7 +787,7 @@ struct ContentView: View {
                     .frame(width: 8, height: 8)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(screen.session.providerID.displayName)
+                    Text(summary.session.providerID.displayName)
                         .font(NexusMacTheme.bodyFont(17).weight(.semibold))
                         .foregroundStyle(.white)
 
@@ -800,16 +803,16 @@ struct ContentView: View {
                 Menu {
                     if isRemote, isReady {
                         Button("Detach") {
-                            detachSession(screen.session)
+                            detachSession(summary.session)
                         }
                     }
 
                     if isReady {
                         Button("Stop Session") {
                             stopSession(
-                                screen.session,
-                                workspaceID: screen.session.workspaceID,
-                                providerID: screen.session.providerID
+                                summary.session,
+                                workspaceID: summary.session.workspaceID,
+                                providerID: summary.session.providerID
                             )
                         }
                     }
@@ -839,8 +842,8 @@ struct ContentView: View {
             .nexusPanel(tint: stateColor, radius: 16)
 
             if surface == .structuredActivityFeed {
-                structuredSessionFeed(screen: screen, isReady: isReady)
-            } else {
+                structuredSessionFeed(isReady: isReady)
+            } else if let screen {
                 terminalSessionFeed(screen: screen, isReady: isReady)
             }
         }
@@ -1440,110 +1443,119 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func structuredSessionFeed(screen: SessionScreen, isReady: Bool) -> some View {
-        let structuredPresentation = appModel.focusedStructuredSessionPresentation
-        let structuredChrome = appModel.focusedStructuredSessionChromePresentation ?? NexusSessionPresentation.focusedStructuredSessionChromePresentation(for: screen)
-        let feedPresentation = structuredPresentation?.feed ?? structuredFeedPresenter.presentation(for: screen)
-        let approvalRequestPresentation = structuredSessionApprovalRequestPresentation(hasWriterAuthority: true)
-        let extensionUI = structuredChrome?.extensionUI ?? structuredPresentation?.extensionUI ?? screen.extensionUI
-        let aboveEditorWidgets = extensionUI?.widgets.filter { $0.placement == .aboveEditor } ?? []
-        let belowEditorWidgets = extensionUI?.widgets.filter { $0.placement == .belowEditor } ?? []
-        let autoScrollTrigger = structuredPresentation?.autoScrollTrigger ?? structuredSessionAutoScrollTrigger(for: screen)
+    private func structuredSessionFeed(isReady: Bool) -> some View {
+        if let structuredPresentation = appModel.focusedStructuredSessionPresentation {
+            let structuredChrome = appModel.focusedStructuredSessionChromePresentation
+            let feedPresentation = structuredPresentation.feed
+            let approvalRequestPresentation = structuredSessionApprovalRequestPresentation(hasWriterAuthority: true)
+            let extensionUI = structuredChrome?.extensionUI ?? structuredPresentation.extensionUI
+            let aboveEditorWidgets = extensionUI?.widgets.filter { $0.placement == .aboveEditor } ?? []
+            let belowEditorWidgets = extensionUI?.widgets.filter { $0.placement == .belowEditor } ?? []
+            let autoScrollTrigger = structuredPresentation.autoScrollTrigger
 
-        VStack(spacing: 0) {
-            if let extensionUI, extensionUI.pendingDialogs.isEmpty == false {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(extensionUI.pendingDialogs) { dialog in
-                        structuredSessionExtensionDialogView(dialog)
+            VStack(spacing: 0) {
+                if let extensionUI, extensionUI.pendingDialogs.isEmpty == false {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(extensionUI.pendingDialogs) { dialog in
+                            structuredSessionExtensionDialogView(dialog)
+                        }
                     }
-                }
-                .padding(.horizontal, 14)
-                .padding(.top, 14)
-            }
-
-            if feedPresentation.pendingApprovalRequests.isEmpty == false {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(feedPresentation.pendingApprovalRequests) { request in
-                        structuredSessionApprovalRequestView(request, presentation: approvalRequestPresentation)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.top, 14)
-            }
-
-            if let extensionUI,
-               extensionUI.title != nil || extensionUI.statuses.isEmpty == false || extensionUI.notifications.isEmpty == false {
-                structuredSessionExtensionSummaryView(extensionUI)
                     .padding(.horizontal, 14)
                     .padding(.top, 14)
-            }
+                }
 
-            ScrollViewReader { proxy in
-                ScrollView {
-                    if feedPresentation.activityRows.isEmpty {
-                        ContentUnavailableView(
-                            feedPresentation.copy.emptyStateTitle,
-                            systemImage: "message",
-                            description: Text(feedPresentation.copy.emptyStateDescription)
-                        )
-                        .frame(maxWidth: .infinity, minHeight: 220)
-                    } else {
-                        LazyVStack(spacing: 8) {
-                            ForEach(feedPresentation.activityRows) { row in
-                                MacEquatableStructuredSessionActivityRow(row: row) {
-                                    structuredSessionActivityRowView(row)
-                                }
-                            }
-
-                            if let thinkingIndicator = feedPresentation.thinkingIndicator {
-                                structuredSessionThinkingIndicatorView(thinkingIndicator)
-                            }
-
-                            Color.clear
-                                .frame(height: 1)
-                                .id("conversation-bottom")
+                if feedPresentation.pendingApprovalRequests.isEmpty == false {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(feedPresentation.pendingApprovalRequests) { request in
+                            structuredSessionApprovalRequestView(request, presentation: approvalRequestPresentation)
                         }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.top, 14)
+                }
+
+                if let extensionUI,
+                   extensionUI.title != nil || extensionUI.statuses.isEmpty == false || extensionUI.notifications.isEmpty == false {
+                    structuredSessionExtensionSummaryView(extensionUI)
                         .padding(.horizontal, 14)
-                        .padding(.vertical, 14)
-                    }
+                        .padding(.top, 14)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .onAppear {
-                    DispatchQueue.main.async {
-                        proxy.scrollTo("conversation-bottom", anchor: .bottom)
-                    }
-                }
-                .onChange(of: autoScrollTrigger) { oldTrigger, newTrigger in
-                    let scroll = {
-                        proxy.scrollTo("conversation-bottom", anchor: .bottom)
-                    }
 
-                    switch structuredSessionAutoScrollAnimation(previous: oldTrigger, current: newTrigger) {
-                    case .immediate:
-                        scroll()
-                    case .animated:
-                        withAnimation(.easeOut(duration: 0.18)) {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        if feedPresentation.activityRows.isEmpty {
+                            ContentUnavailableView(
+                                feedPresentation.copy.emptyStateTitle,
+                                systemImage: "message",
+                                description: Text(feedPresentation.copy.emptyStateDescription)
+                            )
+                            .frame(maxWidth: .infinity, minHeight: 220)
+                        } else {
+                            LazyVStack(spacing: 8) {
+                                ForEach(feedPresentation.activityRows) { row in
+                                    MacEquatableStructuredSessionActivityRow(row: row) {
+                                        structuredSessionActivityRowView(row)
+                                    }
+                                }
+
+                                if let thinkingIndicator = feedPresentation.thinkingIndicator {
+                                    structuredSessionThinkingIndicatorView(thinkingIndicator)
+                                }
+
+                                Color.clear
+                                    .frame(height: 1)
+                                    .id("conversation-bottom")
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 14)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .onAppear {
+                        DispatchQueue.main.async {
+                            proxy.scrollTo("conversation-bottom", anchor: .bottom)
+                        }
+                    }
+                    .onChange(of: autoScrollTrigger) { oldTrigger, newTrigger in
+                        let scroll = {
+                            proxy.scrollTo("conversation-bottom", anchor: .bottom)
+                        }
+
+                        switch structuredSessionAutoScrollAnimation(previous: oldTrigger, current: newTrigger) {
+                        case .immediate:
                             scroll()
+                        case .animated:
+                            withAnimation(.easeOut(duration: 0.18)) {
+                                scroll()
+                            }
                         }
                     }
                 }
-            }
 
-            if isReady, let structuredChrome {
-                MacStructuredSessionComposerSection(
-                    chrome: structuredChrome,
-                    appModel: appModel,
-                    workspaceLocation: structuredSessionWorkspaceLocation(for: structuredChrome.session),
-                    aboveEditorWidgets: aboveEditorWidgets,
-                    belowEditorWidgets: belowEditorWidgets,
-                    onError: { message in
-                        presentedError = PresentedError(message: message)
-                    }
-                )
+                if isReady, let structuredChrome {
+                    MacStructuredSessionComposerSection(
+                        chrome: structuredChrome,
+                        appModel: appModel,
+                        workspaceLocation: structuredSessionWorkspaceLocation(for: structuredChrome.session),
+                        aboveEditorWidgets: aboveEditorWidgets,
+                        belowEditorWidgets: belowEditorWidgets,
+                        onError: { message in
+                            presentedError = PresentedError(message: message)
+                        }
+                    )
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .nexusPanel(tint: NexusMacTheme.teal, radius: 22)
+        } else {
+            ContentUnavailableView(
+                "Session unavailable",
+                systemImage: "message",
+                description: Text("Open the session again from its workspace to continue the conversation.")
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .nexusPanel(tint: NexusMacTheme.coral)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .nexusPanel(tint: NexusMacTheme.teal, radius: 22)
     }
 
     @ViewBuilder
@@ -2800,13 +2812,13 @@ private struct ProviderDetailBoundary<Content: View>: View {
 private struct FocusedSessionDetailBoundary<Content: View, Unavailable: View>: View {
     @Bindable var appModel: NexusAppModel
     let sessionID: UUID
-    private let content: (SessionScreen, SessionPresentationContext?) -> Content
+    private let content: (FocusedSessionSummaryPresentation, SessionScreen?, SessionPresentationContext?) -> Content
     private let unavailable: () -> Unavailable
 
     init(
         sessionID: UUID,
         appModel: NexusAppModel,
-        @ViewBuilder content: @escaping (SessionScreen, SessionPresentationContext?) -> Content,
+        @ViewBuilder content: @escaping (FocusedSessionSummaryPresentation, SessionScreen?, SessionPresentationContext?) -> Content,
         @ViewBuilder unavailable: @escaping () -> Unavailable
     ) {
         self.sessionID = sessionID
@@ -2817,10 +2829,17 @@ private struct FocusedSessionDetailBoundary<Content: View, Unavailable: View>: V
 
     var body: some View {
         Group {
-            if let screen = appModel.focusedSessionScreen,
-               screen.session.id == sessionID,
+            if let summary = appModel.focusedSessionSummaryPresentation,
+               summary.session.id == sessionID,
                appModel.focusedSessionID == sessionID {
-                content(screen, appModel.focusedSessionPresentationContext)
+                if summary.primarySurface == .structuredActivityFeed {
+                    content(summary, nil, appModel.focusedSessionPresentationContext)
+                } else if let screen = appModel.focusedSessionScreen,
+                          screen.session.id == sessionID {
+                    content(summary, screen, appModel.focusedSessionPresentationContext)
+                } else {
+                    unavailable()
+                }
             } else {
                 unavailable()
             }

@@ -7775,6 +7775,78 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelFocusedSessionSummaryPresentationStaysStableDuringAppendOnlyStructuredUpdates() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let initialActivity = SessionActivityItem(kind: .message, text: "Pi: Ready")
+        let appendedActivity = SessionActivityItem(kind: .message, text: "Pi: Streaming more output")
+        let initialScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "Pi shared Session stream connected",
+            activityItems: [initialActivity]
+        )
+        let updatedScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "Pi shared Session stream connected\nPi: Streaming more output",
+            activityItems: [initialActivity, appendedActivity]
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []),
+            session: session,
+            screen: initialScreen
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+        try await model.focusSession(sessionID: session.id)
+        let initialSummary = try #require(model.focusedSessionSummaryPresentation)
+        #expect(initialSummary.session == session)
+        #expect(initialSummary.primarySurface == .structuredActivityFeed)
+
+        @MainActor
+        final class ObservationChangeState {
+            var changed = false
+        }
+
+        let summaryChanged = ObservationChangeState()
+        withObservationTracking {
+            _ = model.focusedSessionSummaryPresentation
+        } onChange: {
+            Task { @MainActor in
+                summaryChanged.changed = true
+            }
+        }
+
+        await client.emitObservedScreen(updatedScreen)
+        for _ in 0 ..< 20 where model.focusedSessionScreen?.transcript != updatedScreen.transcript {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(model.focusedStructuredSessionPresentation?.feed.activityRows.map(\.text) == [
+            initialActivity.text,
+            appendedActivity.text
+        ])
+        #expect(summaryChanged.changed == false)
+        #expect(model.focusedSessionSummaryPresentation == initialSummary)
+    }
+
+    @MainActor
     @Test func appModelFocusedSessionControllerSummaryNamesRemoteController() async throws {
         let group = WorkspaceGroup(id: UUID(), name: "Group")
         let workspace = Workspace(

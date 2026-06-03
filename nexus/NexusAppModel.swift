@@ -32,6 +32,11 @@ struct SessionControllerSummary: Equatable {
     let message: String
 }
 
+struct FocusedSessionSummaryPresentation: Equatable {
+    let session: Session
+    let primarySurface: SessionSurface
+}
+
 struct WorkspaceBrowseWorkspaceSummary: Equatable, Identifiable {
     let workspace: Workspace
     let targetSummary: String
@@ -105,6 +110,7 @@ final class NexusAppModel {
     var remoteAccessState: RemoteAccessState?
     var pairedDevices: [PairedDevice] = []
     var focusedSessionScreen: SessionScreen?
+    private(set) var focusedSessionSummaryPresentation: FocusedSessionSummaryPresentation?
     private(set) var focusedStructuredSessionPresentation: FocusedStructuredSessionPresentation?
     private(set) var focusedStructuredSessionChromePresentation: FocusedStructuredSessionChromePresentation?
     private(set) var focusedSessionID: UUID?
@@ -249,6 +255,7 @@ final class NexusAppModel {
             remoteAccessState = nil
             pairedDevices = []
             focusedSessionScreen = nil
+            syncFocusedSessionSummaryPresentation(for: nil)
             syncFocusedStructuredSessionPresentation(for: nil)
             syncFocusedStructuredSessionChromePresentation(for: nil)
             focusedSessionID = nil
@@ -454,6 +461,7 @@ final class NexusAppModel {
         if focusedSessionScreen?.session.id == sessionID {
             await stopFocusingSession()
             focusedSessionScreen = nil
+            syncFocusedSessionSummaryPresentation(for: nil)
             syncFocusedStructuredSessionPresentation(for: nil)
             syncFocusedStructuredSessionChromePresentation(for: nil)
             focusedSessionID = nil
@@ -502,6 +510,7 @@ final class NexusAppModel {
         let session = focusedSessionScreen?.session
         await stopFocusingSession()
         focusedSessionScreen = nil
+        syncFocusedSessionSummaryPresentation(for: nil)
         syncFocusedStructuredSessionPresentation(for: nil)
         syncFocusedStructuredSessionChromePresentation(for: nil)
         focusedSessionID = nil
@@ -1090,6 +1099,7 @@ final class NexusAppModel {
         let previousScreen = focusedSessionScreen?.session.id == screen.session.id ? focusedSessionScreen : nil
         let previousState = previousScreen?.session.state
         focusedSessionScreen = screen
+        syncFocusedSessionSummaryPresentation(for: screen)
         syncFocusedStructuredSessionPresentation(for: screen)
         syncFocusedStructuredSessionChromePresentation(for: screen)
         focusedSessionID = screen.session.id
@@ -1104,6 +1114,15 @@ final class NexusAppModel {
                 workspaceID: screen.session.workspaceID,
                 providerID: screen.session.providerID
             )
+        }
+    }
+
+    private func syncFocusedSessionSummaryPresentation(for screen: SessionScreen?) {
+        let presentation = screen.map {
+            FocusedSessionSummaryPresentation(session: $0.session, primarySurface: $0.primarySurface)
+        }
+        if focusedSessionSummaryPresentation != presentation {
+            focusedSessionSummaryPresentation = presentation
         }
     }
 
