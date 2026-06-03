@@ -1126,6 +1126,42 @@ struct NexusServicePiSessionStreamTests {
         #expect(screen.activityItems.map(\.kind) == [.status, .command, .status, .status])
     }
 
+    @Test func localPiRuntimeRequestsSessionStatsOnStartupForStatusBarUsage() throws {
+        let transport = TestPiRPCTransport(
+            sessionStats: [
+                "contextUsage": [
+                    "tokens": 60000,
+                    "contextWindow": 200000,
+                    "percent": 30
+                ]
+            ],
+            stateModel: TestPiRPCModel(
+                provider: "openai",
+                id: "gpt-5.1-codex-max",
+                name: "GPT-5.1 Codex Max"
+            )
+        )
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(transport.sentLines.contains(where: { $0.contains("\"id\":\"nexus-pi-session-stats-auto-") && $0.contains("\"type\":\"get_session_stats\"") }))
+        #expect(screen.providerEvents.contains(where: { $0.command == "get_session_stats" && $0.rawPayload.contains("\"contextWindow\":200000") }))
+    }
+
     @Test func localPiRuntimeShowsLastAssistantTextViaBuiltInCommand() throws {
         let transport = TestPiRPCTransport(lastAssistantText: "Summarized answer")
         let runtime = try PiRPCSessionRuntime(

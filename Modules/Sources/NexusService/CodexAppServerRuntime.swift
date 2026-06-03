@@ -90,6 +90,8 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
     private var activityItems: [SessionActivityItem] = []
     private var approvalRequests: [SessionApprovalRequest] = []
     private var slashCommands: [SessionSlashCommand]?
+    private var providerEvents: [SessionProviderEvent] = []
+    private var nextProviderEventSequence = 0
     private var pendingApprovalRequests: [UUID: PendingCodexApprovalRequest] = [:]
     private var pendingTurnRequestIDs: Set<String> = []
     private var pendingSlashCommandRequestIDs: Set<String> = []
@@ -195,6 +197,8 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
             guard let self, let object = self.responseObject(from: line) else {
                 return
             }
+
+            self.recordProviderEvent(rawPayload: line, object: object)
 
             let id = self.string(for: "id", in: object)
             if id == self.initializeRequestID {
@@ -326,6 +330,7 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
             activityItems: activityItems,
             approvalRequests: approvalRequests,
             slashCommands: slashCommands,
+            providerEvents: providerEvents,
             isAgentTurnInProgress: isTurnInProgress
         )
     }
@@ -956,6 +961,54 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
         if shouldNotify {
             notifyChange()
         }
+    }
+
+    private func recordProviderEvent(rawPayload: String, object: [String: Any]) {
+        let type = providerEventType(for: object)
+
+        lock.lock()
+        let event = SessionProviderEvent(
+            sequence: nextProviderEventSequence,
+            providerID: .codex,
+            type: type,
+            family: providerEventFamily(for: type),
+            rawPayload: rawPayload
+        )
+        nextProviderEventSequence += 1
+        providerEvents.append(event)
+        if providerEvents.count > 1_000 {
+            providerEvents.removeFirst(providerEvents.count - 1_000)
+        }
+        lock.unlock()
+    }
+
+    private func providerEventType(for object: [String: Any]) -> String {
+        if let method = string(for: "method", in: object) {
+            return method
+        }
+
+        if object["error"] != nil {
+            return "error"
+        }
+
+        return "response"
+    }
+
+    private func providerEventFamily(for type: String) -> SessionProviderEvent.Family {
+        let normalizedType = type.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalizedType == "response" {
+            return .response
+        }
+        if normalizedType.contains("thread") || normalizedType.contains("turn") {
+            return .turn
+        }
+        if normalizedType.contains("item") || normalizedType.contains("approval") {
+            return .toolExecution
+        }
+        if normalizedType.contains("message") {
+            return .message
+        }
+        return .unknown
     }
 
     private func startupThreadParameters(workingDirectory: String, sessionLinkage: CodexSessionLinkage?) -> [String: Any] {

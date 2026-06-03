@@ -292,6 +292,8 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             try? transport.terminate()
             throw startupError
         }
+
+        requestSessionStats()
     }
 
     deinit {
@@ -841,6 +843,17 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             "id": "nexus-pi-session-stats-\(UUID().uuidString)",
             "type": "get_session_stats"
         ]))
+    }
+
+    private func requestSessionStats() {
+        do {
+            try transport.sendLine(Self.jsonLine([
+                "id": "nexus-pi-session-stats-auto-\(UUID().uuidString)",
+                "type": "get_session_stats"
+            ]))
+        } catch {
+            return
+        }
     }
 
     private func submitGetLastAssistantTextCommand(commandText: String) throws {
@@ -1827,6 +1840,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         lastAssistantStopReason = "stop"
         lock.unlock()
         requestSlashCommands()
+        requestSessionStats()
         notifyChange()
     }
 

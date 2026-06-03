@@ -1750,6 +1750,11 @@ private struct RemoteSessionScreenView: View {
            let composerPresentation = structuredComposerPresentation,
            let sendAffordance = structuredSendAffordance,
            let slashCommandMenuPresentation = structuredSlashCommandMenuPresentation {
+            let statusBarPresentation = structuredSessionStatusBarPresentation(
+                for: screen,
+                workspaceLocation: structuredSessionWorkspaceLocation(for: screen.session)
+            )
+
             VStack(spacing: 8) {
                 if composerPresentation.isEnabled {
                     if slashCommandMenuPresentation.isVisible {
@@ -1759,6 +1764,8 @@ private struct RemoteSessionScreenView: View {
                     if aboveEditorWidgets.isEmpty == false {
                         structuredSessionExtensionWidgetsView(aboveEditorWidgets)
                     }
+
+                    iosStructuredSessionStatusBar(statusBarPresentation)
 
                     HStack(alignment: .bottom, spacing: 10) {
                         TextField(composerPresentation.placeholder, text: $structuredPrompt, axis: .vertical)
@@ -2491,6 +2498,63 @@ private struct RemoteSessionScreenView: View {
             NexusIOSTheme.coral
         case .success:
             NexusIOSTheme.teal
+        }
+    }
+
+    private func structuredSessionWorkspaceLocation(for session: Session) -> String {
+        guard let overview = model.workspaceOverview(id: session.workspaceID) else {
+            return "Workspace unavailable"
+        }
+
+        if let remoteTarget = overview.remoteTarget {
+            return "\(remoteTarget.host.name) • \(overview.workspace.folderPath)"
+        }
+
+        return overview.workspace.folderPath
+    }
+
+    @ViewBuilder
+    private func iosStructuredSessionStatusBar(_ presentation: StructuredSessionStatusBarPresentation) -> some View {
+        HStack(spacing: 10) {
+            Label {
+                Text(presentation.workspaceLocation)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            } icon: {
+                Image(systemName: "folder")
+            }
+
+            Spacer(minLength: 8)
+
+            Label(presentation.tokenUsageText, systemImage: "gauge.with.dots.needle.33percent")
+                .foregroundStyle(iosStructuredSessionTokenUsageColor(presentation.tokenUsagePercent))
+        }
+        .font(NexusIOSTheme.bodyFont(11, relativeTo: .caption))
+        .foregroundStyle(NexusIOSTheme.mutedText)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.white.opacity(0.06))
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        }
+    }
+
+    private func iosStructuredSessionTokenUsageColor(_ percent: Int?) -> Color {
+        guard let percent else {
+            return NexusIOSTheme.mutedText
+        }
+
+        switch percent {
+        case 85...:
+            return NexusIOSTheme.coral
+        case 60...:
+            return NexusIOSTheme.gold
+        default:
+            return NexusIOSTheme.teal
         }
     }
 

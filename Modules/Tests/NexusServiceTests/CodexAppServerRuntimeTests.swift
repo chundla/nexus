@@ -34,6 +34,28 @@ struct CodexAppServerRuntimeTests {
         #expect(transport.sentMessages.compactMap { $0["method"] as? String } == ["initialize", "initialized", "thread/start", "model/list"])
     }
 
+    @Test func sessionScreenIncludesProviderEventsFromTheSharedCodexStream() throws {
+        let transport = TestCodexAppServerTransport(threadID: "codex-thread-1")
+        let runtime = try CodexAppServerRuntime(
+            executable: "/tmp/fake-codex",
+            workingDirectory: "/tmp/workspace",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .codex,
+            isDefault: true,
+            state: .ready
+        )
+
+        let providerEvents = runtime.sessionScreen(for: session).providerEvents
+
+        #expect(providerEvents.isEmpty == false)
+        #expect(providerEvents.contains(where: { $0.family == .response && $0.rawPayload.contains("\"model\":\"gpt-5.5\"") }))
+    }
+
     @Test func sessionScreenIncludesLiveCodexModelSlashCommandsFromAppServer() throws {
         let transport = TestCodexAppServerTransport(
             threadID: "codex-thread-1",

@@ -61,6 +61,93 @@ struct StructuredSessionPresentationTests {
         ))
     }
 
+    @Test func structuredSessionStatusBarPresentationFormatsTokenUsageFromProviderEvents() {
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let screen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            providerEvents: [
+                SessionProviderEvent(
+                    sequence: 0,
+                    providerID: .pi,
+                    type: "response",
+                    family: .response,
+                    command: "get_session_stats",
+                    rawPayload: #"{"type":"response","command":"get_session_stats","success":true,"data":{"contextUsage":{"tokens":60000,"contextWindow":200000,"percent":30}}}"#
+                )
+            ]
+        )
+
+        #expect(structuredSessionStatusBarPresentation(for: screen, workspaceLocation: "/tmp/nexus") == StructuredSessionStatusBarPresentation(
+            workspaceLocation: "/tmp/nexus",
+            tokenUsage: StructuredSessionTokenUsagePresentation(usedTokens: 60000, totalTokens: 200000, percent: 30)
+        ))
+    }
+
+    @Test func structuredSessionStatusBarPresentationFallsBackToKnownContextWindowForPiModels() {
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let screen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            providerEvents: [
+                SessionProviderEvent(
+                    sequence: 0,
+                    providerID: .pi,
+                    type: "response",
+                    family: .response,
+                    command: "get_state",
+                    rawPayload: #"{"type":"response","command":"get_state","success":true,"data":{"model":{"provider":"openai","id":"gpt-5.1-codex-max","name":"GPT-5.1 Codex Max"}}}"#
+                )
+            ]
+        )
+
+        let presentation = structuredSessionStatusBarPresentation(for: screen, workspaceLocation: "/tmp/nexus")
+
+        #expect(presentation.workspaceLocation == "/tmp/nexus")
+        #expect(presentation.tokenUsage == StructuredSessionTokenUsagePresentation(usedTokens: 0, totalTokens: 272000, percent: 0))
+        #expect(presentation.tokenUsageText == "0/272k 0%")
+    }
+
+    @Test func structuredSessionStatusBarPresentationFallsBackToKnownContextWindowForCodexModels() {
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .codex,
+            isDefault: true,
+            state: .ready
+        )
+        let screen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            providerEvents: [
+                SessionProviderEvent(
+                    sequence: 0,
+                    providerID: .codex,
+                    type: "response",
+                    family: .response,
+                    rawPayload: #"{"id":"nexus-codex-thread-start","result":{"thread":{"id":"codex-thread-1"},"model":"gpt-5.5"}}"#
+                )
+            ]
+        )
+
+        #expect(structuredSessionStatusBarPresentation(for: screen, workspaceLocation: "/tmp/nexus").tokenUsageText == "0/272k 0%")
+    }
+
     @Test func structuredSessionPresentationBuildsSharedFeedAndComposerStateFromSessionScreenAndDraft() {
         let session = Session(
             id: UUID(),

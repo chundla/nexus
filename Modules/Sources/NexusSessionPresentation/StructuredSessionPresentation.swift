@@ -97,6 +97,44 @@ public struct StructuredSessionApprovalRequestPresentation: Equatable {
     }
 }
 
+public struct StructuredSessionTokenUsagePresentation: Equatable {
+    public let usedTokens: Int
+    public let totalTokens: Int
+    public let percent: Int
+
+    public init(usedTokens: Int, totalTokens: Int, percent: Int) {
+        self.usedTokens = usedTokens
+        self.totalTokens = totalTokens
+        self.percent = percent
+    }
+
+    public var summaryText: String {
+        "\(formatStructuredSessionTokenCount(usedTokens))/\(formatStructuredSessionTokenCount(totalTokens)) \(percent)%"
+    }
+}
+
+public struct StructuredSessionStatusBarPresentation: Equatable {
+    public let workspaceLocation: String
+    public let tokenUsage: StructuredSessionTokenUsagePresentation?
+
+    public init(workspaceLocation: String, tokenUsage: StructuredSessionTokenUsagePresentation?) {
+        self.workspaceLocation = workspaceLocation
+        self.tokenUsage = tokenUsage
+    }
+
+    public var tokenUsageText: String {
+        tokenUsage?.summaryText ?? "—"
+    }
+
+    public var tokenUsagePercent: Int? {
+        tokenUsage?.percent
+    }
+
+    public var isTokenUsageAvailable: Bool {
+        tokenUsage != nil
+    }
+}
+
 public enum StructuredSessionConversationRole: Equatable {
     case user
     case assistant(label: String)
@@ -248,6 +286,30 @@ public func structuredSessionComposerSendAffordance(
     return StructuredSessionComposerSendAffordance(
         isVisible: composer.isEnabled && hasSendableDraft,
         isEnabled: composer.isEnabled && hasSendableDraft && isPerformingAction == false
+    )
+}
+
+public func structuredSessionStatusBarPresentation(
+    for screen: SessionScreen,
+    workspaceLocation: String
+) -> StructuredSessionStatusBarPresentation {
+    StructuredSessionStatusBarPresentation(
+        workspaceLocation: workspaceLocation,
+        tokenUsage: structuredSessionTokenUsagePresentation(for: screen)
+    )
+}
+
+public func structuredSessionTokenUsagePresentation(
+    for screen: SessionScreen
+) -> StructuredSessionTokenUsagePresentation? {
+    guard let usage = resolvedStructuredSessionTokenUsage(for: screen) else {
+        return nil
+    }
+
+    return StructuredSessionTokenUsagePresentation(
+        usedTokens: usage.usedTokens,
+        totalTokens: usage.totalTokens,
+        percent: usage.percent
     )
 }
 
@@ -533,6 +595,303 @@ private func structuredSessionSlashCommandSummaryFallback(for command: SessionSl
         return "Prompt template"
     case .skill:
         return "Skill command"
+    }
+}
+
+private struct StructuredSessionResolvedTokenUsage {
+    let usedTokens: Int
+    let totalTokens: Int
+    let percent: Int
+}
+
+private func resolvedStructuredSessionTokenUsage(for screen: SessionScreen) -> StructuredSessionResolvedTokenUsage? {
+    if let usage = structuredSessionTokenUsage(from: screen.providerEvents) {
+        return usage
+    }
+
+    if let usage = structuredSessionTokenUsage(from: screen.activityItems) {
+        return usage
+    }
+
+    guard let inferredContextWindow = inferredStructuredSessionContextWindow(for: screen) else {
+        return nil
+    }
+
+    return StructuredSessionResolvedTokenUsage(usedTokens: 0, totalTokens: inferredContextWindow, percent: 0)
+}
+
+private func structuredSessionTokenUsage(from providerEvents: [SessionProviderEvent]) -> StructuredSessionResolvedTokenUsage? {
+    for event in providerEvents.reversed() {
+        guard let payload = structuredSessionJSONObject(from: event.rawPayload),
+              let usage = structuredSessionTokenUsage(from: payload) else {
+            continue
+        }
+        return usage
+    }
+    return nil
+}
+
+private func structuredSessionTokenUsage(from activityItems: [SessionActivityItem]) -> StructuredSessionResolvedTokenUsage? {
+    for item in activityItems.reversed() {
+        if let usage = structuredSessionTokenUsage(from: item.text) {
+            return usage
+        }
+        if let detailText = item.detailText,
+           let usage = structuredSessionTokenUsage(from: detailText) {
+            return usage
+        }
+    }
+    return nil
+}
+
+private func structuredSessionTokenUsage(from value: Any) -> StructuredSessionResolvedTokenUsage? {
+    switch value {
+    case let object as [String: Any]:
+        if let directUsage = directStructuredSessionTokenUsage(from: object) {
+            return directUsage
+        }
+
+        let priorityKeys = ["contextUsage", "tokenUsage", "usage", "data", "result", "params", "context", "thread", "turn", "item", "message"]
+        for key in priorityKeys {
+            if let nestedValue = object[key],
+               let usage = structuredSessionTokenUsage(from: nestedValue) {
+                return usage
+            }
+        }
+
+        for nestedValue in object.values {
+            if let usage = structuredSessionTokenUsage(from: nestedValue) {
+                return usage
+            }
+        }
+    case let array as [Any]:
+        for nestedValue in array.reversed() {
+            if let usage = structuredSessionTokenUsage(from: nestedValue) {
+                return usage
+            }
+        }
+    default:
+        break
+    }
+
+    return nil
+}
+
+private func directStructuredSessionTokenUsage(from object: [String: Any]) -> StructuredSessionResolvedTokenUsage? {
+    let totalTokens = structuredSessionIntValue(in: object, keys: ["contextWindow", "context_window", "maxTokens", "max_tokens", "totalTokens", "total_tokens"])
+
+    let explicitUsedTokens = structuredSessionIntValue(in: object, keys: ["tokens", "usedTokens", "used_tokens", "tokenCount", "token_count"])
+        ?? structuredSessionSummedIntValue(in: object, keyPairs: [("inputTokens", "outputTokens"), ("input_tokens", "output_tokens")])
+    let explicitPercent = structuredSessionIntValue(in: object, keys: ["percent", "usagePercent", "usage_percent"])
+
+    guard let totalTokens else {
+        return nil
+    }
+
+    let usedTokens = explicitUsedTokens ?? explicitPercent.map { max(0, Int((Double(totalTokens) * Double($0)) / 100.0)) }
+    guard let usedTokens else {
+        return nil
+    }
+
+    let percent = explicitPercent ?? (totalTokens > 0 ? Int((Double(usedTokens) / Double(totalTokens)) * 100.0) : 0)
+    return StructuredSessionResolvedTokenUsage(
+        usedTokens: max(0, usedTokens),
+        totalTokens: max(1, totalTokens),
+        percent: max(0, min(100, percent))
+    )
+}
+
+private func structuredSessionTokenUsage(from text: String) -> StructuredSessionResolvedTokenUsage? {
+    let pattern = #"([0-9,]+)\s*/\s*([0-9,]+)\s+tokens\s*\((\d+)%\)"#
+    guard let regex = try? NSRegularExpression(pattern: pattern) else {
+        return nil
+    }
+
+    let range = NSRange(text.startIndex..<text.endIndex, in: text)
+    guard let match = regex.firstMatch(in: text, options: [], range: range),
+          match.numberOfRanges == 4,
+          let usedRange = Range(match.range(at: 1), in: text),
+          let totalRange = Range(match.range(at: 2), in: text),
+          let percentRange = Range(match.range(at: 3), in: text) else {
+        return nil
+    }
+
+    let usedText = text[usedRange].replacingOccurrences(of: ",", with: "")
+    let totalText = text[totalRange].replacingOccurrences(of: ",", with: "")
+    let percentText = text[percentRange]
+
+    guard let usedTokens = Int(usedText),
+          let totalTokens = Int(totalText),
+          let percent = Int(percentText) else {
+        return nil
+    }
+
+    return StructuredSessionResolvedTokenUsage(
+        usedTokens: usedTokens,
+        totalTokens: totalTokens,
+        percent: percent
+    )
+}
+
+private func inferredStructuredSessionContextWindow(for screen: SessionScreen) -> Int? {
+    if let modelIdentifier = structuredSessionModelIdentifier(for: screen) {
+        return structuredSessionContextWindow(forModelIdentifier: modelIdentifier)
+    }
+
+    return nil
+}
+
+private func structuredSessionModelIdentifier(for screen: SessionScreen) -> String? {
+    switch screen.session.providerID {
+    case .pi:
+        if let modelIdentifier = piStructuredSessionModelIdentifier(from: screen.providerEvents) {
+            return modelIdentifier
+        }
+        return piStructuredSessionModelIdentifier(from: screen.activityItems)
+    case .codex:
+        return codexStructuredSessionModelIdentifier(from: screen.providerEvents)
+    case .ibmBob, .claude:
+        return nil
+    }
+}
+
+private func piStructuredSessionModelIdentifier(from providerEvents: [SessionProviderEvent]) -> String? {
+    for event in providerEvents.reversed() {
+        guard let payload = structuredSessionJSONObject(from: event.rawPayload),
+              let data = payload["data"] as? [String: Any],
+              let model = data["model"] as? [String: Any],
+              let provider = structuredSessionTrimmedString(in: model, keys: ["provider"]),
+              let modelID = structuredSessionTrimmedString(in: model, keys: ["id"]) else {
+            continue
+        }
+        return "\(provider)/\(modelID)"
+    }
+
+    return nil
+}
+
+private func piStructuredSessionModelIdentifier(from activityItems: [SessionActivityItem]) -> String? {
+    for item in activityItems.reversed() {
+        guard item.text.hasPrefix("Current Model: ") else {
+            continue
+        }
+
+        let suffix = item.text.dropFirst("Current Model: ".count)
+        let target = suffix.split(separator: "(", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? String(suffix)
+        let trimmedTarget = target.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedTarget.isEmpty == false {
+            return trimmedTarget
+        }
+    }
+
+    return nil
+}
+
+private func codexStructuredSessionModelIdentifier(from providerEvents: [SessionProviderEvent]) -> String? {
+    for event in providerEvents.reversed() {
+        guard let payload = structuredSessionJSONObject(from: event.rawPayload) else {
+            continue
+        }
+
+        if let result = payload["result"] as? [String: Any],
+           let model = structuredSessionTrimmedString(in: result, keys: ["model"]) {
+            return model
+        }
+
+        if let params = payload["params"] as? [String: Any],
+           let model = structuredSessionTrimmedString(in: params, keys: ["model"]) {
+            return model
+        }
+    }
+
+    return nil
+}
+
+private func structuredSessionContextWindow(forModelIdentifier modelIdentifier: String) -> Int? {
+    let normalized = modelIdentifier.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    guard normalized.isEmpty == false else {
+        return nil
+    }
+
+    if normalized.contains("gpt-5") || normalized.contains("codex") {
+        return 272_000
+    }
+
+    if normalized.contains("claude") || normalized.contains("sonnet") || normalized.contains("haiku") || normalized.contains("opus") {
+        return 200_000
+    }
+
+    return nil
+}
+
+private func structuredSessionJSONObject(from rawPayload: String) -> [String: Any]? {
+    guard let data = rawPayload.data(using: .utf8),
+          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        return nil
+    }
+
+    return object
+}
+
+private func structuredSessionTrimmedString(in object: [String: Any], keys: [String]) -> String? {
+    for key in keys {
+        if let string = object[key] as? String {
+            let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty == false {
+                return trimmed
+            }
+        }
+    }
+
+    return nil
+}
+
+private func structuredSessionIntValue(in object: [String: Any], keys: [String]) -> Int? {
+    for key in keys {
+        if let value = structuredSessionCoerceInt(object[key]) {
+            return value
+        }
+    }
+
+    return nil
+}
+
+private func structuredSessionSummedIntValue(in object: [String: Any], keyPairs: [(String, String)]) -> Int? {
+    for (lhs, rhs) in keyPairs {
+        if let lhsValue = structuredSessionCoerceInt(object[lhs]),
+           let rhsValue = structuredSessionCoerceInt(object[rhs]) {
+            return lhsValue + rhsValue
+        }
+    }
+
+    return nil
+}
+
+private func structuredSessionCoerceInt(_ value: Any?) -> Int? {
+    switch value {
+    case let value as Int:
+        return value
+    case let value as NSNumber:
+        return value.intValue
+    case let value as String:
+        return Int(value.trimmingCharacters(in: .whitespacesAndNewlines))
+    default:
+        return nil
+    }
+}
+
+private func formatStructuredSessionTokenCount(_ value: Int) -> String {
+    let absoluteValue = abs(value)
+
+    switch absoluteValue {
+    case 1_000_000...:
+        let millions = Double(value) / 1_000_000.0
+        return millions.rounded() == millions ? "\(Int(millions))m" : String(format: "%.1fm", millions)
+    case 1_000...:
+        let thousands = Double(value) / 1_000.0
+        return thousands.rounded() == thousands ? "\(Int(thousands))k" : String(format: "%.1fk", thousands)
+    default:
+        return String(value)
     }
 }
 

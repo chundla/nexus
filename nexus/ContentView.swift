@@ -1523,6 +1523,10 @@ struct ContentView: View {
         let extensionUI = screen.extensionUI
         let aboveEditorWidgets = extensionUI?.widgets.filter { $0.placement == .aboveEditor } ?? []
         let belowEditorWidgets = extensionUI?.widgets.filter { $0.placement == .belowEditor } ?? []
+        let statusBarPresentation = structuredSessionStatusBarPresentation(
+            for: screen,
+            workspaceLocation: structuredSessionWorkspaceLocation(for: screen.session)
+        )
 
         VStack(spacing: 0) {
             if let extensionUI, extensionUI.pendingDialogs.isEmpty == false {
@@ -1617,6 +1621,8 @@ struct ContentView: View {
                     if aboveEditorWidgets.isEmpty == false {
                         structuredSessionExtensionWidgetsView(aboveEditorWidgets)
                     }
+
+                    macStructuredSessionStatusBar(statusBarPresentation)
 
                     HStack(spacing: 8) {
                         TextField(composerPresentation.placeholder, text: $appModel.focusedStructuredSessionDraft, axis: .vertical)
@@ -2015,6 +2021,52 @@ struct ContentView: View {
             NexusMacTheme.coral
         case .success:
             NexusMacTheme.teal
+        }
+    }
+
+    private func structuredSessionWorkspaceLocation(for session: Session) -> String {
+        appModel.sessionPresentationContext(for: session)?.targetSummary ?? "Workspace unavailable"
+    }
+
+    @ViewBuilder
+    private func macStructuredSessionStatusBar(_ presentation: StructuredSessionStatusBarPresentation) -> some View {
+        HStack(spacing: 12) {
+            Label {
+                Text(presentation.workspaceLocation)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            } icon: {
+                Image(systemName: "folder")
+            }
+
+            Spacer(minLength: 12)
+
+            Label(presentation.tokenUsageText, systemImage: "gauge.with.dots.needle.33percent")
+                .foregroundStyle(macStructuredSessionTokenUsageColor(presentation.tokenUsagePercent))
+        }
+        .font(NexusMacTheme.bodyFont(11, relativeTo: .caption))
+        .foregroundStyle(NexusMacTheme.mutedText)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(NexusMacTheme.softLine, lineWidth: 1)
+        }
+    }
+
+    private func macStructuredSessionTokenUsageColor(_ percent: Int?) -> Color {
+        guard let percent else {
+            return NexusMacTheme.mutedText
+        }
+
+        switch percent {
+        case 85...:
+            return NexusMacTheme.coral
+        case 60...:
+            return NexusMacTheme.gold
+        default:
+            return NexusMacTheme.teal
         }
     }
 
