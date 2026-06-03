@@ -9064,6 +9064,231 @@ private func waitForSessionScreen(
     return latestScreen
 }
 
+struct WorkspaceOverviewRefreshStagingTests {
+    @MainActor
+    @Test func refreshStagesRecentWorkspaceOverviewsBeforeBackgroundCompletion() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let alphaWorkspace = Workspace(
+            id: UUID(),
+            name: "Alpha",
+            kind: .local,
+            folderPath: "/tmp/alpha",
+            primaryGroupID: group.id
+        )
+        let betaWorkspace = Workspace(
+            id: UUID(),
+            name: "Beta",
+            kind: .local,
+            folderPath: "/tmp/beta",
+            primaryGroupID: group.id
+        )
+        let gammaWorkspace = Workspace(
+            id: UUID(),
+            name: "Gamma",
+            kind: .local,
+            folderPath: "/tmp/gamma",
+            primaryGroupID: group.id
+        )
+        let deltaWorkspace = Workspace(
+            id: UUID(),
+            name: "Delta",
+            kind: .local,
+            folderPath: "/tmp/delta",
+            primaryGroupID: group.id
+        )
+        let alphaOverview = workspaceOverview(for: alphaWorkspace, providerID: .claude)
+        let betaOverview = workspaceOverview(for: betaWorkspace, providerID: .pi)
+        let gammaOverview = workspaceOverview(for: gammaWorkspace, providerID: .codex)
+        let deltaOverview = workspaceOverview(for: deltaWorkspace, providerID: .ibmBob)
+        let overviewsByID = [
+            alphaWorkspace.id: alphaOverview,
+            betaWorkspace.id: betaOverview,
+            gammaWorkspace.id: gammaOverview,
+            deltaWorkspace.id: deltaOverview
+        ]
+        let loader = ControlledWorkspaceOverviewLoader(modeByWorkspaceID: [
+            alphaWorkspace.id: .suspended,
+            betaWorkspace.id: .suspended,
+            gammaWorkspace.id: .suspended,
+            deltaWorkspace.id: .suspended
+        ])
+        let session = Session(
+            id: UUID(),
+            workspaceID: alphaWorkspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: alphaOverview,
+            session: session,
+            screen: SessionScreen(session: session, transcript: "Claude ready"),
+            workspaces: [alphaWorkspace, betaWorkspace, gammaWorkspace, deltaWorkspace],
+            workspaceGroups: [group],
+            workspaceOverviewsByID: overviewsByID,
+            workspaceOverviewLoader: { workspaceID in
+                try await loader.load(workspaceID: workspaceID, overview: overviewsByID[workspaceID]!)
+            },
+            recentNavigation: [
+                NavigationItem(target: .workspace(deltaWorkspace.id), title: deltaWorkspace.name, subtitle: deltaWorkspace.folderPath),
+                NavigationItem(target: .provider(workspaceID: betaWorkspace.id, providerID: .pi), title: ProviderID.pi.displayName, subtitle: betaWorkspace.name)
+            ]
+        )
+        let model = NexusAppModel(client: client)
+
+        let refreshTask = Task {
+            await model.refresh()
+        }
+
+        try await waitUntil {
+            loader.requestedWorkspaceIDs().count >= 3
+        }
+
+        #expect(Array(loader.requestedWorkspaceIDs().prefix(3)) == [deltaWorkspace.id, betaWorkspace.id, alphaWorkspace.id])
+
+        loader.resume(workspaceID: deltaWorkspace.id, with: deltaOverview)
+        loader.resume(workspaceID: betaWorkspace.id, with: betaOverview)
+        loader.resume(workspaceID: alphaWorkspace.id, with: alphaOverview)
+
+        await refreshTask.value
+
+        #expect(model.workspaceOverview(for: deltaWorkspace.id)?.providerCards.first?.health.summary == "Delta IBM Bob available")
+        #expect(model.workspaceOverview(for: betaWorkspace.id)?.providerCards.first?.health.summary == "Beta Pi available")
+        #expect(model.workspaceOverview(for: alphaWorkspace.id)?.providerCards.first?.health.summary == "Alpha Claude available")
+        #expect(model.workspaceOverview(for: gammaWorkspace.id) == nil)
+
+        try await waitUntil {
+            loader.requestedWorkspaceIDs().count == 4
+        }
+
+        loader.resume(workspaceID: gammaWorkspace.id, with: gammaOverview)
+
+        try await waitUntilAsync {
+            await MainActor.run {
+                model.workspaceOverview(for: gammaWorkspace.id)?.providerCards.first?.health.summary == "Gamma Codex available"
+            }
+        }
+    }
+
+    @MainActor
+    @Test func refreshIgnoresSupersededBackgroundWorkspaceOverviewResults() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let alphaWorkspace = Workspace(
+            id: UUID(),
+            name: "Alpha",
+            kind: .local,
+            folderPath: "/tmp/alpha",
+            primaryGroupID: group.id
+        )
+        let betaWorkspace = Workspace(
+            id: UUID(),
+            name: "Beta",
+            kind: .local,
+            folderPath: "/tmp/beta",
+            primaryGroupID: group.id
+        )
+        let gammaWorkspace = Workspace(
+            id: UUID(),
+            name: "Gamma",
+            kind: .local,
+            folderPath: "/tmp/gamma",
+            primaryGroupID: group.id
+        )
+        let zetaWorkspace = Workspace(
+            id: UUID(),
+            name: "Zeta",
+            kind: .local,
+            folderPath: "/tmp/zeta",
+            primaryGroupID: group.id
+        )
+        let alphaOverview = workspaceOverview(for: alphaWorkspace, providerID: .claude)
+        let betaOverview = workspaceOverview(for: betaWorkspace, providerID: .pi)
+        let gammaOverview = workspaceOverview(for: gammaWorkspace, providerID: .codex)
+        let zetaOverview = workspaceOverview(for: zetaWorkspace, providerID: .ibmBob)
+        let overviewsByID = [
+            alphaWorkspace.id: alphaOverview,
+            betaWorkspace.id: betaOverview,
+            gammaWorkspace.id: gammaOverview,
+            zetaWorkspace.id: zetaOverview
+        ]
+        let loader = ControlledWorkspaceOverviewLoader(modeByWorkspaceID: [
+            alphaWorkspace.id: .suspended,
+            betaWorkspace.id: .suspended,
+            gammaWorkspace.id: .suspended,
+            zetaWorkspace.id: .suspended
+        ])
+        let session = Session(
+            id: UUID(),
+            workspaceID: alphaWorkspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: alphaOverview,
+            session: session,
+            screen: SessionScreen(session: session, transcript: "Claude ready"),
+            workspaces: [alphaWorkspace, betaWorkspace, gammaWorkspace, zetaWorkspace],
+            workspaceGroups: [group],
+            workspaceOverviewsByID: overviewsByID,
+            workspaceOverviewLoader: { workspaceID in
+                try await loader.load(workspaceID: workspaceID, overview: overviewsByID[workspaceID]!)
+            }
+        )
+        let model = NexusAppModel(client: client)
+
+        let firstRefreshTask = Task {
+            await model.refresh()
+        }
+
+        try await waitUntil {
+            loader.requestedWorkspaceIDs().count >= 3
+        }
+
+        #expect(Array(loader.requestedWorkspaceIDs().prefix(3)) == [alphaWorkspace.id, betaWorkspace.id, gammaWorkspace.id])
+
+        loader.resume(workspaceID: alphaWorkspace.id, with: alphaOverview)
+        loader.resume(workspaceID: betaWorkspace.id, with: betaOverview)
+        loader.resume(workspaceID: gammaWorkspace.id, with: gammaOverview)
+
+        await firstRefreshTask.value
+
+        try await waitUntil {
+            loader.requestedWorkspaceIDs().count == 4
+        }
+
+        loader.setMode(.immediate, for: alphaWorkspace.id)
+        loader.setMode(.immediate, for: betaWorkspace.id)
+        loader.setMode(.immediate, for: gammaWorkspace.id)
+        client.setWorkspaces([alphaWorkspace, betaWorkspace, gammaWorkspace])
+
+        await model.refresh()
+
+        loader.resume(workspaceID: zetaWorkspace.id, with: zetaOverview)
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        #expect(model.workspaceOverview(for: zetaWorkspace.id) == nil)
+        #expect(model.workspaces.map(\.id) == [alphaWorkspace.id, betaWorkspace.id, gammaWorkspace.id])
+    }
+
+    private func workspaceOverview(for workspace: Workspace, providerID: ProviderID) -> WorkspaceOverview {
+        WorkspaceOverview(
+            workspace: workspace,
+            providerCards: [
+                WorkspaceProviderCard(
+                    provider: Provider(id: providerID),
+                    health: ProviderHealthSummary(state: .available, summary: "\(workspace.name) \(providerID.displayName) available"),
+                    defaultSession: ProviderDefaultSessionSummary(
+                        state: .notCreated,
+                        summary: "No default session yet",
+                        actionTitle: "Launch"
+                    )
+                )
+            ]
+        )
+    }
+}
+
 @MainActor
 private func waitForFocusedSessionScreen(
     model: NexusAppModel,
@@ -9983,6 +10208,10 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
 
     func listWorkspaces() async throws -> [Workspace] {
         workspacesValue
+    }
+
+    func setWorkspaces(_ workspaces: [Workspace]) {
+        workspacesValue = workspaces
     }
 
     func listHosts() async throws -> [NexusDomain.Host] {

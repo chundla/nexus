@@ -63,6 +63,10 @@ final class NexusAppModel {
     private let remotePairingServerFactory: (() throws -> any RemotePairingServing)?
     private var focusedSessionObservation: (any SessionScreenObservation)?
     private var staleWorkspaceOverviewRefreshTasks: [UUID: Task<Void, Never>] = [:]
+    private var backgroundWorkspaceOverviewLoadTask: Task<Void, Never>?
+    private var workspaceOverviewRefreshGeneration: UInt64 = 0
+
+    private static let initialWorkspaceOverviewLoadCount = 3
 
     init(
         client: any NexusServiceClient,
@@ -99,6 +103,8 @@ final class NexusAppModel {
 
     func refresh() async {
         do {
+            let refreshGeneration = startWorkspaceOverviewRefresh()
+
             async let serviceStatus = client.getServiceStatus()
             async let workspaceGroups = client.listWorkspaceGroups()
             async let workspaces = client.listWorkspaces()
@@ -133,19 +139,46 @@ final class NexusAppModel {
             }
             self.serviceErrorMessage = nil
 
-            let client = self.client
-            try await withThrowingTaskGroup(of: WorkspaceOverview.self) { group in
-                for workspaceID in loadedWorkspaces.map(\.id) {
-                    group.addTask {
-                        try await client.getWorkspaceOverview(workspaceID: workspaceID)
+            let orderedWorkspaceIDs = prioritizedWorkspaceOverviewIDs(
+                for: loadedWorkspaces,
+                recentNavigation: loadedRecentNavigation
+            )
+            let immediateWorkspaceIDs = Array(orderedWorkspaceIDs.prefix(Self.initialWorkspaceOverviewLoadCount))
+            let backgroundWorkspaceIDs = Array(orderedWorkspaceIDs.dropFirst(immediateWorkspaceIDs.count))
+
+            try await loadWorkspaceOverviews(
+                for: immediateWorkspaceIDs,
+                refreshGeneration: refreshGeneration
+            )
+
+            guard backgroundWorkspaceIDs.isEmpty == false else {
+                return
+            }
+
+            backgroundWorkspaceOverviewLoadTask = Task { @MainActor [weak self] in
+                guard let self else {
+                    return
+                }
+                defer {
+                    if self.workspaceOverviewRefreshGeneration == refreshGeneration {
+                        self.backgroundWorkspaceOverviewLoadTask = nil
                     }
                 }
 
-                for try await overview in group {
-                    applyWorkspaceOverview(overview)
+                do {
+                    try await self.loadWorkspaceOverviews(
+                        for: backgroundWorkspaceIDs,
+                        refreshGeneration: refreshGeneration
+                    )
+                } catch is CancellationError {
+                    return
+                } catch {
+                    return
                 }
             }
         } catch {
+            backgroundWorkspaceOverviewLoadTask?.cancel()
+            backgroundWorkspaceOverviewLoadTask = nil
             await stopFocusingSession()
             cancelStaleWorkspaceOverviewRefreshTasks()
             serviceStatus = nil
@@ -586,7 +619,87 @@ final class NexusAppModel {
         applyWorkspaceOverview(overview)
     }
 
-    private func applyWorkspaceOverview(_ overview: WorkspaceOverview) {
+    private func startWorkspaceOverviewRefresh() -> UInt64 {
+        backgroundWorkspaceOverviewLoadTask?.cancel()
+        backgroundWorkspaceOverviewLoadTask = nil
+        workspaceOverviewRefreshGeneration &+= 1
+        return workspaceOverviewRefreshGeneration
+    }
+
+    private func loadWorkspaceOverviews(
+        for workspaceIDs: [UUID],
+        refreshGeneration: UInt64
+    ) async throws {
+        let client = self.client
+
+        try await withThrowingTaskGroup(of: WorkspaceOverview.self) { group in
+            for workspaceID in workspaceIDs {
+                group.addTask {
+                    try Task.checkCancellation()
+                    return try await client.getWorkspaceOverview(workspaceID: workspaceID)
+                }
+            }
+
+            for try await overview in group {
+                applyWorkspaceOverview(overview, refreshGeneration: refreshGeneration)
+            }
+        }
+    }
+
+    private func prioritizedWorkspaceOverviewIDs(
+        for loadedWorkspaces: [Workspace],
+        recentNavigation: [NavigationItem]
+    ) -> [UUID] {
+        let knownWorkspacesByID = Dictionary(uniqueKeysWithValues: loadedWorkspaces.map { ($0.id, $0) })
+        var orderedWorkspaceIDs: [UUID] = []
+        var seenWorkspaceIDs = Set<UUID>()
+
+        func appendWorkspaceID(_ workspaceID: UUID?) {
+            guard let workspaceID,
+                  knownWorkspacesByID[workspaceID] != nil,
+                  seenWorkspaceIDs.insert(workspaceID).inserted else {
+                return
+            }
+            orderedWorkspaceIDs.append(workspaceID)
+        }
+
+        appendWorkspaceID(focusedSessionScreen?.session.workspaceID)
+
+        for key in providerDetails.keys.sorted(by: { lhs, rhs in
+            lhs.workspaceID.uuidString < rhs.workspaceID.uuidString
+        }) {
+            appendWorkspaceID(key.workspaceID)
+        }
+
+        for item in recentNavigation {
+            switch item.target.kind {
+            case .workspace, .provider:
+                appendWorkspaceID(item.target.workspaceID)
+            case .session:
+                continue
+            }
+        }
+
+        for workspace in loadedWorkspaces.sorted(by: { lhs, rhs in
+            lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }) {
+            appendWorkspaceID(workspace.id)
+        }
+
+        return orderedWorkspaceIDs
+    }
+
+    private func applyWorkspaceOverview(
+        _ overview: WorkspaceOverview,
+        refreshGeneration: UInt64? = nil
+    ) {
+        if let refreshGeneration {
+            guard workspaceOverviewRefreshGeneration == refreshGeneration,
+                  workspaces.contains(where: { $0.id == overview.workspace.id }) else {
+                return
+            }
+        }
+
         workspaceOverviews[overview.workspace.id] = overview
         syncStaleWorkspaceOverviewRefreshTask(for: overview)
     }
