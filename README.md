@@ -17,6 +17,7 @@ Nexus is a workspace-first control center for coding agent CLIs across local and
 3. `docs/architecture/milestone-12.md` — latest planned rollout direction
 4. `docs/adr/README.md` — index of durable architecture decisions
 5. `docs/prd/nexus-workspace-first-control-center.md` — historical milestone-one product framing
+6. `docs/performance-baselines.md` — repeatable launch and service flow baseline workflow
 
 ## Build
 
