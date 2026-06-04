@@ -1,4 +1,3 @@
-#if os(macOS)
 import Foundation
 import NexusDomain
 
@@ -89,4 +88,3 @@ enum StructuredSessionLiveHistoryRetention {
         return retainedLines.joined(separator: "\n")
     }
 }
-#endif
