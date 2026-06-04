@@ -219,7 +219,7 @@ final class StructuredSessionHistoryPagingController {
             return false
         }
 
-        return screen.primarySurface == .structuredActivityFeed && screen.session.providerID == .pi
+        return screen.primarySurface == .structuredActivityFeed
     }
 
     private func missingFirstActivityItemID(from previousScreen: SessionScreen, to currentScreen: SessionScreen) -> UUID? {

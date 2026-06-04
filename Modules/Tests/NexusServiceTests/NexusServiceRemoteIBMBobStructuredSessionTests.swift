@@ -327,13 +327,7 @@ struct NexusServiceRemoteIBMBobStructuredSessionTests {
         #expect(failedResumeCommand.contains("bob-session-1"))
         #expect(fallbackCommand.contains("--resume") == false)
         #expect(metadata?.ibmBobSessionLinkage?.sessionID == "bob-session-2")
-        #expect(metadata?.ibmBobPersistedActivityItems?.suffix(5).map(\.text) == [
-            "You: second",
-            "Stored IBM Bob continuity was unavailable. Started a fresh Bob conversation on this Session.",
-            "Fresh Bob turn started",
-            "Recovered reply",
-            "Recovered turn complete"
-        ])
+        #expect(metadata?.ibmBobPersistedActivityItems == nil)
         #expect(recoveredResponse.activityItems.suffix(5).map(\.kind) == [.message, .status, .status, .message, .completion])
         #expect(recoveredResponse.activityItems.suffix(5).map(\.text) == [
             "You: second",
@@ -510,7 +504,7 @@ struct NexusServiceRemoteIBMBobStructuredSessionTests {
             "IBM Bob turn stopped."
         ])
         #expect(metadata?.ibmBobTurnInProgress == false)
-        #expect(metadata?.ibmBobPersistedActivityItems?.map(\.text) == stoppedScreen.activityItems.map(\.text))
+        #expect(metadata?.ibmBobPersistedActivityItems == nil)
     }
 
     @Test func remoteIBMBobServiceRestartLeavesInterruptedInspectableSessionUntilExplicitRelaunch() throws {

@@ -984,9 +984,7 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
         )
         nextProviderEventSequence += 1
         providerEvents.append(event)
-        if providerEvents.count > 1_000 {
-            providerEvents.removeFirst(providerEvents.count - 1_000)
-        }
+        providerEvents = StructuredSessionLiveHistoryRetention.retainedProviderEvents(providerEvents)
         lock.unlock()
     }
 
@@ -1093,9 +1091,7 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
         }
 
         activityItems.append(SessionActivityItem(id: item.id, kind: item.kind, text: trimmedText))
-        if activityItems.count > 200 {
-            activityItems.removeFirst(activityItems.count - 200)
-        }
+        activityItems = StructuredSessionLiveHistoryRetention.retainedActivityItems(activityItems)
     }
 
     private func sessionWithCurrentState(_ session: Session) -> Session {

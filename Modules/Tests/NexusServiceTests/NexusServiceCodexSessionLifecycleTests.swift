@@ -58,9 +58,15 @@ struct NexusServiceCodexSessionLifecycleTests {
         #expect(restartedNamedSession.state == .interrupted)
         #expect(restartedNamedSession.failureMessage == expectedMessage)
         #expect(interruptedDefaultScreen.session.state == .interrupted)
-        #expect(interruptedDefaultScreen.activityItems.map(\.text) == [expectedMessage])
+        #expect(interruptedDefaultScreen.activityItems.map(\.text) == [
+            "Codex shared Session stream connected",
+            expectedMessage
+        ])
         #expect(interruptedNamedScreen.session.state == .interrupted)
-        #expect(interruptedNamedScreen.activityItems.map(\.text) == [expectedMessage])
+        #expect(interruptedNamedScreen.activityItems.map(\.text) == [
+            "Codex shared Session stream connected",
+            expectedMessage
+        ])
         #expect(relaunchedDefaultSession.id == defaultSession.id)
         #expect(relaunchedDefaultSession.state == .ready)
         #expect(relaunchedDefaultScreen.session.state == .ready)

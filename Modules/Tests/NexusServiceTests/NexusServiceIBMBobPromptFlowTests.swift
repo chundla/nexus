@@ -267,12 +267,7 @@ struct NexusServiceIBMBobPromptFlowTests {
 
         #expect(metadata?.providerID == .ibmBob)
         #expect(metadata?.ibmBobSessionLinkage?.sessionID == "bob-session-1")
-        #expect(metadata?.ibmBobPersistedActivityItems?.suffix(4).map(\.text) == [
-            "You: second",
-            "Bob resumed turn started",
-            "Second reply",
-            "Second turn complete"
-        ])
+        #expect(metadata?.ibmBobPersistedActivityItems == nil)
         #expect(secondLaunch.arguments.contains("--resume"))
         #expect(secondLaunch.arguments.contains("bob-session-1"))
         #expect(secondLaunch.arguments.contains("latest") == false)
@@ -519,7 +514,7 @@ struct NexusServiceIBMBobPromptFlowTests {
             "IBM Bob turn stopped."
         ])
         #expect(metadata?.ibmBobTurnInProgress == false)
-        #expect(metadata?.ibmBobPersistedActivityItems?.map(\.text) == stoppedScreen.activityItems.map(\.text))
+        #expect(metadata?.ibmBobPersistedActivityItems == nil)
     }
 
     @Test func localIBMBobRestartedIdleReadySessionStillRejectsStopWithoutActiveTurn() throws {
@@ -700,13 +695,7 @@ struct NexusServiceIBMBobPromptFlowTests {
         #expect(failedResumeLaunch.arguments.contains("bob-session-1"))
         #expect(fallbackLaunch.arguments.contains("--resume") == false)
         #expect(metadata?.ibmBobSessionLinkage?.sessionID == "bob-session-2")
-        #expect(metadata?.ibmBobPersistedActivityItems?.suffix(5).map(\.text) == [
-            "You: second",
-            "Stored IBM Bob continuity was unavailable. Started a fresh Bob conversation on this Session.",
-            "Fresh Bob turn started",
-            "Recovered reply",
-            "Recovered turn complete"
-        ])
+        #expect(metadata?.ibmBobPersistedActivityItems == nil)
         #expect(recoveredResponse.activityItems.suffix(5).map(\.kind) == [.message, .status, .status, .message, .completion])
         #expect(recoveredResponse.activityItems.suffix(5).map(\.text) == [
             "You: second",

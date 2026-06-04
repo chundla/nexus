@@ -86,12 +86,10 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
     var sessionRecordAdapterMetadata: SessionRecordAdapterMetadata? {
         lock.lock()
         let sessionID = sessionLinkage?.sessionID
-        let snapshotActivityItems = activityItems
         let turnInProgress = isStreaming
         lock.unlock()
         return SessionRecordAdapterMetadata.ibmBob(
             sessionID: sessionID,
-            activityItems: snapshotActivityItems,
             turnInProgress: turnInProgress
         )
     }

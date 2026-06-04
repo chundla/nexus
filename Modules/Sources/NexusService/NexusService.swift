@@ -2096,7 +2096,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         guard let session = try sessionRecordStore.session(id: sessionID) else {
             throw NexusMetadataStoreError.sessionNotFound
         }
-        guard session.providerID == .pi else {
+        guard try persistedPrimarySurface(for: session) == .structuredActivityFeed else {
             return StructuredSessionHistoryPage(
                 sessionID: sessionID,
                 activityItems: [],
@@ -2893,8 +2893,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     private func persistPiStructuredSessionHistoryIfNeeded(for session: Session) throws {
-        guard session.providerID == .pi,
-              sessionRuntimeManager.hasRuntime(for: session) else {
+        guard sessionRuntimeManager.hasRuntime(for: session) else {
             return
         }
 
@@ -3214,11 +3213,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     private func persistedPiStructuredSessionState(for session: Session) throws -> PiStructuredSessionPersistedState? {
-        guard session.providerID == .pi else {
-            return nil
-        }
-
-        return try piStructuredSessionHistoryStore.persistedState(sessionID: session.id)
+        try piStructuredSessionHistoryStore.persistedState(sessionID: session.id)
     }
 
     private func persistedStructuredActivityItems(for session: Session) throws -> [SessionActivityItem]? {
