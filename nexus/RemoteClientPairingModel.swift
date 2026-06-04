@@ -1183,6 +1183,7 @@ final class RemoteClientPairingModel {
     }
 
     private func applyFocusedSessionScreen(_ screen: SessionScreen) {
+        let previousScreen = focusedSessionScreen?.session.id == screen.session.id ? focusedSessionScreen : nil
         focusedSessionScreen = screen
         syncFocusedStructuredSessionHistoryPagingState(for: screen)
         syncFocusedStructuredSessionPresentation(for: screen)
@@ -1190,6 +1191,22 @@ final class RemoteClientPairingModel {
         syncFocusedSessionSurfacePresentation(for: screen)
         syncFocusedSessionControllerStatus()
         setFocusedSessionWorkspaceID(screen.session.workspaceID)
+
+        guard let previousScreen else {
+            return
+        }
+
+        Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+            await self.structuredSessionHistoryPagingController.recoverPersistedGapIfNeeded(from: previousScreen, to: screen)
+            guard self.focusedSessionScreen?.session.id == screen.session.id else {
+                return
+            }
+            self.syncFocusedStructuredSessionHistoryPagingState(for: self.focusedSessionScreen)
+            self.syncFocusedStructuredSessionPresentation(for: self.focusedSessionScreen)
+        }
     }
 
     private func syncFocusedStructuredSessionPresentation(for screen: SessionScreen?) {

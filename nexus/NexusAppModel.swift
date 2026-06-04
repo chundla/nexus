@@ -1123,6 +1123,7 @@ final class NexusAppModel {
         let previousScreen = focusedSessionScreen?.session.id == screen.session.id ? focusedSessionScreen : nil
         let previousState = previousScreen?.session.state
         focusedSessionScreen = screen
+        await structuredSessionHistoryPagingController.recoverPersistedGapIfNeeded(from: previousScreen, to: screen)
         syncFocusedStructuredSessionHistoryPagingState(for: screen)
         syncFocusedSessionSummaryPresentation(for: screen)
         syncFocusedStructuredSessionPresentation(for: screen)

@@ -7699,6 +7699,77 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelAutoRecoversPiStructuredSessionObservationGapFromPersistedHistory() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let droppedActivity = SessionActivityItem(kind: .message, text: "Pi: thinking step 1")
+        let previousTailActivity = SessionActivityItem(kind: .message, text: "Pi: thinking step 2")
+        let latestActivity = SessionActivityItem(kind: .message, text: "Pi: thinking step 3")
+        let initialScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "Pi shared Session stream connected",
+            activityItems: [droppedActivity, previousTailActivity],
+            isAgentTurnInProgress: true
+        )
+        let recoveredLiveScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "Pi shared Session stream connected",
+            activityItems: [latestActivity],
+            isAgentTurnInProgress: true
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []),
+            session: session,
+            screen: initialScreen,
+            structuredHistoryPages: [
+                StructuredSessionHistoryPage(
+                    sessionID: session.id,
+                    activityItems: [droppedActivity, previousTailActivity],
+                    providerEvents: [],
+                    nextCursor: nil
+                )
+            ]
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+        try await model.focusSession(sessionID: session.id)
+
+        await client.emitObservedScreen(recoveredLiveScreen)
+        for _ in 0 ..< 20 where model.focusedStructuredSessionPresentation?.feed.activityRows.map(\.text) != [
+            droppedActivity.text,
+            previousTailActivity.text,
+            latestActivity.text
+        ] {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+
+        #expect(model.focusedStructuredSessionPresentation?.feed.activityRows.map(\.text) == [
+            droppedActivity.text,
+            previousTailActivity.text,
+            latestActivity.text
+        ])
+        #expect(model.focusedStructuredSessionPresentation?.feed.pendingApprovalRequests.isEmpty == true)
+        #expect(model.focusedStructuredSessionPresentation?.feed.thinkingIndicator == StructuredSessionThinkingIndicator(text: "Thinking…"))
+        #expect(client.structuredHistoryPageRequests.map(\.sessionID) == [session.id])
+    }
+
+    @MainActor
     @Test func appModelFocusedStructuredSessionPresentationStaysStableDuringTranscriptOnlyUpdates() async throws {
         let group = WorkspaceGroup(id: UUID(), name: "Group")
         let workspace = Workspace(

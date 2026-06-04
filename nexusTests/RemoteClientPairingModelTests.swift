@@ -1620,6 +1620,100 @@ struct RemoteClientPairingModelTests {
         #expect(client.structuredHistoryPageRequests.map(\.sessionID) == [session.id])
     }
 
+    @Test func focusedStructuredSessionPresentationAutoRecoversObservationGapsFromPersistedHistory() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: UUID()
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let catalog = RemoteWorkspaceCatalog(
+            workspaceGroups: [],
+            recentNavigation: [],
+            workspaceOverviews: [WorkspaceOverview(workspace: workspace, providerCards: [])]
+        )
+        let droppedActivity = SessionActivityItem(kind: .message, text: "Pi: thinking step 1")
+        let previousTailActivity = SessionActivityItem(kind: .message, text: "Pi: thinking step 2")
+        let latestActivity = SessionActivityItem(kind: .message, text: "Pi: thinking step 3")
+        let initialScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "Pi shared Session stream connected",
+            activityItems: [droppedActivity, previousTailActivity],
+            isAgentTurnInProgress: true
+        )
+        let recoveredLiveScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "Pi shared Session stream connected",
+            activityItems: [latestActivity],
+            isAgentTurnInProgress: true
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let client = StubRemotePairingClient(
+            result: pairedMac,
+            catalog: catalog,
+            sessionScreen: initialScreen,
+            structuredHistoryPages: [
+                StructuredSessionHistoryPage(
+                    sessionID: session.id,
+                    activityItems: [droppedActivity, previousTailActivity],
+                    providerEvents: [],
+                    nextCursor: nil
+                )
+            ],
+            emitsInitialObservedScreen: false
+        )
+        let model = RemoteClientPairingModel(client: client, store: store)
+
+        await model.refreshActivePairedMacCatalog()
+        await model.focusRemoteSession(sessionID: session.id, workspaceID: session.workspaceID)
+
+        for _ in 0 ..< 20 where model.focusedSessionScreen != initialScreen {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        await client.emitObservedScreen(recoveredLiveScreen)
+        for _ in 0 ..< 20 where model.focusedStructuredSessionPresentation?.feed.activityRows.map(\.text) != [
+            droppedActivity.text,
+            previousTailActivity.text,
+            latestActivity.text
+        ] {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+
+        #expect(model.focusedStructuredSessionPresentation?.feed.activityRows.map(\.text) == [
+            droppedActivity.text,
+            previousTailActivity.text,
+            latestActivity.text
+        ])
+        #expect(model.focusedStructuredSessionPresentation?.feed.pendingApprovalRequests.isEmpty == true)
+        #expect(model.focusedStructuredSessionPresentation?.feed.thinkingIndicator == StructuredSessionThinkingIndicator(text: "Thinking…"))
+        #expect(client.structuredHistoryPageRequests.map(\.sessionID) == [session.id])
+    }
+
     @Test func focusedStructuredSessionPresentationStaysStableDuringTranscriptOnlyUpdates() async throws {
         let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
