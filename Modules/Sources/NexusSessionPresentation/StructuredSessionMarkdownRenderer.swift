@@ -1,6 +1,12 @@
 import Foundation
 import SwiftUI
 
+@available(macOS 12.0, iOS 15.0, *)
+public enum StructuredSessionRenderedText: Equatable, Sendable {
+    case plain(String)
+    case attributed(AttributedString)
+}
+
 public struct StructuredSessionMarkdownRendererMetrics: Equatable, Sendable {
     public let plainTextBypassCount: Int
     public let cacheHitCount: Int
@@ -67,18 +73,27 @@ public final class StructuredSessionMarkdownRenderer: @unchecked Sendable {
     }
 
     public func render(_ text: String) -> AttributedString {
+        switch renderContent(text) {
+        case .plain(let text):
+            return AttributedString(text)
+        case .attributed(let attributed):
+            return attributed
+        }
+    }
+
+    public func renderContent(_ text: String) -> StructuredSessionRenderedText {
         guard Self.requiresMarkdownParsing(text) else {
             lock.lock()
             metrics.plainTextBypassCount += 1
             lock.unlock()
-            return AttributedString(text)
+            return .plain(text)
         }
 
         lock.lock()
         if let cached = cachedValue(for: text) {
             metrics.cacheHitCount += 1
             lock.unlock()
-            return cached
+            return .attributed(cached)
         }
         metrics.cacheMissCount += 1
         lock.unlock()
@@ -89,21 +104,21 @@ public final class StructuredSessionMarkdownRenderer: @unchecked Sendable {
             lock.lock()
             metrics.parseCount += 1
             lock.unlock()
-            return rendered
+            return .attributed(rendered)
         }
 
         lock.lock()
         if let cached = cachedValue(for: text) {
             metrics.cacheHitCount += 1
             lock.unlock()
-            return cached
+            return .attributed(cached)
         }
 
         metrics.parseCount += 1
         insert(rendered, for: text)
         lock.unlock()
 
-        return rendered
+        return .attributed(rendered)
     }
 
     public func clearCache() {
@@ -333,7 +348,7 @@ public struct StructuredSessionMarkdownText: View {
     private let color: Color
     private let renderer: StructuredSessionMarkdownRenderer
 
-    @State private var attributed: AttributedString
+    @State private var renderedContent: StructuredSessionRenderedText
 
     public init(
         markdown: String,
@@ -345,17 +360,24 @@ public struct StructuredSessionMarkdownText: View {
         self.font = font
         self.color = color
         self.renderer = renderer
-        _attributed = State(initialValue: renderer.render(markdown))
+        _renderedContent = State(initialValue: renderer.renderContent(markdown))
     }
 
     public var body: some View {
-        Text(attributed)
-            .font(font)
-            .foregroundColor(color)
-            .textSelection(.enabled)
-            .fixedSize(horizontal: false, vertical: true)
-            .onChange(of: markdown) { newValue in
-                attributed = renderer.render(newValue)
+        Group {
+            switch renderedContent {
+            case .plain(let text):
+                Text(verbatim: text)
+            case .attributed(let attributed):
+                Text(attributed)
             }
+        }
+        .font(font)
+        .foregroundColor(color)
+        .textSelection(.enabled)
+        .fixedSize(horizontal: false, vertical: true)
+        .onChange(of: markdown) { newValue in
+            renderedContent = renderer.renderContent(newValue)
+        }
     }
 }

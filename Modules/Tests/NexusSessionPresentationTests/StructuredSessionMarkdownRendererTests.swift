@@ -19,6 +19,38 @@ struct StructuredSessionMarkdownRendererTests {
         #expect(parseCallCount == 0)
     }
 
+    @Test func rendererReturnsPlainContentForPlainText() {
+        var parseCallCount = 0
+        let renderer = StructuredSessionMarkdownRenderer(
+            cacheLimit: 4,
+            parser: { text in
+                parseCallCount += 1
+                return AttributedString(text.uppercased())
+            }
+        )
+
+        let rendered = renderer.renderContent("Plain status update")
+
+        #expect(rendered == .plain("Plain status update"))
+        #expect(parseCallCount == 0)
+    }
+
+    @Test func rendererReturnsAttributedContentForMarkdownText() {
+        var parseCallCount = 0
+        let renderer = StructuredSessionMarkdownRenderer(
+            cacheLimit: 4,
+            parser: { text in
+                parseCallCount += 1
+                return AttributedString("rendered: \(text)")
+            }
+        )
+
+        let rendered = renderer.renderContent("**bold**")
+
+        #expect(rendered == .attributed(AttributedString("rendered: **bold**")))
+        #expect(parseCallCount == 1)
+    }
+
     @Test func rendererCachesRepeatedMarkdownStrings() {
         var parseCallCount = 0
         let renderer = StructuredSessionMarkdownRenderer(
