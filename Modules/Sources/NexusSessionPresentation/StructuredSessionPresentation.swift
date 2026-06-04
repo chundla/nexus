@@ -318,20 +318,42 @@ public final class FocusedStructuredSessionPresenter {
     }
 }
 
+public final class FocusedStructuredSessionChromePresenter {
+    private let tokenUsagePresenter: StructuredSessionTokenUsagePresenter
+    private let slashCommandBuilder: (SessionScreen) -> [StructuredSessionSlashCommand]
+
+    public init() {
+        self.tokenUsagePresenter = StructuredSessionTokenUsagePresenter()
+        self.slashCommandBuilder = structuredSessionSlashCommands(for:)
+    }
+
+    init(
+        tokenUsagePresenter: StructuredSessionTokenUsagePresenter,
+        slashCommandBuilder: @escaping (SessionScreen) -> [StructuredSessionSlashCommand]
+    ) {
+        self.tokenUsagePresenter = tokenUsagePresenter
+        self.slashCommandBuilder = slashCommandBuilder
+    }
+
+    public func presentation(for screen: SessionScreen) -> FocusedStructuredSessionChromePresentation? {
+        guard screen.primarySurface == .structuredActivityFeed else {
+            return nil
+        }
+
+        return FocusedStructuredSessionChromePresentation(
+            session: screen.session,
+            extensionUI: screen.extensionUI,
+            isAgentTurnInProgress: screen.isAgentTurnInProgress,
+            tokenUsage: tokenUsagePresenter.presentation(for: screen),
+            slashCommands: slashCommandBuilder(screen)
+        )
+    }
+}
+
 public func focusedStructuredSessionChromePresentation(
     for screen: SessionScreen
 ) -> FocusedStructuredSessionChromePresentation? {
-    guard screen.primarySurface == .structuredActivityFeed else {
-        return nil
-    }
-
-    return FocusedStructuredSessionChromePresentation(
-        session: screen.session,
-        extensionUI: screen.extensionUI,
-        isAgentTurnInProgress: screen.isAgentTurnInProgress,
-        tokenUsage: structuredSessionTokenUsagePresentation(for: screen),
-        slashCommands: structuredSessionSlashCommands(for: screen)
-    )
+    FocusedStructuredSessionChromePresenter().presentation(for: screen)
 }
 
 public final class StructuredSessionFeedPresenter {
@@ -767,6 +789,130 @@ public func structuredSessionTokenUsagePresentation(
     )
 }
 
+public final class StructuredSessionTokenUsagePresenter {
+    private let providerEventUsageParser: (SessionProviderEvent) -> StructuredSessionTokenUsagePresentation?
+    private let activityItemUsageParser: (SessionActivityItem) -> StructuredSessionTokenUsagePresentation?
+    private let inferredContextWindowResolver: (SessionScreen) -> Int?
+
+    private var cachedSessionID: UUID?
+    private var cachedProviderEvents: [SessionProviderEvent] = []
+    private var cachedProviderEventUsage: StructuredSessionTokenUsagePresentation?
+    private var cachedActivityItems: [SessionActivityItem] = []
+    private var cachedActivityItemUsage: StructuredSessionTokenUsagePresentation?
+
+    public init() {
+        self.providerEventUsageParser = structuredSessionTokenUsagePresentation(from:)
+        self.activityItemUsageParser = structuredSessionTokenUsagePresentation(from:)
+        self.inferredContextWindowResolver = inferredStructuredSessionContextWindow(for:)
+    }
+
+    init(
+        providerEventUsageParser: @escaping (SessionProviderEvent) -> StructuredSessionTokenUsagePresentation?,
+        activityItemUsageParser: @escaping (SessionActivityItem) -> StructuredSessionTokenUsagePresentation?,
+        inferredContextWindowResolver: @escaping (SessionScreen) -> Int?
+    ) {
+        self.providerEventUsageParser = providerEventUsageParser
+        self.activityItemUsageParser = activityItemUsageParser
+        self.inferredContextWindowResolver = inferredContextWindowResolver
+    }
+
+    public func presentation(for screen: SessionScreen) -> StructuredSessionTokenUsagePresentation? {
+        if cachedSessionID != screen.session.id {
+            resetCache(for: screen.session.id)
+        }
+
+        if let usage = resolveProviderEventUsage(from: screen.providerEvents) {
+            return usage
+        }
+
+        if let usage = resolveActivityItemUsage(from: screen.activityItems) {
+            return usage
+        }
+
+        guard let inferredContextWindow = inferredContextWindowResolver(screen) else {
+            return nil
+        }
+
+        return StructuredSessionTokenUsagePresentation(
+            usedTokens: 0,
+            totalTokens: inferredContextWindow,
+            percent: 0
+        )
+    }
+
+    private func resetCache(for sessionID: UUID) {
+        cachedSessionID = sessionID
+        cachedProviderEvents = []
+        cachedProviderEventUsage = nil
+        cachedActivityItems = []
+        cachedActivityItemUsage = nil
+    }
+
+    private func resolveProviderEventUsage(
+        from providerEvents: [SessionProviderEvent]
+    ) -> StructuredSessionTokenUsagePresentation? {
+        if providerEvents == cachedProviderEvents {
+            return cachedProviderEventUsage
+        }
+
+        if structuredSessionIsAppendOnlyUpdate(cachedProviderEvents, newItems: providerEvents) {
+            for event in providerEvents.suffix(providerEvents.count - cachedProviderEvents.count).reversed() {
+                if let usage = providerEventUsageParser(event) {
+                    cachedProviderEvents = providerEvents
+                    cachedProviderEventUsage = usage
+                    return usage
+                }
+            }
+
+            cachedProviderEvents = providerEvents
+            return cachedProviderEventUsage
+        }
+
+        cachedProviderEvents = providerEvents
+        cachedProviderEventUsage = nil
+        for event in providerEvents.reversed() {
+            if let usage = providerEventUsageParser(event) {
+                cachedProviderEventUsage = usage
+                return usage
+            }
+        }
+
+        return nil
+    }
+
+    private func resolveActivityItemUsage(
+        from activityItems: [SessionActivityItem]
+    ) -> StructuredSessionTokenUsagePresentation? {
+        if activityItems == cachedActivityItems {
+            return cachedActivityItemUsage
+        }
+
+        if structuredSessionIsAppendOnlyUpdate(cachedActivityItems, newItems: activityItems) {
+            for item in activityItems.suffix(activityItems.count - cachedActivityItems.count).reversed() {
+                if let usage = activityItemUsageParser(item) {
+                    cachedActivityItems = activityItems
+                    cachedActivityItemUsage = usage
+                    return usage
+                }
+            }
+
+            cachedActivityItems = activityItems
+            return cachedActivityItemUsage
+        }
+
+        cachedActivityItems = activityItems
+        cachedActivityItemUsage = nil
+        for item in activityItems.reversed() {
+            if let usage = activityItemUsageParser(item) {
+                cachedActivityItemUsage = usage
+                return usage
+            }
+        }
+
+        return nil
+    }
+}
+
 public func structuredSessionApprovalRequestPresentation(
     hasWriterAuthority: Bool
 ) -> StructuredSessionApprovalRequestPresentation {
@@ -1125,24 +1271,37 @@ private func resolvedStructuredSessionTokenUsage(for screen: SessionScreen) -> S
 
 private func structuredSessionTokenUsage(from providerEvents: [SessionProviderEvent]) -> StructuredSessionResolvedTokenUsage? {
     for event in providerEvents.reversed() {
-        guard let payload = structuredSessionJSONObject(from: event.rawPayload),
-              let usage = structuredSessionTokenUsage(from: payload) else {
-            continue
+        if let usage = structuredSessionTokenUsage(from: event) {
+            return usage
         }
-        return usage
     }
     return nil
 }
 
+private func structuredSessionTokenUsage(from event: SessionProviderEvent) -> StructuredSessionResolvedTokenUsage? {
+    guard let payload = structuredSessionJSONObject(from: event.rawPayload),
+          let usage = structuredSessionTokenUsage(from: payload) else {
+        return nil
+    }
+    return usage
+}
+
 private func structuredSessionTokenUsage(from activityItems: [SessionActivityItem]) -> StructuredSessionResolvedTokenUsage? {
     for item in activityItems.reversed() {
-        if let usage = structuredSessionTokenUsage(from: item.text) {
+        if let usage = structuredSessionTokenUsage(from: item) {
             return usage
         }
-        if let detailText = item.detailText,
-           let usage = structuredSessionTokenUsage(from: detailText) {
-            return usage
-        }
+    }
+    return nil
+}
+
+private func structuredSessionTokenUsage(from item: SessionActivityItem) -> StructuredSessionResolvedTokenUsage? {
+    if let usage = structuredSessionTokenUsage(from: item.text) {
+        return usage
+    }
+    if let detailText = item.detailText,
+       let usage = structuredSessionTokenUsage(from: detailText) {
+        return usage
     }
     return nil
 }
@@ -1336,6 +1495,28 @@ private func structuredSessionJSONObject(from rawPayload: String) -> [String: An
     return object
 }
 
+private func structuredSessionTokenUsagePresentation(
+    from usage: StructuredSessionResolvedTokenUsage
+) -> StructuredSessionTokenUsagePresentation {
+    StructuredSessionTokenUsagePresentation(
+        usedTokens: usage.usedTokens,
+        totalTokens: usage.totalTokens,
+        percent: usage.percent
+    )
+}
+
+private func structuredSessionTokenUsagePresentation(
+    from event: SessionProviderEvent
+) -> StructuredSessionTokenUsagePresentation? {
+    structuredSessionTokenUsage(from: event).map(structuredSessionTokenUsagePresentation(from:))
+}
+
+private func structuredSessionTokenUsagePresentation(
+    from item: SessionActivityItem
+) -> StructuredSessionTokenUsagePresentation? {
+    structuredSessionTokenUsage(from: item).map(structuredSessionTokenUsagePresentation(from:))
+}
+
 private func structuredSessionTrimmedString(in object: [String: Any], keys: [String]) -> String? {
     for key in keys {
         if let string = object[key] as? String {
@@ -1381,6 +1562,18 @@ private func structuredSessionCoerceInt(_ value: Any?) -> Int? {
     default:
         return nil
     }
+}
+
+private func structuredSessionIsAppendOnlyUpdate<T: Equatable>(_ cachedItems: [T], newItems: [T]) -> Bool {
+    guard newItems.count >= cachedItems.count else {
+        return false
+    }
+
+    for (cachedItem, newItem) in zip(cachedItems, newItems) where cachedItem != newItem {
+        return false
+    }
+
+    return true
 }
 
 private func formatStructuredSessionTokenCount(_ value: Int) -> String {

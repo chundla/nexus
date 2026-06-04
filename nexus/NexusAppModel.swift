@@ -122,6 +122,7 @@ final class NexusAppModel {
     private let embeddedService: (any NexusEmbeddedServiceSession)?
     private var remotePairingServer: (any RemotePairingServing)?
     private let focusedStructuredSessionPresenter = FocusedStructuredSessionPresenter()
+    private let focusedStructuredSessionChromePresenter = FocusedStructuredSessionChromePresenter()
     private let remotePairingServerFactory: (() throws -> any RemotePairingServing)?
     private var focusedSessionObservation: (any SessionScreenObservation)?
     private var staleWorkspaceOverviewRefreshTasks: [UUID: Task<Void, Never>] = [:]
@@ -1134,7 +1135,7 @@ final class NexusAppModel {
     }
 
     private func syncFocusedStructuredSessionChromePresentation(for screen: SessionScreen?) {
-        let presentation = screen.flatMap { NexusSessionPresentation.focusedStructuredSessionChromePresentation(for: $0) }
+        let presentation = screen.flatMap { focusedStructuredSessionChromePresenter.presentation(for: $0) }
         if focusedStructuredSessionChromePresentation != presentation {
             focusedStructuredSessionChromePresentation = presentation
         }

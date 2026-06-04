@@ -416,6 +416,175 @@ struct StructuredSessionPresentationTests {
         #expect(structuredSessionStatusBarPresentation(for: screen, workspaceLocation: "/tmp/nexus").tokenUsageText == "0/272k 0%")
     }
 
+    @Test func structuredSessionTokenUsagePresenterOnlyParsesNewProviderEventsAcrossAppendOnlyUpdates() {
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let usage = StructuredSessionTokenUsagePresentation(usedTokens: 60000, totalTokens: 200000, percent: 30)
+        let usageEvent = SessionProviderEvent(
+            sequence: 0,
+            providerID: .pi,
+            type: "response",
+            family: .response,
+            rawPayload: "usage"
+        )
+        let appendedEvent = SessionProviderEvent(
+            sequence: 1,
+            providerID: .pi,
+            type: "response",
+            family: .response,
+            rawPayload: "noop"
+        )
+        var parsedPayloads: [String] = []
+        let presenter = StructuredSessionTokenUsagePresenter(
+            providerEventUsageParser: { event in
+                parsedPayloads.append(event.rawPayload)
+                return event.rawPayload == "usage"
+                    ? StructuredSessionTokenUsagePresentation(usedTokens: 60000, totalTokens: 200000, percent: 30)
+                    : nil
+            },
+            activityItemUsageParser: { _ in
+                Issue.record("Expected append-only provider event updates to avoid reparsing activity items")
+                return nil
+            },
+            inferredContextWindowResolver: { _ in
+                Issue.record("Expected append-only provider event updates to avoid falling back to inferred context windows")
+                return nil
+            }
+        )
+
+        let initialPresentation = presenter.presentation(for: SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            providerEvents: [usageEvent]
+        ))
+        let updatedPresentation = presenter.presentation(for: SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            providerEvents: [usageEvent, appendedEvent]
+        ))
+
+        #expect(initialPresentation == usage)
+        #expect(updatedPresentation == usage)
+        #expect(parsedPayloads == ["usage", "noop"])
+    }
+
+    @Test func structuredSessionTokenUsagePresenterOnlyParsesNewActivityItemsAcrossAppendOnlyUpdates() {
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let usage = StructuredSessionTokenUsagePresentation(usedTokens: 40000, totalTokens: 200000, percent: 20)
+        let usageItem = SessionActivityItem(kind: .progress, text: "usage")
+        let appendedItem = SessionActivityItem(kind: .message, text: "noop")
+        var parsedTexts: [String] = []
+        let presenter = StructuredSessionTokenUsagePresenter(
+            providerEventUsageParser: { _ in
+                Issue.record("Expected append-only activity updates to avoid reparsing provider events")
+                return nil
+            },
+            activityItemUsageParser: { item in
+                parsedTexts.append(item.text)
+                return item.text == "usage"
+                    ? StructuredSessionTokenUsagePresentation(usedTokens: 40000, totalTokens: 200000, percent: 20)
+                    : nil
+            },
+            inferredContextWindowResolver: { _ in
+                Issue.record("Expected append-only activity updates to avoid falling back to inferred context windows")
+                return nil
+            }
+        )
+
+        let initialPresentation = presenter.presentation(for: SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [usageItem]
+        ))
+        let updatedPresentation = presenter.presentation(for: SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [usageItem, appendedItem]
+        ))
+
+        #expect(initialPresentation == usage)
+        #expect(updatedPresentation == usage)
+        #expect(parsedTexts == ["usage", "noop"])
+    }
+
+    @Test func structuredSessionTokenUsagePresenterRebuildsWhenProviderEventsChangeInPlace() {
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let initialEvent = SessionProviderEvent(
+            sequence: 0,
+            providerID: .pi,
+            type: "response",
+            family: .response,
+            rawPayload: "usage-1"
+        )
+        let updatedEvent = SessionProviderEvent(
+            sequence: 0,
+            providerID: .pi,
+            type: "response",
+            family: .response,
+            rawPayload: "usage-2"
+        )
+        var parsedPayloads: [String] = []
+        let presenter = StructuredSessionTokenUsagePresenter(
+            providerEventUsageParser: { event in
+                parsedPayloads.append(event.rawPayload)
+                switch event.rawPayload {
+                case "usage-1":
+                    return StructuredSessionTokenUsagePresentation(usedTokens: 10000, totalTokens: 200000, percent: 5)
+                case "usage-2":
+                    return StructuredSessionTokenUsagePresentation(usedTokens: 60000, totalTokens: 200000, percent: 30)
+                default:
+                    return nil
+                }
+            },
+            activityItemUsageParser: { _ in
+                Issue.record("Expected provider event rebuilds to avoid activity-item fallback when usage still exists in provider events")
+                return nil
+            },
+            inferredContextWindowResolver: { _ in
+                Issue.record("Expected provider event rebuilds to avoid inferred-context fallback when usage still exists in provider events")
+                return nil
+            }
+        )
+
+        let initialPresentation = presenter.presentation(for: SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            providerEvents: [initialEvent]
+        ))
+        let updatedPresentation = presenter.presentation(for: SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            providerEvents: [updatedEvent]
+        ))
+
+        #expect(initialPresentation == StructuredSessionTokenUsagePresentation(usedTokens: 10000, totalTokens: 200000, percent: 5))
+        #expect(updatedPresentation == StructuredSessionTokenUsagePresentation(usedTokens: 60000, totalTokens: 200000, percent: 30))
+        #expect(parsedPayloads == ["usage-1", "usage-2"])
+    }
+
     @Test func structuredSessionPresentationBuildsSharedFeedAndComposerStateFromSessionScreenAndDraft() {
         let session = Session(
             id: UUID(),

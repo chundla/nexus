@@ -182,6 +182,7 @@ final class RemoteClientPairingModel {
     private let store: any PairedMacStore
     private let focusedSessionObservationStartupTimeoutNanoseconds: UInt64
     private let focusedStructuredSessionPresenter = FocusedStructuredSessionPresenter()
+    private let focusedStructuredSessionChromePresenter = FocusedStructuredSessionChromePresenter()
     private var focusedSessionObservation: (any SessionScreenObservation)?
     private var focusedSessionObservationStartupTask: Task<Void, Never>?
     private var focusedSessionReconnectTask: Task<Void, Never>?
@@ -1130,7 +1131,7 @@ final class RemoteClientPairingModel {
     }
 
     private func syncFocusedStructuredSessionChromePresentation(for screen: SessionScreen?) {
-        let presentation = screen.flatMap { NexusSessionPresentation.focusedStructuredSessionChromePresentation(for: $0) }
+        let presentation = screen.flatMap { focusedStructuredSessionChromePresenter.presentation(for: $0) }
         if focusedStructuredSessionChromePresentation != presentation {
             focusedStructuredSessionChromePresentation = presentation
         }
