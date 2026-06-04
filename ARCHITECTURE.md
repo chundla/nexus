@@ -149,8 +149,11 @@ Stored:
 - sessions
 - launch snapshots
 - provider-native continuation linkage on Session Records
+- persisted structured Session history for structured Session reopen and paging, retained locally for the lifetime of the Session Record unless an explicit reset or replacement flow discards or moves it
 - recent/default mappings
 - diagnostics metadata
+
+Persisted structured Session history exists to keep bounded live `SessionScreen` behavior separate from reopen and paging needs. It is not an automatic export or full-capture artifact.
 
 Not fully persisted in milestone one:
 
@@ -200,7 +203,7 @@ Milestone one proves the service-centered architecture with local-only execution
 - iOS app target and implementation
 - remote SSH/tmux execution
 - provider installation management
-- full transcript retention policy management
+- user-configurable transcript/history retention policy management UI
 - multi-client terminal control implementation
 - deep provider semantic normalization
 

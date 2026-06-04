@@ -1,6 +1,9 @@
 import Foundation
 import NexusDomain
 
+/// Bounds the live structured `SessionScreen` payload used for shared rendering and observation.
+/// These limits do not define persisted structured Session history retention and do not imply
+/// automatic export or full-capture behavior.
 enum StructuredSessionLiveHistoryRetention {
     static let maxTranscriptCharacters = 128_000
     static let maxRetainedActivityItems = 2_000

@@ -10,6 +10,10 @@ struct PiStructuredSessionPersistedState: Codable, Equatable, Sendable {
     let providerEvents: [SessionProviderEvent]
 }
 
+/// Persists structured Session history for reopen and paging on the owning Mac.
+/// By default this data lives with the Session Record and is removed when the Session Record
+/// is deleted or when a narrower explicit reset/replacement flow discards it.
+/// Provider-native export and full-capture remain separate explicit concerns.
 final class PiStructuredSessionHistoryStore: @unchecked Sendable {
     private let rootURL: URL
     private let fileManager: FileManager

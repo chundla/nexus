@@ -5,6 +5,65 @@ import NexusDomain
 import Testing
 
 struct NexusServiceStructuredSessionHistoryPersistenceTests {
+    @Test func deletingStructuredSessionRecordRemovesPersistedStructuredHistoryFiles() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
+
+        let transportHarness = CodexHistoryPersistenceTransportHarness(
+            completedAgentMessages: ["Reply 0"]
+        )
+
+        func makeService() throws -> NexusService {
+            let launcher = ProcessSessionRuntimeLauncher(
+                codexTransportFactory: { _, _, _ in transportHarness.makeTransport() }
+            )
+
+            return try NexusService.bootstrapForTests(
+                rootURL: rootURL,
+                providerHealthEvaluator: ProviderHealthFacts(
+                    executableResolver: CodexHistoryPersistenceExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
+                    commandRunner: CodexHistoryPersistenceCommandRunner(results: [
+                        .init(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n")
+                    ]),
+                    codexReadinessProbe: CodexHistoryPersistenceReadinessProbe()
+                ),
+                sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+            )
+        }
+
+        let service = try makeService()
+        let group = try service.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try service.createLocalWorkspace(
+            name: "Local Codex",
+            folderPath: workspaceFolder.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .codex)
+        _ = try service.sendSessionInput(sessionID: session.id, text: "first")
+        _ = try service.stopSession(sessionID: session.id)
+
+        let historyDirectory = rootURL
+            .appendingPathComponent("PiStructuredSessionHistory", isDirectory: true)
+            .appendingPathComponent(session.id.uuidString, isDirectory: true)
+
+        #expect(FileManager.default.fileExists(atPath: historyDirectory.path))
+
+        let deleted = try service.deleteSessionRecord(sessionID: session.id)
+
+        #expect(deleted)
+        #expect(FileManager.default.fileExists(atPath: historyDirectory.path) == false)
+
+        do {
+            _ = try service.getStructuredSessionHistoryPage(sessionID: session.id, pageSize: 40, before: nil)
+            Issue.record("Expected deleted structured Session history to be unavailable")
+        } catch {
+        }
+    }
+
     @Test func localCodexPersistsStructuredHistoryOverflowOnDiskAndReopensFromPersistedHistoryPages() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)

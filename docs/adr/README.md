@@ -40,3 +40,4 @@ Initial set:
 32. Local structured Sessions may be ready without a continuously attached provider runtime
 33. Some remote structured Sessions may be ready without a continuously attached live runtime
 34. Provider Modules are the single Provider seam
+35. Persisted structured Session history is Session Record scoped, with explicit export
