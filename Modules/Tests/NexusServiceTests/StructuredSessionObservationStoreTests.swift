@@ -6,6 +6,68 @@ import NexusIPC
 import Testing
 
 struct StructuredSessionObservationStoreTests {
+    @Test func structuredObservationSnapshotKeepsOnlyBoundedTranscriptTail() {
+        let store = StructuredSessionObservationStore()
+        let session = Session(id: UUID(), workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready)
+        let lines = (0..<40_000).map { "line-\($0)" }.joined(separator: "\n")
+        let screen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: lines,
+            activityItems: [SessionActivityItem(kind: .status, text: "Pi ready")]
+        )
+
+        let response = store.snapshotResponse(for: screen)
+        let snapshot = try! #require(response.structuredSnapshot)
+
+        #expect(snapshot.transcript.count <= StructuredSessionLiveHistoryRetention.maxTranscriptCharacters)
+        #expect(snapshot.transcript.hasSuffix("line-39999"))
+        #expect(snapshot.transcript.contains("line-0") == false)
+    }
+
+    @Test func structuredObservationDeltaKeepsOnlyBoundedTranscriptTail() {
+        let store = StructuredSessionObservationStore()
+        let session = Session(id: UUID(), workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready)
+        _ = store.snapshotResponse(
+            for: SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                transcript: "initial",
+                activityItems: [SessionActivityItem(kind: .status, text: "Pi ready")]
+            )
+        )
+
+        let lines = (0..<40_000).map { "line-\($0)" }.joined(separator: "\n")
+        store.recordChange(
+            for: SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                transcript: lines,
+                activityItems: [SessionActivityItem(kind: .status, text: "Pi ready")]
+            )
+        )
+
+        let updates = store.updates(for: session.id, after: 0)
+        let delta: StructuredSessionObservationDelta
+        switch try! #require(updates.first) {
+        case let .structuredDelta(value):
+            delta = value
+        default:
+            Issue.record("Expected structured delta update")
+            return
+        }
+        let transcript = try! #require(delta.changes.compactMap { change -> String? in
+            if case let .setTranscript(value) = change {
+                return value
+            }
+            return nil
+        }.first)
+
+        #expect(transcript.count <= StructuredSessionLiveHistoryRetention.maxTranscriptCharacters)
+        #expect(transcript.hasSuffix("line-39999"))
+        #expect(transcript.contains("line-0") == false)
+    }
+
     @Test func structuredObservationStartPreservesStructuredViewportState() {
         let store = StructuredSessionObservationStore()
         let session = Session(id: UUID(), workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready)

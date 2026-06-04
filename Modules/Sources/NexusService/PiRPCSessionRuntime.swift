@@ -238,8 +238,8 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             return
         }
 
-        activityItems = metadata.piPersistedActivityItems ?? []
-        transcriptEntries = Self.transcriptEntries(from: activityItems)
+        activityItems = StructuredSessionLiveHistoryRetention.retainedActivityItems(metadata.piPersistedActivityItems ?? [])
+        transcriptEntries = StructuredSessionLiveHistoryRetention.retainedTranscriptEntries(Self.transcriptEntries(from: activityItems))
         approvalRequests = metadata.piPersistedApprovalRequests ?? []
         if let extensionUIState = metadata.piPersistedExtensionUIState {
             extensionTitle = extensionUIState.title
@@ -249,7 +249,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             extensionWidgets = extensionUIState.widgets
             extensionEditorText = extensionUIState.editorText
         }
-        providerEvents = metadata.piPersistedProviderEvents ?? []
+        providerEvents = StructuredSessionLiveHistoryRetention.retainedProviderEvents(metadata.piPersistedProviderEvents ?? [])
         nextProviderEventSequence = (providerEvents.last?.sequence ?? -1) + 1
     }
 
@@ -595,7 +595,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             lastAssistantStopReason = nil
         }
         draft = ""
-        transcriptEntries.append("> \(promptSummaryText(for: resolvedPrompt))")
+        appendTranscriptEntryLocked("> \(promptSummaryText(for: resolvedPrompt))")
         appendActivityItemLocked(
             SessionActivityItem(
                 kind: .message,
@@ -1059,7 +1059,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         let summary = promptSummaryText(for: prompt)
         lock.lock()
         draft = ""
-        transcriptEntries.append("> \(summary)")
+        appendTranscriptEntryLocked("> \(summary)")
         appendActivityItemLocked(SessionActivityItem(kind: .message, text: "\(activityPrefix): \(summary)", prompt: prompt))
         lock.unlock()
         notifyChange()
@@ -1681,6 +1681,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             ensureAssistantTranscriptEntryLocked()
             if let assistantTranscriptIndex {
                 transcriptEntries[assistantTranscriptIndex] = currentAssistantText
+                trimTranscriptEntriesLocked()
             }
             lock.unlock()
             notifyChange()
@@ -1720,6 +1721,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             ensureAssistantTranscriptEntryLocked()
             if let assistantTranscriptIndex {
                 transcriptEntries[assistantTranscriptIndex] = finalText
+                trimTranscriptEntriesLocked()
             }
             appendActivityItemLocked(SessionActivityItem(kind: .message, text: "Pi: \(finalText)"))
         }
@@ -1839,6 +1841,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             ensureAssistantTranscriptEntryLocked()
             if let assistantTranscriptIndex {
                 transcriptEntries[assistantTranscriptIndex] = finalText
+                trimTranscriptEntriesLocked()
             }
             appendActivityItemLocked(SessionActivityItem(kind: .message, text: "Pi: \(finalText)"))
         }
@@ -1898,6 +1901,32 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
 
         transcriptEntries.append("")
         assistantTranscriptIndex = transcriptEntries.count - 1
+        trimTranscriptEntriesLocked()
+    }
+
+    private func appendTranscriptEntryLocked(_ entry: String) {
+        transcriptEntries.append(entry)
+        trimTranscriptEntriesLocked()
+    }
+
+    private func trimTranscriptEntriesLocked() {
+        let originalCount = transcriptEntries.count
+        transcriptEntries = StructuredSessionLiveHistoryRetention.retainedTranscriptEntries(transcriptEntries)
+
+        guard let assistantTranscriptIndex else {
+            return
+        }
+
+        let removedCount = originalCount - transcriptEntries.count
+        let shiftedIndex = assistantTranscriptIndex - removedCount
+        guard transcriptEntries.indices.contains(shiftedIndex) else {
+            self.assistantTranscriptIndex = nil
+            currentAssistantText = ""
+            return
+        }
+
+        self.assistantTranscriptIndex = shiftedIndex
+        currentAssistantText = transcriptEntries[shiftedIndex]
     }
 
     private func renderedTranscriptLocked() -> String {
@@ -1905,7 +1934,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         if draft.isEmpty == false {
             lines.append("> \(draft)")
         }
-        return lines.joined(separator: "\n")
+        return StructuredSessionLiveHistoryRetention.retainedTranscriptEntries(lines).joined(separator: "\n")
     }
 
     private static func transcriptEntries(from activityItems: [SessionActivityItem]) -> [String] {
@@ -3212,9 +3241,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
                 prompt: item.prompt
             )
         )
-        if activityItems.count > 2_000 {
-            activityItems.removeFirst(activityItems.count - 2_000)
-        }
+        activityItems = StructuredSessionLiveHistoryRetention.retainedActivityItems(activityItems)
     }
 
     private func setActivityItemDetailTextLocked(id: UUID, detailText: String) {

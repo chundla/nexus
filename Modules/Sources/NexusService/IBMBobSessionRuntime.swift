@@ -72,9 +72,9 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
             )
         }
         self.slashCommands = Self.discoverSlashCommands(executable: executable, workingDirectory: workingDirectory)
-        let restoredActivityItems = sessionLinkage?.persistedActivityItems ?? []
+        let restoredActivityItems = StructuredSessionLiveHistoryRetention.retainedActivityItems(sessionLinkage?.persistedActivityItems ?? [])
         self.activityItems = restoredActivityItems.isEmpty ? Self.defaultActivityItems : restoredActivityItems
-        self.transcriptEntries = Self.transcriptEntries(from: self.activityItems)
+        self.transcriptEntries = StructuredSessionLiveHistoryRetention.retainedTranscriptEntries(Self.transcriptEntries(from: self.activityItems))
     }
 
     var state: Session.State {
@@ -230,18 +230,18 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
         }
         switch event.kind {
         case .status:
-            activityItems.append(SessionActivityItem(kind: .status, text: event.text))
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: event.text))
         case .message:
-            transcriptEntries.append(event.text)
-            activityItems.append(SessionActivityItem(kind: .message, text: event.text))
+            appendTranscriptEntryLocked(event.text)
+            appendActivityItemLocked(SessionActivityItem(kind: .message, text: event.text))
         case .command:
-            activityItems.append(SessionActivityItem(kind: .command, text: event.text))
+            appendActivityItemLocked(SessionActivityItem(kind: .command, text: event.text))
         case .diff:
-            activityItems.append(SessionActivityItem(kind: .diff, text: event.text))
+            appendActivityItemLocked(SessionActivityItem(kind: .diff, text: event.text))
         case .completion:
-            activityItems.append(SessionActivityItem(kind: .completion, text: event.text))
+            appendActivityItemLocked(SessionActivityItem(kind: .completion, text: event.text))
         case .error:
-            activityItems.append(SessionActivityItem(kind: .error, text: event.text))
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: event.text))
         default:
             break
         }
@@ -284,7 +284,7 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
         if shouldRetryFresh {
             runtimeState = .ready
             sessionLinkage = nil
-            activityItems.append(
+            appendActivityItemLocked(
                 SessionActivityItem(
                     kind: .status,
                     text: "Stored IBM Bob continuity was unavailable. Started a fresh Bob conversation on this Session."
@@ -292,11 +292,11 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
             )
         } else if shouldAppendError {
             runtimeState = unexpectedTerminationStateEvaluator(status, errorText)
-            activityItems.append(SessionActivityItem(kind: .error, text: errorText))
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: errorText))
         } else {
             runtimeState = .ready
             if requestedStop {
-                activityItems.append(SessionActivityItem(kind: .status, text: "IBM Bob turn stopped."))
+                appendActivityItemLocked(SessionActivityItem(kind: .status, text: "IBM Bob turn stopped."))
             }
         }
         stderrLines = []
@@ -328,8 +328,8 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
         stderrLines = []
         runtimeState = .ready
         if announceUserMessage {
-            transcriptEntries.append("> \(prompt)")
-            activityItems.append(SessionActivityItem(kind: .message, text: "You: \(prompt)"))
+            appendTranscriptEntryLocked("> \(prompt)")
+            appendActivityItemLocked(SessionActivityItem(kind: .message, text: "You: \(prompt)"))
         }
         lock.unlock()
         notifyChange()
@@ -381,7 +381,7 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
         activeTransport = nil
         activeTurn = nil
         runtimeState = .failed
-        activityItems.append(SessionActivityItem(kind: .error, text: resolvedMessage))
+        appendActivityItemLocked(SessionActivityItem(kind: .error, text: resolvedMessage))
         lock.unlock()
         notifyChange()
     }
@@ -395,7 +395,7 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
             )
         } catch {
             lock.lock()
-            activityItems.append(SessionActivityItem(kind: .error, text: error.localizedDescription))
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: error.localizedDescription))
             lock.unlock()
             notifyChange()
         }
@@ -420,7 +420,17 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
     }
 
     private func renderedTranscriptLocked() -> String {
-        transcriptEntries.joined(separator: "\n")
+        StructuredSessionLiveHistoryRetention.retainedTranscriptEntries(transcriptEntries).joined(separator: "\n")
+    }
+
+    private func appendTranscriptEntryLocked(_ entry: String) {
+        transcriptEntries.append(entry)
+        transcriptEntries = StructuredSessionLiveHistoryRetention.retainedTranscriptEntries(transcriptEntries)
+    }
+
+    private func appendActivityItemLocked(_ item: SessionActivityItem) {
+        activityItems.append(item)
+        activityItems = StructuredSessionLiveHistoryRetention.retainedActivityItems(activityItems)
     }
 
     private func notifyChange() {

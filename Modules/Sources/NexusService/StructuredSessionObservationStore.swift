@@ -41,18 +41,19 @@ final class StructuredSessionObservationStore: @unchecked Sendable {
     }
 
     func snapshotResponse(for screen: SessionScreen) -> SessionScreenObservationSnapshotResponse {
-        guard screen.primarySurface == .structuredActivityFeed else {
+        let retainedScreen = StructuredSessionLiveHistoryRetention.normalizedScreen(screen)
+        guard retainedScreen.primarySurface == .structuredActivityFeed else {
             return withLock {
-                entries.removeValue(forKey: screen.session.id)
-                return SessionScreenObservationSnapshotResponse(screen: screen)
+                entries.removeValue(forKey: retainedScreen.session.id)
+                return SessionScreenObservationSnapshotResponse(screen: retainedScreen)
             }
         }
 
-        var trace = makeTrace(for: screen.session)
+        var trace = makeTrace(for: retainedScreen.session)
         var deltaBuildSummary: DeltaBuildSummary?
         let response = trace.measure("buildStructuredSnapshot") {
             withLock {
-                let resolution = ensureCurrentEntryLocked(for: screen)
+                let resolution = ensureCurrentEntryLocked(for: retainedScreen)
                 deltaBuildSummary = resolution.deltaBuildSummary
                 return SessionScreenObservationSnapshotResponse(
                     screen: resolution.entry.snapshot.screen,
@@ -62,7 +63,7 @@ final class StructuredSessionObservationStore: @unchecked Sendable {
         }
 
         if let deltaBuildSummary {
-            recordPerformanceDiagnostic(deltaDiagnostic(for: screen.session, summary: deltaBuildSummary))
+            recordPerformanceDiagnostic(deltaDiagnostic(for: retainedScreen.session, summary: deltaBuildSummary))
         }
         if let structuredSnapshot = response.structuredSnapshot {
             recordPerformanceDiagnostic(
@@ -85,18 +86,19 @@ final class StructuredSessionObservationStore: @unchecked Sendable {
     }
 
     func recordChange(for screen: SessionScreen) {
-        guard screen.primarySurface == .structuredActivityFeed else {
+        let retainedScreen = StructuredSessionLiveHistoryRetention.normalizedScreen(screen)
+        guard retainedScreen.primarySurface == .structuredActivityFeed else {
             _ = withLock {
-                entries.removeValue(forKey: screen.session.id)
+                entries.removeValue(forKey: retainedScreen.session.id)
             }
             return
         }
 
         let deltaBuildSummary = withLock {
-            ensureCurrentEntryLocked(for: screen).deltaBuildSummary
+            ensureCurrentEntryLocked(for: retainedScreen).deltaBuildSummary
         }
         if let deltaBuildSummary {
-            recordPerformanceDiagnostic(deltaDiagnostic(for: screen.session, summary: deltaBuildSummary))
+            recordPerformanceDiagnostic(deltaDiagnostic(for: retainedScreen.session, summary: deltaBuildSummary))
         }
     }
 

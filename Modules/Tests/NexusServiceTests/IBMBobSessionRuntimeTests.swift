@@ -123,6 +123,53 @@ struct IBMBobSessionRuntimeTests {
         ])
     }
 
+    @Test func retainsOnlyBoundedLiveHistoryAcrossPersistedBobResume() throws {
+        let reply = String(repeating: "bob-tail-", count: 40)
+        let runtime = try IBMBobSessionRuntime(
+            executable: "/tmp/fake-bob",
+            workingDirectory: "/tmp/workspace",
+            terminationStatusMessageBuilder: { status in "IBM Bob exited with status \(status)." },
+            transportFactory: { _, _, _ in
+                SynchronousIBMBobTransport(
+                    stdoutLines: [
+                        #"{"type":"message","text":"\#(reply)"}"#,
+                        #"{"type":"completion","text":"Done"}"#
+                    ],
+                    terminationStatus: 0
+                )
+            }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .ibmBob,
+            isDefault: true,
+            state: .ready
+        )
+
+        for turn in 0..<700 {
+            try runtime.sendInput("prompt-\(turn)")
+        }
+
+        let linkage = try! #require(runtime.sessionRecordAdapterMetadata?.ibmBobSessionLinkage)
+        let resumedRuntime = try IBMBobSessionRuntime(
+            executable: "/tmp/fake-bob",
+            workingDirectory: "/tmp/workspace",
+            sessionLinkage: linkage,
+            terminationStatusMessageBuilder: { status in "IBM Bob exited with status \(status)." },
+            transportFactory: { _, _, _ in
+                SynchronousIBMBobTransport(stdoutLines: [], terminationStatus: 0)
+            }
+        )
+        let screen = resumedRuntime.sessionScreen(for: session)
+
+        #expect(screen.activityItems.count <= StructuredSessionLiveHistoryRetention.maxRetainedActivityItems)
+        #expect(screen.transcript.count <= StructuredSessionLiveHistoryRetention.maxTranscriptCharacters)
+        #expect(screen.transcript.contains("> prompt-699"))
+        #expect(screen.transcript.contains("> prompt-0") == false)
+    }
+
     @Test func secondPromptStartsFreshBobTurnOnSameReadyRuntime() throws {
         let launchRecorder = IBMBobLaunchRecorder()
         let runtime = try IBMBobSessionRuntime(

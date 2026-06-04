@@ -155,6 +155,47 @@ struct NexusServicePiSessionStreamTests {
         ])
     }
 
+    @Test func localPiRuntimeRetainsOnlyBoundedTranscriptTailAcrossManyTurns() throws {
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in
+                TestPiRPCTransport(promptResponseText: String(repeating: "assistant-tail-", count: 4_000))
+            }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        for turn in 0..<5 {
+            try runtime.sendInput("prompt-\(turn)")
+        }
+        let metadata = runtime.sessionRecordAdapterMetadata
+        let screen = runtime.sessionScreen(for: session)
+
+        let resumedRuntime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            restoredMetadata: metadata,
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in
+                TestPiRPCTransport()
+            }
+        )
+        let resumedScreen = resumedRuntime.sessionScreen(for: session)
+
+        #expect(screen.transcript.count <= StructuredSessionLiveHistoryRetention.maxTranscriptCharacters)
+        #expect(screen.transcript.contains("> prompt-4"))
+        #expect(screen.transcript.contains("> prompt-0") == false)
+        #expect(resumedScreen.transcript == screen.transcript)
+    }
+
     @Test func localPiRuntimePublishesAvailableModelCommandsFromRpc() throws {
         let runtime = try PiRPCSessionRuntime(
             executable: "/tmp/fake-pi",
