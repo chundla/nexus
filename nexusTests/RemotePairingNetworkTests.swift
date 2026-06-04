@@ -1359,6 +1359,72 @@ struct RemotePairingNetworkTests {
         #expect(screen == expectedScreen)
     }
 
+    @Test func fetchesRemotePiStructuredHistoryPagesOverDedicatedNetworkAPI() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolderURL = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let messageCount = StructuredSessionLiveHistoryRetention.maxRetainedActivityItems + 100
+        let messages = (0..<messageCount).map { index in
+            [
+                "role": "user",
+                "content": "History \(index)"
+            ]
+        }
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthFacts(
+                executableResolver: StubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
+                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                ]),
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+            ),
+            sessionRuntimeManager: InMemorySessionRuntimeManager(
+                launcher: ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
+                    HistoryPagingPiRPCTransport(messages: messages)
+                })
+            )
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
+
+        _ = try await client.setRemoteAccessEnabled(true)
+        let pairing = try await client.startPairing()
+        let group = try await client.createWorkspaceGroup(name: "Client Work")
+        let workspace = try await client.createLocalWorkspace(
+            name: "Nexus",
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+        _ = try await client.sendSessionInput(sessionID: session.id, text: "/messages")
+        let liveScreen = try await client.getSessionScreen(sessionID: session.id)
+
+        let remoteClient = RemotePairingHTTPClient()
+        let pairedMac = try await remoteClient.completePairing(
+            host: server.displayHost,
+            port: server.port,
+            pairingCode: pairing.code,
+            deviceName: "Chris’s iPhone"
+        )
+        let page = try await remoteClient.fetchStructuredSessionHistoryPage(
+            for: pairedMac,
+            sessionID: session.id,
+            pageSize: 20,
+            before: nil
+        )
+
+        #expect(liveScreen.activityItems.first?.text == "Message 101 — user: History 100")
+        #expect(page.activityItems.count == 20)
+        #expect(page.activityItems.first?.text == "Message 81 — user: History 80")
+        #expect(page.activityItems.last?.text == "Message 100 — user: History 99")
+        #expect(page.activityItems.contains(where: { $0.text == liveScreen.activityItems.first?.text }) == false)
+    }
+
     @Test func viewerCanTakeControllerStatusAndOwnTerminalSizeOverDedicatedNetworkAPI() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)

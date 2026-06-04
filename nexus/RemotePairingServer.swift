@@ -218,6 +218,23 @@ nonisolated final class RemotePairingServer: RemotePairingServing, @unchecked Se
         }
 
         if request.method == "GET",
+           let structuredSessionHistoryPageRequest = structuredSessionHistoryPageRequest(from: request) {
+            await respondToAuthorizedRequest(
+                operation: .fetchSessionScreen,
+                request: request,
+                over: connection,
+                sessionID: structuredSessionHistoryPageRequest.sessionID
+            ) { [self] in
+                try await self.client.getStructuredSessionHistoryPage(
+                    sessionID: structuredSessionHistoryPageRequest.sessionID,
+                    pageSize: structuredSessionHistoryPageRequest.pageSize,
+                    before: structuredSessionHistoryPageRequest.cursor
+                )
+            }
+            return
+        }
+
+        if request.method == "GET",
            let sessionScreenObservationRequest = sessionScreenObservationRequest(from: request) {
             do {
                 try await authorize(request)
@@ -644,6 +661,34 @@ nonisolated final class RemotePairingServer: RemotePairingServing, @unchecked Se
         }
 
         return SessionScreenObservationRequest(sessionID: sessionID)
+    }
+
+    private func structuredSessionHistoryPageRequest(from request: ParsedRequest) -> StructuredSessionHistoryPageRequest? {
+        guard let components = URLComponents(string: "http://localhost\(request.path)") else {
+            return nil
+        }
+        let pathComponents = components.path.split(separator: "/")
+        guard pathComponents.count == 4,
+              pathComponents[0] == "remote-client",
+              pathComponents[1] == "sessions",
+              let sessionID = UUID(uuidString: String(pathComponents[2])),
+              pathComponents[3] == "structured-history" else {
+            return nil
+        }
+
+        let queryItems = components.queryItems ?? []
+        let pageSize = queryItems.first(where: { $0.name == "pageSize" }).flatMap { $0.value }.flatMap(Int.init) ?? 50
+        let activityItemOffset = queryItems.first(where: { $0.name == "activityItemOffset" }).flatMap { $0.value }.flatMap(Int.init)
+        let providerEventOffset = queryItems.first(where: { $0.name == "providerEventOffset" }).flatMap { $0.value }.flatMap(Int.init)
+        let cursor: StructuredSessionHistoryCursor? = if let activityItemOffset, let providerEventOffset {
+            StructuredSessionHistoryCursor(
+                activityItemOffset: activityItemOffset,
+                providerEventOffset: providerEventOffset
+            )
+        } else {
+            nil
+        }
+        return StructuredSessionHistoryPageRequest(sessionID: sessionID, pageSize: pageSize, cursor: cursor)
     }
 
     private func structuredObservationRevision(from request: ParsedRequest) -> Int? {
@@ -1113,6 +1158,12 @@ private struct ProviderDetailRequest {
 
 private struct SessionScreenObservationRequest {
     let sessionID: UUID
+}
+
+private struct StructuredSessionHistoryPageRequest {
+    let sessionID: UUID
+    let pageSize: Int
+    let cursor: StructuredSessionHistoryCursor?
 }
 
 private struct SessionScreenRequest {

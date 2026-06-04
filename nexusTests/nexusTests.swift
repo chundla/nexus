@@ -8319,6 +8319,56 @@ struct nexusTests {
         ])
     }
 
+    @Test func localXPCLoadsPiStructuredHistoryPagesSeparatelyFromLiveTail() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolderURL = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
+
+        let messageCount = StructuredSessionLiveHistoryRetention.maxRetainedActivityItems + 100
+        let messages = (0..<messageCount).map { index in
+            [
+                "role": "user",
+                "content": "History \(index)"
+            ]
+        }
+        let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
+            HistoryPagingPiRPCTransport(messages: messages)
+        })
+
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthFacts(
+                executableResolver: StubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
+                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                ]),
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+            ),
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+        )
+        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
+        let group = try await client.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try await client.createLocalWorkspace(
+            name: nil,
+            folderPath: workspaceFolderURL.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+        _ = try await client.sendSessionInput(sessionID: session.id, text: "/messages")
+
+        let liveScreen = try await client.getSessionScreen(sessionID: session.id)
+        let page = try await client.getStructuredSessionHistoryPage(sessionID: session.id, pageSize: 20, before: nil)
+
+        #expect(liveScreen.activityItems.first?.text == "Message 101 — user: History 100")
+        #expect(page.activityItems.count == 20)
+        #expect(page.activityItems.first?.text == "Message 81 — user: History 80")
+        #expect(page.activityItems.last?.text == "Message 100 — user: History 99")
+        #expect(page.activityItems.contains(where: { $0.text == liveScreen.activityItems.first?.text }) == false)
+    }
+
     @MainActor
     @Test func appModelStreamsPiToolAndSubagentActivityBeforeFinalTurnCompletion() async throws {
         let workspaceFolderURL = FileManager.default.temporaryDirectory
@@ -11551,6 +11601,19 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
         return screenValue
     }
 
+    func getStructuredSessionHistoryPage(
+        sessionID: UUID,
+        pageSize: Int,
+        before cursor: StructuredSessionHistoryCursor?
+    ) async throws -> StructuredSessionHistoryPage {
+        _ = pageSize
+        _ = cursor
+        guard sessionValue.id == sessionID else {
+            throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Session not found"])
+        }
+        return StructuredSessionHistoryPage(sessionID: sessionID, activityItems: [], providerEvents: [], nextCursor: nil)
+    }
+
     func observeSessionScreen(sessionID: UUID, onUpdate: @escaping @Sendable (SessionScreen) -> Void) async throws -> any SessionScreenObservation {
         let observationID = UUID()
         observedScreenHandlers[observationID] = onUpdate
@@ -11890,6 +11953,17 @@ private struct FailingServiceClient: NexusServiceClient {
     }
 
     func getSessionScreen(sessionID: UUID) async throws -> SessionScreen {
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func getStructuredSessionHistoryPage(
+        sessionID: UUID,
+        pageSize: Int,
+        before cursor: StructuredSessionHistoryCursor?
+    ) async throws -> StructuredSessionHistoryPage {
+        _ = sessionID
+        _ = pageSize
+        _ = cursor
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 

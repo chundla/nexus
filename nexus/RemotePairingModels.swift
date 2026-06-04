@@ -168,6 +168,24 @@ nonisolated struct RemotePairingHTTPClient {
         return try JSONDecoder().decode(SessionScreen.self, from: data)
     }
 
+    func fetchStructuredSessionHistoryPage(
+        for pairedMac: PairedMac,
+        sessionID: UUID,
+        pageSize: Int,
+        before cursor: StructuredSessionHistoryCursor?
+    ) async throws -> StructuredSessionHistoryPage {
+        var components = URLComponents()
+        components.path = "/remote-client/sessions/\(sessionID.uuidString)/structured-history"
+        components.queryItems = [URLQueryItem(name: "pageSize", value: String(pageSize))]
+        if let cursor {
+            components.queryItems?.append(URLQueryItem(name: "activityItemOffset", value: String(cursor.activityItemOffset)))
+            components.queryItems?.append(URLQueryItem(name: "providerEventOffset", value: String(cursor.providerEventOffset)))
+        }
+        let request = try authenticatedRequest(for: pairedMac, path: components.string ?? components.path)
+        let data = try await send(request)
+        return try JSONDecoder().decode(StructuredSessionHistoryPage.self, from: data)
+    }
+
     func launchOrResumeSession(for pairedMac: PairedMac, sessionID: UUID) async throws -> Session {
         var request = try authenticatedRequest(
             for: pairedMac,

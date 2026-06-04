@@ -1,6 +1,7 @@
 #if os(macOS)
 import Foundation
 import NexusDomain
+import NexusIPC
 
 struct PiStructuredSessionPersistedState: Codable, Equatable, Sendable {
     let activityItems: [SessionActivityItem]
@@ -71,6 +72,43 @@ final class PiStructuredSessionHistoryStore: @unchecked Sendable {
         }
     }
 
+    func historyPage(
+        sessionID: UUID,
+        pageSize: Int,
+        before cursor: StructuredSessionHistoryCursor?
+    ) throws -> StructuredSessionHistoryPage {
+        try withLock {
+            let resolvedPageSize = max(1, min(pageSize, 500))
+            let activityPage = try pagedJSONLines(
+                SessionActivityItem.self,
+                from: activityOverflowURL(sessionID: sessionID),
+                before: cursor?.activityItemOffset,
+                pageSize: resolvedPageSize
+            )
+            let providerEventPage = try pagedJSONLines(
+                SessionProviderEvent.self,
+                from: providerEventOverflowURL(sessionID: sessionID),
+                before: cursor?.providerEventOffset,
+                pageSize: resolvedPageSize
+            )
+            let nextCursor: StructuredSessionHistoryCursor? = if activityPage.nextOffset == nil,
+                providerEventPage.nextOffset == nil {
+                nil
+            } else {
+                StructuredSessionHistoryCursor(
+                    activityItemOffset: activityPage.nextOffset ?? 0,
+                    providerEventOffset: providerEventPage.nextOffset ?? 0
+                )
+            }
+            return StructuredSessionHistoryPage(
+                sessionID: sessionID,
+                activityItems: activityPage.values,
+                providerEvents: providerEventPage.values,
+                nextCursor: nextCursor
+            )
+        }
+    }
+
     func deleteHistory(sessionID: UUID) throws {
         try withLock {
             let directoryURL = historyDirectoryURL(sessionID: sessionID)
@@ -133,6 +171,32 @@ final class PiStructuredSessionHistoryStore: @unchecked Sendable {
             let lineData = try encoder.encode(value)
             handle.write(lineData)
             handle.write(Data([0x0A]))
+        }
+    }
+
+    private func pagedJSONLines<T: Decodable>(
+        _ type: T.Type,
+        from url: URL,
+        before offset: Int?,
+        pageSize: Int
+    ) throws -> (values: [T], nextOffset: Int?) {
+        let values = try readJSONLines(type, from: url)
+        let endOffset = min(max(0, offset ?? values.count), values.count)
+        let startOffset = max(0, endOffset - pageSize)
+        let nextOffset = startOffset > 0 ? startOffset : nil
+        return (Array(values[startOffset..<endOffset]), nextOffset)
+    }
+
+    private func readJSONLines<T: Decodable>(_ type: T.Type, from url: URL) throws -> [T] {
+        _ = type
+        guard fileManager.fileExists(atPath: url.path) else {
+            return []
+        }
+
+        let lines = try String(decoding: Data(contentsOf: url), as: UTF8.self)
+            .split(separator: "\n")
+        return try lines.map { line in
+            try decoder.decode(T.self, from: Data(line.utf8))
         }
     }
 

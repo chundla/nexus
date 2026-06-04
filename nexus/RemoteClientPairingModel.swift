@@ -15,6 +15,12 @@ protocol RemotePairingClient {
     func stopSession(for pairedMac: PairedMac, sessionID: UUID) async throws -> Session
     func deleteSessionRecord(for pairedMac: PairedMac, sessionID: UUID) async throws -> Bool
     func fetchSessionScreen(for pairedMac: PairedMac, sessionID: UUID) async throws -> SessionScreen
+    func fetchStructuredSessionHistoryPage(
+        for pairedMac: PairedMac,
+        sessionID: UUID,
+        pageSize: Int,
+        before cursor: StructuredSessionHistoryCursor?
+    ) async throws -> StructuredSessionHistoryPage
     func takeSessionControl(for pairedMac: PairedMac, sessionID: UUID, columns: Int, rows: Int) async throws -> SessionScreen
     func releaseSessionControl(for pairedMac: PairedMac, sessionID: UUID) async throws -> SessionScreen
     func sendSessionInput(for pairedMac: PairedMac, sessionID: UUID, text: String) async throws -> SessionScreen
@@ -41,6 +47,23 @@ extension RemotePairingClient {
             )
         }
         return try await sendSessionInput(for: pairedMac, sessionID: sessionID, text: prompt.text)
+    }
+
+    func fetchStructuredSessionHistoryPage(
+        for pairedMac: PairedMac,
+        sessionID: UUID,
+        pageSize: Int,
+        before cursor: StructuredSessionHistoryCursor?
+    ) async throws -> StructuredSessionHistoryPage {
+        _ = pairedMac
+        _ = sessionID
+        _ = pageSize
+        _ = cursor
+        throw NSError(
+            domain: "RemotePairingClient",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "This remote pairing client does not support structured Session history paging."]
+        )
     }
 }
 

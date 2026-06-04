@@ -2088,6 +2088,29 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         structuredSessionObservationStore.snapshotResponse(for: try getSessionScreen(sessionID: sessionID))
     }
 
+    func getStructuredSessionHistoryPage(
+        sessionID: UUID,
+        pageSize: Int,
+        before cursor: StructuredSessionHistoryCursor?
+    ) throws -> StructuredSessionHistoryPage {
+        guard let session = try sessionRecordStore.session(id: sessionID) else {
+            throw NexusMetadataStoreError.sessionNotFound
+        }
+        guard session.providerID == .pi else {
+            return StructuredSessionHistoryPage(
+                sessionID: sessionID,
+                activityItems: [],
+                providerEvents: [],
+                nextCursor: nil
+            )
+        }
+        return try piStructuredSessionHistoryStore.historyPage(
+            sessionID: sessionID,
+            pageSize: pageSize,
+            before: cursor
+        )
+    }
+
     func observeSessionScreen(
         observationID: UUID,
         sessionID: UUID,
@@ -4521,6 +4544,27 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol, @unchecked Senda
 
     func getSessionScreenObservationSnapshot(sessionID: String, reply: @escaping (Data?, NSString?) -> Void) {
         sendReply(with: { try service.getSessionScreenObservationSnapshot(sessionID: resolveUUID(sessionID)) }, reply: reply)
+    }
+
+    func getStructuredSessionHistoryPage(
+        sessionID: String,
+        pageSize: Int,
+        cursorPayload: Data,
+        reply: @escaping (Data?, NSString?) -> Void
+    ) {
+        sendReply(
+            with: { [self] in
+                let cursor = cursorPayload.isEmpty
+                    ? nil
+                    : try JSONDecoder().decode(StructuredSessionHistoryCursor.self, from: cursorPayload)
+                return try service.getStructuredSessionHistoryPage(
+                    sessionID: resolveUUID(sessionID),
+                    pageSize: pageSize,
+                    before: cursor
+                )
+            },
+            reply: reply
+        )
     }
 
     func observeSessionScreen(sessionID: String, reply: @escaping (Data?, NSString?) -> Void) {

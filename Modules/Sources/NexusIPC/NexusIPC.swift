@@ -46,6 +46,7 @@ public protocol SessionScreenObservation: Sendable {
     func getSessionRecord(sessionID: String, reply: @escaping (Data?, NSString?) -> Void)
     func getSessionScreen(sessionID: String, reply: @escaping (Data?, NSString?) -> Void)
     func getSessionScreenObservationSnapshot(sessionID: String, reply: @escaping (Data?, NSString?) -> Void)
+    func getStructuredSessionHistoryPage(sessionID: String, pageSize: Int, cursorPayload: Data, reply: @escaping (Data?, NSString?) -> Void)
     func observeSessionScreen(sessionID: String, reply: @escaping (Data?, NSString?) -> Void)
     func cancelSessionScreenObservation(observationID: String, reply: @escaping (Data?, NSString?) -> Void)
     func sendSessionInput(sessionID: String, text: String, reply: @escaping (Data?, NSString?) -> Void)
@@ -100,6 +101,11 @@ public protocol NexusServiceClient: Sendable {
     func deleteSessionRecord(sessionID: UUID) async throws -> Bool
     func getSessionRecord(sessionID: UUID) async throws -> Session
     func getSessionScreen(sessionID: UUID) async throws -> SessionScreen
+    func getStructuredSessionHistoryPage(
+        sessionID: UUID,
+        pageSize: Int,
+        before cursor: StructuredSessionHistoryCursor?
+    ) async throws -> StructuredSessionHistoryPage
     func observeSessionScreen(sessionID: UUID, onUpdate: @escaping @Sendable (SessionScreen) -> Void) async throws -> any SessionScreenObservation
     func sendSessionInput(sessionID: UUID, text: String) async throws -> SessionScreen
     func sendSessionInput(sessionID: UUID, prompt: SessionPrompt) async throws -> SessionScreen
@@ -174,6 +180,11 @@ public typealias NexusServiceStatusClient = NexusServiceClient
 
 public protocol SessionScreenObservationEventClient: NexusServiceClient {
     func getSessionScreenObservationSnapshot(sessionID: UUID) async throws -> SessionScreenObservationSnapshotResponse
+    func getStructuredSessionHistoryPage(
+        sessionID: UUID,
+        pageSize: Int,
+        before cursor: StructuredSessionHistoryCursor?
+    ) async throws -> StructuredSessionHistoryPage
     func observeSessionScreenUpdateEvents(
         sessionID: UUID,
         onUpdate: @escaping @Sendable (SessionScreenObservationUpdate) -> Void
@@ -445,6 +456,22 @@ public final class NexusIPCClient: NexusServiceClient, SessionScreenObservationE
     ) async throws -> SessionScreenObservationSnapshotResponse {
         try await requestDecodable { proxy, reply in
             proxy.getSessionScreenObservationSnapshot(sessionID: sessionID.uuidString, reply: reply)
+        }
+    }
+
+    nonisolated public func getStructuredSessionHistoryPage(
+        sessionID: UUID,
+        pageSize: Int,
+        before cursor: StructuredSessionHistoryCursor?
+    ) async throws -> StructuredSessionHistoryPage {
+        let cursorPayload = try cursor.map(JSONEncoder().encode) ?? Data()
+        return try await requestDecodable { proxy, reply in
+            proxy.getStructuredSessionHistoryPage(
+                sessionID: sessionID.uuidString,
+                pageSize: pageSize,
+                cursorPayload: cursorPayload,
+                reply: reply
+            )
         }
     }
 

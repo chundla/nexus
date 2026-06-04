@@ -2359,6 +2359,85 @@ struct NexusServicePiSessionStreamTests {
                 == interruptedScreen.activityItems.suffix(200).map(\.text)
         )
     }
+
+    @Test func localPiLoadsOlderStructuredHistoryPagesFromPersistedOverflowWithoutGrowingLiveTail() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
+
+        let overflowCount = 100
+        let messageCount = StructuredSessionLiveHistoryRetention.maxRetainedActivityItems + overflowCount
+        let messages = (0..<messageCount).map { index in
+            [
+                "role": "user",
+                "content": "History \(index)"
+            ]
+        }
+
+        func makeService() throws -> NexusService {
+            let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
+                TestPiRPCTransport(messages: messages)
+            })
+
+            return try NexusService.bootstrapForTests(
+                rootURL: rootURL,
+                providerHealthEvaluator: ProviderHealthFacts(
+                    executableResolver: PiStreamStubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
+                    commandRunner: PiStreamStubCommandRunner(results: [
+                        .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
+                        .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                    ]),
+                    localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+                ),
+                sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+            )
+        }
+
+        let service = try makeService()
+        let group = try service.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try service.createLocalWorkspace(
+            name: "Local Pi",
+            folderPath: workspaceFolder.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+        _ = try service.sendSessionInput(sessionID: session.id, text: "/messages")
+
+        let restartedService = try makeService()
+        let liveScreen = try restartedService.getSessionScreen(sessionID: session.id)
+        let firstPage = try restartedService.getStructuredSessionHistoryPage(
+            sessionID: session.id,
+            pageSize: 40,
+            before: nil
+        )
+        let secondPage = try restartedService.getStructuredSessionHistoryPage(
+            sessionID: session.id,
+            pageSize: 40,
+            before: firstPage.nextCursor
+        )
+        let finalPage = try restartedService.getStructuredSessionHistoryPage(
+            sessionID: session.id,
+            pageSize: 40,
+            before: secondPage.nextCursor
+        )
+
+        #expect(liveScreen.activityItems.count == StructuredSessionLiveHistoryRetention.maxRetainedActivityItems + 1)
+        #expect(liveScreen.activityItems.first?.text == "Message 101 — user: History 100")
+        #expect(firstPage.activityItems.count == 40)
+        #expect(firstPage.activityItems.first?.text == "Message 61 — user: History 60")
+        #expect(firstPage.activityItems.last?.text == "Message 100 — user: History 99")
+        #expect(firstPage.nextCursor != nil)
+        #expect(secondPage.activityItems.count == 40)
+        #expect(secondPage.activityItems.first?.text == "Message 21 — user: History 20")
+        #expect(secondPage.activityItems.last?.text == "Message 60 — user: History 59")
+        #expect(secondPage.nextCursor != nil)
+        #expect(finalPage.activityItems.count >= 20)
+        #expect(finalPage.activityItems.contains(where: { $0.text == "Message 1 — user: History 0" }))
+        #expect(finalPage.activityItems.contains(where: { $0.text == "Message 20 — user: History 19" }))
+        #expect(finalPage.nextCursor == nil)
+    }
 }
 
 private struct PiStreamStubExecutableResolver: ProviderExecutableResolving {
