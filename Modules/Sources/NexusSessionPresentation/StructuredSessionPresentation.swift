@@ -406,8 +406,9 @@ public final class StructuredSessionFeedPresenter {
             return cachedActivityRows
         }
 
-        if screen.activityItems.count >= cachedActivityItems.count,
-           screen.activityItems.starts(with: cachedActivityItems) {
+        let stablePrefixCount = structuredSessionCommonPrefixCount(cachedActivityItems, screen.activityItems)
+        if stablePrefixCount == cachedActivityItems.count,
+           screen.activityItems.count > cachedActivityItems.count {
             let appendedItems = Array(screen.activityItems.dropFirst(cachedActivityItems.count))
             let appendedRows = annotateStructuredSessionActivityRows(
                 rowBuilder(appendedItems),
@@ -423,11 +424,48 @@ public final class StructuredSessionFeedPresenter {
             return cachedActivityRows
         }
 
+        if stablePrefixCount > 0 {
+            return rebuildAffectedTailRows(
+                for: screen.activityItems,
+                stablePrefixCount: stablePrefixCount,
+                providerDisplayName: providerDisplayName
+            )
+        }
+
         return rebuildActivityRows(
             for: screen.activityItems,
             sessionID: screen.session.id,
             providerDisplayName: providerDisplayName
         )
+    }
+
+    @discardableResult
+    private func rebuildAffectedTailRows(
+        for activityItems: [SessionActivityItem],
+        stablePrefixCount: Int,
+        providerDisplayName: String
+    ) -> [StructuredSessionActivityRow] {
+        let rebuildStartIndex = structuredSessionActivityRowChunkStartIndex(
+            for: stablePrefixCount,
+            cachedChunks: cachedActivityRowChunks
+        )
+        let rebuiltRows = annotateStructuredSessionActivityRows(
+            rowBuilder(Array(activityItems.dropFirst(rebuildStartIndex))),
+            providerDisplayName: providerDisplayName
+        )
+        let preservedRows = Array(cachedActivityRows.prefix(rebuildStartIndex))
+        let rebuiltChunks = structuredSessionActivityRowChunks(
+            for: rebuiltRows,
+            chunkSize: chunkSize,
+            liveTailChunkSize: liveTailChunkSize
+        ).map { chunk in
+            StructuredSessionActivityRowChunk(id: chunk.id + rebuildStartIndex, rows: chunk.rows)
+        }
+
+        cachedActivityItems = activityItems
+        cachedActivityRows = preservedRows + rebuiltRows
+        cachedActivityRowChunks = Array(cachedActivityRowChunks.prefix { $0.id < rebuildStartIndex }) + rebuiltChunks
+        return cachedActivityRows
     }
 
     @discardableResult
@@ -520,6 +558,33 @@ func structuredSessionActivityRowChunks(
     }
 
     return chunks
+}
+
+private func structuredSessionCommonPrefixCount<T: Equatable>(_ lhs: [T], _ rhs: [T]) -> Int {
+    var count = 0
+
+    for (lhsItem, rhsItem) in zip(lhs, rhs) {
+        guard lhsItem == rhsItem else {
+            break
+        }
+        count += 1
+    }
+
+    return count
+}
+
+private func structuredSessionActivityRowChunkStartIndex(
+    for rowIndex: Int,
+    cachedChunks: [StructuredSessionActivityRowChunk]
+) -> Int {
+    for chunk in cachedChunks.reversed() {
+        let upperBound = chunk.id + chunk.rows.count
+        if rowIndex >= chunk.id && rowIndex < upperBound {
+            return chunk.id
+        }
+    }
+
+    return rowIndex
 }
 
 private func appendStructuredSessionActivityRowChunks(

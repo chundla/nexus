@@ -867,6 +867,73 @@ struct StructuredSessionPresentationTests {
         #expect(thirdPresentation.activityRowChunks[1] == secondPresentation.activityRowChunks[1])
     }
 
+    @Test func structuredSessionFeedPresenterOnlyRebuildsAffectedTailChunkForInPlaceLastItemUpdates() {
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let firstActivity = SessionActivityItem(kind: .message, text: "Pi: First")
+        let secondActivity = SessionActivityItem(kind: .progress, text: "Thinking")
+        let thirdActivityID = UUID()
+        let originalThirdActivity = SessionActivityItem(
+            id: thirdActivityID,
+            kind: .command,
+            text: "git diff",
+            detailText: "line 1"
+        )
+        let updatedThirdActivity = SessionActivityItem(
+            id: thirdActivityID,
+            kind: .command,
+            text: "git diff",
+            detailText: "line 1\nline 2"
+        )
+        var builtItems: [[String]] = []
+        let presenter = StructuredSessionFeedPresenter(chunkSize: 2, liveTailChunkSize: 2) { items in
+            builtItems.append(items.map { "\($0.text)|\($0.detailText ?? "")" })
+            return items.map { item in
+                StructuredSessionActivityRow(
+                    id: item.id,
+                    title: item.kind.rawValue,
+                    systemImage: item.kind.rawValue,
+                    text: item.text,
+                    detailText: item.detailText,
+                    isDetailTextTruncated: false,
+                    emphasis: .neutral
+                )
+            }
+        }
+
+        let initialPresentation = presenter.presentation(for: SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [firstActivity, secondActivity, originalThirdActivity]
+        ))
+        let updatedPresentation = presenter.presentation(for: SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [firstActivity, secondActivity, updatedThirdActivity]
+        ))
+
+        #expect(initialPresentation.activityRowChunks.map { $0.rows.map(\.id) } == [
+            [firstActivity.id, secondActivity.id],
+            [thirdActivityID]
+        ])
+        #expect(updatedPresentation.activityRowChunks.map { $0.rows.map(\.id) } == [
+            [firstActivity.id, secondActivity.id],
+            [thirdActivityID]
+        ])
+        #expect(updatedPresentation.activityRows.last?.detailText == "line 1\nline 2")
+        #expect(builtItems == [
+            ["Pi: First|", "Thinking|", "git diff|line 1"],
+            ["git diff|line 1\nline 2"]
+        ])
+    }
+
     @Test func structuredSessionFeedPresenterRebuildsWhenStructuredSessionHistoryChangesInPlace() {
         let session = Session(
             id: UUID(),
