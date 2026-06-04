@@ -4,8 +4,8 @@ import NexusIPC
 
 extension RemoteClientPairingModel {
     static func bootstrap(environment: [String: String] = ProcessInfo.processInfo.environment) -> RemoteClientPairingModel {
-        if environment[RemoteClientInvalidationProfilingFixture.environmentKey] == RemoteClientInvalidationProfilingFixture.fixtureName {
-            return RemoteClientInvalidationProfilingFixture.makeModel()
+        if let mode = RemoteClientFixtureMode(rawValue: environment[RemoteClientFixture.environmentKey] ?? "") {
+            return RemoteClientFixture.makeModel(mode: mode)
         }
 
         return RemoteClientPairingModel(
@@ -15,11 +15,15 @@ extension RemoteClientPairingModel {
     }
 }
 
-private enum RemoteClientInvalidationProfilingFixture {
-    static let environmentKey = "NEXUS_REMOTE_CLIENT_FIXTURE"
-    static let fixtureName = "invalidation-baseline"
+private enum RemoteClientFixtureMode: String {
+    case invalidationBaseline = "invalidation-baseline"
+    case thinkingDiagnosis = "thinking-diagnosis"
+}
 
-    static func makeModel() -> RemoteClientPairingModel {
+private enum RemoteClientFixture {
+    static let environmentKey = "NEXUS_REMOTE_CLIENT_FIXTURE"
+
+    static func makeModel(mode: RemoteClientFixtureMode) -> RemoteClientPairingModel {
         let pairedMac = PairedMac(
             name: "Profiling Mac",
             host: "profiling.local",
@@ -29,7 +33,7 @@ private enum RemoteClientInvalidationProfilingFixture {
         )
         let store = InMemoryPairedMacStore(pairedMacs: [pairedMac], activePairedMacID: pairedMac.id)
         return RemoteClientPairingModel(
-            client: RemoteClientProfilingFixtureClient(pairedMac: pairedMac),
+            client: RemoteClientProfilingFixtureClient(pairedMac: pairedMac, mode: mode),
             store: store
         )
     }
@@ -62,6 +66,7 @@ private enum RemoteClientInvalidationProfilingFixture {
 
     private actor RemoteClientProfilingFixtureClient: RemotePairingClient {
         private let pairedMac: PairedMac
+        private let mode: RemoteClientFixtureMode
         private let workspaceGroup: WorkspaceGroup
         private let remoteHost: NexusDomain.Host
         private let apiWorkspace: Workspace
@@ -74,8 +79,9 @@ private enum RemoteClientInvalidationProfilingFixture {
         private var latestScreen: SessionScreen
         private var autoUpdateCount = 0
 
-        init(pairedMac: PairedMac) {
+        init(pairedMac: PairedMac, mode: RemoteClientFixtureMode) {
             self.pairedMac = pairedMac
+            self.mode = mode
             workspaceGroup = WorkspaceGroup(
                 id: UUID(uuidString: "22222222-2222-2222-2222-222222222222")!,
                 name: "Baseline Work"
@@ -166,15 +172,22 @@ private enum RemoteClientInvalidationProfilingFixture {
                 failedSessions: []
             )
 
+            let isThinkingFixture = mode == .thinkingDiagnosis
+            let initialMessage = isThinkingFixture
+                ? "Pi: thinking step 0"
+                : "Pi: Profiling fixture ready"
             latestScreen = SessionScreen(
                 session: session,
                 primarySurface: .structuredActivityFeed,
                 controller: .mac,
-                transcript: "Pi shared Session stream connected",
+                transcript: isThinkingFixture
+                    ? "Pi shared Session stream connected\n\(initialMessage)"
+                    : "Pi shared Session stream connected",
                 activityItems: [
                     SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"),
-                    SessionActivityItem(kind: .message, text: "Pi: Profiling fixture ready")
-                ]
+                    SessionActivityItem(kind: .message, text: initialMessage)
+                ],
+                isAgentTurnInProgress: isThinkingFixture
             )
         }
 
@@ -326,7 +339,9 @@ private enum RemoteClientInvalidationProfilingFixture {
 
         private func appendAutoUpdate() -> SessionScreen {
             autoUpdateCount += 1
-            let line = "Pi: Fixture update \(autoUpdateCount)"
+            let line = mode == .thinkingDiagnosis
+                ? "Pi: thinking step \(autoUpdateCount)"
+                : "Pi: Fixture update \(autoUpdateCount)"
             latestScreen = SessionScreen(
                 session: latestScreen.session,
                 primarySurface: latestScreen.primarySurface,
@@ -338,7 +353,7 @@ private enum RemoteClientInvalidationProfilingFixture {
                 approvalRequests: latestScreen.approvalRequests,
                 extensionUI: latestScreen.extensionUI,
                 providerEvents: latestScreen.providerEvents,
-                isAgentTurnInProgress: false
+                isAgentTurnInProgress: mode == .thinkingDiagnosis
             )
             return latestScreen
         }

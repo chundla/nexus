@@ -199,6 +199,18 @@ final class RemoteClientPairingModel {
         focusedSessionSurfacePresentation?.surfaceSupport
     }
 
+    var focusedStructuredSessionDiagnosticSnapshot: StructuredSessionClientDiagnosticSnapshot? {
+        guard let screen = focusedSessionScreen,
+              screen.primarySurface == .structuredActivityFeed else {
+            return nil
+        }
+
+        return StructuredSessionClientDiagnosticSnapshot(
+            screen: screen,
+            presentation: focusedStructuredSessionPresentation
+        )
+    }
+
     init(
         client: any RemotePairingClient,
         store: any PairedMacStore,

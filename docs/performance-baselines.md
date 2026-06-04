@@ -66,6 +66,7 @@ swift test --package-path Modules --filter NexusServicePerformanceBaselineTests/
 | #186 macOS Workspace browse invalidation | the focused `nexusTests` guardrail command below | Final SwiftUI Instruments validation remains a manual macOS pass |
 | #187 iOS Remote Client invalidation | the focused `RemoteClientPairingModelTests` and `RemoteClientProfilingFixtureTests` commands below | Final SwiftUI invalidation tracing still has to run from Xcode Instruments on a physical iPhone |
 | #188 structured Session updates | `StructuredSessionPresentationTests`, `StructuredSessionObservationDiagnosticsTests`, `NexusServicePerformanceRegressionTests/testStructuredSessionActivityAppendRegressionMatchesTheAuditedBaselineShape`, and `NexusServicePerformanceBaselineTests/testStructuredSessionActivityAppendBaseline` | None beyond targeted profiling when a regression is still visible after the automated checks |
+| #192 long structured Session stall attribution | `StructuredSessionThinkingStallAttributionTests`, `StructuredSessionThinkingStallDiagnosisTests`, and `RemoteClientProfilingFixtureTests/bootstrapStreamsThinkingDiagnosticSnapshotsForLongObservationProfiling` | Final side-by-side memory capture still runs manually on macOS and a physical iPhone when you need Instruments evidence |
 
 ## Diagnostic fields to compare
 
@@ -158,6 +159,51 @@ Suggested trace path:
 3. keep the trace running long enough to capture the automatic `Fixture update ...` activity appends on the structured `Session` surface
 
 Important: `xcrun xctrace` currently reports `The SwiftUI instrument is not supported on the Simulator` for this app flow, so use the simulator fixture for deterministic navigation rehearsal and focused test validation, but run the final SwiftUI invalidation trace from Xcode Instruments on a physical iPhone.
+
+## Long structured Session stall diagnosis (#192)
+
+Use this loop when a structured **Session** appears stuck in `Thinking…` and you need to decide whether the stall is in the provider runtime, the shared observation path, or client **Session Presentation**.
+
+### Automated guardrails
+
+```bash
+swift test --package-path Modules --filter StructuredSessionThinkingStallAttributionTests
+swift test --package-path Modules --filter StructuredSessionThinkingStallDiagnosisTests
+xcodebuildmcp macos test --project-path nexus.xcodeproj --scheme nexus \
+  --extra-args -only-testing:nexusTests/RemoteClientProfilingFixtureTests/bootstrapStreamsThinkingDiagnosticSnapshotsForLongObservationProfiling
+```
+
+- `StructuredSessionThinkingStallAttributionTests` verifies the shared attribution rules:
+  - no canonical progress while `Thinking…` stays visible ⇒ runtime stall
+  - canonical progress without observed screen progress ⇒ observation-layer stall
+  - observed screen progress without **Session Presentation** progress ⇒ client projection stall
+- `StructuredSessionThinkingStallDiagnosisTests` drives a repeatable macOS **Background Service** structured **Session** fixture and proves canonical history growth can be attributed to the observation layer when the client side is held still
+- `RemoteClientProfilingFixtureTests/bootstrapStreamsThinkingDiagnosticSnapshotsForLongObservationProfiling` keeps the iPhone `Remote Client` fixture healthy while it streams a long-running structured `Thinking…` turn
+
+### Repeatable evidence to compare
+
+Capture two samples a short interval apart:
+
+- macOS canonical sample: `StructuredSessionObservationProgressSample(screen: snapshot.screen, structuredRevision: snapshot.structuredSnapshot?.revision)` from `getSessionScreenObservationSnapshot`
+- iPhone client sample: `model.focusedStructuredSessionDiagnosticSnapshot`
+- attribution: `structuredSessionThinkingStallAttribution(...)`
+
+The shared samples use repeatable counts as the lightweight memory-growth evidence for this slice:
+
+- transcript character count
+- activity item / activity row count
+- approval request count
+- provider event count
+- last visible activity text
+- whether `Thinking…` is still active
+
+Interpretation:
+
+- `.runtime`: canonical macOS state stopped advancing while `Thinking…` stayed active
+- `.observation`: the macOS canonical sample advanced, but the observed client sample did not
+- `.sessionPresentation`: the observed client sample advanced, but the client **Session Presentation** did not
+
+For final manual captures, pair the macOS canonical sample deltas with Instruments memory graphs on macOS or a physical iPhone so the qualitative trace lines up with the repeatable counters above.
 
 ## Profiling guidance
 
