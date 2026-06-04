@@ -27,6 +27,13 @@ struct SessionRuntimeSessionTransition: Equatable, Sendable {
     let sessionRecordAdapterMetadata: SessionRecordAdapterMetadata
 }
 
+struct StructuredSessionPersistedHistoryOverflow: Equatable, Sendable {
+    let activityItems: [SessionActivityItem]
+    let providerEvents: [SessionProviderEvent]
+
+    static let empty = StructuredSessionPersistedHistoryOverflow(activityItems: [], providerEvents: [])
+}
+
 protocol SessionRuntimeManaging: AnyObject {
     func setRuntimeChangeHandler(_ handler: (@Sendable (UUID) -> Void)?)
     func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) async throws
@@ -36,6 +43,7 @@ protocol SessionRuntimeManaging: AnyObject {
     func hasRuntime(for session: Session) -> Bool
     func runtimeState(for session: Session) -> Session.State?
     func sessionRecordAdapterMetadata(for session: Session) -> SessionRecordAdapterMetadata?
+    func consumeStructuredHistoryOverflow(for session: Session) -> StructuredSessionPersistedHistoryOverflow
     func consumeSessionTransition(for session: Session) -> SessionRuntimeSessionTransition?
     func moveRuntime(from sourceSessionID: UUID, to targetSessionID: UUID)
     func sessionScreen(for session: Session) throws -> SessionScreen
@@ -51,6 +59,11 @@ protocol SessionRuntimeManaging: AnyObject {
 }
 
 extension SessionRuntimeManaging {
+    func consumeStructuredHistoryOverflow(for session: Session) -> StructuredSessionPersistedHistoryOverflow {
+        _ = session
+        return .empty
+    }
+
     func consumeSessionTransition(for session: Session) -> SessionRuntimeSessionTransition? {
         _ = session
         return nil
@@ -131,6 +144,7 @@ protocol SessionRuntimeLaunching {
 protocol SessionRuntime: AnyObject {
     var state: Session.State { get }
     var sessionRecordAdapterMetadata: SessionRecordAdapterMetadata? { get }
+    func consumeStructuredHistoryOverflow() -> StructuredSessionPersistedHistoryOverflow
     func consumeSessionTransition() -> SessionRuntimeSessionTransition?
     func sessionScreen(for session: Session) -> SessionScreen
     func setChangeHandler(_ handler: (@Sendable () -> Void)?)
@@ -145,6 +159,10 @@ protocol SessionRuntime: AnyObject {
 }
 
 extension SessionRuntime {
+    func consumeStructuredHistoryOverflow() -> StructuredSessionPersistedHistoryOverflow {
+        .empty
+    }
+
     func consumeSessionTransition() -> SessionRuntimeSessionTransition? {
         nil
     }
@@ -378,6 +396,13 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Se
         lock.lock()
         defer { lock.unlock() }
         return runtimes[session.id]?.sessionRecordAdapterMetadata
+    }
+
+    func consumeStructuredHistoryOverflow(for session: Session) -> StructuredSessionPersistedHistoryOverflow {
+        lock.lock()
+        let runtime = runtimes[session.id]
+        lock.unlock()
+        return runtime?.consumeStructuredHistoryOverflow() ?? .empty
     }
 
     func consumeSessionTransition(for session: Session) -> SessionRuntimeSessionTransition? {
@@ -1455,6 +1480,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     private let ibmBobNativeSessionCleaner: any IBMBobNativeSessionCleaning
     private let sessionControllerRegistry = SessionControllerRegistry()
     private let structuredSessionObservationStore: StructuredSessionObservationStore
+    private let piStructuredSessionHistoryStore: PiStructuredSessionHistoryStore
     private let piSessionRedirectLock = NSLock()
     private var pendingPiSessionRedirects: [UUID: UUID] = [:]
 
@@ -1469,6 +1495,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         sessionRuntimeManager: any SessionRuntimeManaging,
         sessionLifecycle: (any SessionLifecycleManaging)? = nil,
         sessionInteraction: (any SessionInteractionManaging)? = nil,
+        piStructuredSessionHistoryStore: PiStructuredSessionHistoryStore? = nil,
         remoteAccessRuntime: RemoteAccessRuntime,
         ibmBobNativeSessionCleaner: any IBMBobNativeSessionCleaning,
         providerModuleRegistry: ProviderModuleRegistry
@@ -1487,6 +1514,12 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 try? metadataStore.recordPerformanceDiagnostic($0)
             }
         )
+        self.piStructuredSessionHistoryStore = piStructuredSessionHistoryStore
+            ?? PiStructuredSessionHistoryStore(
+                rootURL: storeURL
+                    .deletingLastPathComponent()
+                    .appendingPathComponent("PiStructuredSessionHistory", isDirectory: true)
+            )
         self.workspaceCatalog = WorkspaceCatalog(
             dependencies: WorkspaceCatalogDependencies(
                 metadataStore: metadataStore,
@@ -1626,6 +1659,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             self?.handlePiSessionTransitionAfterRuntimeChange(sessionID: sessionID)
             self?.persistRuntimeLinkageAfterRuntimeChange(sessionID: sessionID)
             self?.persistPiSessionNameAfterRuntimeChange(sessionID: sessionID)
+            self?.persistPiStructuredSessionHistoryAfterRuntimeChange(sessionID: sessionID)
             self?.persistSessionStateAfterRuntimeChange(sessionID: sessionID)
         }
         self.listener.delegate = self
@@ -1994,6 +2028,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         }
 
         try sessionRecordStore.deleteSessionRecordAdapterMetadata(sessionID: resolvedSession.id)
+        try piStructuredSessionHistoryStore.deleteHistory(sessionID: resolvedSession.id)
         let readySession = try sessionRecordStore.updateSession(id: resolvedSession.id, state: .ready, failureMessage: nil)
         let relaunchedSession = try launchOrResumeSession(sessionID: readySession.id)
         return normalizedSessionScreen(try sessionRuntimeManager.sessionScreen(for: relaunchedSession))
@@ -2033,6 +2068,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         )
 
         sessionRuntimeManager.remove(session: resolvedSession)
+        try piStructuredSessionHistoryStore.deleteHistory(sessionID: resolvedSession.id)
         return try sessionRecordStore.deleteSessionRecord(id: sessionID)
     }
 
@@ -2833,6 +2869,32 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         try? persistPiSessionNameIfNeeded(for: session)
     }
 
+    private func persistPiStructuredSessionHistoryIfNeeded(for session: Session) throws {
+        guard session.providerID == .pi,
+              sessionRuntimeManager.hasRuntime(for: session) else {
+            return
+        }
+
+        let screen = try normalizedSessionScreen(sessionRuntimeManager.sessionScreen(for: session))
+        guard screen.primarySurface == .structuredActivityFeed else {
+            return
+        }
+
+        try piStructuredSessionHistoryStore.recordCurrentState(
+            sessionID: session.id,
+            screen: screen,
+            overflow: sessionRuntimeManager.consumeStructuredHistoryOverflow(for: session)
+        )
+    }
+
+    private func persistPiStructuredSessionHistoryAfterRuntimeChange(sessionID: UUID) {
+        guard let session = (try? sessionRecordStore.session(id: sessionID)) ?? nil else {
+            return
+        }
+
+        try? persistPiStructuredSessionHistoryIfNeeded(for: session)
+    }
+
     private func handlePiSessionTransitionAfterRuntimeChange(sessionID: UUID) {
         guard let sourceSession = (try? sessionRecordStore.session(id: sessionID)) ?? nil,
               sourceSession.providerID == .pi,
@@ -2860,10 +2922,12 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         if let metadata = targetLinkage.sessionRecordAdapterMetadata {
             try sessionRecordStore.saveSessionRecordAdapterMetadata(sessionID: targetSession.id, metadata: metadata)
         }
+        try piStructuredSessionHistoryStore.moveHistory(from: sourceSession.id, to: targetSession.id)
         sessionControllerRegistry.moveController(from: sourceSession.id, to: targetSession.id)
         sessionRuntimeManager.moveRuntime(from: sourceSession.id, to: targetSession.id)
         if let refreshedTargetSession = try sessionRecordStore.session(id: targetSession.id) {
             try persistPiSessionNameIfNeeded(for: refreshedTargetSession)
+            try persistPiStructuredSessionHistoryIfNeeded(for: refreshedTargetSession)
         }
         recordPiSessionRedirect(from: sourceSession.id, to: targetSession.id)
     }
@@ -3126,21 +3190,45 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         return providerModuleRegistry.module(for: session.providerID).prelaunchPrimarySurface(in: resolvedWorkspace)
     }
 
+    private func persistedPiStructuredSessionState(for session: Session) throws -> PiStructuredSessionPersistedState? {
+        guard session.providerID == .pi else {
+            return nil
+        }
+
+        return try piStructuredSessionHistoryStore.persistedState(sessionID: session.id)
+    }
+
     private func persistedStructuredActivityItems(for session: Session) throws -> [SessionActivityItem]? {
+        if let state = try persistedPiStructuredSessionState(for: session) {
+            return state.activityItems
+        }
+
         let metadata = try sessionRecordStore.sessionRecordAdapterMetadata(sessionID: session.id)
         return metadata?.piPersistedActivityItems ?? metadata?.ibmBobPersistedActivityItems
     }
 
     private func persistedApprovalRequests(for session: Session) throws -> [SessionApprovalRequest] {
-        try sessionRecordStore.sessionRecordAdapterMetadata(sessionID: session.id)?.piPersistedApprovalRequests ?? []
+        if let state = try persistedPiStructuredSessionState(for: session) {
+            return state.approvalRequests
+        }
+
+        return try sessionRecordStore.sessionRecordAdapterMetadata(sessionID: session.id)?.piPersistedApprovalRequests ?? []
     }
 
     private func persistedExtensionUIState(for session: Session) throws -> SessionExtensionUIState? {
-        try sessionRecordStore.sessionRecordAdapterMetadata(sessionID: session.id)?.piPersistedExtensionUIState
+        if let state = try persistedPiStructuredSessionState(for: session) {
+            return state.extensionUIState
+        }
+
+        return try sessionRecordStore.sessionRecordAdapterMetadata(sessionID: session.id)?.piPersistedExtensionUIState
     }
 
     private func persistedProviderEvents(for session: Session) throws -> [SessionProviderEvent] {
-        try sessionRecordStore.sessionRecordAdapterMetadata(sessionID: session.id)?.piPersistedProviderEvents ?? []
+        if let state = try persistedPiStructuredSessionState(for: session) {
+            return state.providerEvents
+        }
+
+        return try sessionRecordStore.sessionRecordAdapterMetadata(sessionID: session.id)?.piPersistedProviderEvents ?? []
     }
 
     private func staticSessionTranscript(

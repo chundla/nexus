@@ -64,6 +64,18 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         )
     }
 
+    func consumeStructuredHistoryOverflow() -> StructuredSessionPersistedHistoryOverflow {
+        lock.lock()
+        defer { lock.unlock() }
+        let overflow = StructuredSessionPersistedHistoryOverflow(
+            activityItems: persistedActivityItemOverflow,
+            providerEvents: persistedProviderEventOverflow
+        )
+        persistedActivityItemOverflow.removeAll(keepingCapacity: true)
+        persistedProviderEventOverflow.removeAll(keepingCapacity: true)
+        return overflow
+    }
+
     func consumeSessionTransition() -> SessionRuntimeSessionTransition? {
         lock.lock()
         defer { lock.unlock() }
@@ -95,6 +107,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     private var interruptedFailureMessage: String?
     private var draft = ""
     private var activityItems: [SessionActivityItem] = []
+    private var persistedActivityItemOverflow: [SessionActivityItem] = []
     private var approvalRequests: [SessionApprovalRequest] = []
     private var pendingExtensionDialogs: [SessionExtensionUIDialog] = []
     private var extensionNotifications: [SessionExtensionUINotification] = []
@@ -103,6 +116,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     private var extensionTitle: String?
     private var extensionEditorText: String?
     private var providerEvents: [SessionProviderEvent] = []
+    private var persistedProviderEventOverflow: [SessionProviderEvent] = []
     private var nextProviderEventSequence = 0
     private var providerSlashCommands: [SessionSlashCommand]?
     private var availableModelCommands: [SessionSlashCommand]?
@@ -1405,8 +1419,10 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         )
         nextProviderEventSequence += 1
         providerEvents.append(event)
-        if providerEvents.count > 1_000 {
-            providerEvents.removeFirst(providerEvents.count - 1_000)
+        if providerEvents.count > StructuredSessionLiveHistoryRetention.maxRetainedProviderEvents {
+            let removedCount = providerEvents.count - StructuredSessionLiveHistoryRetention.maxRetainedProviderEvents
+            persistedProviderEventOverflow.append(contentsOf: providerEvents.prefix(removedCount))
+            providerEvents.removeFirst(removedCount)
         }
         lock.unlock()
     }
@@ -3241,7 +3257,11 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
                 prompt: item.prompt
             )
         )
-        activityItems = StructuredSessionLiveHistoryRetention.retainedActivityItems(activityItems)
+        if activityItems.count > StructuredSessionLiveHistoryRetention.maxRetainedActivityItems {
+            let removedCount = activityItems.count - StructuredSessionLiveHistoryRetention.maxRetainedActivityItems
+            persistedActivityItemOverflow.append(contentsOf: activityItems.prefix(removedCount))
+            activityItems.removeFirst(removedCount)
+        }
     }
 
     private func setActivityItemDetailTextLocked(id: UUID, detailText: String) {
@@ -3250,13 +3270,17 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         }
 
         let trimmedDetailText = detailText.trimmingCharacters(in: .whitespacesAndNewlines)
-        activityItems[index] = SessionActivityItem(
+        let updatedItem = SessionActivityItem(
             id: activityItems[index].id,
             kind: activityItems[index].kind,
             text: activityItems[index].text,
             detailText: trimmedDetailText.isEmpty ? nil : trimmedDetailText,
             prompt: activityItems[index].prompt
         )
+        activityItems[index] = updatedItem
+        if let overflowIndex = persistedActivityItemOverflow.firstIndex(where: { $0.id == id }) {
+            persistedActivityItemOverflow[overflowIndex] = updatedItem
+        }
     }
 
     private func assistantText(from message: [String: Any]?) -> String {

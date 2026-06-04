@@ -2280,6 +2280,85 @@ struct NexusServicePiSessionStreamTests {
         #expect(finalScreen.extensionUI?.widgets == [SessionExtensionUIWidget(key: "rpc-demo", lines: ["Ready.", "Waiting for input"], placement: .belowEditor)])
         #expect(finalScreen.extensionUI?.editorText == "This text was set by the rpc-demo extension.")
     }
+
+    @Test func localPiPersistsStructuredHistoryOverflowOnDiskAndRestoresRecentTailAcrossInspectPaths() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
+
+        let messageCount = StructuredSessionLiveHistoryRetention.maxRetainedActivityItems + 100
+        let messages = (0..<messageCount).map { index in
+            [
+                "role": "user",
+                "content": "History \(index)"
+            ]
+        }
+
+        func makeService() throws -> NexusService {
+            let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
+                TestPiRPCTransport(messages: messages)
+            })
+
+            return try NexusService.bootstrapForTests(
+                rootURL: rootURL,
+                providerHealthEvaluator: ProviderHealthFacts(
+                    executableResolver: PiStreamStubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
+                    commandRunner: PiStreamStubCommandRunner(results: [
+                        .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
+                        .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                    ]),
+                    localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+                ),
+                sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+            )
+        }
+
+        let service = try makeService()
+        let group = try service.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try service.createLocalWorkspace(
+            name: "Local Pi",
+            folderPath: workspaceFolder.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+        _ = try service.sendSessionInput(sessionID: session.id, text: "/messages")
+
+        let liveScreen = try service.getSessionScreen(sessionID: session.id)
+        let restartedService = try makeService()
+        let interruptedScreen = try restartedService.getSessionScreen(sessionID: session.id)
+        let observationSnapshot = try restartedService.getSessionScreenObservationSnapshot(sessionID: session.id)
+
+        let historyDirectory = rootURL
+            .appendingPathComponent("PiStructuredSessionHistory", isDirectory: true)
+            .appendingPathComponent(session.id.uuidString, isDirectory: true)
+        let snapshotData = try Data(contentsOf: historyDirectory.appendingPathComponent("current.json", isDirectory: false))
+        let persistedState = try JSONDecoder().decode(PiStructuredSessionPersistedState.self, from: snapshotData)
+        let overflowLines = try String(
+            decoding: Data(contentsOf: historyDirectory.appendingPathComponent("activity-items.jsonl", isDirectory: false)),
+            as: UTF8.self
+        )
+            .split(separator: "\n")
+        let overflowItems = try overflowLines.map { line in
+            try JSONDecoder().decode(SessionActivityItem.self, from: Data(line.utf8))
+        }
+
+        #expect(liveScreen.activityItems.count == StructuredSessionLiveHistoryRetention.maxRetainedActivityItems)
+        #expect(liveScreen.activityItems.contains(where: { $0.text == "Message 1 — user: History 0" }) == false)
+        #expect(liveScreen.activityItems.contains(where: { $0.text == "Message \(messageCount) — user: History \(messageCount - 1)" }))
+        #expect(persistedState.activityItems == liveScreen.activityItems)
+        #expect(overflowItems.isEmpty == false)
+        #expect(overflowItems.contains(where: { $0.text == "Message 1 — user: History 0" }))
+        #expect(interruptedScreen.activityItems.dropLast() == liveScreen.activityItems)
+        #expect(interruptedScreen.activityItems.last?.kind == .error)
+        #expect(observationSnapshot.screen.activityItems.last?.kind == interruptedScreen.activityItems.last?.kind)
+        #expect(observationSnapshot.screen.activityItems.last?.text == interruptedScreen.activityItems.last?.text)
+        #expect(
+            observationSnapshot.screen.activityItems.suffix(200).map(\.text)
+                == interruptedScreen.activityItems.suffix(200).map(\.text)
+        )
+    }
 }
 
 private struct PiStreamStubExecutableResolver: ProviderExecutableResolving {
