@@ -1535,6 +1535,91 @@ struct RemoteClientPairingModelTests {
         #expect(model.workspaceBrowsePresentation(showingGroupsOnly: false, selectedGroupID: nil) == initialPresentation)
     }
 
+    @Test func loadOlderFocusedPiStructuredSessionHistoryPrependsPersistedRowsWithoutDisturbingLiveTailState() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: UUID()
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let catalog = RemoteWorkspaceCatalog(
+            workspaceGroups: [],
+            recentNavigation: [],
+            workspaceOverviews: [WorkspaceOverview(workspace: workspace, providerCards: [])]
+        )
+        let olderActivity = SessionActivityItem(kind: .message, text: "Pi: Older context")
+        let liveActivity = SessionActivityItem(kind: .message, text: "Pi: Latest reply")
+        let approvalRequest = SessionApprovalRequest(title: "Deploy", text: "Deploy now?", state: .pending)
+        let screen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "Pi shared Session stream connected",
+            activityItems: [liveActivity],
+            approvalRequests: [approvalRequest],
+            isAgentTurnInProgress: true
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+
+        let client = StubRemotePairingClient(
+            result: pairedMac,
+            catalog: catalog,
+            sessionScreen: screen,
+            structuredHistoryPages: [
+                StructuredSessionHistoryPage(
+                    sessionID: session.id,
+                    activityItems: [olderActivity],
+                    providerEvents: [],
+                    nextCursor: nil
+                )
+            ]
+        )
+        let model = RemoteClientPairingModel(client: client, store: store)
+
+        await model.refreshActivePairedMacCatalog()
+        await model.focusRemoteSession(sessionID: session.id, workspaceID: session.workspaceID)
+
+        for _ in 0 ..< 20 where model.focusedSessionScreen != screen {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        #expect(model.canLoadOlderFocusedStructuredSessionHistory)
+        #expect(model.focusedStructuredSessionPresentation?.feed.activityRows.map(\.text) == [liveActivity.text])
+        #expect(model.focusedStructuredSessionPresentation?.feed.pendingApprovalRequests == [approvalRequest])
+        #expect(model.focusedStructuredSessionPresentation?.feed.thinkingIndicator == StructuredSessionThinkingIndicator(text: "Thinking"))
+
+        await model.loadOlderFocusedStructuredSessionHistory()
+
+        #expect(model.canLoadOlderFocusedStructuredSessionHistory == false)
+        #expect(model.focusedStructuredSessionPresentation?.feed.activityRows.map(\.text) == [
+            olderActivity.text,
+            liveActivity.text
+        ])
+        #expect(model.focusedStructuredSessionPresentation?.feed.pendingApprovalRequests == [approvalRequest])
+        #expect(model.focusedStructuredSessionPresentation?.feed.thinkingIndicator == StructuredSessionThinkingIndicator(text: "Thinking"))
+        #expect(client.structuredHistoryPageRequests.map(\.sessionID) == [session.id])
+    }
+
     @Test func focusedStructuredSessionPresentationStaysStableDuringTranscriptOnlyUpdates() async throws {
         let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -5304,6 +5389,7 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
     let stoppedSession: Session
     let deletedSessionRecord: Bool
     let catalogFetchGate: AsyncGate?
+    private var structuredHistoryPages: [StructuredSessionHistoryPage]
     let providerDetailFetchGate: AsyncGate?
     let sessionScreenFetchGate: AsyncGate?
     let takeSessionControlResult: Result<SessionScreen, any Error>?
@@ -5325,6 +5411,7 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
     private(set) var takeSessionControlRequests: [TakeSessionControlRequest] = []
     private(set) var releaseSessionControlRequests: [UUID] = []
     private(set) var requestLog: [String] = []
+    private(set) var structuredHistoryPageRequests: [(sessionID: UUID, pageSize: Int, cursor: StructuredSessionHistoryCursor?)] = []
     private(set) var catalogFetchStarted = false
     private(set) var providerDetailFetchStarted = false
     private(set) var sessionScreenFetchStarted = false
@@ -5374,6 +5461,7 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
         stoppedSession: Session? = nil,
         deletedSessionRecord: Bool = true,
         catalogFetchGate: AsyncGate? = nil,
+        structuredHistoryPages: [StructuredSessionHistoryPage] = [],
         providerDetailFetchGate: AsyncGate? = nil,
         sessionScreenFetchGate: AsyncGate? = nil,
         takeSessionControlResult: Result<SessionScreen, any Error>? = nil,
@@ -5402,6 +5490,7 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
         self.stoppedSession = stoppedSession ?? sessionScreen.session
         self.deletedSessionRecord = deletedSessionRecord
         self.catalogFetchGate = catalogFetchGate
+        self.structuredHistoryPages = structuredHistoryPages
         self.providerDetailFetchGate = providerDetailFetchGate
         self.sessionScreenFetchGate = sessionScreenFetchGate
         self.takeSessionControlResult = takeSessionControlResult
@@ -5497,6 +5586,22 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
         }
 
         return defaultSessionScreen
+    }
+
+    func fetchStructuredSessionHistoryPage(
+        for pairedMac: PairedMac,
+        sessionID: UUID,
+        pageSize: Int,
+        before cursor: StructuredSessionHistoryCursor?
+    ) async throws -> StructuredSessionHistoryPage {
+        requestLog.append("fetchStructuredSessionHistoryPage")
+        structuredHistoryPageRequests.append((sessionID: sessionID, pageSize: pageSize, cursor: cursor))
+
+        if structuredHistoryPages.isEmpty == false {
+            return structuredHistoryPages.removeFirst()
+        }
+
+        return StructuredSessionHistoryPage(sessionID: sessionID, activityItems: [], providerEvents: [], nextCursor: nil)
     }
 
     func takeSessionControl(for pairedMac: PairedMac, sessionID: UUID, columns: Int, rows: Int) async throws -> SessionScreen {

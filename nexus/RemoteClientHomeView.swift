@@ -2127,6 +2127,7 @@ private struct RemoteSessionScreenView: View {
         approvalRequestPresentation: StructuredSessionApprovalRequestPresentation
     ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
+            structuredSessionHistoryPagingControls()
             structuredSessionSupplementaryContent(
                 presentation: presentation,
                 approvalRequestPresentation: approvalRequestPresentation
@@ -2136,6 +2137,39 @@ private struct RemoteSessionScreenView: View {
         .padding(.horizontal, horizontalPadding)
         .padding(.top, 14)
         .padding(.bottom, 120)
+    }
+
+    @ViewBuilder
+    private func structuredSessionHistoryPagingControls() -> some View {
+        if model.canLoadOlderFocusedStructuredSessionHistory
+            || model.isLoadingOlderFocusedStructuredSessionHistory
+            || model.focusedStructuredSessionHistoryErrorMessage != nil {
+            VStack(alignment: .leading, spacing: 8) {
+                Button {
+                    Task {
+                        await model.loadOlderFocusedStructuredSessionHistory()
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        if model.isLoadingOlderFocusedStructuredSessionHistory {
+                            ProgressView()
+                                .tint(.white)
+                        }
+                        Text(model.isLoadingOlderFocusedStructuredSessionHistory ? "Loading older activity…" : "Load older activity")
+                            .font(NexusIOSTheme.bodyFont(14, weight: .semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(NexusIOSSecondaryButtonStyle())
+                .disabled(model.isLoadingOlderFocusedStructuredSessionHistory || model.canLoadOlderFocusedStructuredSessionHistory == false)
+
+                if let errorMessage = model.focusedStructuredSessionHistoryErrorMessage {
+                    Text(errorMessage)
+                        .font(NexusIOSTheme.bodyFont(12, relativeTo: .caption))
+                        .foregroundStyle(NexusIOSTheme.coral)
+                }
+            }
+        }
     }
 
     @ViewBuilder

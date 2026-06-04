@@ -113,6 +113,9 @@ final class NexusAppModel {
     private(set) var focusedSessionSummaryPresentation: FocusedSessionSummaryPresentation?
     private(set) var focusedStructuredSessionPresentation: FocusedStructuredSessionPresentation?
     private(set) var focusedStructuredSessionChromePresentation: FocusedStructuredSessionChromePresentation?
+    private(set) var canLoadOlderFocusedStructuredSessionHistory = false
+    private(set) var isLoadingOlderFocusedStructuredSessionHistory = false
+    private(set) var focusedStructuredSessionHistoryErrorMessage: String?
     private(set) var focusedSessionID: UUID?
     private(set) var focusedSessionWorkspaceID: UUID?
     private(set) var remotePairingEndpoint: RemotePairingEndpoint?
@@ -121,7 +124,7 @@ final class NexusAppModel {
     private let client: any NexusServiceClient
     private let embeddedService: (any NexusEmbeddedServiceSession)?
     private var remotePairingServer: (any RemotePairingServing)?
-    private let focusedStructuredSessionPresenter = FocusedStructuredSessionPresenter()
+    private let structuredSessionHistoryPagingController: StructuredSessionHistoryPagingController
     private let focusedStructuredSessionChromePresenter = FocusedStructuredSessionChromePresenter()
     private let remotePairingServerFactory: (() throws -> any RemotePairingServing)?
     private var focusedSessionObservation: (any SessionScreenObservation)?
@@ -140,6 +143,13 @@ final class NexusAppModel {
         self.client = client
         self.embeddedService = embeddedService
         self.remotePairingServer = remotePairingServer
+        self.structuredSessionHistoryPagingController = StructuredSessionHistoryPagingController { sessionID, pageSize, cursor in
+            try await client.getStructuredSessionHistoryPage(
+                sessionID: sessionID,
+                pageSize: pageSize,
+                before: cursor
+            )
+        }
         self.remotePairingServerFactory = remotePairingServerFactory
         self.remotePairingEndpoint = remotePairingServer?.endpoint
     }
@@ -259,6 +269,7 @@ final class NexusAppModel {
             syncFocusedSessionSummaryPresentation(for: nil)
             syncFocusedStructuredSessionPresentation(for: nil)
             syncFocusedStructuredSessionChromePresentation(for: nil)
+            syncFocusedStructuredSessionHistoryPagingState(for: nil)
             focusedSessionID = nil
             focusedSessionWorkspaceID = nil
             serviceErrorMessage = error.localizedDescription
@@ -465,6 +476,7 @@ final class NexusAppModel {
             syncFocusedSessionSummaryPresentation(for: nil)
             syncFocusedStructuredSessionPresentation(for: nil)
             syncFocusedStructuredSessionChromePresentation(for: nil)
+            syncFocusedStructuredSessionHistoryPagingState(for: nil)
             focusedSessionID = nil
             focusedSessionWorkspaceID = nil
         }
@@ -514,6 +526,7 @@ final class NexusAppModel {
         syncFocusedSessionSummaryPresentation(for: nil)
         syncFocusedStructuredSessionPresentation(for: nil)
         syncFocusedStructuredSessionChromePresentation(for: nil)
+        syncFocusedStructuredSessionHistoryPagingState(for: nil)
         focusedSessionID = nil
         focusedSessionWorkspaceID = nil
         return session
@@ -522,6 +535,16 @@ final class NexusAppModel {
     func loadSessionScreen(sessionID: UUID) async throws {
         let screen = try await client.getSessionScreen(sessionID: sessionID)
         try await applyFocusedSessionScreen(screen)
+    }
+
+    func loadOlderFocusedStructuredSessionHistory() async {
+        guard let screen = focusedSessionScreen else {
+            return
+        }
+
+        await structuredSessionHistoryPagingController.loadOlderHistory(for: screen)
+        syncFocusedStructuredSessionPresentation(for: focusedSessionScreen)
+        syncFocusedStructuredSessionHistoryPagingState(for: focusedSessionScreen)
     }
 
     func refreshFocusedSession() async throws {
@@ -1100,6 +1123,7 @@ final class NexusAppModel {
         let previousScreen = focusedSessionScreen?.session.id == screen.session.id ? focusedSessionScreen : nil
         let previousState = previousScreen?.session.state
         focusedSessionScreen = screen
+        syncFocusedStructuredSessionHistoryPagingState(for: screen)
         syncFocusedSessionSummaryPresentation(for: screen)
         syncFocusedStructuredSessionPresentation(for: screen)
         syncFocusedStructuredSessionChromePresentation(for: screen)
@@ -1128,9 +1152,23 @@ final class NexusAppModel {
     }
 
     private func syncFocusedStructuredSessionPresentation(for screen: SessionScreen?) {
-        let presentation = screen.flatMap { focusedStructuredSessionPresenter.presentation(for: $0) }
+        let presentation = screen.flatMap { structuredSessionHistoryPagingController.presentation(for: $0) }
         if focusedStructuredSessionPresentation != presentation {
             focusedStructuredSessionPresentation = presentation
+        }
+    }
+
+    private func syncFocusedStructuredSessionHistoryPagingState(for screen: SessionScreen?) {
+        structuredSessionHistoryPagingController.applyLiveScreen(screen)
+
+        if canLoadOlderFocusedStructuredSessionHistory != structuredSessionHistoryPagingController.canLoadOlder {
+            canLoadOlderFocusedStructuredSessionHistory = structuredSessionHistoryPagingController.canLoadOlder
+        }
+        if isLoadingOlderFocusedStructuredSessionHistory != structuredSessionHistoryPagingController.isLoading {
+            isLoadingOlderFocusedStructuredSessionHistory = structuredSessionHistoryPagingController.isLoading
+        }
+        if focusedStructuredSessionHistoryErrorMessage != structuredSessionHistoryPagingController.errorMessage {
+            focusedStructuredSessionHistoryErrorMessage = structuredSessionHistoryPagingController.errorMessage
         }
     }
 

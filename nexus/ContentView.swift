@@ -1497,38 +1497,42 @@ struct ContentView: View {
 
                 ScrollViewReader { proxy in
                     ScrollView {
-                        if feedPresentation.activityRowChunks.isEmpty {
-                            ContentUnavailableView(
-                                feedPresentation.copy.emptyStateTitle,
-                                systemImage: "message",
-                                description: Text(feedPresentation.copy.emptyStateDescription)
-                            )
-                            .frame(maxWidth: .infinity, minHeight: 220)
-                        } else {
-                            LazyVStack(spacing: 8) {
-                                ForEach(feedPresentation.activityRowChunks) { chunk in
-                                    MacEquatableStructuredSessionActivityChunk(chunk: chunk) {
-                                        VStack(spacing: 8) {
-                                            ForEach(chunk.rows) { row in
-                                                MacEquatableStructuredSessionActivityRow(row: row) {
-                                                    structuredSessionActivityRowView(row)
+                        VStack(spacing: 14) {
+                            structuredSessionHistoryPagingControls()
+
+                            if feedPresentation.activityRowChunks.isEmpty {
+                                ContentUnavailableView(
+                                    feedPresentation.copy.emptyStateTitle,
+                                    systemImage: "message",
+                                    description: Text(feedPresentation.copy.emptyStateDescription)
+                                )
+                                .frame(maxWidth: .infinity, minHeight: 220)
+                            } else {
+                                LazyVStack(spacing: 8) {
+                                    ForEach(feedPresentation.activityRowChunks) { chunk in
+                                        MacEquatableStructuredSessionActivityChunk(chunk: chunk) {
+                                            VStack(spacing: 8) {
+                                                ForEach(chunk.rows) { row in
+                                                    MacEquatableStructuredSessionActivityRow(row: row) {
+                                                        structuredSessionActivityRowView(row)
+                                                    }
                                                 }
                                             }
                                         }
                                     }
-                                }
 
-                                if let thinkingIndicator = feedPresentation.thinkingIndicator {
-                                    structuredSessionThinkingIndicatorView(thinkingIndicator)
-                                }
+                                    if let thinkingIndicator = feedPresentation.thinkingIndicator {
+                                        structuredSessionThinkingIndicatorView(thinkingIndicator)
+                                    }
 
-                                Color.clear
-                                    .frame(height: 1)
-                                    .id("conversation-bottom")
+                                    Color.clear
+                                        .frame(height: 1)
+                                        .id("conversation-bottom")
+                                }
                             }
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 14)
                         }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 14)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .onAppear {
@@ -1579,6 +1583,38 @@ struct ContentView: View {
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .nexusPanel(tint: NexusMacTheme.coral)
+        }
+    }
+
+    @ViewBuilder
+    private func structuredSessionHistoryPagingControls() -> some View {
+        if appModel.canLoadOlderFocusedStructuredSessionHistory
+            || appModel.isLoadingOlderFocusedStructuredSessionHistory
+            || appModel.focusedStructuredSessionHistoryErrorMessage != nil {
+            VStack(alignment: .leading, spacing: 8) {
+                Button {
+                    Task {
+                        await appModel.loadOlderFocusedStructuredSessionHistory()
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        if appModel.isLoadingOlderFocusedStructuredSessionHistory {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                        Text(appModel.isLoadingOlderFocusedStructuredSessionHistory ? "Loading older activity…" : "Load older activity")
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(NexusSecondaryButtonStyle())
+                .disabled(appModel.isLoadingOlderFocusedStructuredSessionHistory || appModel.canLoadOlderFocusedStructuredSessionHistory == false)
+
+                if let errorMessage = appModel.focusedStructuredSessionHistoryErrorMessage {
+                    Text(errorMessage)
+                        .font(NexusMacTheme.bodyFont(11, relativeTo: .caption))
+                        .foregroundStyle(NexusMacTheme.coral)
+                }
+            }
         }
     }
 

@@ -191,6 +191,9 @@ final class RemoteClientPairingModel {
     var focusedSessionScreen: SessionScreen?
     private(set) var focusedStructuredSessionPresentation: FocusedStructuredSessionPresentation?
     private(set) var focusedStructuredSessionChromePresentation: FocusedStructuredSessionChromePresentation?
+    private(set) var canLoadOlderFocusedStructuredSessionHistory = false
+    private(set) var isLoadingOlderFocusedStructuredSessionHistory = false
+    private(set) var focusedStructuredSessionHistoryErrorMessage: String?
     private(set) var focusedSessionSurfacePresentation: RemoteSessionSurfacePresentation?
     private(set) var focusedSessionIsController = false
     var focusedSessionIsStale = false
@@ -204,7 +207,7 @@ final class RemoteClientPairingModel {
     private let client: any RemotePairingClient
     private let store: any PairedMacStore
     private let focusedSessionObservationStartupTimeoutNanoseconds: UInt64
-    private let focusedStructuredSessionPresenter = FocusedStructuredSessionPresenter()
+    private let structuredSessionHistoryPagingController: StructuredSessionHistoryPagingController
     private let focusedStructuredSessionChromePresenter = FocusedStructuredSessionChromePresenter()
     private var focusedSessionObservation: (any SessionScreenObservation)?
     private var focusedSessionObservationStartupTask: Task<Void, Never>?
@@ -242,6 +245,25 @@ final class RemoteClientPairingModel {
         self.client = client
         self.store = store
         self.focusedSessionObservationStartupTimeoutNanoseconds = focusedSessionObservationStartupTimeoutNanoseconds
+        self.structuredSessionHistoryPagingController = StructuredSessionHistoryPagingController { sessionID, pageSize, cursor in
+            let pairedMac = try await MainActor.run {
+                let pairedMacs = store.loadPairedMacs()
+                guard pairedMacs.isEmpty == false else {
+                    throw RemoteClientPairingModelError.pairedMacNotFound
+                }
+                if let preferredID = store.loadActivePairedMacID(),
+                   let preferredMac = pairedMacs.first(where: { $0.id == preferredID }) {
+                    return preferredMac
+                }
+                return pairedMacs[0]
+            }
+            return try await client.fetchStructuredSessionHistoryPage(
+                for: pairedMac,
+                sessionID: sessionID,
+                pageSize: pageSize,
+                before: cursor
+            )
+        }
         self.pairedMacs = store.loadPairedMacs()
         self.activePairedMacID = Self.resolveActivePairedMacID(
             preferredID: store.loadActivePairedMacID(),
@@ -557,6 +579,16 @@ final class RemoteClientPairingModel {
         await startFocusedSessionObservation(forceRestart: true)
     }
 
+    func loadOlderFocusedStructuredSessionHistory() async {
+        guard let screen = focusedSessionScreen else {
+            return
+        }
+
+        await structuredSessionHistoryPagingController.loadOlderHistory(for: screen)
+        syncFocusedStructuredSessionPresentation(for: focusedSessionScreen)
+        syncFocusedStructuredSessionHistoryPagingState(for: focusedSessionScreen)
+    }
+
     func takeFocusedRemoteSessionControl(columns: Int, rows: Int) async throws {
         let pairedMac = try requireActivePairedMac()
         guard let sessionID = focusedSessionID else {
@@ -831,6 +863,7 @@ final class RemoteClientPairingModel {
         focusedSessionScreen = nil
         syncFocusedStructuredSessionPresentation(for: nil)
         syncFocusedStructuredSessionChromePresentation(for: nil)
+        syncFocusedStructuredSessionHistoryPagingState(for: nil)
         syncFocusedSessionSurfacePresentation(for: nil)
         syncFocusedSessionControllerStatus()
         focusedSessionIsStale = false
@@ -1151,6 +1184,7 @@ final class RemoteClientPairingModel {
 
     private func applyFocusedSessionScreen(_ screen: SessionScreen) {
         focusedSessionScreen = screen
+        syncFocusedStructuredSessionHistoryPagingState(for: screen)
         syncFocusedStructuredSessionPresentation(for: screen)
         syncFocusedStructuredSessionChromePresentation(for: screen)
         syncFocusedSessionSurfacePresentation(for: screen)
@@ -1159,9 +1193,23 @@ final class RemoteClientPairingModel {
     }
 
     private func syncFocusedStructuredSessionPresentation(for screen: SessionScreen?) {
-        let presentation = screen.flatMap { focusedStructuredSessionPresenter.presentation(for: $0) }
+        let presentation = screen.flatMap { structuredSessionHistoryPagingController.presentation(for: $0) }
         if focusedStructuredSessionPresentation != presentation {
             focusedStructuredSessionPresentation = presentation
+        }
+    }
+
+    private func syncFocusedStructuredSessionHistoryPagingState(for screen: SessionScreen?) {
+        structuredSessionHistoryPagingController.applyLiveScreen(screen)
+
+        if canLoadOlderFocusedStructuredSessionHistory != structuredSessionHistoryPagingController.canLoadOlder {
+            canLoadOlderFocusedStructuredSessionHistory = structuredSessionHistoryPagingController.canLoadOlder
+        }
+        if isLoadingOlderFocusedStructuredSessionHistory != structuredSessionHistoryPagingController.isLoading {
+            isLoadingOlderFocusedStructuredSessionHistory = structuredSessionHistoryPagingController.isLoading
+        }
+        if focusedStructuredSessionHistoryErrorMessage != structuredSessionHistoryPagingController.errorMessage {
+            focusedStructuredSessionHistoryErrorMessage = structuredSessionHistoryPagingController.errorMessage
         }
     }
 
@@ -1218,6 +1266,7 @@ final class RemoteClientPairingModel {
             focusedSessionScreen = nil
             syncFocusedStructuredSessionPresentation(for: nil)
             syncFocusedStructuredSessionChromePresentation(for: nil)
+            syncFocusedStructuredSessionHistoryPagingState(for: nil)
             syncFocusedSessionSurfacePresentation(for: nil)
             syncFocusedSessionControllerStatus()
             focusedSessionIsStale = false
@@ -1230,6 +1279,7 @@ final class RemoteClientPairingModel {
             focusedSessionScreen = nil
             syncFocusedStructuredSessionPresentation(for: nil)
             syncFocusedStructuredSessionChromePresentation(for: nil)
+            syncFocusedStructuredSessionHistoryPagingState(for: nil)
             syncFocusedSessionSurfacePresentation(for: nil)
             syncFocusedSessionControllerStatus()
             focusedSessionIsStale = false
@@ -1401,6 +1451,7 @@ final class RemoteClientPairingModel {
             focusedSessionScreen = nil
             syncFocusedStructuredSessionPresentation(for: nil)
             syncFocusedStructuredSessionChromePresentation(for: nil)
+            syncFocusedStructuredSessionHistoryPagingState(for: nil)
             syncFocusedSessionSurfacePresentation(for: nil)
             syncFocusedSessionControllerStatus()
             focusedSessionIsStale = false

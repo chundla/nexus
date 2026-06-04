@@ -7636,6 +7636,69 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelLoadsOlderPiStructuredSessionHistoryIntoFocusedPresentationWithoutDisturbingLiveTailState() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let olderActivity = SessionActivityItem(kind: .message, text: "Pi: Older context")
+        let liveActivity = SessionActivityItem(kind: .message, text: "Pi: Latest reply")
+        let approvalRequest = SessionApprovalRequest(title: "Deploy", text: "Deploy now?", state: .pending)
+        let screen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "Pi shared Session stream connected",
+            activityItems: [liveActivity],
+            approvalRequests: [approvalRequest],
+            isAgentTurnInProgress: true
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []),
+            session: session,
+            screen: screen,
+            structuredHistoryPages: [
+                StructuredSessionHistoryPage(
+                    sessionID: session.id,
+                    activityItems: [olderActivity],
+                    providerEvents: [],
+                    nextCursor: nil
+                )
+            ]
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+        try await model.focusSession(sessionID: session.id)
+
+        #expect(model.canLoadOlderFocusedStructuredSessionHistory)
+        #expect(model.focusedStructuredSessionPresentation?.feed.activityRows.map(\.text) == [liveActivity.text])
+        #expect(model.focusedStructuredSessionPresentation?.feed.pendingApprovalRequests == [approvalRequest])
+        #expect(model.focusedStructuredSessionPresentation?.feed.thinkingIndicator == StructuredSessionThinkingIndicator(text: "Thinking"))
+
+        await model.loadOlderFocusedStructuredSessionHistory()
+
+        #expect(model.canLoadOlderFocusedStructuredSessionHistory == false)
+        #expect(model.focusedStructuredSessionPresentation?.feed.activityRows.map(\.text) == [
+            olderActivity.text,
+            liveActivity.text
+        ])
+        #expect(model.focusedStructuredSessionPresentation?.feed.pendingApprovalRequests == [approvalRequest])
+        #expect(model.focusedStructuredSessionPresentation?.feed.thinkingIndicator == StructuredSessionThinkingIndicator(text: "Thinking"))
+        #expect(client.structuredHistoryPageRequests.map(\.sessionID) == [session.id])
+    }
+
+    @MainActor
     @Test func appModelFocusedStructuredSessionPresentationStaysStableDuringTranscriptOnlyUpdates() async throws {
         let group = WorkspaceGroup(id: UUID(), name: "Group")
         let workspace = Workspace(
@@ -11160,6 +11223,7 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
     private let workspaceOverviewLoader: (@Sendable (UUID) async throws -> WorkspaceOverview)?
     private let workspaceOverviewBatchLoader: (@Sendable ([UUID]) async throws -> [WorkspaceOverview])?
     private var observedScreenHandlers: [UUID: @Sendable (SessionScreen) -> Void] = [:]
+    private var structuredHistoryPages: [StructuredSessionHistoryPage]
 
     var getSessionScreenHandler: (@Sendable (UUID) async throws -> SessionScreen)?
     var sendSessionInputHandler: (@Sendable (UUID, String) async throws -> SessionScreen)?
@@ -11171,6 +11235,7 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
     var recordedNavigationTargets: [NavigationTarget] = []
     var respondedApprovalRequests: [(sessionID: UUID, approvalRequestID: UUID, decision: ApprovalRequestDecision)] = []
     var respondedExtensionDialogs: [(sessionID: UUID, dialogID: String, response: SessionExtensionUIDialogResponse)] = []
+    var structuredHistoryPageRequests: [(sessionID: UUID, pageSize: Int, cursor: StructuredSessionHistoryCursor?)] = []
     var observedScreenHandlerCount: Int {
         observedScreenHandlers.count
     }
@@ -11191,7 +11256,8 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
         recentNavigation: [NavigationItem] = [],
         searchResults: [NavigationItem] = [],
         remoteAccessState: RemoteAccessState = RemoteAccessState(isEnabled: false, activePairing: nil),
-        pairedDevices: [PairedDevice] = []
+        pairedDevices: [PairedDevice] = [],
+        structuredHistoryPages: [StructuredSessionHistoryPage] = []
     ) {
         let allWorkspaceOverviews = workspaceOverviewsByID ?? [workspaceOverview.workspace.id: workspaceOverview]
         let detailWorkspaceOverview = allWorkspaceOverviews[session.workspaceID] ?? workspaceOverview
@@ -11221,6 +11287,7 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
         self.pairedDevicesValue = pairedDevices
         self.workspaceOverviewLoader = workspaceOverviewLoader
         self.workspaceOverviewBatchLoader = workspaceOverviewBatchLoader
+        self.structuredHistoryPages = structuredHistoryPages
     }
 
     func getServiceStatus() async throws -> NexusServiceStatus {
@@ -11606,10 +11673,12 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
         pageSize: Int,
         before cursor: StructuredSessionHistoryCursor?
     ) async throws -> StructuredSessionHistoryPage {
-        _ = pageSize
-        _ = cursor
+        structuredHistoryPageRequests.append((sessionID: sessionID, pageSize: pageSize, cursor: cursor))
         guard sessionValue.id == sessionID else {
             throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Session not found"])
+        }
+        if structuredHistoryPages.isEmpty == false {
+            return structuredHistoryPages.removeFirst()
         }
         return StructuredSessionHistoryPage(sessionID: sessionID, activityItems: [], providerEvents: [], nextCursor: nil)
     }
