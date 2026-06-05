@@ -341,6 +341,31 @@ public final class StructuredSessionMarkdownRenderer: @unchecked Sendable {
     }
 }
 
+enum StructuredSessionFeedTextSelectionPolicy {
+    static var isEnabled: Bool {
+        #if os(macOS)
+        false
+        #else
+        true
+        #endif
+    }
+}
+
+@available(macOS 12.0, iOS 15.0, *)
+public extension View {
+    /// macOS SwiftUI selection overlays can enter a layout invalidation loop for
+    /// large multiline structured Session feed content, so keep feed text
+    /// non-selectable there while preserving selection on iOS.
+    @ViewBuilder
+    func structuredSessionFeedTextSelection() -> some View {
+        if StructuredSessionFeedTextSelectionPolicy.isEnabled {
+            textSelection(.enabled)
+        } else {
+            textSelection(.disabled)
+        }
+    }
+}
+
 @available(macOS 12.0, iOS 15.0, *)
 public struct StructuredSessionMarkdownText: View {
     private let markdown: String
@@ -374,7 +399,7 @@ public struct StructuredSessionMarkdownText: View {
         }
         .font(font)
         .foregroundColor(color)
-        .textSelection(.enabled)
+        .structuredSessionFeedTextSelection()
         .fixedSize(horizontal: false, vertical: true)
         .onChange(of: markdown) { newValue in
             renderedContent = renderer.renderContent(newValue)

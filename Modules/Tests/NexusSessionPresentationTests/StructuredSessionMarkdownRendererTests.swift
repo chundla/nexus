@@ -166,4 +166,12 @@ struct StructuredSessionMarkdownRendererTests {
             """
         )
     }
+
+    @Test func structuredSessionFeedTextSelectionDefaultsMatchPlatformPolicy() {
+        #if os(macOS)
+        #expect(StructuredSessionFeedTextSelectionPolicy.isEnabled == false)
+        #else
+        #expect(StructuredSessionFeedTextSelectionPolicy.isEnabled == true)
+        #endif
+    }
 }

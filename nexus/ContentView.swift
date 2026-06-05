@@ -1633,7 +1633,7 @@ struct ContentView: View {
                 Text(conversation.text)
                     .font(NexusMacTheme.bodyFont(13))
                     .foregroundStyle(.white)
-                    .textSelection(.enabled)
+                    .structuredSessionFeedTextSelection()
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
@@ -1671,7 +1671,7 @@ struct ContentView: View {
                     Text(conversation.text)
                         .font(NexusMacTheme.monoFont(11, relativeTo: .callout))
                         .foregroundStyle(.white.opacity(0.92))
-                        .textSelection(.enabled)
+                        .structuredSessionFeedTextSelection()
                         .fixedSize(horizontal: false, vertical: true)
                     if let detailText = row.detailText {
                         structuredSessionDetailTextView(
@@ -1699,7 +1699,7 @@ struct ContentView: View {
                     Text(conversation.text)
                         .font(NexusMacTheme.bodyFont(13))
                         .foregroundStyle(.white.opacity(0.94))
-                        .textSelection(.enabled)
+                        .structuredSessionFeedTextSelection()
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxWidth: 620, alignment: .leading)
@@ -1770,7 +1770,7 @@ struct ContentView: View {
             Text(text)
                 .font(font)
                 .foregroundStyle(.white.opacity(0.84))
-                .textSelection(.enabled)
+                .structuredSessionFeedTextSelection()
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             if isTruncated {
@@ -1818,7 +1818,7 @@ struct ContentView: View {
             Text(request.text)
                 .font(NexusMacTheme.bodyFont(13))
                 .foregroundStyle(.white.opacity(0.92))
-                .textSelection(.enabled)
+                .structuredSessionFeedTextSelection()
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             HStack(spacing: 8) {
@@ -1890,7 +1890,7 @@ struct ContentView: View {
                             Text(notification.message)
                                 .font(NexusMacTheme.bodyFont(12))
                                 .foregroundStyle(.white.opacity(0.92))
-                                .textSelection(.enabled)
+                                .structuredSessionFeedTextSelection()
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(10)
