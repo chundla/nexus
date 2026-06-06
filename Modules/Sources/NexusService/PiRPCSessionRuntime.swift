@@ -265,7 +265,9 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             extensionWidgets = extensionUIState.widgets
             extensionEditorText = extensionUIState.editorText
         }
-        providerEvents = StructuredSessionLiveHistoryRetention.retainedProviderEvents(metadata.piPersistedProviderEvents ?? [])
+        providerEvents = StructuredSessionLiveHistoryRetention.retainedProviderEvents(
+            PiStructuredSessionProviderEventCompaction.compacted(events: metadata.piPersistedProviderEvents ?? [], providerID: .pi)
+        )
         providerFacts = StructuredSessionProviderFacts.summarizing(providerEvents: providerEvents)
         nextProviderEventSequence = (providerEvents.last?.sequence ?? -1) + 1
     }
@@ -1414,16 +1416,25 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
 
     private func recordProviderEvent(rawPayload: String, object: [String: Any], type: String) {
         lock.lock()
+        let command = type == "response" ? string(for: "command", in: object) : nil
         let event = SessionProviderEvent(
             sequence: nextProviderEventSequence,
             providerID: .pi,
             type: type,
             family: providerEventFamily(for: type),
-            command: type == "response" ? string(for: "command", in: object) : nil,
+            command: command,
             rawPayload: rawPayload
         )
+        let retainedEvent = PiStructuredSessionProviderEventCompaction.compacted(
+            sequence: nextProviderEventSequence,
+            type: type,
+            family: event.family,
+            command: command,
+            rawPayload: rawPayload,
+            object: object
+        )
         nextProviderEventSequence += 1
-        providerEvents.append(event)
+        providerEvents.append(retainedEvent)
         if providerEvents.count > StructuredSessionLiveHistoryRetention.maxRetainedProviderEvents {
             let removedCount = providerEvents.count - StructuredSessionLiveHistoryRetention.maxRetainedProviderEvents
             persistedProviderEventOverflow.append(contentsOf: providerEvents.prefix(removedCount))

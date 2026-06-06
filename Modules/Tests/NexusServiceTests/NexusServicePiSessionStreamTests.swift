@@ -1240,6 +1240,115 @@ struct NexusServicePiSessionStreamTests {
         #expect(screen.providerFacts.lastProviderEventType == "message_update")
     }
 
+    @Test func localPiRuntimeCompactsLargeRetainedProviderEventPayloads() throws {
+        let oversizedMarker = String(repeating: "oversized-provider-payload-", count: 512)
+        let transport = PromptEventPiRPCTransport(promptEvents: [
+            ["type": "agent_start", "agent": "pi", "oversized": oversizedMarker],
+            [
+                "type": "message_update",
+                "assistantMessageEvent": [
+                    "type": "text_delta",
+                    "delta": "world",
+                    "oversized": oversizedMarker
+                ],
+                "oversized": oversizedMarker
+            ],
+            [
+                "type": "turn_end",
+                "message": [
+                    "role": "assistant",
+                    "content": [["type": "text", "text": oversizedMarker]]
+                ]
+            ]
+        ])
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("hello")
+        let screen = runtime.sessionScreen(for: session)
+        let metadata = try #require(runtime.sessionRecordAdapterMetadata)
+        let compactedMessageUpdate = try #require(screen.providerEvents.first(where: { $0.type == "message_update" }))
+        let compactedTurnEnd = try #require(screen.providerEvents.first(where: { $0.type == "turn_end" }))
+        let persistedMessageUpdate = try #require(metadata.piPersistedProviderEvents?.first(where: { $0.type == "message_update" }))
+
+        #expect(screen.providerFacts.liveAssistantDraftText == nil)
+        #expect(compactedMessageUpdate.rawPayload.contains("\"delta\":\"world\""))
+        #expect(compactedMessageUpdate.rawPayload.contains(oversizedMarker) == false)
+        #expect(compactedTurnEnd.rawPayload == "{\"type\":\"turn_end\"}")
+        #expect(persistedMessageUpdate.rawPayload == compactedMessageUpdate.rawPayload)
+    }
+
+    @Test func localPiRuntimeCompactsLegacyPersistedProviderEventsOnRestore() throws {
+        let oversizedMarker = String(repeating: "legacy-provider-payload-", count: 512)
+        let legacyStatePayload = "{\"type\":\"response\",\"command\":\"get_state\",\"success\":true,\"data\":{\"sessionId\":\"pi-session-1\",\"model\":{\"provider\":\"openai\",\"id\":\"gpt-5.1-codex-max\",\"name\":\"GPT-5.1 Codex Max\"},\"oversized\":\"\(oversizedMarker)\"}}"
+        let legacyStatsPayload = "{\"type\":\"response\",\"command\":\"get_session_stats\",\"success\":true,\"data\":{\"contextUsage\":{\"tokens\":60000,\"contextWindow\":200000,\"percent\":30},\"oversized\":\"\(oversizedMarker)\"}}"
+        let legacyMessageUpdatePayload = "{\"type\":\"message_update\",\"assistantMessageEvent\":{\"type\":\"text_delta\",\"delta\":\"world\",\"oversized\":\"\(oversizedMarker)\"},\"oversized\":\"\(oversizedMarker)\"}"
+        let restoredMetadata = try #require(
+            SessionRecordAdapterMetadata.pi(
+                linkage: PiSessionLinkage(piSessionID: "pi-session-1", sessionFile: "/tmp/pi-session.jsonl"),
+                providerEvents: [
+                    SessionProviderEvent(
+                        sequence: 0,
+                        providerID: .pi,
+                        type: "response",
+                        family: .response,
+                        command: "get_state",
+                        rawPayload: legacyStatePayload
+                    ),
+                    SessionProviderEvent(
+                        sequence: 1,
+                        providerID: .pi,
+                        type: "response",
+                        family: .response,
+                        command: "get_session_stats",
+                        rawPayload: legacyStatsPayload
+                    ),
+                    SessionProviderEvent(
+                        sequence: 2,
+                        providerID: .pi,
+                        type: "message_update",
+                        family: .message,
+                        rawPayload: legacyMessageUpdatePayload
+                    )
+                ]
+            )
+        )
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            restoredMetadata: restoredMetadata,
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in TestPiRPCTransport() }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(screen.providerFacts.modelIdentifier == "openai/gpt-5.1-codex-max")
+        #expect(screen.providerFacts.tokenUsage == StructuredSessionProviderTokenUsage(usedTokens: 60000, totalTokens: 200000, percent: 30))
+        #expect(screen.providerFacts.liveAssistantDraftText == "world")
+        #expect(screen.providerEvents.allSatisfy { $0.rawPayload.contains(oversizedMarker) == false })
+    }
+
     @Test func localPiRuntimeShowsLastAssistantTextViaBuiltInCommand() throws {
         let transport = TestPiRPCTransport(lastAssistantText: "Summarized answer")
         let runtime = try PiRPCSessionRuntime(

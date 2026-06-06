@@ -2116,10 +2116,19 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 nextCursor: nil
             )
         }
-        return try piStructuredSessionHistoryStore.historyPage(
+        let page = try piStructuredSessionHistoryStore.historyPage(
             sessionID: sessionID,
             pageSize: pageSize,
             before: cursor
+        )
+        guard session.providerID == .pi else {
+            return page
+        }
+        return StructuredSessionHistoryPage(
+            sessionID: page.sessionID,
+            activityItems: page.activityItems,
+            providerEvents: PiStructuredSessionProviderEventCompaction.compacted(events: page.providerEvents, providerID: .pi),
+            nextCursor: page.nextCursor
         )
     }
 
@@ -2913,7 +2922,7 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         guard screen.primarySurface == .structuredActivityFeed else {
             return
         }
-        guard session.providerID != .pi || screen.isAgentTurnInProgress == false else {
+        guard session.providerID != .pi || shouldPersistPiStructuredSessionHistoryDuringActiveTurn(screen) else {
             return
         }
 
@@ -2922,6 +2931,25 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             screen: screen,
             overflow: sessionRuntimeManager.consumeStructuredHistoryOverflow(for: session)
         )
+    }
+
+    private func shouldPersistPiStructuredSessionHistoryDuringActiveTurn(_ screen: SessionScreen) -> Bool {
+        guard screen.session.providerID == .pi,
+              screen.isAgentTurnInProgress else {
+            return true
+        }
+
+        guard let extensionUI = screen.extensionUI else {
+            return screen.approvalRequests.isEmpty == false
+        }
+
+        return screen.approvalRequests.isEmpty == false
+            || extensionUI.pendingDialogs.isEmpty == false
+            || extensionUI.notifications.isEmpty == false
+            || extensionUI.statuses.isEmpty == false
+            || extensionUI.widgets.isEmpty == false
+            || extensionUI.title != nil
+            || extensionUI.editorText != nil
     }
 
     private func persistPiStructuredSessionHistoryAfterRuntimeChange(sessionID: UUID) {
@@ -3257,11 +3285,14 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
     }
 
     private func persistedProviderEvents(for session: Session) throws -> [SessionProviderEvent] {
+        let providerEvents: [SessionProviderEvent]
         if let state = try persistedPiStructuredSessionState(for: session) {
-            return state.providerEvents
+            providerEvents = state.providerEvents
+        } else {
+            providerEvents = try sessionRecordStore.sessionRecordAdapterMetadata(sessionID: session.id)?.piPersistedProviderEvents ?? []
         }
 
-        return try sessionRecordStore.sessionRecordAdapterMetadata(sessionID: session.id)?.piPersistedProviderEvents ?? []
+        return PiStructuredSessionProviderEventCompaction.compacted(events: providerEvents, providerID: session.providerID)
     }
 
     private func staticSessionTranscript(
