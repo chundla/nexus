@@ -91,6 +91,7 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
     private var approvalRequests: [SessionApprovalRequest] = []
     private var slashCommands: [SessionSlashCommand]?
     private var providerEvents: [SessionProviderEvent] = []
+    private var finalOutputDiagnostic: StructuredSessionFinalOutputDiagnostic?
     private var nextProviderEventSequence = 0
     private var pendingApprovalRequests: [UUID: PendingCodexApprovalRequest] = [:]
     private var pendingTurnRequestIDs: Set<String> = []
@@ -339,6 +340,7 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
             approvalRequests: approvalRequests,
             slashCommands: slashCommands,
             providerEvents: providerEvents,
+            finalOutputDiagnostic: finalOutputDiagnostic,
             isAgentTurnInProgress: isTurnInProgress
         )
     }
@@ -701,6 +703,7 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
     }
 
     private func handleCompletedItem(_ params: [String: Any]?) {
+        let startedAt = DispatchTime.now().uptimeNanoseconds
         guard let item = params?["item"] as? [String: Any],
               let itemID = string(for: "id", in: item) else {
             return
@@ -719,7 +722,14 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
 
             let inserted = completedAgentMessageItemIDs.insert(itemID).inserted
             if inserted {
-                appendActivityItemLocked(SessionActivityItem(kind: .message, text: "Codex: \(text)"))
+                let finalActivityItem = SessionActivityItem(kind: .message, text: "Codex: \(text)")
+                appendActivityItemLocked(finalActivityItem)
+                recordFinalOutputDiagnosticLocked(
+                    trigger: .turnEnd,
+                    activityItem: finalActivityItem,
+                    providerRuntimeLatencyMilliseconds: elapsedMilliseconds(since: startedAt),
+                    expectedThinkingIndicatorVisible: false
+                )
                 isTurnInProgress = false
             }
             shouldNotify = inserted
@@ -1084,6 +1094,27 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
         return value
     }
 
+    private func recordFinalOutputDiagnosticLocked(
+        trigger: StructuredSessionFinalOutputTrigger,
+        activityItem: SessionActivityItem,
+        providerRuntimeLatencyMilliseconds: Int,
+        expectedThinkingIndicatorVisible: Bool
+    ) {
+        guard let providerEventSequence = providerEvents.last?.sequence else {
+            return
+        }
+
+        finalOutputDiagnostic = StructuredSessionFinalOutputDiagnostic(
+            trigger: trigger,
+            providerEventSequence: providerEventSequence,
+            providerRuntimeLatencyMilliseconds: providerRuntimeLatencyMilliseconds,
+            expectedActivityItemID: activityItem.id,
+            expectedActivityItemText: activityItem.text,
+            expectedThinkingIndicatorVisible: expectedThinkingIndicatorVisible,
+            serviceObservationAnchorUptimeNanoseconds: DispatchTime.now().uptimeNanoseconds
+        )
+    }
+
     private func appendActivityItemLocked(_ item: SessionActivityItem) {
         let trimmedText = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmedText.isEmpty == false else {
@@ -1092,6 +1123,11 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
 
         activityItems.append(SessionActivityItem(id: item.id, kind: item.kind, text: trimmedText))
         activityItems = StructuredSessionLiveHistoryRetention.retainedActivityItems(activityItems)
+    }
+
+    private func elapsedMilliseconds(since startedAt: UInt64) -> Int {
+        let now = DispatchTime.now().uptimeNanoseconds
+        return Int((now >= startedAt ? now - startedAt : 0) / 1_000_000)
     }
 
     private func sessionWithCurrentState(_ session: Session) -> Session {

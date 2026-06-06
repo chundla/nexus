@@ -116,6 +116,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     private var extensionTitle: String?
     private var extensionEditorText: String?
     private var providerEvents: [SessionProviderEvent] = []
+    private var finalOutputDiagnostic: StructuredSessionFinalOutputDiagnostic?
     private var persistedProviderEventOverflow: [SessionProviderEvent] = []
     private var nextProviderEventSequence = 0
     private var providerSlashCommands: [SessionSlashCommand]?
@@ -347,6 +348,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             extensionUI: extensionUIStateLocked(),
             slashCommands: mergedSlashCommandsLocked(),
             providerEvents: providerEvents,
+            finalOutputDiagnostic: finalOutputDiagnostic,
             isAgentTurnInProgress: isStreaming
         )
     }
@@ -1849,6 +1851,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     }
 
     private func handleTurnEnd(_ object: [String: Any]) {
+        let startedAt = DispatchTime.now().uptimeNanoseconds
         let resolvedText = assistantText(from: object["message"] as? [String: Any])
 
         lock.lock()
@@ -1859,7 +1862,14 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
                 transcriptEntries[assistantTranscriptIndex] = finalText
                 trimTranscriptEntriesLocked()
             }
-            appendActivityItemLocked(SessionActivityItem(kind: .message, text: "Pi: \(finalText)"))
+            let finalActivityItem = SessionActivityItem(kind: .message, text: "Pi: \(finalText)")
+            appendActivityItemLocked(finalActivityItem)
+            recordFinalOutputDiagnosticLocked(
+                trigger: .turnEnd,
+                activityItem: finalActivityItem,
+                providerRuntimeLatencyMilliseconds: elapsedMilliseconds(since: startedAt),
+                expectedThinkingIndicatorVisible: false
+            )
         }
         currentAssistantText = ""
         assistantTranscriptIndex = nil
@@ -3241,6 +3251,27 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         extensionWidgets.append(widget)
     }
 
+    private func recordFinalOutputDiagnosticLocked(
+        trigger: StructuredSessionFinalOutputTrigger,
+        activityItem: SessionActivityItem,
+        providerRuntimeLatencyMilliseconds: Int,
+        expectedThinkingIndicatorVisible: Bool
+    ) {
+        guard let providerEventSequence = providerEvents.last?.sequence else {
+            return
+        }
+
+        finalOutputDiagnostic = StructuredSessionFinalOutputDiagnostic(
+            trigger: trigger,
+            providerEventSequence: providerEventSequence,
+            providerRuntimeLatencyMilliseconds: providerRuntimeLatencyMilliseconds,
+            expectedActivityItemID: activityItem.id,
+            expectedActivityItemText: activityItem.text,
+            expectedThinkingIndicatorVisible: expectedThinkingIndicatorVisible,
+            serviceObservationAnchorUptimeNanoseconds: DispatchTime.now().uptimeNanoseconds
+        )
+    }
+
     private func appendActivityItemLocked(_ item: SessionActivityItem) {
         let trimmedText = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmedText.isEmpty == false else {
@@ -3262,6 +3293,11 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             persistedActivityItemOverflow.append(contentsOf: activityItems.prefix(removedCount))
             activityItems.removeFirst(removedCount)
         }
+    }
+
+    private func elapsedMilliseconds(since startedAt: UInt64) -> Int {
+        let now = DispatchTime.now().uptimeNanoseconds
+        return Int((now >= startedAt ? now - startedAt : 0) / 1_000_000)
     }
 
     private func setActivityItemDetailTextLocked(id: UUID, detailText: String) {

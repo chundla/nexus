@@ -67,6 +67,7 @@ swift test --package-path Modules --filter NexusServicePerformanceBaselineTests/
 | #187 iOS Remote Client invalidation | the focused `RemoteClientPairingModelTests` and `RemoteClientProfilingFixtureTests` commands below | Final SwiftUI invalidation tracing still has to run from Xcode Instruments on a physical iPhone |
 | #188 structured Session updates | `StructuredSessionPresentationTests`, `StructuredSessionObservationDiagnosticsTests`, `NexusServicePerformanceRegressionTests/testStructuredSessionActivityAppendRegressionMatchesTheAuditedBaselineShape`, and `NexusServicePerformanceBaselineTests/testStructuredSessionActivityAppendBaseline` | None beyond targeted profiling when a regression is still visible after the automated checks |
 | #192 long structured Session stall attribution | `StructuredSessionThinkingStallAttributionTests`, `StructuredSessionThinkingStallDiagnosisTests`, and `RemoteClientProfilingFixtureTests/bootstrapStreamsThinkingDiagnosticSnapshotsForLongObservationProfiling` | Final side-by-side memory capture still runs manually on macOS and a physical iPhone when you need Instruments evidence |
+| #199 structured Session final-output latency delivery | `StructuredSessionObservationDiagnosticsTests/structuredObservationDeltaRecordsFinalOutputLatencyMetrics`, `StructuredSessionFinalOutputLatencyTrackerTests`, `NexusServicePiSessionStreamTests/localPiRuntimeAttachesFinalOutputLatencyDiagnosticToTurnCompletion`, and `RemoteClientProfilingFixtureTests/bootstrapCapturesFinalOutputLatencyDiagnosticSnapshotsForRemoteClientProfiling` | Final visual trace pairing still runs manually when you need Instruments evidence for the last visible feed update |
 
 ## Diagnostic fields to compare
 
@@ -94,6 +95,13 @@ swift test --package-path Modules --filter NexusServicePerformanceBaselineTests/
 - compare: `totalElapsedMilliseconds`
 - compare steps: `buildStructuredDelta`
 - compare metrics: `deltaBuildCount`, `changeCount`, `activityItemCount`, `approvalRequestCount`, `fullReplaceFallbackCount`, `structuredRevision`, `transcriptCharacterCount`
+
+### Structured Session final-output delivery
+
+- operation: `structuredSessionObservation`
+- compare steps: `buildStructuredDelta` or `buildStructuredSnapshot`
+- compare metrics: `finalOutputProviderRuntimeMilliseconds`, `finalOutputServiceObservationMilliseconds`, `finalOutputTriggerTextDeltaCount`, `finalOutputTriggerTurnEndCount`
+- compare client snapshot fields: `clientPresentationLatencyMilliseconds`, `totalVisibleLatencyMilliseconds`
 
 ## macOS workspace browse invalidation guardrails
 
@@ -159,6 +167,51 @@ Suggested trace path:
 3. keep the trace running long enough to capture the automatic `Fixture update ...` activity appends on the structured `Session` surface
 
 Important: `xcrun xctrace` currently reports `The SwiftUI instrument is not supported on the Simulator` for this app flow, so use the simulator fixture for deterministic navigation rehearsal and focused test validation, but run the final SwiftUI invalidation trace from Xcode Instruments on a physical iPhone.
+
+## Structured Session final-output latency diagnosis (#199)
+
+Use this loop when a structured **Session** finishes provider work but the final answer feels slow to appear in the visible feed and you need to decide whether the delay came from provider/runtime projection, service-side structured observation bookkeeping, or client **Session Presentation**.
+
+### Automated guardrails
+
+```bash
+swift test --package-path Modules --filter StructuredSessionObservationDiagnosticsTests/structuredObservationDeltaRecordsFinalOutputLatencyMetrics
+swift test --package-path Modules --filter StructuredSessionFinalOutputLatencyTrackerTests
+swift test --package-path Modules --filter NexusServicePiSessionStreamTests/localPiRuntimeAttachesFinalOutputLatencyDiagnosticToTurnCompletion
+xcodebuildmcp macos test --project-path nexus.xcodeproj --scheme nexus \
+  --extra-args -only-testing:nexusTests/RemoteClientProfilingFixtureTests/bootstrapCapturesFinalOutputLatencyDiagnosticSnapshotsForRemoteClientProfiling
+```
+
+- `StructuredSessionObservationDiagnosticsTests/structuredObservationDeltaRecordsFinalOutputLatencyMetrics` verifies that `structuredSessionObservation` diagnostics record `finalOutputProviderRuntimeMilliseconds`, `finalOutputServiceObservationMilliseconds`, and the `textDelta` / `turnEnd` trigger counters.
+- `StructuredSessionFinalOutputLatencyTrackerTests` verifies the shared client-side latency tracker that turns canonical final-output milestones into visible-feed presentation timing.
+- `NexusServicePiSessionStreamTests/localPiRuntimeAttachesFinalOutputLatencyDiagnosticToTurnCompletion` proves the Pi runtime attaches final-output timing anchors when a real `turn_end` completion lands.
+- `RemoteClientProfilingFixtureTests/bootstrapCapturesFinalOutputLatencyDiagnosticSnapshotsForRemoteClientProfiling` keeps the iPhone `Remote Client` fixture healthy while a focused reply records visible-feed final-output latency.
+
+### Repeatable evidence to compare
+
+Capture the latest `structuredSessionObservation` diagnostic record with `metrics["finalOutputLatencyCount"] == 1` and compare it with a current client snapshot.
+
+Service-side fields:
+
+- `finalOutputProviderRuntimeMilliseconds`: provider event handling plus runtime projection into shared `SessionScreen`
+- `finalOutputServiceObservationMilliseconds`: elapsed time from that projected screen state until structured observation work picked it up
+- `buildStructuredDelta` / `buildStructuredSnapshot`: structured observation build cost for the same update
+- `finalOutputTriggerTextDeltaCount` / `finalOutputTriggerTurnEndCount`: which provider milestone produced the visible feed update
+
+Client-side fields:
+
+- macOS: `NexusAppModel.focusedStructuredSessionDiagnosticSnapshot?.finalOutputLatency`
+- iPhone `Remote Client`: `RemoteClientPairingModel.focusedStructuredSessionDiagnosticSnapshot?.finalOutputLatency`
+- `clientPresentationLatencyMilliseconds`: time from the observed canonical final-output milestone to the matching visible feed row in shared **Session Presentation**
+- `totalVisibleLatencyMilliseconds`: provider/runtime + service observation + client presentation time combined
+
+Interpretation:
+
+- high `finalOutputProviderRuntimeMilliseconds` with low follow-on numbers ⇒ provider/runtime projection cost
+- low provider/runtime time but high `finalOutputServiceObservationMilliseconds` or `buildStructuredDelta` ⇒ service observation/bookkeeping cost
+- low service numbers but high `clientPresentationLatencyMilliseconds` ⇒ client **Session Presentation** cost
+
+For final manual captures, pair those counters with a matching Instruments trace on macOS or a physical iPhone so the visible feed update lines up with the repeatable timing sample above.
 
 ## Long structured Session stall diagnosis (#192)
 

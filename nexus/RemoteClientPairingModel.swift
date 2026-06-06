@@ -191,6 +191,7 @@ final class RemoteClientPairingModel {
     var focusedSessionScreen: SessionScreen?
     private(set) var focusedStructuredSessionPresentation: FocusedStructuredSessionPresentation?
     private(set) var focusedStructuredSessionChromePresentation: FocusedStructuredSessionChromePresentation?
+    private(set) var focusedStructuredSessionFinalOutputLatency: StructuredSessionFinalOutputLatencySample?
     private(set) var canLoadOlderFocusedStructuredSessionHistory = false
     private(set) var isLoadingOlderFocusedStructuredSessionHistory = false
     private(set) var focusedStructuredSessionHistoryErrorMessage: String?
@@ -209,6 +210,7 @@ final class RemoteClientPairingModel {
     private let focusedSessionObservationStartupTimeoutNanoseconds: UInt64
     private let structuredSessionHistoryPagingController: StructuredSessionHistoryPagingController
     private let focusedStructuredSessionChromePresenter = FocusedStructuredSessionChromePresenter()
+    private var focusedStructuredSessionFinalOutputLatencyTracker = StructuredSessionFinalOutputLatencyTracker()
     private var focusedSessionObservation: (any SessionScreenObservation)?
     private var focusedSessionObservationStartupTask: Task<Void, Never>?
     private var focusedSessionReconnectTask: Task<Void, Never>?
@@ -233,7 +235,8 @@ final class RemoteClientPairingModel {
 
         return StructuredSessionClientDiagnosticSnapshot(
             screen: screen,
-            presentation: focusedStructuredSessionPresentation
+            presentation: focusedStructuredSessionPresentation,
+            finalOutputLatency: focusedStructuredSessionFinalOutputLatency
         )
     }
 
@@ -1187,6 +1190,7 @@ final class RemoteClientPairingModel {
         focusedSessionScreen = screen
         syncFocusedStructuredSessionHistoryPagingState(for: screen)
         syncFocusedStructuredSessionPresentation(for: screen)
+        syncFocusedStructuredSessionFinalOutputLatency(for: screen)
         syncFocusedStructuredSessionChromePresentation(for: screen)
         syncFocusedSessionSurfacePresentation(for: screen)
         syncFocusedSessionControllerStatus()
@@ -1227,6 +1231,16 @@ final class RemoteClientPairingModel {
         }
         if focusedStructuredSessionHistoryErrorMessage != structuredSessionHistoryPagingController.errorMessage {
             focusedStructuredSessionHistoryErrorMessage = structuredSessionHistoryPagingController.errorMessage
+        }
+    }
+
+    private func syncFocusedStructuredSessionFinalOutputLatency(for screen: SessionScreen?) {
+        let latency = focusedStructuredSessionFinalOutputLatencyTracker.update(
+            screen: screen,
+            presentation: focusedStructuredSessionPresentation
+        )
+        if focusedStructuredSessionFinalOutputLatency != latency {
+            focusedStructuredSessionFinalOutputLatency = latency
         }
     }
 

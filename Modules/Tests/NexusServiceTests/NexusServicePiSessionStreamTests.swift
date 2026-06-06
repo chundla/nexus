@@ -1691,6 +1691,55 @@ struct NexusServicePiSessionStreamTests {
         #expect(screen.transcript == "> hello\nworld")
     }
 
+    @Test func localPiRuntimeAttachesFinalOutputLatencyDiagnosticToTurnCompletion() throws {
+        let transport = PromptEventPiRPCTransport(promptEvents: [
+            ["type": "agent_start", "agent": "pi"],
+            [
+                "type": "message_update",
+                "assistantMessageEvent": [
+                    "type": "text_delta",
+                    "delta": "world"
+                ]
+            ],
+            [
+                "type": "turn_end",
+                "message": [
+                    "content": [[
+                        "type": "text",
+                        "text": "world"
+                    ]]
+                ]
+            ]
+        ])
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("hello")
+        let screen = runtime.sessionScreen(for: session)
+        let diagnostic = try #require(screen.finalOutputDiagnostic)
+
+        #expect(diagnostic.trigger == .turnEnd)
+        #expect(diagnostic.providerEventSequence == screen.providerEvents.last(where: { $0.type == "turn_end" })?.sequence)
+        #expect(diagnostic.providerRuntimeLatencyMilliseconds >= 0)
+        #expect(diagnostic.serviceObservationLatencyMilliseconds == nil)
+        #expect(diagnostic.expectedActivityItemID == screen.activityItems.last?.id)
+        #expect(diagnostic.expectedActivityItemText == "Pi: world")
+        #expect(diagnostic.expectedThinkingIndicatorVisible == false)
+        #expect(diagnostic.serviceObservationAnchorUptimeNanoseconds != nil)
+    }
+
     @Test func localPiRuntimeProjectsAssistantThinkingToolCallsAndCompletionIntoSharedSessionActivity() throws {
         let transport = PromptEventPiRPCTransport(promptEvents: [
             ["type": "agent_start", "agent": "pi"],

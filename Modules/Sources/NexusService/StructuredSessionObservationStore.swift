@@ -49,11 +49,12 @@ final class StructuredSessionObservationStore: @unchecked Sendable {
             }
         }
 
-        var trace = makeTrace(for: retainedScreen.session)
+        let observedScreen = screenWithObservedFinalOutputDiagnostic(retainedScreen)
+        var trace = makeTrace(for: observedScreen.session)
         var deltaBuildSummary: DeltaBuildSummary?
         let response = trace.measure("buildStructuredSnapshot") {
             withLock {
-                let resolution = ensureCurrentEntryLocked(for: retainedScreen)
+                let resolution = ensureCurrentEntryLocked(for: observedScreen)
                 deltaBuildSummary = resolution.deltaBuildSummary
                 return SessionScreenObservationSnapshotResponse(
                     screen: resolution.entry.snapshot.screen,
@@ -94,8 +95,9 @@ final class StructuredSessionObservationStore: @unchecked Sendable {
             return
         }
 
+        let observedScreen = screenWithObservedFinalOutputDiagnostic(retainedScreen)
         let deltaBuildSummary = withLock {
-            ensureCurrentEntryLocked(for: retainedScreen).deltaBuildSummary
+            ensureCurrentEntryLocked(for: observedScreen).deltaBuildSummary
         }
         if let deltaBuildSummary {
             recordPerformanceDiagnostic(deltaDiagnostic(for: retainedScreen.session, summary: deltaBuildSummary))
@@ -229,6 +231,9 @@ final class StructuredSessionObservationStore: @unchecked Sendable {
             changes.append(.replaceSlashCommands(screen.slashCommands))
         }
         changes.append(contentsOf: providerEventChanges(from: snapshot.providerEvents, to: screen.providerEvents))
+        if snapshot.finalOutputDiagnostic != screen.finalOutputDiagnostic {
+            changes.append(.replaceFinalOutputDiagnostic(screen.finalOutputDiagnostic))
+        }
         if snapshot.isAgentTurnInProgress != screen.isAgentTurnInProgress {
             changes.append(.setAgentTurnInProgress(screen.isAgentTurnInProgress))
         }
@@ -313,7 +318,7 @@ final class StructuredSessionObservationStore: @unchecked Sendable {
             "transcriptCharacterCount": snapshot.transcript.count,
             "extensionDialogVisibleCount": snapshot.extensionUI == nil ? 0 : 1,
             "agentTurnInProgressCount": snapshot.isAgentTurnInProgress ? 1 : 0
-        ]
+        ].merging(finalOutputMetrics(from: snapshot.finalOutputDiagnostic)) { _, new in new }
     }
 
     private func deltaDiagnostic(for session: Session, summary: DeltaBuildSummary) -> PerformanceDiagnosticRecord {
@@ -363,6 +368,54 @@ final class StructuredSessionObservationStore: @unchecked Sendable {
         metrics["fullReplaceProviderEventsCount"] = fullReplaceProviderEventsCount
         metrics["fullReplaceFallbackCount"] = fullReplaceActivityItemsCount + fullReplaceProviderEventsCount
         return metrics
+    }
+
+    private func finalOutputMetrics(from diagnostic: StructuredSessionFinalOutputDiagnostic?) -> [String: Int] {
+        guard let diagnostic else {
+            return [:]
+        }
+
+        return [
+            "finalOutputLatencyCount": 1,
+            "finalOutputProviderEventSequence": diagnostic.providerEventSequence,
+            "finalOutputProviderRuntimeMilliseconds": diagnostic.providerRuntimeLatencyMilliseconds,
+            "finalOutputServiceObservationMilliseconds": diagnostic.serviceObservationLatencyMilliseconds ?? 0,
+            "finalOutputTriggerTextDeltaCount": diagnostic.trigger == .textDelta ? 1 : 0,
+            "finalOutputTriggerTurnEndCount": diagnostic.trigger == .turnEnd ? 1 : 0,
+            "finalOutputThinkingIndicatorVisibleCount": diagnostic.expectedThinkingIndicatorVisible ? 1 : 0
+        ]
+    }
+
+    private func screenWithObservedFinalOutputDiagnostic(_ screen: SessionScreen) -> SessionScreen {
+        guard let diagnostic = screen.finalOutputDiagnostic,
+              diagnostic.serviceObservationLatencyMilliseconds == nil,
+              let anchor = diagnostic.serviceObservationAnchorUptimeNanoseconds else {
+            return screen
+        }
+
+        let observedDiagnostic = diagnostic.observed(
+            serviceObservationLatencyMilliseconds: elapsedMilliseconds(since: anchor)
+        )
+        return SessionScreen(
+            session: screen.session,
+            primarySurface: screen.primarySurface,
+            controller: screen.controller,
+            transcript: screen.transcript,
+            terminalColumns: screen.terminalColumns,
+            terminalRows: screen.terminalRows,
+            activityItems: screen.activityItems,
+            approvalRequests: screen.approvalRequests,
+            extensionUI: screen.extensionUI,
+            slashCommands: screen.slashCommands,
+            providerEvents: screen.providerEvents,
+            finalOutputDiagnostic: observedDiagnostic,
+            isAgentTurnInProgress: screen.isAgentTurnInProgress,
+            visibleLines: screen.visibleLines,
+            styledVisibleLines: screen.styledVisibleLines,
+            cursorRow: screen.cursorRow,
+            cursorColumn: screen.cursorColumn,
+            cursorVisible: screen.cursorVisible
+        )
     }
 
     private func gapDiagnostic(

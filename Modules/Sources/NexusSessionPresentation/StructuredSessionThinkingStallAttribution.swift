@@ -54,17 +54,20 @@ public struct StructuredSessionPresentationProgressSample: Equatable, Sendable {
 public struct StructuredSessionClientDiagnosticSnapshot: Equatable, Sendable {
     public let observation: StructuredSessionObservationProgressSample
     public let presentation: StructuredSessionPresentationProgressSample?
+    public let finalOutputLatency: StructuredSessionFinalOutputLatencySample?
 
     public init(
         screen: SessionScreen,
         structuredRevision: Int? = nil,
-        presentation: FocusedStructuredSessionPresentation?
+        presentation: FocusedStructuredSessionPresentation?,
+        finalOutputLatency: StructuredSessionFinalOutputLatencySample? = nil
     ) {
         self.observation = StructuredSessionObservationProgressSample(
             screen: screen,
             structuredRevision: structuredRevision
         )
         self.presentation = presentation.map(StructuredSessionPresentationProgressSample.init)
+        self.finalOutputLatency = finalOutputLatency
     }
 }
 

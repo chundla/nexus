@@ -86,4 +86,30 @@ struct RemoteClientProfilingFixtureTests {
         #expect(updatedSnapshot.presentation?.hasThinkingIndicator == true)
         #expect(updatedSnapshot.observation.lastActivityItemText?.contains("Pi: thinking step") == true)
     }
+
+    @Test func bootstrapCapturesFinalOutputLatencyDiagnosticSnapshotsForRemoteClientProfiling() async throws {
+        let model = RemoteClientPairingModel.bootstrap(environment: [
+            "NEXUS_REMOTE_CLIENT_FIXTURE": "invalidation-baseline"
+        ])
+
+        await model.refreshActivePairedMacCatalog()
+        let session = try await model.launchOrResumeDefaultSession(
+            workspaceID: UUID(uuidString: "44444444-4444-4444-4444-444444444444")!,
+            providerID: .pi
+        )
+
+        await model.focusRemoteSession(sessionID: session.id, workspaceID: session.workspaceID)
+        for _ in 0 ..< 20 where model.focusedStructuredSessionDiagnosticSnapshot == nil {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+
+        try await model.sendInputToFocusedRemoteSession("ship it")
+
+        let snapshot = try #require(model.focusedStructuredSessionDiagnosticSnapshot)
+        let finalOutputLatency = try #require(snapshot.finalOutputLatency)
+        #expect(finalOutputLatency.providerRuntimeLatencyMilliseconds == 4)
+        #expect(finalOutputLatency.serviceObservationLatencyMilliseconds == 10)
+        #expect(finalOutputLatency.isVisibleInPresentation)
+        #expect(finalOutputLatency.visibleActivityRowText == "Pi: Fixture reply for: ship it")
+    }
 }

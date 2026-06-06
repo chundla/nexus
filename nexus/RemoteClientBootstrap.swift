@@ -360,6 +360,8 @@ private enum RemoteClientFixture {
 
         private func appendedScreen(userLine: String, agentLine: String) -> SessionScreen {
             let appendedTranscript = latestScreen.transcript + "\nYou: \(userLine)\nPi: \(agentLine)"
+            let userItem = SessionActivityItem(kind: .message, text: "You: \(userLine)")
+            let agentItem = SessionActivityItem(kind: .message, text: "Pi: \(agentLine)")
             latestScreen = SessionScreen(
                 session: latestScreen.session,
                 primarySurface: latestScreen.primarySurface,
@@ -367,13 +369,19 @@ private enum RemoteClientFixture {
                 transcript: appendedTranscript,
                 terminalColumns: latestScreen.terminalColumns,
                 terminalRows: latestScreen.terminalRows,
-                activityItems: latestScreen.activityItems + [
-                    SessionActivityItem(kind: .message, text: "You: \(userLine)"),
-                    SessionActivityItem(kind: .message, text: "Pi: \(agentLine)")
-                ],
+                activityItems: latestScreen.activityItems + [userItem, agentItem],
                 approvalRequests: latestScreen.approvalRequests,
                 extensionUI: latestScreen.extensionUI,
                 providerEvents: latestScreen.providerEvents,
+                finalOutputDiagnostic: StructuredSessionFinalOutputDiagnostic(
+                    trigger: .turnEnd,
+                    providerEventSequence: latestScreen.providerEvents.last?.sequence ?? latestScreen.activityItems.count + 1,
+                    providerRuntimeLatencyMilliseconds: 4,
+                    serviceObservationLatencyMilliseconds: 10,
+                    expectedActivityItemID: agentItem.id,
+                    expectedActivityItemText: agentItem.text,
+                    expectedThinkingIndicatorVisible: false
+                ),
                 isAgentTurnInProgress: false
             )
             return latestScreen

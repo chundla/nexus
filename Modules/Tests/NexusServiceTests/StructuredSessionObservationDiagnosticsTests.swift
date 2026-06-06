@@ -203,6 +203,59 @@ struct StructuredSessionObservationDiagnosticsTests {
         #expect(record.metrics["currentRevision"] == 2)
         #expect(record.metrics["retainedDeltaCount"] == 1)
     }
+
+    @Test func structuredObservationDeltaRecordsFinalOutputLatencyMetrics() throws {
+        let recorder = PerformanceDiagnosticRecorder()
+        let uptime = StructuredObservationDiagnosticUptimeClock()
+        let store = StructuredSessionObservationStore(
+            recordPerformanceDiagnostic: recorder.record,
+            currentDate: { Date(timeIntervalSince1970: 123) },
+            currentUptimeNanoseconds: uptime.now
+        )
+        let session = Session(id: UUID(), workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready)
+        let statusItem = SessionActivityItem(id: UUID(), kind: .status, text: "Pi ready")
+        let finalMessage = SessionActivityItem(id: UUID(), kind: .message, text: "Pi: done")
+
+        uptime.value = 100_000_000
+        _ = store.snapshotResponse(
+            for: SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                transcript: "",
+                activityItems: [statusItem]
+            )
+        )
+
+        uptime.value = 200_000_000
+        store.recordChange(
+            for: SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                transcript: "Pi: done",
+                activityItems: [statusItem, finalMessage],
+                finalOutputDiagnostic: StructuredSessionFinalOutputDiagnostic(
+                    trigger: .turnEnd,
+                    providerEventSequence: 9,
+                    providerRuntimeLatencyMilliseconds: 4,
+                    expectedActivityItemID: finalMessage.id,
+                    expectedActivityItemText: finalMessage.text,
+                    expectedThinkingIndicatorVisible: false,
+                    serviceObservationAnchorUptimeNanoseconds: 190_000_000
+                )
+            )
+        )
+
+        let matchingRecords = recorder.records.filter {
+            $0.metrics["deltaBuildCount"] == 1 && $0.metrics["finalOutputLatencyCount"] == 1
+        }
+        let record = try #require(matchingRecords.first)
+
+        #expect(record.metrics["finalOutputProviderRuntimeMilliseconds"] == 4)
+        #expect(record.metrics["finalOutputServiceObservationMilliseconds"] == 10)
+        #expect(record.metrics["finalOutputTriggerTurnEndCount"] == 1)
+        #expect(record.metrics["finalOutputTriggerTextDeltaCount"] == 0)
+        #expect(record.metrics["finalOutputProviderEventSequence"] == 9)
+    }
 }
 
 private struct StructuredObservationDiagnosticProviderHealthFacts: ProviderHealthEvaluating {
@@ -243,6 +296,14 @@ private final class PerformanceDiagnosticRecorder: @unchecked Sendable {
         lock.lock()
         records.append(record)
         lock.unlock()
+    }
+}
+
+private final class StructuredObservationDiagnosticUptimeClock: @unchecked Sendable {
+    var value: UInt64 = 0
+
+    func now() -> UInt64 {
+        value
     }
 }
 

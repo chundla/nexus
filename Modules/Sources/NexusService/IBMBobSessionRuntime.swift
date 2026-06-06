@@ -40,6 +40,8 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
     private var draft = ""
     private var transcriptEntries: [String] = []
     private var activityItems: [SessionActivityItem]
+    private var finalOutputDiagnostic: StructuredSessionFinalOutputDiagnostic?
+    private var nextFinalOutputEventSequence = 0
     private let slashCommands: [SessionSlashCommand]?
     private var changeHandler: (@Sendable () -> Void)?
     private var activeTransport: (any IBMBobTransporting)?
@@ -120,6 +122,7 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
             terminalRows: terminalRows,
             activityItems: activityItems,
             slashCommands: slashCommands,
+            finalOutputDiagnostic: finalOutputDiagnostic,
             isAgentTurnInProgress: isTurnInProgress
         )
     }
@@ -214,6 +217,7 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
     }
 
     private func handleStdoutLine(_ line: String) {
+        let startedAt = DispatchTime.now().uptimeNanoseconds
         guard let object = jsonObject(from: line) else {
             return
         }
@@ -237,7 +241,14 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
         case .diff:
             appendActivityItemLocked(SessionActivityItem(kind: .diff, text: event.text))
         case .completion:
-            appendActivityItemLocked(SessionActivityItem(kind: .completion, text: event.text))
+            let completionItem = SessionActivityItem(kind: .completion, text: event.text)
+            appendActivityItemLocked(completionItem)
+            recordFinalOutputDiagnosticLocked(
+                trigger: .turnEnd,
+                activityItem: completionItem,
+                providerRuntimeLatencyMilliseconds: elapsedMilliseconds(since: startedAt),
+                expectedThinkingIndicatorVisible: false
+            )
         case .error:
             appendActivityItemLocked(SessionActivityItem(kind: .error, text: event.text))
         default:
@@ -426,9 +437,32 @@ final class IBMBobSessionRuntime: SessionRuntime, @unchecked Sendable {
         transcriptEntries = StructuredSessionLiveHistoryRetention.retainedTranscriptEntries(transcriptEntries)
     }
 
+    private func recordFinalOutputDiagnosticLocked(
+        trigger: StructuredSessionFinalOutputTrigger,
+        activityItem: SessionActivityItem,
+        providerRuntimeLatencyMilliseconds: Int,
+        expectedThinkingIndicatorVisible: Bool
+    ) {
+        finalOutputDiagnostic = StructuredSessionFinalOutputDiagnostic(
+            trigger: trigger,
+            providerEventSequence: nextFinalOutputEventSequence,
+            providerRuntimeLatencyMilliseconds: providerRuntimeLatencyMilliseconds,
+            expectedActivityItemID: activityItem.id,
+            expectedActivityItemText: activityItem.text,
+            expectedThinkingIndicatorVisible: expectedThinkingIndicatorVisible,
+            serviceObservationAnchorUptimeNanoseconds: DispatchTime.now().uptimeNanoseconds
+        )
+        nextFinalOutputEventSequence += 1
+    }
+
     private func appendActivityItemLocked(_ item: SessionActivityItem) {
         activityItems.append(item)
         activityItems = StructuredSessionLiveHistoryRetention.retainedActivityItems(activityItems)
+    }
+
+    private func elapsedMilliseconds(since startedAt: UInt64) -> Int {
+        let now = DispatchTime.now().uptimeNanoseconds
+        return Int((now >= startedAt ? now - startedAt : 0) / 1_000_000)
     }
 
     private func notifyChange() {

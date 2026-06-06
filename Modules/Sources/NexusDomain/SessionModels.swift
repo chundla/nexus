@@ -464,6 +464,55 @@ public struct SessionProviderEvent: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+public enum StructuredSessionFinalOutputTrigger: String, Codable, Equatable, Sendable {
+    case textDelta
+    case turnEnd
+}
+
+public struct StructuredSessionFinalOutputDiagnostic: Codable, Equatable, Sendable {
+    public let trigger: StructuredSessionFinalOutputTrigger
+    public let providerEventSequence: Int
+    public let providerRuntimeLatencyMilliseconds: Int
+    public let serviceObservationLatencyMilliseconds: Int?
+    public let expectedActivityItemID: UUID?
+    public let expectedActivityItemText: String?
+    public let expectedThinkingIndicatorVisible: Bool
+    public let serviceObservationAnchorUptimeNanoseconds: UInt64?
+
+    public init(
+        trigger: StructuredSessionFinalOutputTrigger,
+        providerEventSequence: Int,
+        providerRuntimeLatencyMilliseconds: Int,
+        serviceObservationLatencyMilliseconds: Int? = nil,
+        expectedActivityItemID: UUID? = nil,
+        expectedActivityItemText: String? = nil,
+        expectedThinkingIndicatorVisible: Bool,
+        serviceObservationAnchorUptimeNanoseconds: UInt64? = nil
+    ) {
+        self.trigger = trigger
+        self.providerEventSequence = providerEventSequence
+        self.providerRuntimeLatencyMilliseconds = providerRuntimeLatencyMilliseconds
+        self.serviceObservationLatencyMilliseconds = serviceObservationLatencyMilliseconds
+        self.expectedActivityItemID = expectedActivityItemID
+        self.expectedActivityItemText = expectedActivityItemText
+        self.expectedThinkingIndicatorVisible = expectedThinkingIndicatorVisible
+        self.serviceObservationAnchorUptimeNanoseconds = serviceObservationAnchorUptimeNanoseconds
+    }
+
+    public func observed(serviceObservationLatencyMilliseconds: Int) -> StructuredSessionFinalOutputDiagnostic {
+        StructuredSessionFinalOutputDiagnostic(
+            trigger: trigger,
+            providerEventSequence: providerEventSequence,
+            providerRuntimeLatencyMilliseconds: providerRuntimeLatencyMilliseconds,
+            serviceObservationLatencyMilliseconds: serviceObservationLatencyMilliseconds,
+            expectedActivityItemID: expectedActivityItemID,
+            expectedActivityItemText: expectedActivityItemText,
+            expectedThinkingIndicatorVisible: expectedThinkingIndicatorVisible,
+            serviceObservationAnchorUptimeNanoseconds: nil
+        )
+    }
+}
+
 public struct SessionScreen: Codable, Equatable, Sendable {
     public let session: Session
     public let primarySurface: SessionSurface
@@ -476,6 +525,7 @@ public struct SessionScreen: Codable, Equatable, Sendable {
     public let extensionUI: SessionExtensionUIState?
     public let slashCommands: [SessionSlashCommand]?
     public let providerEvents: [SessionProviderEvent]
+    public let finalOutputDiagnostic: StructuredSessionFinalOutputDiagnostic?
     public let isAgentTurnInProgress: Bool
     public let visibleLines: [String]
     public let styledVisibleLines: [TerminalLine]
@@ -495,6 +545,48 @@ public struct SessionScreen: Codable, Equatable, Sendable {
         extensionUI: SessionExtensionUIState? = nil,
         slashCommands: [SessionSlashCommand]? = nil,
         providerEvents: [SessionProviderEvent] = [],
+        isAgentTurnInProgress: Bool = false,
+        visibleLines: [String]? = nil,
+        styledVisibleLines: [TerminalLine]? = nil,
+        cursorRow: Int? = nil,
+        cursorColumn: Int? = nil,
+        cursorVisible: Bool = true
+    ) {
+        self.init(
+            session: session,
+            primarySurface: primarySurface,
+            controller: controller,
+            transcript: transcript,
+            terminalColumns: terminalColumns,
+            terminalRows: terminalRows,
+            activityItems: activityItems,
+            approvalRequests: approvalRequests,
+            extensionUI: extensionUI,
+            slashCommands: slashCommands,
+            providerEvents: providerEvents,
+            finalOutputDiagnostic: nil,
+            isAgentTurnInProgress: isAgentTurnInProgress,
+            visibleLines: visibleLines,
+            styledVisibleLines: styledVisibleLines,
+            cursorRow: cursorRow,
+            cursorColumn: cursorColumn,
+            cursorVisible: cursorVisible
+        )
+    }
+
+    public init(
+        session: Session,
+        primarySurface: SessionSurface = .terminal,
+        controller: SessionController = .mac,
+        transcript: String,
+        terminalColumns: Int = 80,
+        terminalRows: Int = 24,
+        activityItems: [SessionActivityItem] = [],
+        approvalRequests: [SessionApprovalRequest] = [],
+        extensionUI: SessionExtensionUIState? = nil,
+        slashCommands: [SessionSlashCommand]? = nil,
+        providerEvents: [SessionProviderEvent] = [],
+        finalOutputDiagnostic: StructuredSessionFinalOutputDiagnostic? = nil,
         isAgentTurnInProgress: Bool = false,
         visibleLines: [String]? = nil,
         styledVisibleLines: [TerminalLine]? = nil,
@@ -535,6 +627,7 @@ public struct SessionScreen: Codable, Equatable, Sendable {
         self.extensionUI = extensionUI
         self.slashCommands = slashCommands
         self.providerEvents = providerEvents
+        self.finalOutputDiagnostic = finalOutputDiagnostic
         self.isAgentTurnInProgress = isAgentTurnInProgress
         self.visibleLines = resolvedVisibleLines
         self.styledVisibleLines = resolvedStyledVisibleLines
@@ -573,6 +666,48 @@ public struct SessionScreen: Codable, Equatable, Sendable {
             extensionUI: extensionUI,
             slashCommands: slashCommands,
             providerEvents: [],
+            finalOutputDiagnostic: nil,
+            isAgentTurnInProgress: isAgentTurnInProgress,
+            visibleLines: visibleLines,
+            styledVisibleLines: styledVisibleLines,
+            cursorRow: cursorRow,
+            cursorColumn: cursorColumn,
+            cursorVisible: cursorVisible
+        )
+    }
+
+    public init(
+        session: Session,
+        primarySurface: SessionSurface = .terminal,
+        controller: SessionController = .mac,
+        transcript: String,
+        terminalColumns: Int = 80,
+        terminalRows: Int = 24,
+        activityItems: [SessionActivityItem] = [],
+        approvalRequests: [SessionApprovalRequest] = [],
+        extensionUI: SessionExtensionUIState? = nil,
+        slashCommands: [SessionSlashCommand]? = nil,
+        finalOutputDiagnostic: StructuredSessionFinalOutputDiagnostic? = nil,
+        isAgentTurnInProgress: Bool = false,
+        visibleLines: [String]? = nil,
+        styledVisibleLines: [TerminalLine]? = nil,
+        cursorRow: Int? = nil,
+        cursorColumn: Int? = nil,
+        cursorVisible: Bool = true
+    ) {
+        self.init(
+            session: session,
+            primarySurface: primarySurface,
+            controller: controller,
+            transcript: transcript,
+            terminalColumns: terminalColumns,
+            terminalRows: terminalRows,
+            activityItems: activityItems,
+            approvalRequests: approvalRequests,
+            extensionUI: extensionUI,
+            slashCommands: slashCommands,
+            providerEvents: [],
+            finalOutputDiagnostic: finalOutputDiagnostic,
             isAgentTurnInProgress: isAgentTurnInProgress,
             visibleLines: visibleLines,
             styledVisibleLines: styledVisibleLines,
@@ -611,6 +746,47 @@ public struct SessionScreen: Codable, Equatable, Sendable {
             extensionUI: nil,
             slashCommands: slashCommands,
             providerEvents: [],
+            finalOutputDiagnostic: nil,
+            isAgentTurnInProgress: isAgentTurnInProgress,
+            visibleLines: visibleLines,
+            styledVisibleLines: styledVisibleLines,
+            cursorRow: cursorRow,
+            cursorColumn: cursorColumn,
+            cursorVisible: cursorVisible
+        )
+    }
+
+    public init(
+        session: Session,
+        primarySurface: SessionSurface = .terminal,
+        controller: SessionController = .mac,
+        transcript: String,
+        terminalColumns: Int = 80,
+        terminalRows: Int = 24,
+        activityItems: [SessionActivityItem] = [],
+        approvalRequests: [SessionApprovalRequest] = [],
+        slashCommands: [SessionSlashCommand]? = nil,
+        finalOutputDiagnostic: StructuredSessionFinalOutputDiagnostic? = nil,
+        isAgentTurnInProgress: Bool = false,
+        visibleLines: [String]? = nil,
+        styledVisibleLines: [TerminalLine]? = nil,
+        cursorRow: Int? = nil,
+        cursorColumn: Int? = nil,
+        cursorVisible: Bool = true
+    ) {
+        self.init(
+            session: session,
+            primarySurface: primarySurface,
+            controller: controller,
+            transcript: transcript,
+            terminalColumns: terminalColumns,
+            terminalRows: terminalRows,
+            activityItems: activityItems,
+            approvalRequests: approvalRequests,
+            extensionUI: nil,
+            slashCommands: slashCommands,
+            providerEvents: [],
+            finalOutputDiagnostic: finalOutputDiagnostic,
             isAgentTurnInProgress: isAgentTurnInProgress,
             visibleLines: visibleLines,
             styledVisibleLines: styledVisibleLines,
