@@ -60,7 +60,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             activityItems: activityItems,
             approvalRequests: approvalRequests,
             extensionUIState: extensionUIStateLocked(),
-            providerEvents: providerEvents
+            providerEvents: []
         )
     }
 
