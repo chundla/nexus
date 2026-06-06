@@ -2913,6 +2913,9 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         guard screen.primarySurface == .structuredActivityFeed else {
             return
         }
+        guard session.providerID != .pi || screen.isAgentTurnInProgress == false else {
+            return
+        }
 
         try piStructuredSessionHistoryStore.recordCurrentState(
             sessionID: session.id,

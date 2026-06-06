@@ -264,6 +264,220 @@ struct NexusServiceStructuredSessionHistoryPersistenceTests {
         ])
         #expect(finalPage.nextCursor == nil)
     }
+
+    @Test func localPiDefersStructuredHistorySnapshotRewriteUntilTurnCompletionWhilePreservingOverflowRecovery() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
+
+        let runtime = DeferredPiHistoryPersistenceRuntime()
+
+        func makeService(withRuntime: Bool) throws -> NexusService {
+            try NexusService.bootstrapForTests(
+                rootURL: rootURL,
+                providerHealthEvaluator: DeferredPiHistoryPersistenceProviderHealthFacts(),
+                sessionRuntimeManager: withRuntime
+                    ? InMemorySessionRuntimeManager(launcher: DeferredPiHistoryPersistenceRuntimeLauncher(runtime: runtime))
+                    : nil
+            )
+        }
+
+        let service = try makeService(withRuntime: true)
+        let group = try service.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try service.createLocalWorkspace(
+            name: "Local Pi",
+            folderPath: workspaceFolder.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+
+        let stateURL = rootURL
+            .appendingPathComponent("PiStructuredSessionHistory", isDirectory: true)
+            .appendingPathComponent(session.id.uuidString, isDirectory: true)
+            .appendingPathComponent("current.json", isDirectory: false)
+        let initialState = try persistedStructuredState(at: stateURL)
+
+        #expect(initialState.activityItems.map(\.text) == ["Pi ready"])
+
+        let activeScreen = try service.sendSessionInput(sessionID: session.id, text: "deploy")
+
+        #expect(activeScreen.isAgentTurnInProgress)
+        #expect(try persistedStructuredState(at: stateURL) == initialState)
+
+        let streamedReplyCount = StructuredSessionLiveHistoryRetention.maxRetainedActivityItems + 5
+        for index in 0..<streamedReplyCount {
+            runtime.recordAssistantReply("Reply \(index)")
+        }
+
+        #expect(try persistedStructuredState(at: stateURL) == initialState)
+
+        runtime.finishTurn(with: "Done")
+
+        let liveScreen = try service.getSessionScreen(sessionID: session.id)
+        let completedState = try persistedStructuredState(at: stateURL)
+        let restartedService = try makeService(withRuntime: false)
+        let reopenedScreen = try restartedService.getSessionScreen(sessionID: session.id)
+        let overflowPage = try restartedService.getStructuredSessionHistoryPage(sessionID: session.id, pageSize: 20, before: nil)
+
+        #expect(liveScreen.isAgentTurnInProgress == false)
+        #expect(liveScreen.activityItems.count == StructuredSessionLiveHistoryRetention.maxRetainedActivityItems)
+        #expect(liveScreen.activityItems.first?.text == "Pi: Reply 6")
+        #expect(liveScreen.activityItems.last?.text == "Pi: Done")
+        #expect(completedState.activityItems == liveScreen.activityItems)
+        #expect(reopenedScreen.activityItems.dropLast() == liveScreen.activityItems)
+        #expect(reopenedScreen.activityItems.last?.kind == .error)
+        #expect(overflowPage.activityItems.map(\.text) == [
+            "Pi ready",
+            "You: deploy",
+            "Pi: Reply 0",
+            "Pi: Reply 1",
+            "Pi: Reply 2",
+            "Pi: Reply 3",
+            "Pi: Reply 4",
+            "Pi: Reply 5"
+        ])
+        #expect(overflowPage.nextCursor == nil)
+    }
+}
+
+private func persistedStructuredState(at url: URL) throws -> PiStructuredSessionPersistedState {
+    try JSONDecoder().decode(PiStructuredSessionPersistedState.self, from: Data(contentsOf: url))
+}
+
+private struct DeferredPiHistoryPersistenceProviderHealthFacts: ProviderHealthEvaluating {
+    func healthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> ProviderHealthSummary {
+        _ = workspace
+        _ = remoteContext
+        if providerID == .pi {
+            return ProviderHealthSummary(
+                state: .available,
+                summary: "Ready",
+                resolvedExecutable: "/tmp/fake-pi",
+                launchability: .launchable
+            )
+        }
+        return ProviderHealthSummary(state: .notChecked, summary: "Health checks coming soon")
+    }
+}
+
+private final class DeferredPiHistoryPersistenceRuntimeLauncher: SessionRuntimeLaunching, @unchecked Sendable {
+    private let runtime: DeferredPiHistoryPersistenceRuntime
+
+    init(runtime: DeferredPiHistoryPersistenceRuntime) {
+        self.runtime = runtime
+    }
+
+    func makeRuntime(
+        session: Session,
+        workspace: Workspace,
+        launchConfiguration: SessionRuntimeLaunchConfiguration
+    ) async throws -> any SessionRuntime {
+        _ = session
+        _ = workspace
+        _ = launchConfiguration
+        return runtime
+    }
+}
+
+private final class DeferredPiHistoryPersistenceRuntime: SessionRuntime, @unchecked Sendable {
+    var state: Session.State { .ready }
+    var sessionRecordAdapterMetadata: SessionRecordAdapterMetadata? { nil }
+
+    private let lock = NSLock()
+    private var changeHandler: (@Sendable () -> Void)?
+    private var transcriptEntries = ["Pi ready"]
+    private var activityItems = [SessionActivityItem(kind: .status, text: "Pi ready")]
+    private var persistedActivityItemOverflow: [SessionActivityItem] = []
+    private var isTurnInProgress = false
+
+    func consumeStructuredHistoryOverflow() -> StructuredSessionPersistedHistoryOverflow {
+        lock.lock()
+        defer { lock.unlock() }
+        let overflow = StructuredSessionPersistedHistoryOverflow(
+            activityItems: persistedActivityItemOverflow,
+            providerEvents: []
+        )
+        persistedActivityItemOverflow.removeAll(keepingCapacity: true)
+        return overflow
+    }
+
+    func sessionScreen(for session: Session) -> SessionScreen {
+        lock.lock()
+        let transcript = transcriptEntries.joined(separator: "\n")
+        let activityItems = self.activityItems
+        let isTurnInProgress = self.isTurnInProgress
+        lock.unlock()
+
+        return SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: transcript,
+            activityItems: activityItems,
+            isAgentTurnInProgress: isTurnInProgress
+        )
+    }
+
+    func setChangeHandler(_ handler: (@Sendable () -> Void)?) {
+        lock.lock()
+        changeHandler = handler
+        lock.unlock()
+    }
+
+    func stop() throws {}
+
+    func sendInput(_ text: String) throws {
+        lock.lock()
+        transcriptEntries.append("> \(text)")
+        appendActivityItemLocked(SessionActivityItem(kind: .message, text: "You: \(text)"))
+        isTurnInProgress = true
+        let changeHandler = self.changeHandler
+        lock.unlock()
+        changeHandler?()
+    }
+
+    func sendText(_ text: String) throws { _ = text }
+    func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool) throws {
+        _ = key
+        _ = applicationCursorMode
+    }
+    func respondToApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision) throws {
+        _ = approvalRequestID
+        _ = decision
+    }
+    func resize(columns: Int, rows: Int) throws {
+        _ = columns
+        _ = rows
+    }
+
+    func recordAssistantReply(_ text: String) {
+        lock.lock()
+        transcriptEntries.append("Pi: \(text)")
+        appendActivityItemLocked(SessionActivityItem(kind: .message, text: "Pi: \(text)"))
+        let changeHandler = self.changeHandler
+        lock.unlock()
+        changeHandler?()
+    }
+
+    func finishTurn(with text: String) {
+        lock.lock()
+        transcriptEntries.append("Pi: \(text)")
+        appendActivityItemLocked(SessionActivityItem(kind: .message, text: "Pi: \(text)"))
+        isTurnInProgress = false
+        let changeHandler = self.changeHandler
+        lock.unlock()
+        changeHandler?()
+    }
+
+    private func appendActivityItemLocked(_ item: SessionActivityItem) {
+        activityItems.append(item)
+        if activityItems.count > StructuredSessionLiveHistoryRetention.maxRetainedActivityItems {
+            let removedCount = activityItems.count - StructuredSessionLiveHistoryRetention.maxRetainedActivityItems
+            persistedActivityItemOverflow.append(contentsOf: activityItems.prefix(removedCount))
+            activityItems.removeFirst(removedCount)
+        }
+    }
 }
 
 private struct CodexHistoryPersistenceExecutableResolver: ProviderExecutableResolving {
