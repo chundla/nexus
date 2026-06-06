@@ -35,7 +35,8 @@ struct StructuredSessionPersistedHistoryOverflow: Equatable, Sendable {
 }
 
 protocol SessionRuntimeManaging: AnyObject {
-    func setRuntimeChangeHandler(_ handler: (@Sendable (UUID) -> Void)?)
+    func setRuntimeChangePreObserverHandler(_ handler: (@Sendable (UUID) -> Void)?)
+    func setRuntimeChangePostObserverHandler(_ handler: (@Sendable (UUID) -> Void)?)
     func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) async throws
     func stop(session: Session) throws
     func remove(session: Session)
@@ -318,15 +319,22 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Se
     private var runtimes: [UUID: any SessionRuntime] = [:]
     private var updateObservers: [UUID: [UUID: @Sendable () -> Void]] = [:]
     private var observedSessionIDs: [UUID: UUID] = [:]
-    private var runtimeChangeHandler: (@Sendable (UUID) -> Void)?
+    private var runtimeChangePreObserverHandler: (@Sendable (UUID) -> Void)?
+    private var runtimeChangePostObserverHandler: (@Sendable (UUID) -> Void)?
 
     init(launcher: any SessionRuntimeLaunching = ProcessSessionRuntimeLauncher()) {
         self.launcher = launcher
     }
 
-    func setRuntimeChangeHandler(_ handler: (@Sendable (UUID) -> Void)?) {
+    func setRuntimeChangePreObserverHandler(_ handler: (@Sendable (UUID) -> Void)?) {
         lock.lock()
-        runtimeChangeHandler = handler
+        runtimeChangePreObserverHandler = handler
+        lock.unlock()
+    }
+
+    func setRuntimeChangePostObserverHandler(_ handler: (@Sendable (UUID) -> Void)?) {
+        lock.lock()
+        runtimeChangePostObserverHandler = handler
         lock.unlock()
     }
 
@@ -371,7 +379,6 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Se
 
     func remove(session: Session, preservingObservers: Bool) {
         lock.lock()
-        let removedObserverCount = updateObservers[session.id]?.count ?? 0
         runtimes.removeValue(forKey: session.id)?.setChangeHandler(nil)
         if preservingObservers == false {
             updateObservers.removeValue(forKey: session.id)
@@ -544,17 +551,20 @@ final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Se
     }
 
     private func notifyRuntimeChange(for sessionID: UUID) {
-        let runtimeChangeHandler: (@Sendable (UUID) -> Void)?
+        let runtimeChangePreObserverHandler: (@Sendable (UUID) -> Void)?
+        let runtimeChangePostObserverHandler: (@Sendable (UUID) -> Void)?
         let observers: [@Sendable () -> Void]
         lock.lock()
-        runtimeChangeHandler = self.runtimeChangeHandler
+        runtimeChangePreObserverHandler = self.runtimeChangePreObserverHandler
+        runtimeChangePostObserverHandler = self.runtimeChangePostObserverHandler
         observers = Array(updateObservers[sessionID, default: [:]].values)
         lock.unlock()
 
-        runtimeChangeHandler?(sessionID)
+        runtimeChangePreObserverHandler?(sessionID)
         for observer in observers {
             observer()
         }
+        runtimeChangePostObserverHandler?(sessionID)
     }
 
     private func withLock<T>(_ operation: () throws -> T) throws -> T {
@@ -1654,8 +1664,10 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
                 }
             )
         )
-        self.sessionRuntimeManager.setRuntimeChangeHandler { [weak self] sessionID in
+        self.sessionRuntimeManager.setRuntimeChangePreObserverHandler { [weak self] sessionID in
             self?.recordStructuredSessionObservationChange(sessionID: sessionID)
+        }
+        self.sessionRuntimeManager.setRuntimeChangePostObserverHandler { [weak self] sessionID in
             self?.handlePiSessionTransitionAfterRuntimeChange(sessionID: sessionID)
             self?.persistRuntimeLinkageAfterRuntimeChange(sessionID: sessionID)
             self?.persistPiSessionNameAfterRuntimeChange(sessionID: sessionID)
