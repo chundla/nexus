@@ -13,6 +13,7 @@ public struct StructuredSessionObservationSnapshot: Codable, Equatable, Sendable
     public let extensionUI: SessionExtensionUIState?
     public let slashCommands: [SessionSlashCommand]?
     public let providerEvents: [SessionProviderEvent]
+    public let providerFacts: StructuredSessionProviderFacts
     public let finalOutputDiagnostic: StructuredSessionFinalOutputDiagnostic?
     public let isAgentTurnInProgress: Bool
     public let visibleLines: [String]
@@ -33,6 +34,7 @@ public struct StructuredSessionObservationSnapshot: Codable, Equatable, Sendable
         self.extensionUI = screen.extensionUI
         self.slashCommands = screen.slashCommands
         self.providerEvents = screen.providerEvents
+        self.providerFacts = screen.providerFacts
         self.finalOutputDiagnostic = screen.finalOutputDiagnostic
         self.isAgentTurnInProgress = screen.isAgentTurnInProgress
         self.visibleLines = screen.visibleLines
@@ -55,6 +57,7 @@ public struct StructuredSessionObservationSnapshot: Codable, Equatable, Sendable
             extensionUI: extensionUI,
             slashCommands: slashCommands,
             providerEvents: providerEvents,
+            providerFacts: providerFacts,
             finalOutputDiagnostic: finalOutputDiagnostic,
             isAgentTurnInProgress: isAgentTurnInProgress,
             visibleLines: visibleLines,
@@ -80,6 +83,7 @@ public enum StructuredSessionObservationChange: Codable, Equatable, Sendable {
     case replaceSlashCommands([SessionSlashCommand]?)
     case appendProviderEvents([SessionProviderEvent])
     case replaceProviderEvents([SessionProviderEvent])
+    case replaceProviderFacts(StructuredSessionProviderFacts)
     case replaceFinalOutputDiagnostic(StructuredSessionFinalOutputDiagnostic?)
     case setAgentTurnInProgress(Bool)
 }
@@ -226,6 +230,7 @@ private struct StructuredSessionObservationMutableState {
     var extensionUI: SessionExtensionUIState?
     var slashCommands: [SessionSlashCommand]?
     var providerEvents: [SessionProviderEvent]
+    var providerFacts: StructuredSessionProviderFacts
     var finalOutputDiagnostic: StructuredSessionFinalOutputDiagnostic?
     var isAgentTurnInProgress: Bool
     var visibleLines: [String]
@@ -245,6 +250,7 @@ private struct StructuredSessionObservationMutableState {
         extensionUI = snapshot.extensionUI
         slashCommands = snapshot.slashCommands
         providerEvents = snapshot.providerEvents
+        providerFacts = snapshot.providerFacts
         finalOutputDiagnostic = snapshot.finalOutputDiagnostic
         isAgentTurnInProgress = snapshot.isAgentTurnInProgress
         visibleLines = snapshot.visibleLines
@@ -290,6 +296,8 @@ private struct StructuredSessionObservationMutableState {
             providerEvents.append(contentsOf: events)
         case let .replaceProviderEvents(events):
             providerEvents = events
+        case let .replaceProviderFacts(updatedProviderFacts):
+            providerFacts = updatedProviderFacts
         case let .replaceFinalOutputDiagnostic(updatedFinalOutputDiagnostic):
             finalOutputDiagnostic = updatedFinalOutputDiagnostic
         case let .setAgentTurnInProgress(updatedIsAgentTurnInProgress):
@@ -312,6 +320,7 @@ private struct StructuredSessionObservationMutableState {
                 extensionUI: extensionUI,
                 slashCommands: slashCommands,
                 providerEvents: providerEvents,
+                providerFacts: providerFacts,
                 finalOutputDiagnostic: finalOutputDiagnostic,
                 isAgentTurnInProgress: isAgentTurnInProgress,
                 visibleLines: visibleLines,

@@ -416,6 +416,61 @@ struct StructuredSessionPresentationTests {
         #expect(structuredSessionStatusBarPresentation(for: screen, workspaceLocation: "/tmp/nexus").tokenUsageText == "0/272k 0%")
     }
 
+    @Test func structuredSessionStatusBarPresentationUsesProviderFactsWithoutReparsingRawEvents() {
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let screen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            providerEvents: [
+                SessionProviderEvent(
+                    sequence: 0,
+                    providerID: .pi,
+                    type: "response",
+                    family: .response,
+                    command: "get_session_stats",
+                    rawPayload: #"{"type":"response","command":"get_session_stats","success":true,"data":{"contextUsage":{"tokens":1,"contextWindow":2,"percent":50}}}"#
+                )
+            ],
+            providerFacts: StructuredSessionProviderFacts(
+                providerEventCount: 1,
+                lastProviderEventSequence: 0,
+                lastProviderEventType: "response",
+                tokenUsage: StructuredSessionProviderTokenUsage(usedTokens: 60000, totalTokens: 200000, percent: 30)
+            )
+        )
+
+        #expect(structuredSessionStatusBarPresentation(for: screen, workspaceLocation: "/tmp/nexus").tokenUsage == StructuredSessionTokenUsagePresentation(
+            usedTokens: 60000,
+            totalTokens: 200000,
+            percent: 30
+        ))
+    }
+
+    @Test func structuredSessionStatusBarPresentationInfersContextWindowFromProviderFactsModelIdentifier() {
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let screen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            providerFacts: StructuredSessionProviderFacts(modelIdentifier: "openai/gpt-5.1-codex-max")
+        )
+
+        #expect(structuredSessionStatusBarPresentation(for: screen, workspaceLocation: "/tmp/nexus").tokenUsageText == "0/272k 0%")
+    }
+
     @Test func structuredSessionTokenUsagePresenterOnlyParsesNewProviderEventsAcrossAppendOnlyUpdates() {
         let session = Session(
             id: UUID(),
@@ -791,6 +846,41 @@ struct StructuredSessionPresentationTests {
         #expect(finalizedPresentation.activityRows.map(\.text) == ["You: hello", "Pi: world"])
         #expect(finalizedPresentation.activityRows.last?.id == draftRowID)
         #expect(finalizedPresentation.activityRows.filter { $0.text == "Pi: world" }.count == 1)
+    }
+
+    @Test func structuredSessionFeedPresenterUsesProviderFactsForLivePiDraftsWithoutReparsingRawEvents() {
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let presenter = StructuredSessionFeedPresenter()
+        let screen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [SessionActivityItem(kind: .message, text: "You: hello")],
+            providerEvents: [
+                SessionProviderEvent(
+                    sequence: 0,
+                    providerID: .pi,
+                    type: "message_update",
+                    family: .message,
+                    rawPayload: #"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"stale"}}"#
+                )
+            ],
+            providerFacts: StructuredSessionProviderFacts(
+                providerEventCount: 1,
+                lastProviderEventSequence: 0,
+                lastProviderEventType: "message_update",
+                liveAssistantDraftText: "fresh"
+            ),
+            isAgentTurnInProgress: true
+        )
+
+        #expect(presenter.presentation(for: screen).activityRows.map(\.text) == ["You: hello", "Pi: fresh"])
     }
 
     @Test func structuredSessionFeedPresentationUsesChunksAsCanonicalActivityRowStorage() {

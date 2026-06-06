@@ -631,6 +631,9 @@ private func structuredSessionLiveAssistantDraftText(for screen: SessionScreen) 
 
     switch screen.session.providerID {
     case .pi:
+        if let text = screen.providerFacts.liveAssistantDraftText {
+            return "Pi: \(text)"
+        }
         guard let text = piStructuredSessionLiveAssistantDraftText(from: screen.providerEvents) else {
             return nil
         }
@@ -1044,6 +1047,15 @@ public final class StructuredSessionTokenUsagePresenter {
     }
 
     public func presentation(for screen: SessionScreen) -> StructuredSessionTokenUsagePresentation? {
+        if let usage = screen.providerFacts.tokenUsage {
+            resetCache(for: screen.session.id)
+            return StructuredSessionTokenUsagePresentation(
+                usedTokens: usage.usedTokens,
+                totalTokens: usage.totalTokens,
+                percent: usage.percent
+            )
+        }
+
         if cachedSessionID != screen.session.id {
             resetCache(for: screen.session.id)
         }
@@ -1481,6 +1493,10 @@ private struct StructuredSessionResolvedTokenUsage {
 }
 
 private func resolvedStructuredSessionTokenUsage(for screen: SessionScreen) -> StructuredSessionResolvedTokenUsage? {
+    if let usage = resolvedStructuredSessionTokenUsage(from: screen.providerFacts.tokenUsage) {
+        return usage
+    }
+
     if let usage = structuredSessionTokenUsage(from: screen.providerEvents) {
         return usage
     }
@@ -1494,6 +1510,20 @@ private func resolvedStructuredSessionTokenUsage(for screen: SessionScreen) -> S
     }
 
     return StructuredSessionResolvedTokenUsage(usedTokens: 0, totalTokens: inferredContextWindow, percent: 0)
+}
+
+private func resolvedStructuredSessionTokenUsage(
+    from usage: StructuredSessionProviderTokenUsage?
+) -> StructuredSessionResolvedTokenUsage? {
+    guard let usage else {
+        return nil
+    }
+
+    return StructuredSessionResolvedTokenUsage(
+        usedTokens: usage.usedTokens,
+        totalTokens: usage.totalTokens,
+        percent: usage.percent
+    )
 }
 
 private func structuredSessionTokenUsage(from providerEvents: [SessionProviderEvent]) -> StructuredSessionResolvedTokenUsage? {
@@ -1631,6 +1661,10 @@ private func inferredStructuredSessionContextWindow(for screen: SessionScreen) -
 }
 
 private func structuredSessionModelIdentifier(for screen: SessionScreen) -> String? {
+    if let modelIdentifier = screen.providerFacts.modelIdentifier {
+        return modelIdentifier
+    }
+
     switch screen.session.providerID {
     case .pi:
         if let modelIdentifier = piStructuredSessionModelIdentifier(from: screen.providerEvents) {

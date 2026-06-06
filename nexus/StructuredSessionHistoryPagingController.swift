@@ -187,6 +187,8 @@ final class StructuredSessionHistoryPagingController {
             extensionUI: screen.extensionUI,
             slashCommands: screen.slashCommands,
             providerEvents: mergedProviderEvents,
+            providerFacts: screen.providerFacts,
+            finalOutputDiagnostic: screen.finalOutputDiagnostic,
             isAgentTurnInProgress: screen.isAgentTurnInProgress,
             visibleLines: screen.visibleLines,
             styledVisibleLines: screen.styledVisibleLines,

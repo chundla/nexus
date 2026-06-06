@@ -116,6 +116,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     private var extensionTitle: String?
     private var extensionEditorText: String?
     private var providerEvents: [SessionProviderEvent] = []
+    private var providerFacts: StructuredSessionProviderFacts = .empty
     private var finalOutputDiagnostic: StructuredSessionFinalOutputDiagnostic?
     private var persistedProviderEventOverflow: [SessionProviderEvent] = []
     private var nextProviderEventSequence = 0
@@ -265,6 +266,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             extensionEditorText = extensionUIState.editorText
         }
         providerEvents = StructuredSessionLiveHistoryRetention.retainedProviderEvents(metadata.piPersistedProviderEvents ?? [])
+        providerFacts = StructuredSessionProviderFacts.summarizing(providerEvents: providerEvents)
         nextProviderEventSequence = (providerEvents.last?.sequence ?? -1) + 1
     }
 
@@ -348,6 +350,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             extensionUI: extensionUIStateLocked(),
             slashCommands: mergedSlashCommandsLocked(),
             providerEvents: providerEvents,
+            providerFacts: providerFacts,
             finalOutputDiagnostic: finalOutputDiagnostic,
             isAgentTurnInProgress: isStreaming
         )
@@ -1426,6 +1429,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             persistedProviderEventOverflow.append(contentsOf: providerEvents.prefix(removedCount))
             providerEvents.removeFirst(removedCount)
         }
+        providerFacts = providerFacts.appending(event, retainedProviderEventCount: providerEvents.count)
         lock.unlock()
     }
 

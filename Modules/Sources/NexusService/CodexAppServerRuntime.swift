@@ -91,6 +91,7 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
     private var approvalRequests: [SessionApprovalRequest] = []
     private var slashCommands: [SessionSlashCommand]?
     private var providerEvents: [SessionProviderEvent] = []
+    private var providerFacts: StructuredSessionProviderFacts = .empty
     private var finalOutputDiagnostic: StructuredSessionFinalOutputDiagnostic?
     private var nextProviderEventSequence = 0
     private var pendingApprovalRequests: [UUID: PendingCodexApprovalRequest] = [:]
@@ -340,6 +341,7 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
             approvalRequests: approvalRequests,
             slashCommands: slashCommands,
             providerEvents: providerEvents,
+            providerFacts: providerFacts,
             finalOutputDiagnostic: finalOutputDiagnostic,
             isAgentTurnInProgress: isTurnInProgress
         )
@@ -995,6 +997,7 @@ final class CodexAppServerRuntime: SessionRuntime, @unchecked Sendable {
         nextProviderEventSequence += 1
         providerEvents.append(event)
         providerEvents = StructuredSessionLiveHistoryRetention.retainedProviderEvents(providerEvents)
+        providerFacts = providerFacts.appending(event, retainedProviderEventCount: providerEvents.count)
         lock.unlock()
     }
 

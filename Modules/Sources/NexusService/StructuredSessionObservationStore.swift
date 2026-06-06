@@ -231,6 +231,9 @@ final class StructuredSessionObservationStore: @unchecked Sendable {
             changes.append(.replaceSlashCommands(screen.slashCommands))
         }
         changes.append(contentsOf: providerEventChanges(from: snapshot.providerEvents, to: screen.providerEvents))
+        if snapshot.providerFacts != screen.providerFacts {
+            changes.append(.replaceProviderFacts(screen.providerFacts))
+        }
         if snapshot.finalOutputDiagnostic != screen.finalOutputDiagnostic {
             changes.append(.replaceFinalOutputDiagnostic(screen.finalOutputDiagnostic))
         }
@@ -408,6 +411,7 @@ final class StructuredSessionObservationStore: @unchecked Sendable {
             extensionUI: screen.extensionUI,
             slashCommands: screen.slashCommands,
             providerEvents: screen.providerEvents,
+            providerFacts: screen.providerFacts,
             finalOutputDiagnostic: observedDiagnostic,
             isAgentTurnInProgress: screen.isAgentTurnInProgress,
             visibleLines: screen.visibleLines,

@@ -35,6 +35,8 @@ enum StructuredSessionLiveHistoryRetention {
             extensionUI: screen.extensionUI,
             slashCommands: screen.slashCommands,
             providerEvents: providerEvents,
+            providerFacts: screen.providerFacts,
+            finalOutputDiagnostic: screen.finalOutputDiagnostic,
             isAgentTurnInProgress: screen.isAgentTurnInProgress,
             visibleLines: screen.visibleLines,
             styledVisibleLines: screen.styledVisibleLines,

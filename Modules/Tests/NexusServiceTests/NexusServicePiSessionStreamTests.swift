@@ -1201,7 +1201,43 @@ struct NexusServicePiSessionStreamTests {
 
         #expect(transport.sentLines.contains(where: { $0.contains("\"id\":\"nexus-pi-session-stats-auto-") && $0.contains("\"type\":\"get_session_stats\"") }))
         #expect(screen.providerEvents.contains(where: { $0.command == "get_session_stats" && $0.rawPayload.contains("\"contextWindow\":200000") }))
+        #expect(screen.providerFacts.tokenUsage == StructuredSessionProviderTokenUsage(usedTokens: 60000, totalTokens: 200000, percent: 30))
+        #expect(screen.providerFacts.modelIdentifier == "openai/gpt-5.1-codex-max")
         #expect(screen.activityItems.allSatisfy { $0.text.contains("Session stats —") == false && $0.text.contains("Context usage —") == false })
+    }
+
+    @Test func localPiRuntimePublishesLiveAssistantDraftProviderFactsDuringStreamingTurns() throws {
+        let transport = PromptEventPiRPCTransport(promptEvents: [
+            ["type": "agent_start", "agent": "pi"],
+            [
+                "type": "message_update",
+                "assistantMessageEvent": [
+                    "type": "text_delta",
+                    "delta": "world"
+                ]
+            ]
+        ])
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("hello")
+        let screen = runtime.sessionScreen(for: session)
+
+        #expect(screen.isAgentTurnInProgress)
+        #expect(screen.providerFacts.liveAssistantDraftText == "world")
+        #expect(screen.providerFacts.lastProviderEventType == "message_update")
     }
 
     @Test func localPiRuntimeShowsLastAssistantTextViaBuiltInCommand() throws {

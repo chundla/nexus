@@ -68,6 +68,48 @@ struct StructuredSessionObservationStoreTests {
         #expect(transcript.contains("line-0") == false)
     }
 
+    @Test func structuredObservationDeltaCarriesProviderFacts() {
+        let store = StructuredSessionObservationStore()
+        let session = Session(id: UUID(), workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready)
+        _ = store.snapshotResponse(
+            for: SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                transcript: "initial",
+                activityItems: [SessionActivityItem(kind: .status, text: "Pi ready")]
+            )
+        )
+
+        let updatedFacts = StructuredSessionProviderFacts(
+            providerEventCount: 2,
+            lastProviderEventSequence: 1,
+            lastProviderEventType: "message_update",
+            liveAssistantDraftText: "world"
+        )
+        store.recordChange(
+            for: SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                transcript: "initial",
+                activityItems: [SessionActivityItem(kind: .status, text: "Pi ready")],
+                providerFacts: updatedFacts,
+                isAgentTurnInProgress: true
+            )
+        )
+
+        let updates = store.updates(for: session.id, after: 0)
+        let delta: StructuredSessionObservationDelta
+        switch try! #require(updates.first) {
+        case let .structuredDelta(value):
+            delta = value
+        default:
+            Issue.record("Expected structured delta update")
+            return
+        }
+
+        #expect(delta.changes.contains(.replaceProviderFacts(updatedFacts)))
+    }
+
     @Test func structuredObservationStartPreservesStructuredViewportState() {
         let store = StructuredSessionObservationStore()
         let session = Session(id: UUID(), workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready)

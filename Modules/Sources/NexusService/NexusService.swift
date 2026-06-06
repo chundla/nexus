@@ -3457,6 +3457,8 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
             extensionUI: screen.extensionUI,
             slashCommands: screen.slashCommands,
             providerEvents: screen.providerEvents,
+            providerFacts: screen.providerFacts,
+            finalOutputDiagnostic: screen.finalOutputDiagnostic,
             isAgentTurnInProgress: screen.isAgentTurnInProgress,
             visibleLines: renderState.visibleLines,
             styledVisibleLines: renderState.styledVisibleLines,

@@ -525,6 +525,7 @@ public struct SessionScreen: Codable, Equatable, Sendable {
     public let extensionUI: SessionExtensionUIState?
     public let slashCommands: [SessionSlashCommand]?
     public let providerEvents: [SessionProviderEvent]
+    public let providerFacts: StructuredSessionProviderFacts
     public let finalOutputDiagnostic: StructuredSessionFinalOutputDiagnostic?
     public let isAgentTurnInProgress: Bool
     public let visibleLines: [String]
@@ -564,6 +565,49 @@ public struct SessionScreen: Codable, Equatable, Sendable {
             extensionUI: extensionUI,
             slashCommands: slashCommands,
             providerEvents: providerEvents,
+            providerFacts: .empty,
+            isAgentTurnInProgress: isAgentTurnInProgress,
+            visibleLines: visibleLines,
+            styledVisibleLines: styledVisibleLines,
+            cursorRow: cursorRow,
+            cursorColumn: cursorColumn,
+            cursorVisible: cursorVisible
+        )
+    }
+
+    public init(
+        session: Session,
+        primarySurface: SessionSurface = .terminal,
+        controller: SessionController = .mac,
+        transcript: String,
+        terminalColumns: Int = 80,
+        terminalRows: Int = 24,
+        activityItems: [SessionActivityItem] = [],
+        approvalRequests: [SessionApprovalRequest] = [],
+        extensionUI: SessionExtensionUIState? = nil,
+        slashCommands: [SessionSlashCommand]? = nil,
+        providerEvents: [SessionProviderEvent] = [],
+        providerFacts: StructuredSessionProviderFacts = .empty,
+        isAgentTurnInProgress: Bool = false,
+        visibleLines: [String]? = nil,
+        styledVisibleLines: [TerminalLine]? = nil,
+        cursorRow: Int? = nil,
+        cursorColumn: Int? = nil,
+        cursorVisible: Bool = true
+    ) {
+        self.init(
+            session: session,
+            primarySurface: primarySurface,
+            controller: controller,
+            transcript: transcript,
+            terminalColumns: terminalColumns,
+            terminalRows: terminalRows,
+            activityItems: activityItems,
+            approvalRequests: approvalRequests,
+            extensionUI: extensionUI,
+            slashCommands: slashCommands,
+            providerEvents: providerEvents,
+            providerFacts: providerFacts,
             finalOutputDiagnostic: nil,
             isAgentTurnInProgress: isAgentTurnInProgress,
             visibleLines: visibleLines,
@@ -586,7 +630,8 @@ public struct SessionScreen: Codable, Equatable, Sendable {
         extensionUI: SessionExtensionUIState? = nil,
         slashCommands: [SessionSlashCommand]? = nil,
         providerEvents: [SessionProviderEvent] = [],
-        finalOutputDiagnostic: StructuredSessionFinalOutputDiagnostic? = nil,
+        providerFacts: StructuredSessionProviderFacts = .empty,
+        finalOutputDiagnostic: StructuredSessionFinalOutputDiagnostic?,
         isAgentTurnInProgress: Bool = false,
         visibleLines: [String]? = nil,
         styledVisibleLines: [TerminalLine]? = nil,
@@ -627,6 +672,7 @@ public struct SessionScreen: Codable, Equatable, Sendable {
         self.extensionUI = extensionUI
         self.slashCommands = slashCommands
         self.providerEvents = providerEvents
+        self.providerFacts = providerFacts
         self.finalOutputDiagnostic = finalOutputDiagnostic
         self.isAgentTurnInProgress = isAgentTurnInProgress
         self.visibleLines = resolvedVisibleLines
@@ -665,7 +711,48 @@ public struct SessionScreen: Codable, Equatable, Sendable {
             approvalRequests: approvalRequests,
             extensionUI: extensionUI,
             slashCommands: slashCommands,
+            providerFacts: .empty,
+            isAgentTurnInProgress: isAgentTurnInProgress,
+            visibleLines: visibleLines,
+            styledVisibleLines: styledVisibleLines,
+            cursorRow: cursorRow,
+            cursorColumn: cursorColumn,
+            cursorVisible: cursorVisible
+        )
+    }
+
+    public init(
+        session: Session,
+        primarySurface: SessionSurface = .terminal,
+        controller: SessionController = .mac,
+        transcript: String,
+        terminalColumns: Int = 80,
+        terminalRows: Int = 24,
+        activityItems: [SessionActivityItem] = [],
+        approvalRequests: [SessionApprovalRequest] = [],
+        extensionUI: SessionExtensionUIState? = nil,
+        slashCommands: [SessionSlashCommand]? = nil,
+        providerFacts: StructuredSessionProviderFacts = .empty,
+        isAgentTurnInProgress: Bool = false,
+        visibleLines: [String]? = nil,
+        styledVisibleLines: [TerminalLine]? = nil,
+        cursorRow: Int? = nil,
+        cursorColumn: Int? = nil,
+        cursorVisible: Bool = true
+    ) {
+        self.init(
+            session: session,
+            primarySurface: primarySurface,
+            controller: controller,
+            transcript: transcript,
+            terminalColumns: terminalColumns,
+            terminalRows: terminalRows,
+            activityItems: activityItems,
+            approvalRequests: approvalRequests,
+            extensionUI: extensionUI,
+            slashCommands: slashCommands,
             providerEvents: [],
+            providerFacts: providerFacts,
             finalOutputDiagnostic: nil,
             isAgentTurnInProgress: isAgentTurnInProgress,
             visibleLines: visibleLines,
@@ -687,7 +774,7 @@ public struct SessionScreen: Codable, Equatable, Sendable {
         approvalRequests: [SessionApprovalRequest] = [],
         extensionUI: SessionExtensionUIState? = nil,
         slashCommands: [SessionSlashCommand]? = nil,
-        finalOutputDiagnostic: StructuredSessionFinalOutputDiagnostic? = nil,
+        finalOutputDiagnostic: StructuredSessionFinalOutputDiagnostic?,
         isAgentTurnInProgress: Bool = false,
         visibleLines: [String]? = nil,
         styledVisibleLines: [TerminalLine]? = nil,
@@ -707,6 +794,7 @@ public struct SessionScreen: Codable, Equatable, Sendable {
             extensionUI: extensionUI,
             slashCommands: slashCommands,
             providerEvents: [],
+            providerFacts: .empty,
             finalOutputDiagnostic: finalOutputDiagnostic,
             isAgentTurnInProgress: isAgentTurnInProgress,
             visibleLines: visibleLines,
@@ -766,7 +854,7 @@ public struct SessionScreen: Codable, Equatable, Sendable {
         activityItems: [SessionActivityItem] = [],
         approvalRequests: [SessionApprovalRequest] = [],
         slashCommands: [SessionSlashCommand]? = nil,
-        finalOutputDiagnostic: StructuredSessionFinalOutputDiagnostic? = nil,
+        finalOutputDiagnostic: StructuredSessionFinalOutputDiagnostic?,
         isAgentTurnInProgress: Bool = false,
         visibleLines: [String]? = nil,
         styledVisibleLines: [TerminalLine]? = nil,

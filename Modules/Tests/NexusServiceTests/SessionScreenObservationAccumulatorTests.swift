@@ -59,6 +59,48 @@ struct SessionScreenObservationAccumulatorTests {
         #expect(screen.cursorVisible == false)
     }
 
+    @Test func structuredAccumulatorAppliesProviderFactsDelta() throws {
+        let session = Session(id: UUID(), workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready)
+        let startScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [SessionActivityItem(kind: .status, text: "Pi ready")],
+            providerFacts: StructuredSessionProviderFacts(providerEventCount: 1, lastProviderEventSequence: 0, lastProviderEventType: "response")
+        )
+        let start = SessionScreenObservationStart(
+            observationID: UUID(),
+            screen: startScreen,
+            structuredSnapshot: StructuredSessionObservationSnapshot(revision: 0, screen: startScreen)
+        )
+        let accumulator = SessionScreenObservationAccumulator(start: start)
+
+        let updatedFacts = StructuredSessionProviderFacts(
+            providerEventCount: 2,
+            lastProviderEventSequence: 1,
+            lastProviderEventType: "message_update",
+            liveAssistantDraftText: "world",
+            tokenUsage: StructuredSessionProviderTokenUsage(usedTokens: 60000, totalTokens: 200000, percent: 30),
+            modelIdentifier: "openai/gpt-5.1-codex-max"
+        )
+        let update = SessionScreenObservationUpdate.structuredDelta(
+            StructuredSessionObservationDelta(
+                baseRevision: 0,
+                revision: 1,
+                changes: [
+                    .replaceProviderFacts(updatedFacts),
+                    .setAgentTurnInProgress(true)
+                ]
+            )
+        )
+
+        let screen = try #require(try accumulator.apply(update))
+
+        #expect(accumulator.currentStructuredRevision == 1)
+        #expect(screen.providerFacts == updatedFacts)
+        #expect(screen.isAgentTurnInProgress)
+    }
+
     @Test func structuredAccumulatorAppliesRevisionedDelta() throws {
         let session = Session(id: UUID(), workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready)
         let startScreen = SessionScreen(

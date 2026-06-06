@@ -1127,7 +1127,13 @@ final class NexusAppModel {
             return true
         }
 
-        if candidateScreen.providerEvents.count > currentScreen.providerEvents.count {
+        let currentProviderEventCount = currentScreen.providerFacts.providerEventCount == 0
+            ? currentScreen.providerEvents.count
+            : currentScreen.providerFacts.providerEventCount
+        let candidateProviderEventCount = candidateScreen.providerFacts.providerEventCount == 0
+            ? candidateScreen.providerEvents.count
+            : candidateScreen.providerFacts.providerEventCount
+        if candidateProviderEventCount > currentProviderEventCount {
             return true
         }
 

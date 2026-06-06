@@ -18,11 +18,11 @@ public struct StructuredSessionObservationProgressSample: Equatable, Sendable {
         self.transcriptCharacterCount = screen.transcript.count
         self.activityItemCount = screen.activityItems.count
         self.approvalRequestCount = screen.approvalRequests.count
-        self.providerEventCount = screen.providerEvents.count
+        self.providerEventCount = screen.providerFacts.providerEventCount == 0 ? screen.providerEvents.count : screen.providerFacts.providerEventCount
         self.lastActivityItemID = screen.activityItems.last?.id
         self.lastActivityItemText = screen.activityItems.last?.text
-        self.lastProviderEventSequence = screen.providerEvents.last?.sequence
-        self.lastProviderEventType = screen.providerEvents.last?.type
+        self.lastProviderEventSequence = screen.providerFacts.lastProviderEventSequence ?? screen.providerEvents.last?.sequence
+        self.lastProviderEventType = screen.providerFacts.lastProviderEventType ?? screen.providerEvents.last?.type
         self.isAgentTurnInProgress = screen.isAgentTurnInProgress
     }
 

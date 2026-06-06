@@ -264,6 +264,7 @@ private enum RemoteClientFixture {
                 approvalRequests: latestScreen.approvalRequests,
                 extensionUI: latestScreen.extensionUI,
                 providerEvents: latestScreen.providerEvents,
+                providerFacts: latestScreen.providerFacts,
                 isAgentTurnInProgress: latestScreen.isAgentTurnInProgress
             )
             return latestScreen
@@ -281,6 +282,7 @@ private enum RemoteClientFixture {
                 approvalRequests: latestScreen.approvalRequests,
                 extensionUI: latestScreen.extensionUI,
                 providerEvents: latestScreen.providerEvents,
+                providerFacts: latestScreen.providerFacts,
                 isAgentTurnInProgress: latestScreen.isAgentTurnInProgress
             )
             return latestScreen
@@ -353,6 +355,7 @@ private enum RemoteClientFixture {
                 approvalRequests: latestScreen.approvalRequests,
                 extensionUI: latestScreen.extensionUI,
                 providerEvents: latestScreen.providerEvents,
+                providerFacts: latestScreen.providerFacts,
                 isAgentTurnInProgress: mode == .thinkingDiagnosis
             )
             return latestScreen
@@ -373,9 +376,10 @@ private enum RemoteClientFixture {
                 approvalRequests: latestScreen.approvalRequests,
                 extensionUI: latestScreen.extensionUI,
                 providerEvents: latestScreen.providerEvents,
+                providerFacts: latestScreen.providerFacts,
                 finalOutputDiagnostic: StructuredSessionFinalOutputDiagnostic(
                     trigger: .turnEnd,
-                    providerEventSequence: latestScreen.providerEvents.last?.sequence ?? latestScreen.activityItems.count + 1,
+                    providerEventSequence: latestScreen.providerFacts.lastProviderEventSequence ?? latestScreen.providerEvents.last?.sequence ?? latestScreen.activityItems.count + 1,
                     providerRuntimeLatencyMilliseconds: 4,
                     serviceObservationLatencyMilliseconds: 10,
                     expectedActivityItemID: agentItem.id,
