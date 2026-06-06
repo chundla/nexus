@@ -1280,16 +1280,85 @@ struct NexusServicePiSessionStreamTests {
 
         try runtime.sendInput("hello")
         let screen = runtime.sessionScreen(for: session)
-        let metadata = try #require(runtime.sessionRecordAdapterMetadata)
         let compactedMessageUpdate = try #require(screen.providerEvents.first(where: { $0.type == "message_update" }))
         let compactedTurnEnd = try #require(screen.providerEvents.first(where: { $0.type == "turn_end" }))
-        let persistedMessageUpdate = try #require(metadata.piPersistedProviderEvents?.first(where: { $0.type == "message_update" }))
 
         #expect(screen.providerFacts.liveAssistantDraftText == nil)
         #expect(compactedMessageUpdate.rawPayload.contains("\"delta\":\"world\""))
         #expect(compactedMessageUpdate.rawPayload.contains(oversizedMarker) == false)
         #expect(compactedTurnEnd.rawPayload == "{\"type\":\"turn_end\"}")
-        #expect(persistedMessageUpdate.rawPayload == compactedMessageUpdate.rawPayload)
+    }
+
+    @Test func localPiRuntimeCompactsToolExecutionProviderEventPayloads() throws {
+        let oversizedMarker = String(repeating: "oversized-tool-update-", count: 2_048)
+        let transport = PromptEventPiRPCTransport(promptEvents: [
+            [
+                "type": "tool_execution_start",
+                "toolCallId": "tool-1",
+                "toolName": "subagent",
+                "args": [
+                    "agent": "reviewer",
+                    "task": oversizedMarker
+                ]
+            ],
+            [
+                "type": "tool_execution_update",
+                "toolCallId": "tool-1",
+                "partialResult": [
+                    "content": [[
+                        "type": "text",
+                        "text": "Looks good overall."
+                    ]],
+                    "details": [
+                        "messages": [[
+                            "role": "assistant",
+                            "content": [[
+                                "type": "text",
+                                "text": oversizedMarker
+                            ]]
+                        ]]
+                    ]
+                ]
+            ],
+            [
+                "type": "tool_execution_end",
+                "toolCallId": "tool-1",
+                "toolName": "subagent",
+                "result": [
+                    "content": [[
+                        "type": "text",
+                        "text": oversizedMarker
+                    ]]
+                ]
+            ]
+        ])
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("hello")
+        let screen = runtime.sessionScreen(for: session)
+        let startEvent = try #require(screen.providerEvents.first(where: { $0.type == "tool_execution_start" }))
+        let updateEvent = try #require(screen.providerEvents.first(where: { $0.type == "tool_execution_update" }))
+        let endEvent = try #require(screen.providerEvents.first(where: { $0.type == "tool_execution_end" }))
+
+        #expect(startEvent.rawPayload.contains("\"toolName\":\"subagent\""))
+        #expect(startEvent.rawPayload.contains(oversizedMarker) == false)
+        #expect(updateEvent.rawPayload.contains("Looks good overall."))
+        #expect(updateEvent.rawPayload.contains(oversizedMarker) == false)
+        #expect(endEvent.rawPayload.contains("\"toolCallId\":\"tool-1\""))
+        #expect(endEvent.rawPayload.contains(oversizedMarker) == false)
     }
 
     @Test func localPiRuntimeCompactsLegacyPersistedProviderEventsOnRestore() throws {

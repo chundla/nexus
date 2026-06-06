@@ -62,6 +62,12 @@ enum PiStructuredSessionProviderEventCompaction {
             return compactedMessageUpdate(object)
         case "message_end":
             return compactedMessageEnd(object)
+        case "tool_execution_start":
+            return compactedToolExecutionStart(object)
+        case "tool_execution_update":
+            return compactedToolExecutionUpdate(object)
+        case "tool_execution_end":
+            return compactedToolExecutionEnd(object)
         case "turn_end":
             return jsonString(["type": "turn_end"])
         case "response":
@@ -98,6 +104,65 @@ enum PiStructuredSessionProviderEventCompaction {
             payload["message"] = ["role": role]
         }
         return jsonString(payload)
+    }
+
+    private static func compactedToolExecutionStart(_ object: [String: Any]) -> String? {
+        var payload: [String: Any] = ["type": "tool_execution_start"]
+        if let toolCallID = trimmedString(in: object, keys: ["toolCallId"]) {
+            payload["toolCallId"] = toolCallID
+        }
+        if let toolName = trimmedString(in: object, keys: ["toolName"]) {
+            payload["toolName"] = toolName
+        }
+        if let args = object["args"] as? [String: Any] {
+            var compactArgs: [String: Any] = [:]
+            if let agent = trimmedString(in: args, keys: ["agent"]) {
+                compactArgs["agent"] = agent
+            }
+            if let task = trimmedString(in: args, keys: ["task"]) {
+                compactArgs["task"] = truncatedText(task, limit: 256)
+            }
+            if compactArgs.isEmpty == false {
+                payload["args"] = compactArgs
+            }
+        }
+        return jsonString(payload)
+    }
+
+    private static func compactedToolExecutionUpdate(_ object: [String: Any]) -> String? {
+        var payload: [String: Any] = ["type": "tool_execution_update"]
+        if let toolCallID = trimmedString(in: object, keys: ["toolCallId"]) {
+            payload["toolCallId"] = toolCallID
+        }
+        if let text = compactedToolExecutionText(from: object["partialResult"]) {
+            payload["partialResult"] = ["text": text]
+        }
+        return jsonString(payload)
+    }
+
+    private static func compactedToolExecutionEnd(_ object: [String: Any]) -> String? {
+        var payload: [String: Any] = ["type": "tool_execution_end"]
+        if let toolCallID = trimmedString(in: object, keys: ["toolCallId"]) {
+            payload["toolCallId"] = toolCallID
+        }
+        if let toolName = trimmedString(in: object, keys: ["toolName"]) {
+            payload["toolName"] = toolName
+        }
+        if let isError = object["isError"] as? Bool {
+            payload["isError"] = isError
+        }
+        if let text = compactedToolExecutionText(from: object["result"]) {
+            payload["result"] = ["text": text]
+        }
+        return jsonString(payload)
+    }
+
+    private static func compactedToolExecutionText(from value: Any?) -> String? {
+        let text = toolExecutionResultText(from: value).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.isEmpty == false else {
+            return nil
+        }
+        return truncatedText(text, limit: 1_024)
     }
 
     private static func compactedResponse(command: String?, object: [String: Any]) -> String? {
@@ -171,6 +236,34 @@ enum PiStructuredSessionProviderEventCompaction {
         return compactModel.isEmpty ? nil : compactModel
     }
 
+    private static func toolExecutionResultText(from value: Any?) -> String {
+        switch value {
+        case let string as String:
+            return string.trimmingCharacters(in: .whitespacesAndNewlines)
+        case let object as [String: Any]:
+            if let text = trimmedString(in: object, keys: ["text", "delta", "message", "output", "summary"]) {
+                return text
+            }
+
+            for key in ["content", "result", "partialResult"] {
+                let text = toolExecutionResultText(from: object[key])
+                if text.isEmpty == false {
+                    return text
+                }
+            }
+
+            return ""
+        case let array as [Any]:
+            return array
+                .map { toolExecutionResultText(from: $0) }
+                .filter { $0.isEmpty == false }
+                .joined()
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        default:
+            return ""
+        }
+    }
+
     private static func intValue(in object: [String: Any], keys: [String]) -> Int? {
         for key in keys {
             if let value = object[key] as? Int {
@@ -197,6 +290,13 @@ enum PiStructuredSessionProviderEventCompaction {
             }
         }
         return nil
+    }
+
+    private static func truncatedText(_ text: String, limit: Int) -> String {
+        guard text.count > limit else {
+            return text
+        }
+        return String(text.prefix(max(0, limit - 1))) + "…"
     }
 
     private static func normalized(_ value: String?) -> String {
