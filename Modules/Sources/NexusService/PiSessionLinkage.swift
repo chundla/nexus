@@ -40,7 +40,7 @@ extension SessionRecordAdapterMetadata {
         var values: [String: String] = [:]
         values[PiSessionRecordMetadataKey.sessionID] = linkage?.piSessionID ?? ""
         values[PiSessionRecordMetadataKey.sessionFile] = linkage?.sessionFile ?? ""
-        encode(activityItems, key: PiSessionRecordMetadataKey.activityItemsJSON, into: &values)
+        encode(compactedPiMetadataActivityItems(activityItems), key: PiSessionRecordMetadataKey.activityItemsJSON, into: &values)
         encode(approvalRequests, key: PiSessionRecordMetadataKey.approvalRequestsJSON, into: &values)
         if let extensionUIState,
            piExtensionUIStateHasContent(extensionUIState) {
@@ -104,6 +104,80 @@ extension SessionRecordAdapterMetadata {
         }
         return value
     }
+}
+
+private enum PiMetadataActivityItemCompaction {
+    static let maxEncodedJSONCharacters = 20_000
+    static let maxPerItemTextCharacters = 4_096
+    static let maxPerPromptTextCharacters = 2_048
+}
+
+private func compactedPiMetadataActivityItems(_ activityItems: [SessionActivityItem]) -> [SessionActivityItem] {
+    guard encodedJSONCharacterCount(activityItems) > PiMetadataActivityItemCompaction.maxEncodedJSONCharacters else {
+        return activityItems
+    }
+
+    var compacted = activityItems.map(compactedPiMetadataActivityItem)
+    while compacted.count > 1,
+          encodedJSONCharacterCount(compacted) > PiMetadataActivityItemCompaction.maxEncodedJSONCharacters {
+        compacted.removeFirst()
+    }
+
+    if compacted.count == 1,
+       encodedJSONCharacterCount(compacted) > PiMetadataActivityItemCompaction.maxEncodedJSONCharacters,
+       let item = compacted.first {
+        compacted = [truncatedPiMetadataActivityItem(item)]
+    }
+
+    return compacted
+}
+
+private func compactedPiMetadataActivityItem(_ item: SessionActivityItem) -> SessionActivityItem {
+    let prompt = compactedPiMetadataPrompt(item.prompt)
+    return SessionActivityItem(
+        id: item.id,
+        kind: item.kind,
+        text: truncatedPiMetadataText(item.text, limit: PiMetadataActivityItemCompaction.maxPerItemTextCharacters),
+        detailText: nil,
+        prompt: prompt
+    )
+}
+
+private func truncatedPiMetadataActivityItem(_ item: SessionActivityItem) -> SessionActivityItem {
+    SessionActivityItem(
+        id: item.id,
+        kind: item.kind,
+        text: truncatedPiMetadataText(item.text, limit: PiMetadataActivityItemCompaction.maxEncodedJSONCharacters / 2),
+        detailText: nil,
+        prompt: compactedPiMetadataPrompt(item.prompt, limit: PiMetadataActivityItemCompaction.maxEncodedJSONCharacters / 4)
+    )
+}
+
+private func compactedPiMetadataPrompt(_ prompt: SessionPrompt?, limit: Int = PiMetadataActivityItemCompaction.maxPerPromptTextCharacters) -> SessionPrompt? {
+    guard let prompt else {
+        return nil
+    }
+
+    let text = truncatedPiMetadataText(prompt.text, limit: limit)
+    guard text.isEmpty == false else {
+        return nil
+    }
+    return SessionPrompt(text: text)
+}
+
+private func truncatedPiMetadataText(_ text: String, limit: Int) -> String {
+    guard text.count > limit else {
+        return text
+    }
+    return String(text.prefix(max(0, limit - 1))) + "…"
+}
+
+private func encodedJSONCharacterCount<T: Encodable>(_ value: T) -> Int {
+    guard let data = try? JSONEncoder().encode(value),
+          let json = String(data: data, encoding: .utf8) else {
+        return 0
+    }
+    return json.count
 }
 
 private func piExtensionUIStateHasContent(_ state: SessionExtensionUIState) -> Bool {

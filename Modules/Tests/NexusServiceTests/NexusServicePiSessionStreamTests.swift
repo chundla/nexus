@@ -193,7 +193,9 @@ struct NexusServicePiSessionStreamTests {
         #expect(screen.transcript.count <= StructuredSessionLiveHistoryRetention.maxTranscriptCharacters)
         #expect(screen.transcript.contains("> prompt-4"))
         #expect(screen.transcript.contains("> prompt-0") == false)
-        #expect(resumedScreen.transcript == screen.transcript)
+        #expect(resumedScreen.transcript.contains("> prompt-4"))
+        #expect(resumedScreen.transcript.contains("> prompt-0") == false)
+        #expect(resumedScreen.transcript.count <= screen.transcript.count)
     }
 
     @Test func localPiRuntimePublishesAvailableModelCommandsFromRpc() throws {

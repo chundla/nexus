@@ -85,6 +85,48 @@ struct NexusMetadataStoreSessionRecordAdapterMetadataTests {
         #expect(storedMetadata.piPersistedProviderEvents?.map(\.type) == ["extension_ui_request"])
     }
 
+    @Test func oversizedPiActivityItemsAreCompactedBeforeMetadataPersistence() throws {
+        let oversizedDetail = String(repeating: "oversized-command-output-", count: 1_024)
+        let oversizedImageData = Data(repeating: 0xAB, count: 8_192)
+        let activityItems = [
+            SessionActivityItem(kind: .status, text: "Session stream connected"),
+            SessionActivityItem(
+                kind: .command,
+                text: "read /tmp/huge-file.txt",
+                detailText: oversizedDetail
+            ),
+            SessionActivityItem(
+                kind: .message,
+                text: "You: describe this image",
+                prompt: SessionPrompt(
+                    text: "describe this image",
+                    images: [SessionPromptImage(data: oversizedImageData, mimeType: "image/png")]
+                )
+            ),
+            SessionActivityItem(kind: .message, text: "Pi: Latest answer")
+        ]
+        let originalJSONCharacterCount = try #require(String(data: JSONEncoder().encode(activityItems), encoding: .utf8)?.count)
+
+        let metadata = try #require(
+            SessionRecordAdapterMetadata.pi(
+                linkage: PiSessionLinkage(piSessionID: "pi-session-1", sessionFile: "/tmp/pi-session-1.jsonl"),
+                activityItems: activityItems
+            )
+        )
+        let persistedActivityItems = try #require(metadata.piPersistedActivityItems)
+        let persistedJSONCharacterCount = try #require(metadata.values["activityItemsJSON"]?.count)
+        let persistedCommand = try #require(persistedActivityItems.first(where: { $0.kind == .command }))
+        let persistedPromptMessage = try #require(persistedActivityItems.first(where: { $0.text == "You: describe this image" }))
+
+        #expect(originalJSONCharacterCount > 20_000)
+        #expect(persistedJSONCharacterCount < originalJSONCharacterCount)
+        #expect(persistedJSONCharacterCount < 20_000)
+        #expect(persistedActivityItems.map(\.text) == activityItems.map(\.text))
+        #expect(persistedCommand.detailText == nil)
+        #expect(persistedPromptMessage.prompt?.text == "describe this image")
+        #expect(persistedPromptMessage.prompt?.images == [])
+    }
+
     @Test func reopeningStoreMigratesLegacyPiSessionLinkageIntoGenericSessionRecordMetadata() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusMetadataStoreTests", isDirectory: true)
