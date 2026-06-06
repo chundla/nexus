@@ -702,6 +702,97 @@ struct StructuredSessionPresentationTests {
         #expect(builtItemIDs == [[firstActivity.id, secondActivity.id], [thirdActivity.id]])
     }
 
+    @Test func structuredSessionFeedPresenterStreamsLivePiAssistantDraftAndReusesItsRowIdentityWhenTurnFinalizes() throws {
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let userPrompt = SessionActivityItem(kind: .message, text: "You: hello")
+        let finalizedAssistantMessage = SessionActivityItem(kind: .message, text: "Pi: world")
+        let presenter = StructuredSessionFeedPresenter()
+
+        let firstDraftPresentation = presenter.presentation(for: SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [userPrompt],
+            providerEvents: [
+                SessionProviderEvent(
+                    sequence: 0,
+                    providerID: .pi,
+                    type: "message_update",
+                    family: .message,
+                    rawPayload: #"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"wor"}}"#
+                )
+            ],
+            isAgentTurnInProgress: true
+        ))
+        let streamedDraftPresentation = presenter.presentation(for: SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [userPrompt],
+            providerEvents: [
+                SessionProviderEvent(
+                    sequence: 0,
+                    providerID: .pi,
+                    type: "message_update",
+                    family: .message,
+                    rawPayload: #"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"wor"}}"#
+                ),
+                SessionProviderEvent(
+                    sequence: 1,
+                    providerID: .pi,
+                    type: "message_update",
+                    family: .message,
+                    rawPayload: #"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"ld"}}"#
+                )
+            ],
+            isAgentTurnInProgress: true
+        ))
+        let finalizedPresentation = presenter.presentation(for: SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [userPrompt, finalizedAssistantMessage],
+            providerEvents: [
+                SessionProviderEvent(
+                    sequence: 0,
+                    providerID: .pi,
+                    type: "message_update",
+                    family: .message,
+                    rawPayload: #"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"wor"}}"#
+                ),
+                SessionProviderEvent(
+                    sequence: 1,
+                    providerID: .pi,
+                    type: "message_update",
+                    family: .message,
+                    rawPayload: #"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"ld"}}"#
+                ),
+                SessionProviderEvent(
+                    sequence: 2,
+                    providerID: .pi,
+                    type: "turn_end",
+                    family: .turn,
+                    rawPayload: #"{"type":"turn_end","message":{"content":[{"type":"text","text":"world"}]}}"#
+                )
+            ],
+            isAgentTurnInProgress: false
+        ))
+
+        #expect(firstDraftPresentation.activityRows.map(\.text) == ["You: hello", "Pi: wor"])
+        let draftRowID = try #require(firstDraftPresentation.activityRows.last?.id)
+        #expect(streamedDraftPresentation.activityRows.map(\.text) == ["You: hello", "Pi: world"])
+        #expect(streamedDraftPresentation.activityRows.last?.id == draftRowID)
+        #expect(finalizedPresentation.activityRows.map(\.text) == ["You: hello", "Pi: world"])
+        #expect(finalizedPresentation.activityRows.last?.id == draftRowID)
+        #expect(finalizedPresentation.activityRows.filter { $0.text == "Pi: world" }.count == 1)
+    }
+
     @Test func structuredSessionFeedPresentationUsesChunksAsCanonicalActivityRowStorage() {
         let firstRow = StructuredSessionActivityRow(
             id: UUID(),

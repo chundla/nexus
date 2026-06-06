@@ -357,6 +357,11 @@ public func focusedStructuredSessionChromePresentation(
 }
 
 public final class StructuredSessionFeedPresenter {
+    private struct LiveAssistantDraftState {
+        let rowID: UUID
+        let text: String
+    }
+
     private let rowBuilder: ([SessionActivityItem]) -> [StructuredSessionActivityRow]
     private let chunkSize: Int
     private let liveTailChunkSize: Int
@@ -365,6 +370,8 @@ public final class StructuredSessionFeedPresenter {
     private var cachedActivityItems: [SessionActivityItem] = []
     private var cachedActivityRows: [StructuredSessionActivityRow] = []
     private var cachedActivityRowChunks: [StructuredSessionActivityRowChunk] = []
+    private var presentedRowIDByActivityItemID: [UUID: UUID] = [:]
+    private var liveAssistantDraft: LiveAssistantDraftState?
 
     public init() {
         self.rowBuilder = structuredSessionActivityRows(for:)
@@ -384,10 +391,16 @@ public final class StructuredSessionFeedPresenter {
     }
 
     public func presentation(for screen: SessionScreen) -> StructuredSessionFeedPresentation {
-        structuredSessionFeedPresentation(
+        if cachedSessionID != screen.session.id {
+            presentedRowIDByActivityItemID.removeAll(keepingCapacity: true)
+            liveAssistantDraft = nil
+        }
+
+        let feedState = presentedFeedState(for: screen, baseRows: activityRows(for: screen))
+        return structuredSessionFeedPresentation(
             for: screen,
-            activityRows: activityRows(for: screen),
-            activityRowChunks: cachedActivityRowChunks
+            activityRows: feedState.rows,
+            activityRowChunks: feedState.chunks
         )
     }
 
@@ -488,6 +501,63 @@ public final class StructuredSessionFeedPresenter {
         )
         return rows
     }
+
+    private func presentedFeedState(
+        for screen: SessionScreen,
+        baseRows: [StructuredSessionActivityRow]
+    ) -> (rows: [StructuredSessionActivityRow], chunks: [StructuredSessionActivityRowChunk]) {
+        let currentActivityItemIDs = Set(screen.activityItems.map(\.id))
+        presentedRowIDByActivityItemID = presentedRowIDByActivityItemID.filter { currentActivityItemIDs.contains($0.key) }
+
+        let liveDraftRow: StructuredSessionActivityRow?
+        if let draftText = structuredSessionLiveAssistantDraftText(for: screen) {
+            let rowID = liveAssistantDraft?.rowID ?? UUID()
+            liveAssistantDraft = LiveAssistantDraftState(rowID: rowID, text: draftText)
+            liveDraftRow = structuredSessionLiveAssistantDraftRow(
+                id: rowID,
+                text: draftText,
+                providerDisplayName: screen.session.providerID.displayName
+            )
+        } else {
+            if let liveAssistantDraft,
+               let finalizedItem = screen.activityItems.reversed().first(where: {
+                   $0.kind == .message && structuredSessionDraftMatchesFinalizedMessage(draftText: liveAssistantDraft.text, finalizedText: $0.text)
+               }) {
+                presentedRowIDByActivityItemID[finalizedItem.id] = liveAssistantDraft.rowID
+            }
+            self.liveAssistantDraft = nil
+            liveDraftRow = nil
+        }
+
+        var rows = baseRows.map { row in
+            guard let presentedRowID = presentedRowIDByActivityItemID[row.id] else {
+                return row
+            }
+            return structuredSessionActivityRow(row, replacingIDWith: presentedRowID)
+        }
+        var chunks = cachedActivityRowChunks.map { chunk in
+            StructuredSessionActivityRowChunk(
+                id: chunk.id,
+                rows: chunk.rows.map { row in
+                    guard let presentedRowID = presentedRowIDByActivityItemID[row.id] else {
+                        return row
+                    }
+                    return structuredSessionActivityRow(row, replacingIDWith: presentedRowID)
+                }
+            )
+        }
+
+        if let liveDraftRow {
+            rows.append(liveDraftRow)
+            chunks = appendStructuredSessionActivityRowChunks(
+                chunks,
+                rows: [liveDraftRow],
+                liveTailChunkSize: liveTailChunkSize
+            )
+        }
+
+        return (rows, chunks)
+    }
 }
 
 public func structuredSessionActivityRows(for screen: SessionScreen) -> [StructuredSessionActivityRow] {
@@ -518,6 +588,98 @@ func structuredSessionActivityRows(for activityItems: [SessionActivityItem]) -> 
             emphasis: structuredSessionActivityEmphasis(for: item.kind)
         )
     }
+}
+
+private func structuredSessionActivityRow(
+    _ row: StructuredSessionActivityRow,
+    replacingIDWith id: UUID
+) -> StructuredSessionActivityRow {
+    StructuredSessionActivityRow(
+        id: id,
+        title: row.title,
+        systemImage: row.systemImage,
+        text: row.text,
+        detailText: row.detailText,
+        isDetailTextTruncated: row.isDetailTextTruncated,
+        emphasis: row.emphasis,
+        conversationPresentation: row.conversationPresentation,
+        showsExpandedSystemCard: row.showsExpandedSystemCard
+    )
+}
+
+private func structuredSessionLiveAssistantDraftRow(
+    id: UUID,
+    text: String,
+    providerDisplayName: String
+) -> StructuredSessionActivityRow {
+    annotateStructuredSessionActivityRows(
+        [StructuredSessionActivityRow(
+            id: id,
+            title: "Message",
+            systemImage: structuredSessionActivitySystemImage(for: .message),
+            text: text,
+            emphasis: structuredSessionActivityEmphasis(for: .message)
+        )],
+        providerDisplayName: providerDisplayName
+    )[0]
+}
+
+private func structuredSessionLiveAssistantDraftText(for screen: SessionScreen) -> String? {
+    guard screen.isAgentTurnInProgress else {
+        return nil
+    }
+
+    switch screen.session.providerID {
+    case .pi:
+        guard let text = piStructuredSessionLiveAssistantDraftText(from: screen.providerEvents) else {
+            return nil
+        }
+        return "Pi: \(text)"
+    case .codex, .ibmBob, .claude:
+        return nil
+    }
+}
+
+private func piStructuredSessionLiveAssistantDraftText(from providerEvents: [SessionProviderEvent]) -> String? {
+    var draft = ""
+
+    for event in providerEvents {
+        guard let payload = structuredSessionJSONObject(from: event.rawPayload),
+              let type = structuredSessionTrimmedString(in: payload, keys: ["type"]) else {
+            continue
+        }
+
+        switch type {
+        case "message_update":
+            guard let assistantMessageEvent = payload["assistantMessageEvent"] as? [String: Any],
+                  structuredSessionTrimmedString(in: assistantMessageEvent, keys: ["type"]) == "text_delta",
+                  let delta = assistantMessageEvent["delta"] as? String else {
+                continue
+            }
+            draft += delta
+        case "turn_end":
+            draft = ""
+        case "message_end":
+            if let message = payload["message"] as? [String: Any],
+               structuredSessionTrimmedString(in: message, keys: ["role"]) == "assistant" {
+                draft = ""
+            }
+        default:
+            continue
+        }
+    }
+
+    let trimmedDraft = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmedDraft.isEmpty ? nil : trimmedDraft
+}
+
+private func structuredSessionDraftMatchesFinalizedMessage(draftText: String, finalizedText: String) -> Bool {
+    let normalizedDraft = draftText.trimmingCharacters(in: .whitespacesAndNewlines)
+    let normalizedFinalized = finalizedText.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard normalizedDraft.isEmpty == false, normalizedFinalized.isEmpty == false else {
+        return false
+    }
+    return normalizedFinalized.hasPrefix(normalizedDraft)
 }
 
 private let structuredSessionActivityRowChunkSize = 40
