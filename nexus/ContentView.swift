@@ -1508,7 +1508,7 @@ struct ContentView: View {
                                 )
                                 .frame(maxWidth: .infinity, minHeight: 220)
                             } else {
-                                VStack(alignment: .leading, spacing: 8) {
+                                LazyVStack(alignment: .leading, spacing: 8) {
                                     ForEach(feedPresentation.activityRowChunks) { chunk in
                                         MacEquatableStructuredSessionActivityChunk(chunk: chunk) {
                                             VStack(alignment: .leading, spacing: 8) {
@@ -1516,9 +1516,11 @@ struct ContentView: View {
                                                     MacEquatableStructuredSessionActivityRow(row: row) {
                                                         structuredSessionActivityRowView(row)
                                                     }
+                                                    .equatable()
                                                 }
                                             }
                                         }
+                                        .equatable()
                                     }
 
                                     if let thinkingIndicator = feedPresentation.thinkingIndicator {

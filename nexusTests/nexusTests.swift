@@ -11005,9 +11005,11 @@ private final class StubSessionRuntimeManager: SessionRuntimeManaging {
         self.launchTranscriptForConfiguration = launchTranscriptForConfiguration
     }
 
-    func setRuntimeChangeHandler(_ handler: (@Sendable (UUID) -> Void)?) {}
+    func setRuntimeChangePreObserverHandler(_ handler: (@Sendable (UUID) -> Void)?) {}
 
-    func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) throws {
+    func setRuntimeChangePostObserverHandler(_ handler: (@Sendable (UUID) -> Void)?) {}
+
+    func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) async throws {
         try launchBehavior?(launchConfiguration, session, workspace)
         if let launchTranscriptForConfiguration {
             transcripts[session.id] = launchTranscriptForConfiguration(launchConfiguration, session, workspace)
@@ -11030,11 +11032,17 @@ private final class StubSessionRuntimeManager: SessionRuntimeManaging {
     }
 
     func remove(session: Session) {
+        remove(session: session, preservingObservers: false)
+    }
+
+    func remove(session: Session, preservingObservers: Bool) {
         transcripts.removeValue(forKey: session.id)
         states.removeValue(forKey: session.id)
         sizes.removeValue(forKey: session.id)
-        updateObservers.removeValue(forKey: session.id)
-        observedSessionIDs = observedSessionIDs.filter { $0.value != session.id }
+        if preservingObservers == false {
+            updateObservers.removeValue(forKey: session.id)
+            observedSessionIDs = observedSessionIDs.filter { $0.value != session.id }
+        }
     }
 
     func hasRuntime(for session: Session) -> Bool {

@@ -2828,9 +2828,11 @@ private final class DelayedEchoSessionRuntimeManager: SessionRuntimeManaging, @u
         self.initialTranscript = initialTranscript
     }
 
-    func setRuntimeChangeHandler(_ handler: (@Sendable (UUID) -> Void)?) {}
+    func setRuntimeChangePreObserverHandler(_ handler: (@Sendable (UUID) -> Void)?) {}
 
-    func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) throws {
+    func setRuntimeChangePostObserverHandler(_ handler: (@Sendable (UUID) -> Void)?) {}
+
+    func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) async throws {
         lock.lock()
         runtimes[session.id] = RuntimeRecord(transcript: initialTranscript)
         lock.unlock()
@@ -2848,10 +2850,16 @@ private final class DelayedEchoSessionRuntimeManager: SessionRuntimeManaging, @u
     }
 
     func remove(session: Session) {
+        remove(session: session, preservingObservers: false)
+    }
+
+    func remove(session: Session, preservingObservers: Bool) {
         lock.lock()
         runtimes.removeValue(forKey: session.id)
-        updateObservers.removeValue(forKey: session.id)
-        observedSessionIDs = observedSessionIDs.filter { $0.value != session.id }
+        if preservingObservers == false {
+            updateObservers.removeValue(forKey: session.id)
+            observedSessionIDs = observedSessionIDs.filter { $0.value != session.id }
+        }
         lock.unlock()
     }
 
@@ -3004,9 +3012,11 @@ private final class StructuredPromptSessionRuntimeManager: SessionRuntimeManagin
         self.initialApprovalRequests = approvalRequests
     }
 
-    func setRuntimeChangeHandler(_ handler: (@Sendable (UUID) -> Void)?) {}
+    func setRuntimeChangePreObserverHandler(_ handler: (@Sendable (UUID) -> Void)?) {}
 
-    func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) throws {
+    func setRuntimeChangePostObserverHandler(_ handler: (@Sendable (UUID) -> Void)?) {}
+
+    func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) async throws {
         lock.lock()
         runtimes[session.id] = RuntimeRecord(
             session: session,
@@ -3026,10 +3036,16 @@ private final class StructuredPromptSessionRuntimeManager: SessionRuntimeManagin
     }
 
     func remove(session: Session) {
+        remove(session: session, preservingObservers: false)
+    }
+
+    func remove(session: Session, preservingObservers: Bool) {
         lock.lock()
         runtimes.removeValue(forKey: session.id)
-        updateObservers.removeValue(forKey: session.id)
-        observedSessionIDs = observedSessionIDs.filter { $0.value != session.id }
+        if preservingObservers == false {
+            updateObservers.removeValue(forKey: session.id)
+            observedSessionIDs = observedSessionIDs.filter { $0.value != session.id }
+        }
         lock.unlock()
     }
 

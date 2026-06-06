@@ -2217,9 +2217,11 @@ private struct RemoteSessionScreenView: View {
                                 IOSEquatableStructuredSessionActivityRow(row: row) {
                                     structuredSessionActivityRowView(row)
                                 }
+                                .equatable()
                             }
                         }
                     }
+                    .equatable()
                 }
 
                 if let thinkingIndicator = feedPresentation.thinkingIndicator {
