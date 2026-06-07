@@ -2443,12 +2443,18 @@ private struct RemoteSessionScreenView: View {
     @ViewBuilder
     private func structuredSessionDetailTextView(_ text: String, isTruncated: Bool, font: Font) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(verbatim: text)
-                .font(font)
-                .foregroundStyle(.white.opacity(0.84))
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            // Fixed-height viewport for live tool output previews.
+            // Prevents the growing detailText from causing repeated ancestor
+            // sizeThatFits / explicitAlignment passes up the LazyVStack / ScrollView / outer containers.
+            ScrollView {
+                Text(verbatim: text)
+                    .font(font)
+                    .foregroundStyle(.white.opacity(0.84))
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(height: 200)
 
             if isTruncated {
                 Text("Output preview truncated for smoother scrolling.")
@@ -2457,7 +2463,6 @@ private struct RemoteSessionScreenView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(maxHeight: 220)   // bound live streaming output height to stabilize layout during appends
         .padding(10)
         .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
