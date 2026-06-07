@@ -1643,11 +1643,18 @@ struct ContentView: View {
                 Text(label)
                     .font(NexusMacTheme.bodyFont(10, relativeTo: .caption).weight(.medium))
                     .foregroundStyle(NexusMacTheme.mutedText)
-                structuredSessionMarkdownText(
-                    conversation.text,
-                    font: NexusMacTheme.bodyFont(13),
-                    color: .white.opacity(0.94)
-                )
+                // Inner ScrollView + fixed height for the markdown body.
+                // Streaming assistant tokens would otherwise cause the bubble height to grow on every update,
+                // driving repeated sizeThatFits + explicitAlignment + StackLayout placement cascades
+                // through the LazyVStack tail (the dominant cost in 31210 sample).
+                ScrollView {
+                    structuredSessionMarkdownText(
+                        conversation.text,
+                        font: NexusMacTheme.bodyFont(13),
+                        color: .white.opacity(0.94)
+                    )
+                }
+                .frame(height: 280)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
