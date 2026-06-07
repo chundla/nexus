@@ -1497,8 +1497,9 @@ struct ContentView: View {
 
                 ScrollViewReader { proxy in
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 14) {
+                        LazyVStack(alignment: .leading, spacing: 8) {
                             structuredSessionHistoryPagingControls()
+                                .padding(.bottom, 6)
 
                             if feedPresentation.activityRowChunks.isEmpty {
                                 ContentUnavailableView(
@@ -1508,33 +1509,32 @@ struct ContentView: View {
                                 )
                                 .frame(maxWidth: .infinity, minHeight: 220)
                             } else {
-                                LazyVStack(alignment: .leading, spacing: 8) {
-                                    ForEach(feedPresentation.activityRowChunks) { chunk in
-                                        MacEquatableStructuredSessionActivityChunk(chunk: chunk) {
-                                            VStack(alignment: .leading, spacing: 8) {
-                                                ForEach(chunk.rows) { row in
-                                                    MacEquatableStructuredSessionActivityRow(row: row) {
-                                                        structuredSessionActivityRowView(row)
-                                                    }
-                                                    .equatable()
+                                ForEach(feedPresentation.activityRowChunks) { chunk in
+                                    MacEquatableStructuredSessionActivityChunk(chunk: chunk) {
+                                        VStack(alignment: .leading, spacing: 8) {
+                                            ForEach(chunk.rows) { row in
+                                                MacEquatableStructuredSessionActivityRow(row: row) {
+                                                    structuredSessionActivityRowView(row)
                                                 }
+                                                .equatable()
                                             }
                                         }
-                                        .equatable()
                                     }
-
-                                    if let thinkingIndicator = feedPresentation.thinkingIndicator {
-                                        structuredSessionThinkingIndicatorView(thinkingIndicator)
-                                    }
-
-                                    Color.clear
-                                        .frame(height: 1)
-                                        .id("conversation-bottom")
+                                    .equatable()
                                 }
+
+                                if let thinkingIndicator = feedPresentation.thinkingIndicator {
+                                    structuredSessionThinkingIndicatorView(thinkingIndicator)
+                                }
+
+                                Color.clear
+                                    .frame(height: 1)
+                                    .id("conversation-bottom")
                             }
                         }
                         .padding(.horizontal, 14)
                         .padding(.vertical, 14)
+                        .scrollTargetLayout()
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .onAppear {
@@ -1792,6 +1792,7 @@ struct ContentView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxHeight: 220)   // bound live streaming output height to stabilize layout during appends
         .padding(10)
         .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }

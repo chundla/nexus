@@ -2232,6 +2232,7 @@ private struct RemoteSessionScreenView: View {
                     .frame(height: 1)
                     .id(conversationBottomID)
             }
+            .scrollTargetLayout()
         }
     }
 
@@ -2456,6 +2457,7 @@ private struct RemoteSessionScreenView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxHeight: 220)   // bound live streaming output height to stabilize layout during appends
         .padding(10)
         .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
