@@ -2322,9 +2322,14 @@ private struct RemoteSessionScreenView: View {
         case .command:
             HStack {
                 VStack(alignment: .leading, spacing: 8) {
-                    Label(row.title, systemImage: row.systemImage)
-                        .font(NexusIOSTheme.monoFont(10, relativeTo: .caption))
-                        .foregroundStyle(accentColor)
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Image(systemName: row.systemImage)
+                            .font(NexusIOSTheme.monoFont(10, relativeTo: .caption))
+                            .foregroundStyle(accentColor)
+                        Text(row.title)
+                            .font(NexusIOSTheme.monoFont(10, relativeTo: .caption))
+                            .foregroundStyle(accentColor)
+                    }
                     Text(conversation.text)
                         .font(NexusIOSTheme.monoFont(12, relativeTo: .callout))
                         .foregroundStyle(.white.opacity(0.92))
@@ -2349,9 +2354,14 @@ private struct RemoteSessionScreenView: View {
         case .error:
             HStack {
                 VStack(alignment: .leading, spacing: 6) {
-                    Label("Error", systemImage: row.systemImage)
-                        .font(NexusIOSTheme.bodyFont(12, relativeTo: .caption, weight: .semibold))
-                        .foregroundStyle(accentColor)
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Image(systemName: row.systemImage)
+                            .font(NexusIOSTheme.bodyFont(12, relativeTo: .caption, weight: .semibold))
+                            .foregroundStyle(accentColor)
+                        Text("Error")
+                            .font(NexusIOSTheme.bodyFont(12, relativeTo: .caption, weight: .semibold))
+                            .foregroundStyle(accentColor)
+                    }
                     Text(conversation.text)
                         .font(NexusIOSTheme.bodyFont(14))
                         .foregroundStyle(.white.opacity(0.94))
@@ -2370,9 +2380,14 @@ private struct RemoteSessionScreenView: View {
             HStack {
                 if row.showsExpandedSystemCard {
                     VStack(alignment: .leading, spacing: 8) {
-                        Label(row.title, systemImage: row.systemImage)
-                            .font(NexusIOSTheme.bodyFont(12, relativeTo: .caption, weight: .medium))
-                            .foregroundStyle(NexusIOSTheme.mutedText)
+                        HStack(alignment: .firstTextBaseline, spacing: 4) {
+                            Image(systemName: row.systemImage)
+                                .font(NexusIOSTheme.bodyFont(12, relativeTo: .caption, weight: .medium))
+                                .foregroundStyle(NexusIOSTheme.mutedText)
+                            Text(row.title)
+                                .font(NexusIOSTheme.bodyFont(12, relativeTo: .caption, weight: .medium))
+                                .foregroundStyle(NexusIOSTheme.mutedText)
+                        }
                         Text(verbatim: conversation.text)
                             .font(NexusIOSTheme.bodyFont(14))
                             .foregroundStyle(.white.opacity(0.92))
@@ -2403,12 +2418,17 @@ private struct RemoteSessionScreenView: View {
                     Spacer(minLength: 48)
                 } else {
                     Spacer()
-                    Label(conversation.text, systemImage: row.systemImage)
-                        .font(NexusIOSTheme.bodyFont(11, relativeTo: .caption))
-                        .foregroundStyle(NexusIOSTheme.mutedText)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color.white.opacity(0.05), in: Capsule())
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Image(systemName: row.systemImage)
+                            .font(NexusIOSTheme.bodyFont(11, relativeTo: .caption))
+                            .foregroundStyle(NexusIOSTheme.mutedText)
+                        Text(conversation.text)
+                            .font(NexusIOSTheme.bodyFont(11, relativeTo: .caption))
+                            .foregroundStyle(NexusIOSTheme.mutedText)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.white.opacity(0.05), in: Capsule())
                     Spacer()
                 }
             }
