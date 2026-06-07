@@ -16,7 +16,6 @@ final class StructuredSessionHistoryPagingController {
     private var hasLoadedFirstPage = false
     private var nextCursor: StructuredSessionHistoryCursor?
     private var historicalActivityItems: [SessionActivityItem] = []
-    private var historicalProviderEvents: [SessionProviderEvent] = []
 
     private(set) var canLoadOlder = false
     private(set) var isLoading = false
@@ -49,14 +48,12 @@ final class StructuredSessionHistoryPagingController {
         }
 
         let missingFirstActivityItemID = missingFirstActivityItemID(from: previousScreen, to: screen)
-        let missingFirstProviderEventSequence = missingFirstProviderEventSequence(from: previousScreen, to: screen)
-        guard missingFirstActivityItemID != nil || missingFirstProviderEventSequence != nil else {
+        guard missingFirstActivityItemID != nil else {
             return
         }
 
         var cursor: StructuredSessionHistoryCursor?
         var recoveredActivityItems: [SessionActivityItem] = []
-        var recoveredProviderEvents: [SessionProviderEvent] = []
 
         while true {
             let page: StructuredSessionHistoryPage
@@ -72,15 +69,11 @@ final class StructuredSessionHistoryPagingController {
             }
 
             recoveredActivityItems = prependHistoricalActivityItems(page.activityItems, to: recoveredActivityItems)
-            recoveredProviderEvents = prependHistoricalProviderEvents(page.providerEvents, to: recoveredProviderEvents)
 
             let recoveredMissingActivityItem = missingFirstActivityItemID.map { missingID in
                 recoveredActivityItems.contains(where: { $0.id == missingID })
             } ?? true
-            let recoveredMissingProviderEvent = missingFirstProviderEventSequence.map { missingSequence in
-                recoveredProviderEvents.contains(where: { $0.sequence == missingSequence })
-            } ?? true
-            if recoveredMissingActivityItem && recoveredMissingProviderEvent {
+            if recoveredMissingActivityItem {
                 break
             }
 
@@ -91,7 +84,6 @@ final class StructuredSessionHistoryPagingController {
         }
 
         historicalActivityItems = prependHistoricalActivityItems(recoveredActivityItems, to: historicalActivityItems)
-        historicalProviderEvents = prependHistoricalProviderEvents(recoveredProviderEvents, to: historicalProviderEvents)
         refreshAvailability()
     }
 
@@ -126,10 +118,6 @@ final class StructuredSessionHistoryPagingController {
                 page.activityItems,
                 to: historicalActivityItems
             )
-            historicalProviderEvents = prependHistoricalProviderEvents(
-                page.providerEvents,
-                to: historicalProviderEvents
-            )
             errorMessage = nil
         } catch {
             guard currentSessionID == screen.session.id else {
@@ -159,7 +147,7 @@ final class StructuredSessionHistoryPagingController {
     private func mergedScreen(for screen: SessionScreen) -> SessionScreen {
         guard currentSessionSupportsPaging,
               currentSessionID == screen.session.id,
-              historicalActivityItems.isEmpty == false || historicalProviderEvents.isEmpty == false else {
+              historicalActivityItems.isEmpty == false else {
             return screen
         }
 
@@ -167,11 +155,7 @@ final class StructuredSessionHistoryPagingController {
             historicalActivityItems,
             with: screen.activityItems
         )
-        let mergedProviderEvents = mergeHistoricalProviderEvents(
-            historicalProviderEvents,
-            with: screen.providerEvents
-        )
-        guard mergedActivityItems != screen.activityItems || mergedProviderEvents != screen.providerEvents else {
+        guard mergedActivityItems != screen.activityItems else {
             return screen
         }
 
@@ -186,7 +170,7 @@ final class StructuredSessionHistoryPagingController {
             approvalRequests: screen.approvalRequests,
             extensionUI: screen.extensionUI,
             slashCommands: screen.slashCommands,
-            providerEvents: mergedProviderEvents,
+            providerEvents: screen.providerEvents,
             providerFacts: screen.providerFacts,
             finalOutputDiagnostic: screen.finalOutputDiagnostic,
             isAgentTurnInProgress: screen.isAgentTurnInProgress,
@@ -204,7 +188,6 @@ final class StructuredSessionHistoryPagingController {
         hasLoadedFirstPage = false
         nextCursor = nil
         historicalActivityItems = []
-        historicalProviderEvents = []
         isLoading = false
         errorMessage = nil
         refreshAvailability()
@@ -238,20 +221,6 @@ final class StructuredSessionHistoryPagingController {
         return previousScreen.activityItems.first?.id
     }
 
-    private func missingFirstProviderEventSequence(from previousScreen: SessionScreen, to currentScreen: SessionScreen) -> Int? {
-        guard let currentFirstSequence = currentScreen.providerEvents.first?.sequence,
-              previousScreen.providerEvents.isEmpty == false else {
-            return nil
-        }
-
-        let knownSequences = Set(mergeHistoricalProviderEvents(historicalProviderEvents, with: previousScreen.providerEvents).map(\.sequence))
-        guard knownSequences.contains(currentFirstSequence) == false else {
-            return nil
-        }
-
-        return previousScreen.providerEvents.first?.sequence
-    }
-
     private func prependHistoricalActivityItems(
         _ olderItems: [SessionActivityItem],
         to existingItems: [SessionActivityItem]
@@ -280,31 +249,4 @@ final class StructuredSessionHistoryPagingController {
         return merged
     }
 
-    private func prependHistoricalProviderEvents(
-        _ olderEvents: [SessionProviderEvent],
-        to existingEvents: [SessionProviderEvent]
-    ) -> [SessionProviderEvent] {
-        var seen = Set<Int>()
-        var merged: [SessionProviderEvent] = []
-
-        for event in olderEvents + existingEvents where seen.insert(event.sequence).inserted {
-            merged.append(event)
-        }
-
-        return merged
-    }
-
-    private func mergeHistoricalProviderEvents(
-        _ historicalEvents: [SessionProviderEvent],
-        with liveEvents: [SessionProviderEvent]
-    ) -> [SessionProviderEvent] {
-        var seen = Set<Int>()
-        var merged: [SessionProviderEvent] = []
-
-        for event in historicalEvents + liveEvents where seen.insert(event.sequence).inserted {
-            merged.append(event)
-        }
-
-        return merged
-    }
 }
