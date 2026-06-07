@@ -128,6 +128,8 @@ final class NexusAppModel {
     private let structuredSessionHistoryPagingController: StructuredSessionHistoryPagingController
     private let focusedStructuredSessionChromePresenter = FocusedStructuredSessionChromePresenter()
     private var focusedStructuredSessionFinalOutputLatencyTracker = StructuredSessionFinalOutputLatencyTracker()
+    @ObservationIgnored
+    nonisolated(unsafe) private let focusedSessionScreenUpdatePump = CoalescingMainActorValuePump<SessionScreen>()
     private let remotePairingServerFactory: (() throws -> any RemotePairingServing)?
     private var focusedSessionObservation: (any SessionScreenObservation)?
     private var staleWorkspaceOverviewRefreshTasks: [UUID: Task<Void, Never>] = [:]
@@ -167,6 +169,14 @@ final class NexusAppModel {
         }
         self.remotePairingServerFactory = remotePairingServerFactory
         self.remotePairingEndpoint = remotePairingServer?.endpoint
+        focusedSessionScreenUpdatePump.installDeliver { [weak self] screen in
+            guard let self,
+                  self.focusedSessionID == screen.session.id else {
+                return
+            }
+
+            try? await self.applyFocusedSessionScreen(screen)
+        }
     }
 
     nonisolated static let defaultRemoteAccessListeningPort = 9234
@@ -515,18 +525,13 @@ final class NexusAppModel {
             focusedSessionWorkspaceID = nil
         }
         let observation = try await client.observeSessionScreen(sessionID: sessionID) { [weak self] screen in
-            Task { @MainActor [weak self] in
-                guard let self else {
-                    return
-                }
-
-                try? await self.applyFocusedSessionScreen(screen)
-            }
+            self?.focusedSessionScreenUpdatePump.submit(screen)
         }
         focusedSessionObservation = observation
     }
 
     func stopFocusingSession() async {
+        focusedSessionScreenUpdatePump.reset()
         let observation = focusedSessionObservation
         focusedSessionObservation = nil
         if let observation {

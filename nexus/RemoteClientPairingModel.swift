@@ -4,6 +4,77 @@ import NexusIPC
 import NexusSessionPresentation
 import Observation
 
+final class CoalescingMainActorValuePump<Value>: @unchecked Sendable {
+    typealias Deliver = @MainActor @Sendable (Value) async -> Void
+
+    private let lock = NSLock()
+    private var deliver: Deliver?
+    private var pendingValue: Value?
+    private var isDraining = false
+
+    init() {}
+
+    func installDeliver(_ deliver: @escaping Deliver) {
+        withLock {
+            self.deliver = deliver
+        }
+    }
+
+    func submit(_ value: Value) {
+        let shouldStartDrain = withLock {
+            pendingValue = value
+            guard isDraining == false else {
+                return false
+            }
+            isDraining = true
+            return true
+        }
+        guard shouldStartDrain else {
+            return
+        }
+
+        Task {
+            await drain()
+        }
+    }
+
+    func reset() {
+        withLock {
+            pendingValue = nil
+        }
+    }
+
+    private func drain() async {
+        while let value = nextValueForDrain() {
+            guard let deliver = currentDeliver() else {
+                continue
+            }
+            await deliver(value)
+        }
+    }
+
+    private func currentDeliver() -> Deliver? {
+        withLock { deliver }
+    }
+
+    private func nextValueForDrain() -> Value? {
+        withLock {
+            guard let pendingValue else {
+                isDraining = false
+                return nil
+            }
+            self.pendingValue = nil
+            return pendingValue
+        }
+    }
+
+    private func withLock<T>(_ operation: () -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return operation()
+    }
+}
+
 protocol RemotePairingClient {
     func fetchStatus(host: String, port: Int) async throws -> RemotePairedMacStatus
     func completePairing(host: String, port: Int, pairingCode: String, deviceName: String) async throws -> PairedMac
@@ -211,6 +282,8 @@ final class RemoteClientPairingModel {
     private let structuredSessionHistoryPagingController: StructuredSessionHistoryPagingController
     private let focusedStructuredSessionChromePresenter = FocusedStructuredSessionChromePresenter()
     private var focusedStructuredSessionFinalOutputLatencyTracker = StructuredSessionFinalOutputLatencyTracker()
+    @ObservationIgnored
+    nonisolated(unsafe) private let focusedSessionScreenUpdatePump = CoalescingMainActorValuePump<SessionScreen>()
     private var focusedSessionObservation: (any SessionScreenObservation)?
     private var focusedSessionObservationStartupTask: Task<Void, Never>?
     private var focusedSessionReconnectTask: Task<Void, Never>?
@@ -267,11 +340,22 @@ final class RemoteClientPairingModel {
                 before: cursor
             )
         }
-        self.pairedMacs = store.loadPairedMacs()
+        let pairedMacs = store.loadPairedMacs()
+        self.pairedMacs = pairedMacs
         self.activePairedMacID = Self.resolveActivePairedMacID(
             preferredID: store.loadActivePairedMacID(),
             pairedMacs: pairedMacs
         )
+        focusedSessionScreenUpdatePump.installDeliver { [weak self] screen in
+            guard let self,
+                  self.focusedSessionID == screen.session.id else {
+                return
+            }
+
+            self.applyFocusedSessionScreen(screen)
+            self.focusedSessionIsStale = false
+            self.focusedSessionErrorMessage = nil
+        }
     }
 
     func availability(for pairedMac: PairedMac) -> PairedMacAvailability {
@@ -1345,25 +1429,7 @@ final class RemoteClientPairingModel {
                 for: pairedMac,
                 sessionID: sessionID,
                 onUpdate: { [weak self] screen in
-                    let applyUpdate = { @MainActor [weak self] in
-                        guard let self, self.focusedSessionID == sessionID else {
-                            return
-                        }
-
-                        self.applyFocusedSessionScreen(screen)
-                        self.focusedSessionIsStale = false
-                        self.focusedSessionErrorMessage = nil
-                    }
-
-                    if Thread.isMainThread {
-                        MainActor.assumeIsolated {
-                            applyUpdate()
-                        }
-                    } else {
-                        Task { @MainActor in
-                            applyUpdate()
-                        }
-                    }
+                    self?.focusedSessionScreenUpdatePump.submit(screen)
                 },
                 onDisconnect: { [weak self] error in
                     let applyDisconnect = { @MainActor [weak self] in
@@ -1444,6 +1510,7 @@ final class RemoteClientPairingModel {
     }
 
     private func cancelFocusedSessionObservation() async {
+        focusedSessionScreenUpdatePump.reset()
         focusedSessionReconnectTask?.cancel()
         focusedSessionReconnectTask = nil
 
