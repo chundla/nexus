@@ -1468,6 +1468,9 @@ struct ContentView: View {
             let autoScrollTrigger = structuredPresentation.autoScrollTrigger
 
             VStack(spacing: 0) {
+                // Supplementary chrome (approvals, extension dialogs/summary) lives *above* the scrolling feed.
+                // This keeps live appends in the activity feed from forcing re-measurement of the chrome,
+                // and vice-versa. The feed ScrollView is now the only live-updating scroller.
                 if let extensionUI, extensionUI.pendingDialogs.isEmpty == false {
                     VStack(alignment: .leading, spacing: 8) {
                         ForEach(extensionUI.pendingDialogs) { dialog in

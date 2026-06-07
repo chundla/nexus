@@ -2304,11 +2304,18 @@ private struct RemoteSessionScreenView: View {
                     Text(label)
                         .font(NexusIOSTheme.bodyFont(11, relativeTo: .caption, weight: .medium))
                         .foregroundStyle(NexusIOSTheme.mutedText)
-                    structuredSessionMarkdownText(
-                        conversation.text,
-                        font: NexusIOSTheme.bodyFont(15),
-                        color: .white.opacity(0.94)
-                    )
+                    // Inner ScrollView + fixed height for the markdown body.
+                    // Streaming assistant tokens would otherwise cause the bubble height to grow on every update,
+                    // driving repeated sizeThatFits + explicitAlignment + StackLayout placement cascades
+                    // through the LazyVStack tail (the dominant cost observed in long-session hangs).
+                    ScrollView {
+                        structuredSessionMarkdownText(
+                            conversation.text,
+                            font: NexusIOSTheme.bodyFont(15),
+                            color: .white.opacity(0.94)
+                        )
+                    }
+                    .frame(height: 280)
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
