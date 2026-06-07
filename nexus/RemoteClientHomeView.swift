@@ -2370,9 +2370,15 @@ private struct RemoteSessionScreenView: View {
             HStack {
                 if row.showsExpandedSystemCard {
                     VStack(alignment: .leading, spacing: 8) {
-                        Label(conversation.text, systemImage: row.systemImage)
+                        Label(row.title, systemImage: row.systemImage)
                             .font(NexusIOSTheme.bodyFont(12, relativeTo: .caption, weight: .medium))
                             .foregroundStyle(NexusIOSTheme.mutedText)
+                        Text(verbatim: conversation.text)
+                            .font(NexusIOSTheme.bodyFont(14))
+                            .foregroundStyle(.white.opacity(0.92))
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         if let detailText = row.detailText {
                             structuredSessionMarkdownText(
                                 detailText,

@@ -1707,9 +1707,15 @@ struct ContentView: View {
             Group {
                 if row.showsExpandedSystemCard {
                     VStack(alignment: .leading, spacing: 8) {
-                        Label(conversation.text, systemImage: row.systemImage)
+                        Label(row.title, systemImage: row.systemImage)
                             .font(NexusMacTheme.bodyFont(11, relativeTo: .caption).weight(.medium))
                             .foregroundStyle(NexusMacTheme.mutedText)
+                        Text(verbatim: conversation.text)
+                            .font(NexusMacTheme.bodyFont(13))
+                            .foregroundStyle(.white.opacity(0.92))
+                            .structuredSessionFeedTextSelection()
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         if let detailText = row.detailText {
                             structuredSessionMarkdownText(
                                 detailText,
