@@ -2416,10 +2416,11 @@ private struct RemoteSessionScreenView: View {
     @ViewBuilder
     private func structuredSessionDetailTextView(_ text: String, isTruncated: Bool, font: Font) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(text)
+            Text(verbatim: text)
                 .font(font)
                 .foregroundStyle(.white.opacity(0.84))
                 .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             if isTruncated {
