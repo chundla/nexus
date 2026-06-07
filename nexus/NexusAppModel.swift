@@ -129,7 +129,7 @@ final class NexusAppModel {
     private let focusedStructuredSessionChromePresenter = FocusedStructuredSessionChromePresenter()
     private var focusedStructuredSessionFinalOutputLatencyTracker = StructuredSessionFinalOutputLatencyTracker()
     @ObservationIgnored
-    nonisolated(unsafe) private let focusedSessionScreenUpdatePump = CoalescingMainActorValuePump<SessionScreen>()
+    private let focusedSessionScreenUpdatePump = CoalescingMainActorValuePump<SessionScreen>()
     private let remotePairingServerFactory: (() throws -> any RemotePairingServing)?
     private var focusedSessionObservation: (any SessionScreenObservation)?
     private var staleWorkspaceOverviewRefreshTasks: [UUID: Task<Void, Never>] = [:]
@@ -170,12 +170,10 @@ final class NexusAppModel {
         self.remotePairingServerFactory = remotePairingServerFactory
         self.remotePairingEndpoint = remotePairingServer?.endpoint
         focusedSessionScreenUpdatePump.installDeliver { [weak self] screen in
-            guard let self,
-                  self.focusedSessionID == screen.session.id else {
+            guard let self else {
                 return
             }
-
-            try? await self.applyFocusedSessionScreen(screen)
+            await self.applyCoalescedFocusedSessionScreenUpdate(screen)
         }
     }
 
@@ -524,8 +522,9 @@ final class NexusAppModel {
         if focusedSessionScreen?.session.id != sessionID {
             focusedSessionWorkspaceID = nil
         }
-        let observation = try await client.observeSessionScreen(sessionID: sessionID) { [weak self] screen in
-            self?.focusedSessionScreenUpdatePump.submit(screen)
+        let updatePump = focusedSessionScreenUpdatePump
+        let observation = try await client.observeSessionScreen(sessionID: sessionID) { screen in
+            submitToCoalescingMainActorValuePump(updatePump, value: screen)
         }
         focusedSessionObservation = observation
     }
@@ -1143,6 +1142,14 @@ final class NexusAppModel {
         }
 
         return false
+    }
+
+    private func applyCoalescedFocusedSessionScreenUpdate(_ screen: SessionScreen) async {
+        guard focusedSessionID == screen.session.id else {
+            return
+        }
+
+        try? await applyFocusedSessionScreen(screen)
     }
 
     private func applyFocusedSessionScreen(_ screen: SessionScreen) async throws {
