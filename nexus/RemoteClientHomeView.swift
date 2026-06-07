@@ -2099,44 +2099,52 @@ private struct RemoteSessionScreenView: View {
         approvalRequestPresentation: StructuredSessionApprovalRequestPresentation
     ) -> some View {
         let autoScrollTrigger = presentation.autoScrollTrigger
+        let feedPresentation = presentation.feed
 
-        return ScrollViewReader { proxy in
-            ScrollView {
-                structuredSessionScrollBody(
-                    presentation,
-                    approvalRequestPresentation: approvalRequestPresentation
-                )
-            }
-            .onAppear {
-                structuredSessionAutoScrollCoordinator.request(.immediate) { animation in
-                    scrollStructuredSessionToBottom(using: proxy, animation: animation)
-                }
-            }
-            .onChange(of: autoScrollTrigger) { oldTrigger, newTrigger in
-                structuredSessionAutoScrollCoordinator.request(
-                    structuredSessionAutoScrollAnimation(previous: oldTrigger, current: newTrigger)
-                ) { animation in
-                    scrollStructuredSessionToBottom(using: proxy, animation: animation)
-                }
-            }
-        }
-    }
-
-    private func structuredSessionScrollBody(
-        _ presentation: FocusedStructuredSessionPresentation,
-        approvalRequestPresentation: StructuredSessionApprovalRequestPresentation
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            structuredSessionHistoryPagingControls()
+        // Supplementary chrome (approvals, extension dialogs/summary) is rendered *outside*
+        // the live feed ScrollView. This prevents live appends to the activity feed
+        // from forcing re-measurement of the chrome (and vice-versa) during long sessions.
+        // Matches the macOS isolation change.
+        return VStack(spacing: 0) {
             structuredSessionSupplementaryContent(
                 presentation: presentation,
                 approvalRequestPresentation: approvalRequestPresentation
             )
-            structuredSessionActivityFeed(feedPresentation: presentation.feed)
+
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 10) {
+                        structuredSessionHistoryPagingControls()
+
+                        structuredSessionActivityFeed(feedPresentation: feedPresentation)
+
+                        if let thinkingIndicator = feedPresentation.thinkingIndicator {
+                            structuredSessionThinkingIndicatorView(thinkingIndicator)
+                        }
+
+                        Color.clear
+                            .frame(height: 1)
+                            .id(conversationBottomID)
+                    }
+                    .padding(.horizontal, horizontalPadding)
+                    .padding(.top, 14)
+                    .padding(.bottom, 120)
+                    .scrollTargetLayout()
+                }
+                .onAppear {
+                    structuredSessionAutoScrollCoordinator.request(.immediate) { animation in
+                        scrollStructuredSessionToBottom(using: proxy, animation: animation)
+                    }
+                }
+                .onChange(of: autoScrollTrigger) { oldTrigger, newTrigger in
+                    structuredSessionAutoScrollCoordinator.request(
+                        structuredSessionAutoScrollAnimation(previous: oldTrigger, current: newTrigger)
+                    ) { animation in
+                        scrollStructuredSessionToBottom(using: proxy, animation: animation)
+                    }
+                }
+            }
         }
-        .padding(.horizontal, horizontalPadding)
-        .padding(.top, 14)
-        .padding(.bottom, 120)
     }
 
     @ViewBuilder
