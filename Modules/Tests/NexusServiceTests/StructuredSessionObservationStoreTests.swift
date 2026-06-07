@@ -110,6 +110,53 @@ struct StructuredSessionObservationStoreTests {
         #expect(delta.changes.contains(.replaceProviderFacts(updatedFacts)))
     }
 
+    @Test func structuredObservationDeltaReplacesSingleUpdatedActivityItem() {
+        let store = StructuredSessionObservationStore()
+        let session = Session(id: UUID(), workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready)
+        let statusID = UUID()
+        let commandID = UUID()
+        let initialScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "initial",
+            activityItems: [
+                SessionActivityItem(id: statusID, kind: .status, text: "Pi ready"),
+                SessionActivityItem(id: commandID, kind: .command, text: "subagent reviewer", detailText: "step 1")
+            ]
+        )
+        _ = store.snapshotResponse(for: initialScreen)
+
+        let updatedScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "initial",
+            activityItems: [
+                SessionActivityItem(id: statusID, kind: .status, text: "Pi ready"),
+                SessionActivityItem(id: commandID, kind: .command, text: "subagent reviewer", detailText: "step 1\nstep 2")
+            ]
+        )
+        store.recordChange(for: updatedScreen)
+
+        let updates = store.updates(for: session.id, after: 0)
+        let delta: StructuredSessionObservationDelta
+        switch try! #require(updates.first) {
+        case let .structuredDelta(value):
+            delta = value
+        default:
+            Issue.record("Expected structured delta update")
+            return
+        }
+
+        #expect(delta.changes.contains {
+            if case let .replaceActivityItem(item) = $0 {
+                return item.id == commandID && item.detailText == "step 1\nstep 2"
+            }
+            return false
+        })
+        #expect(delta.changes.contains { if case .replaceActivityItemRange = $0 { return true }; return false } == false)
+        #expect(delta.changes.contains { if case .replaceActivityItems = $0 { return true }; return false } == false)
+    }
+
     @Test func structuredObservationStartPreservesStructuredViewportState() {
         let store = StructuredSessionObservationStore()
         let session = Session(id: UUID(), workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready)

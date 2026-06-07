@@ -254,17 +254,26 @@ final class StructuredSessionObservationStore: @unchecked Sendable {
 
         let sharedCount = existingItems.count
         var firstChangedIndex: Int?
+        var changedIndices: [Int] = []
 
         for index in 0..<sharedCount {
             guard existingItems[index].id == newItems[index].id else {
                 return [.replaceActivityItems(newItems)]
             }
-            if existingItems[index] != newItems[index], firstChangedIndex == nil {
-                firstChangedIndex = index
+            if existingItems[index] != newItems[index] {
+                if firstChangedIndex == nil {
+                    firstChangedIndex = index
+                }
+                changedIndices.append(index)
             }
         }
 
         if let firstChangedIndex {
+            if changedIndices.count == 1,
+               newItems.count == existingItems.count {
+                return [.replaceActivityItem(newItems[firstChangedIndex])]
+            }
+
             return [
                 .replaceActivityItemRange(
                     startIndex: firstChangedIndex,
