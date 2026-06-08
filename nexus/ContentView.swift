@@ -1465,7 +1465,6 @@ struct ContentView: View {
             let extensionUI = structuredChrome?.extensionUI
             let aboveEditorWidgets = extensionUI?.widgets.filter { $0.placement == .aboveEditor } ?? []
             let belowEditorWidgets = extensionUI?.widgets.filter { $0.placement == .belowEditor } ?? []
-            let autoScrollTrigger = structuredPresentation.autoScrollTrigger
 
             VStack(spacing: 0) {
                 // Supplementary chrome (approvals, extension dialogs/summary) lives *above* the scrolling feed.
@@ -1538,26 +1537,11 @@ struct ContentView: View {
                         .padding(.horizontal, 14)
                         .padding(.vertical, 14)
                     }
+                    .defaultScrollAnchor(.bottom)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .onAppear {
                         structuredSessionAutoScrollCoordinator.request(.immediate) { _ in
                             proxy.scrollTo("conversation-bottom", anchor: .bottom)
-                        }
-                    }
-                    .onChange(of: autoScrollTrigger) { oldTrigger, newTrigger in
-                        structuredSessionAutoScrollCoordinator.request(
-                            structuredSessionAutoScrollAnimation(previous: oldTrigger, current: newTrigger)
-                        ) { animation in
-                            let scroll = {
-                                proxy.scrollTo("conversation-bottom", anchor: .bottom)
-                            }
-
-                            switch animation {
-                            case .immediate:
-                                scroll()
-                            case .animated:
-                                scroll()
-                            }
                         }
                     }
                 }

@@ -2098,7 +2098,6 @@ private struct RemoteSessionScreenView: View {
         _ presentation: FocusedStructuredSessionPresentation,
         approvalRequestPresentation: StructuredSessionApprovalRequestPresentation
     ) -> some View {
-        let autoScrollTrigger = presentation.autoScrollTrigger
         let feedPresentation = presentation.feed
 
         // Supplementary chrome (approvals, extension dialogs/summary) is rendered *outside*
@@ -2130,15 +2129,9 @@ private struct RemoteSessionScreenView: View {
                     .padding(.top, 14)
                     .padding(.bottom, 120)
                 }
+                .defaultScrollAnchor(.bottom)
                 .onAppear {
                     structuredSessionAutoScrollCoordinator.request(.immediate) { animation in
-                        scrollStructuredSessionToBottom(using: proxy, animation: animation)
-                    }
-                }
-                .onChange(of: autoScrollTrigger) { oldTrigger, newTrigger in
-                    structuredSessionAutoScrollCoordinator.request(
-                        structuredSessionAutoScrollAnimation(previous: oldTrigger, current: newTrigger)
-                    ) { animation in
                         scrollStructuredSessionToBottom(using: proxy, animation: animation)
                     }
                 }
