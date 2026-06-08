@@ -1646,18 +1646,19 @@ struct ContentView: View {
                 Text(label)
                     .font(NexusMacTheme.bodyFont(10, relativeTo: .caption).weight(.medium))
                     .foregroundStyle(NexusMacTheme.mutedText)
-                // Inner ScrollView + fixed height for the markdown body.
-                // Streaming assistant tokens would otherwise cause the bubble height to grow on every update,
-                // driving repeated sizeThatFits + explicitAlignment + StackLayout placement cascades
-                // through the LazyVStack tail (the dominant cost in 31210 sample).
-                ScrollView {
-                    structuredSessionMarkdownText(
-                        conversation.text,
-                        font: NexusMacTheme.bodyFont(13),
-                        color: .white.opacity(0.94)
-                    )
-                }
-                .frame(height: 280)
+                // Fixed-height clipped viewport for the markdown body.
+                // The earlier nested ScrollView stabilized streaming height growth,
+                // but manual scrolling in the outer macOS feed now reproduces hangs.
+                // Keep the geometry stable without nesting a second scrolling region
+                // inside the live feed ScrollView.
+                structuredSessionMarkdownText(
+                    conversation.text,
+                    font: NexusMacTheme.bodyFont(13),
+                    color: .white.opacity(0.94)
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(height: 280, alignment: .top)
+                .clipped()
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -1772,18 +1773,17 @@ struct ContentView: View {
     @ViewBuilder
     private func structuredSessionDetailTextView(_ text: String, isTruncated: Bool, font: Font) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Fixed-height viewport for live tool output previews.
-            // Prevents the growing detailText from causing repeated ancestor
-            // sizeThatFits / explicitAlignment passes up the LazyVStack / ScrollView / outer containers.
-            ScrollView {
-                Text(verbatim: text)
-                    .font(font)
-                    .foregroundStyle(.white.opacity(0.84))
-                    .structuredSessionFeedTextSelection()
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .frame(height: 200)
+            // Fixed-height clipped viewport for live tool output previews.
+            // Avoid nested ScrollView-in-ScrollView interaction on macOS while still
+            // preventing growing detailText from expanding the row during streaming.
+            Text(verbatim: text)
+                .font(font)
+                .foregroundStyle(.white.opacity(0.84))
+                .structuredSessionFeedTextSelection()
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(height: 200, alignment: .top)
+                .clipped()
 
             if isTruncated {
                 Text("Output preview truncated for smooth scrolling.")
