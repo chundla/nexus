@@ -120,6 +120,28 @@ xcodebuild test -scheme nexus -project nexus.xcodeproj -destination 'platform=ma
 
 These tests do not replace SwiftUI Instruments, but they catch service/model observation broadening before you spend time in a profiling trace.
 
+### Repeatable macOS structured feed trace fixture
+
+For the macOS structured-feed hang path, launch the app with:
+
+- `NEXUS_MAC_PROFILE_FIXTURE=structured-feed-profile`
+
+That fixture opens the macOS app into the real `ContentView` structured-feed surface with:
+- one deterministic remote Workspace already loaded
+- an initial sidebar selection that targets the Pi structured `Session` directly
+- ~100 preseeded structured activity rows spanning multiple chunks
+- live draft growth every `200 ms`
+- deterministic draft finalization plus the next turn starting automatically
+- alternating compact and multi-line command output previews
+
+Suggested trace path:
+1. launch the macOS app from Xcode with `NEXUS_MAC_PROFILE_FIXTURE=structured-feed-profile`
+2. let the app settle on the structured `Session` detail screen
+3. attach Instruments and capture while the draft expands, finalizes, and starts the next turn
+4. compare the trace with `NexusAppProfilingFixtureTests/bootstrapStreamsDeterministicStructuredFeedProfilingBurstsOnMacOS`
+
+Use this fixture for `ContentView` / macOS structured-feed regressions. Use the `Remote Client` fixture below only for the iPhone path.
+
 ## iOS Remote Client invalidation guardrails
 
 Before running a manual SwiftUI profiling pass for the iPhone `Remote Client` browse or focused `Session` surfaces, run the focused observation-stability tests that guard the extracted presentation seams:

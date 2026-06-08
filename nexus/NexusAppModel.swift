@@ -80,6 +80,7 @@ struct WorkspaceHomePresentation: Equatable {
 enum WorkspaceBrowseInitialSelection: Equatable {
     case workspace(UUID)
     case workspaceGroup(UUID)
+    case session(UUID)
 }
 
 struct WorkspaceBrowseNavigationPresentation: Equatable {
@@ -124,6 +125,7 @@ final class NexusAppModel {
 
     private let client: any NexusServiceClient
     private let embeddedService: (any NexusEmbeddedServiceSession)?
+    private let bootstrapInitialSelection: WorkspaceBrowseInitialSelection?
     private var remotePairingServer: (any RemotePairingServing)?
     private let structuredSessionHistoryPagingController: StructuredSessionHistoryPagingController
     private let focusedStructuredSessionChromePresenter = FocusedStructuredSessionChromePresenter()
@@ -155,10 +157,12 @@ final class NexusAppModel {
         client: any NexusServiceClient,
         embeddedService: (any NexusEmbeddedServiceSession)? = nil,
         remotePairingServer: (any RemotePairingServing)? = nil,
-        remotePairingServerFactory: (() throws -> any RemotePairingServing)? = nil
+        remotePairingServerFactory: (() throws -> any RemotePairingServing)? = nil,
+        bootstrapInitialSelection: WorkspaceBrowseInitialSelection? = nil
     ) {
         self.client = client
         self.embeddedService = embeddedService
+        self.bootstrapInitialSelection = bootstrapInitialSelection
         self.remotePairingServer = remotePairingServer
         self.structuredSessionHistoryPagingController = StructuredSessionHistoryPagingController { sessionID, pageSize, cursor in
             try await client.getStructuredSessionHistoryPage(
@@ -730,7 +734,8 @@ final class NexusAppModel {
 
     func workspaceBrowseNavigationPresentation(currentWorkspaceID: UUID?) -> WorkspaceBrowseNavigationPresentation {
         let sidebarPresentation = workspaceBrowseSidebarPresentation(currentWorkspaceID: currentWorkspaceID)
-        let initialSelection = sidebarPresentation.workspaces.first.map { WorkspaceBrowseInitialSelection.workspace($0.workspace.id) }
+        let initialSelection = bootstrapInitialSelection
+            ?? sidebarPresentation.workspaces.first.map { WorkspaceBrowseInitialSelection.workspace($0.workspace.id) }
             ?? sidebarPresentation.workspaceGroups.first.map { WorkspaceBrowseInitialSelection.workspaceGroup($0.group.id) }
         let quickSwitchItems = sidebarPresentation.workspaces.map { summary in
             NavigationItem(

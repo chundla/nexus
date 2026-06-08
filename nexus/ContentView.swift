@@ -2825,6 +2825,8 @@ private struct SidebarSelectionBootstrapBoundary: View {
             .workspace(workspaceID)
         case .workspaceGroup(let groupID):
             .workspaceGroup(groupID)
+        case .session(let sessionID):
+            .session(sessionID)
         case .none:
             nil
         }

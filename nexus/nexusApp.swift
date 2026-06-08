@@ -12,7 +12,7 @@ struct nexusApp: App {
 #if os(macOS)
     @State private var appModel = {
         do {
-            return try NexusAppModel.live(listeningPort: NexusAppModel.appBootstrapListeningPort())
+            return try NexusAppModel.bootstrap()
         } catch {
             fatalError("Could not bootstrap Nexus background service: \(error)")
         }
