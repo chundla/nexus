@@ -11,7 +11,10 @@ nonisolated enum StructuredFeedProfilingFixture {
     enum Phase: Equatable {
         case drafting(step: Int)
         case finalized
+        case finalizedDwell(remaining: Int)  // post-turn_end dwell: isAgent=false, finalOutputDiagnostic present, activity rows stable (no appends), but providerEventSequence and extensionUI notifications continue to tick every 200 ms. Provides a reliable multi-tick window (~1 s) for observers to sample turn-end state + continued StructuredSessionAutoScrollTrigger churn before the next turn's startTurn appends You+progress rows.
     }
+
+    private static let postTurnDwellTicks = 5
 
     struct State {
         var turnIndex: Int
@@ -74,6 +77,23 @@ nonisolated enum StructuredFeedProfilingFixture {
 
             return finalizeTurn(state)
         case .finalized:
+            // Enter dwell: keep activity rows stable, keep isAgent=false, keep finalOutputDiagnostic,
+            // but continue mutating providerEventSequence + extensionUI (for AutoScrollTrigger.notificationIDs churn)
+            // for a multi-tick window before the next turn appends rows.
+            return State(
+                turnIndex: state.turnIndex,
+                phase: .finalizedDwell(remaining: postTurnDwellTicks),
+                transcript: state.transcript,
+                activityItems: state.activityItems,
+                providerEventSequence: state.providerEventSequence + 1
+            )
+        case .finalizedDwell(let remaining):
+            if remaining > 1 {
+                var updated = state
+                updated.phase = .finalizedDwell(remaining: remaining - 1)
+                updated.providerEventSequence += 1
+                return updated
+            }
             return startTurn(after: state, turnIndex: state.turnIndex + 1)
         }
     }
@@ -94,7 +114,11 @@ nonisolated enum StructuredFeedProfilingFixture {
             modelIdentifier: modelIdentifier
         )
 
-        let finalOutputDiagnostic: StructuredSessionFinalOutputDiagnostic? = if case .finalized = state.phase,
+        let isPostTurn = switch state.phase {
+        case .finalized, .finalizedDwell: true
+        default: false
+        }
+        let finalOutputDiagnostic: StructuredSessionFinalOutputDiagnostic? = if isPostTurn,
            let assistantItem = state.activityItems.last(where: { $0.kind == .message && $0.text.hasPrefix("Pi: ") }) {
             StructuredSessionFinalOutputDiagnostic(
                 trigger: .turnEnd,
@@ -109,6 +133,40 @@ nonisolated enum StructuredFeedProfilingFixture {
             nil
         }
 
+        // Drive full Pi mutation mix on every advance for hang reproduction:
+        // - providerFacts (liveAssistantDraftText + tokenUsage growth + event seq during drafting)
+        // - isAgentTurnInProgress toggles (true while drafting)
+        // - finalOutputDiagnostic appears only on .finalized / turn_end
+        // - extensionUI notifications rotate every observation → StructuredSessionAutoScrollTrigger.notificationIDs churn
+        // - thinking indicator visibility derived from isAgentTurnInProgress in presentation
+        let extensionUI: SessionExtensionUIState?
+        switch state.phase {
+        case .drafting(let step):
+            let notif = SessionExtensionUINotification(
+                id: Self.deterministicNotificationID(sequence: state.providerEventSequence),
+                kind: .info,
+                message: "live provider event \(state.providerEventSequence) step \(step)"
+            )
+            extensionUI = SessionExtensionUIState(
+                notifications: [notif],
+                statuses: [SessionExtensionUIStatus(key: "draft", text: "drafting \(step)")]
+            )
+        case .finalizedDwell:
+            // Continue notification/status churn during dwell so AutoScrollTrigger.notificationIDs keeps changing
+            // on every 200 ms tick even though activity rows and isAgentTurnInProgress are stable.
+            let notif = SessionExtensionUINotification(
+                id: Self.deterministicNotificationID(sequence: state.providerEventSequence),
+                kind: .info,
+                message: "turn_end dwell \(state.providerEventSequence)"
+            )
+            extensionUI = SessionExtensionUIState(
+                notifications: [notif],
+                statuses: [SessionExtensionUIStatus(key: "turn", text: "finalized dwell")]
+            )
+        case .finalized:
+            extensionUI = nil
+        }
+
         return SessionScreen(
             session: session,
             primarySurface: .structuredActivityFeed,
@@ -117,10 +175,18 @@ nonisolated enum StructuredFeedProfilingFixture {
             terminalColumns: terminalColumns,
             terminalRows: terminalRows,
             activityItems: state.activityItems,
+            extensionUI: extensionUI,
             providerFacts: providerFacts,
             finalOutputDiagnostic: finalOutputDiagnostic,
             isAgentTurnInProgress: isDrafting(state.phase)
         )
+    }
+
+    private static func deterministicNotificationID(sequence: Int) -> UUID {
+        // Stable, unique per sequence so autoScrollTrigger.notificationIDs mutates on (nearly) every tick
+        let last = String(format: "%012x", UInt64(sequence) & 0x0000_ffff_ffff_ffff)
+        let s = "feedc0de-0000-0000-0000-\(last)"
+        return UUID(uuidString: s)!
     }
 
     private static func startTurn(after state: State, turnIndex: Int) -> State {
@@ -175,7 +241,7 @@ nonisolated enum StructuredFeedProfilingFixture {
         switch phase {
         case .drafting:
             "message_update"
-        case .finalized:
+        case .finalized, .finalizedDwell:
             "turn_end"
         }
     }

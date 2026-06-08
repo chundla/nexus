@@ -50,7 +50,7 @@ swift test --package-path Modules --filter NexusServicePerformanceRegressionTest
 swift test --package-path Modules --filter NexusServicePerformanceBaselineTests
 ```
 
-### Structured Session update guardrails (#188, #189)
+### Structured Session update guardrails (#188, #189, #207)
 
 ```bash
 swift test --package-path Modules --filter StructuredSessionPresentationTests
@@ -68,6 +68,7 @@ swift test --package-path Modules --filter NexusServicePerformanceBaselineTests/
 | #188 structured Session updates | `StructuredSessionPresentationTests`, `StructuredSessionObservationDiagnosticsTests`, `NexusServicePerformanceRegressionTests/testStructuredSessionActivityAppendRegressionMatchesTheAuditedBaselineShape`, and `NexusServicePerformanceBaselineTests/testStructuredSessionActivityAppendBaseline` | None beyond targeted profiling when a regression is still visible after the automated checks |
 | #192 long structured Session stall attribution | `StructuredSessionThinkingStallAttributionTests`, `StructuredSessionThinkingStallDiagnosisTests`, and `RemoteClientProfilingFixtureTests/bootstrapStreamsThinkingDiagnosticSnapshotsForLongObservationProfiling` | Final side-by-side memory capture still runs manually on macOS and a physical iPhone when you need Instruments evidence |
 | #199 structured Session final-output latency delivery | `StructuredSessionObservationDiagnosticsTests/structuredObservationDeltaRecordsFinalOutputLatencyMetrics`, `StructuredSessionFinalOutputLatencyTrackerTests`, `NexusServicePiSessionStreamTests/localPiRuntimeAttachesFinalOutputLatencyDiagnosticToTurnCompletion`, and `RemoteClientProfilingFixtureTests/bootstrapCapturesFinalOutputLatencyDiagnosticSnapshotsForRemoteClientProfiling` | Final visual trace pairing still runs manually when you need Instruments evidence for the last visible feed update |
+| #207 structured feed profiling fixture "evil mode" (real Pi mutation churn) | `NexusAppProfilingFixtureTests/bootstrapStreamsDeterministicStructuredFeedProfilingBurstsOnMacOS`, `RemoteClientProfilingFixtureTests/bootstrapStreamsDeterministicStructuredFeedProfilingBursts` (both already cover diagnostics + turn progress) | Instruments SwiftUI trace on macOS or physical iPhone to confirm Severe Hang + ScrollViewAdjustedState / ViewLayoutEngine dominance when the fixture now reproduces the full `finalOutputDiagnostic` + `isAgentTurnInProgress` + `providerFacts` (liveAssistantDraftText + tokenUsage) + thinking indicator + `StructuredSessionAutoScrollTrigger` churn on every 200 ms tick (including post-turn_end dwell with continuing seq + notification churn while rows are stable) |
 
 ## Diagnostic fields to compare
 
@@ -139,6 +140,13 @@ Suggested trace path:
 2. let the app settle on the structured `Session` detail screen
 3. attach Instruments and capture while the draft expands, finalizes, and starts the next turn
 4. compare the trace with `NexusAppProfilingFixtureTests/bootstrapStreamsDeterministicStructuredFeedProfilingBurstsOnMacOS`
+
+The fixture now emits the exact live Pi mutation mix that still triggers the hang in 09-06.trace:
+- `finalOutputDiagnostic` on turn_end (and re-emitted during post-turn dwell)
+- `isAgentTurnInProgress` toggles (true during drafting, false post-turn and during dwell)
+- `providerFacts` with changing `liveAssistantDraftText` + `tokenUsage` growth on every tick
+- thinking indicator visibility driven by `isAgentTurnInProgress` in presentation
+- `StructuredSessionAutoScrollTrigger` changes on (nearly) every observation via rotating extensionUI notifications during drafting AND during the post-turn dwell (while activity rows are stable)
 
 Use this fixture for `ContentView` / macOS structured-feed regressions. Use the `Remote Client` fixture below only for the iPhone path.
 
