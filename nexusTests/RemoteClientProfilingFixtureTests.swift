@@ -154,6 +154,36 @@ struct RemoteClientProfilingFixtureTests {
         let finalizedPresentation = try #require(model.focusedStructuredSessionPresentation)
         let finalizedRow = try #require(finalizedPresentation.feed.activityRows.last)
 
+        // Regression for #208: during finalizedDwell (evil fixture churns providerFacts + finalOutputDiagnostic +
+        // isAgentTurnInProgress + extensionUI notifications for autoScrollTrigger, while keeping activityItems
+        // and isAgent stable), the focusedStructuredSessionPresentation (feed + autoScrollTrigger) and chrome
+        // must not mutate on the Remote Client path. Live diagnostic values must still advance via the underlying screen.
+        // Sample immediately after turn finalization (while still in the post-turn dwell window) to match
+        // the macOS NexusAppProfilingFixtureTests structure and the actual dwell duration (~1 s).
+        let dwellStablePresentation = finalizedPresentation
+        let dwellStableChrome = model.focusedStructuredSessionChromePresentation
+        let dwellStableRowID = finalizedRow.id
+        var dwellSamplesChecked = 0
+        for _ in 0 ..< 8 {
+            try await Task.sleep(nanoseconds: 35_000_000)
+            if let snap = model.focusedStructuredSessionDiagnosticSnapshot,
+               snap.observation.isAgentTurnInProgress {
+                break
+            }
+            if let p = model.focusedStructuredSessionPresentation {
+                #expect(p.feed.activityRows.last?.id == dwellStableRowID, "rows must stay stable in dwell")
+                #expect(p == dwellStablePresentation, "focusedStructuredSessionPresentation (incl. autoScrollTrigger + activityRowChunks) must not mutate on providerFacts/diagnostic/turn-progress churn when activityItems unchanged (#208) on Remote Client path")
+            }
+            if let ch = model.focusedStructuredSessionChromePresentation, let stableCh = dwellStableChrome {
+                #expect(ch == stableCh, "focusedStructuredSessionChromePresentation must not mutate on pure metadata churn when activityItems unchanged (#208) on Remote Client path")
+            }
+            dwellSamplesChecked += 1
+        }
+        #expect(dwellSamplesChecked > 0)
+
+        // After dwell sampling (and any remaining dwell ticks), ensure the final-output latency sample is visible
+        // in presentation, then capture and assert its fields. This mirrors the original Remote Client test intent
+        // while keeping the #208 stability check in the correct temporal window.
         for _ in 0 ..< 40 where model.focusedStructuredSessionDiagnosticSnapshot?.finalOutputLatency?.isVisibleInPresentation != true {
             try await Task.sleep(nanoseconds: 25_000_000)
         }
