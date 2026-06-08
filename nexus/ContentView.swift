@@ -1661,14 +1661,9 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         case .command:
             VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .top, spacing: 4) {
-                    Image(systemName: row.systemImage)
-                        .font(NexusMacTheme.monoFont(10, relativeTo: .caption))
-                        .foregroundStyle(accent)
-                    Text(row.title)
-                        .font(NexusMacTheme.monoFont(10, relativeTo: .caption))
-                        .foregroundStyle(accent)
-                }
+                Text(row.title)
+                    .font(NexusMacTheme.monoFont(10, relativeTo: .caption))
+                    .foregroundStyle(accent)
                 Text(conversation.text)
                     .font(NexusMacTheme.monoFont(11, relativeTo: .callout))
                     .foregroundStyle(.white.opacity(0.92))
@@ -1688,14 +1683,9 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         case .error:
             VStack(alignment: .leading, spacing: 5) {
-                HStack(alignment: .top, spacing: 4) {
-                    Image(systemName: row.systemImage)
-                        .font(NexusMacTheme.bodyFont(11, relativeTo: .caption).weight(.semibold))
-                        .foregroundStyle(accent)
-                    Text("Error")
-                        .font(NexusMacTheme.bodyFont(11, relativeTo: .caption).weight(.semibold))
-                        .foregroundStyle(accent)
-                }
+                Text("Error")
+                    .font(NexusMacTheme.bodyFont(11, relativeTo: .caption).weight(.semibold))
+                    .foregroundStyle(accent)
                 Text(conversation.text)
                     .font(NexusMacTheme.bodyFont(13))
                     .foregroundStyle(.white.opacity(0.94))
@@ -1710,14 +1700,9 @@ struct ContentView: View {
             Group {
                 if row.showsExpandedSystemCard {
                     VStack(alignment: .leading, spacing: 8) {
-                        HStack(alignment: .top, spacing: 4) {
-                            Image(systemName: row.systemImage)
-                                .font(NexusMacTheme.bodyFont(11, relativeTo: .caption).weight(.medium))
-                                .foregroundStyle(NexusMacTheme.mutedText)
-                            Text(row.title)
-                                .font(NexusMacTheme.bodyFont(11, relativeTo: .caption).weight(.medium))
-                                .foregroundStyle(NexusMacTheme.mutedText)
-                        }
+                        Text(row.title)
+                            .font(NexusMacTheme.bodyFont(11, relativeTo: .caption).weight(.medium))
+                            .foregroundStyle(NexusMacTheme.mutedText)
                         Text(verbatim: conversation.text)
                             .font(NexusMacTheme.bodyFont(13))
                             .foregroundStyle(.white.opacity(0.92))
@@ -1743,14 +1728,9 @@ struct ContentView: View {
                     .frame(maxWidth: 620, alignment: .leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
-                    HStack(alignment: .top, spacing: 4) {
-                        Image(systemName: row.systemImage)
-                            .font(NexusMacTheme.bodyFont(11, relativeTo: .caption))
-                            .foregroundStyle(NexusMacTheme.mutedText)
-                        Text(conversation.text)
-                            .font(NexusMacTheme.bodyFont(11, relativeTo: .caption))
-                            .foregroundStyle(NexusMacTheme.mutedText)
-                    }
+                    Text(conversation.text)
+                        .font(NexusMacTheme.bodyFont(11, relativeTo: .caption))
+                        .foregroundStyle(NexusMacTheme.mutedText)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
                         .background(Color.white.opacity(0.05), in: Capsule())
