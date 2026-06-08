@@ -21,6 +21,14 @@ final class StructuredSessionHistoryPagingController {
     private(set) var isLoading = false
     private(set) var errorMessage: String?
 
+    /// Last FocusedStructuredSessionPresentation returned while the row-affecting inputs were stable.
+    /// Row-affecting = activityItems + (for live drafting) the current liveAssistantDraftText from facts.
+    /// Used to suppress re-publishing (and thus LazyVStack/ScrollView/Observation churn) on pure providerFacts,
+    /// finalOutputDiagnostic, isAgentTurnInProgress, or extensionUI notification churn during dwells (#208).
+    private var lastRowStablePresentation: FocusedStructuredSessionPresentation?
+    private var lastSourceActivityItems: [SessionActivityItem] = []
+    private var lastLiveDraftKey: String?
+
     init(pageSize: Int = 200, fetchPage: @escaping FetchPage) {
         self.pageSize = max(1, pageSize)
         self.fetchPage = fetchPage
@@ -137,11 +145,36 @@ final class StructuredSessionHistoryPagingController {
             return nil
         }
 
-        return FocusedStructuredSessionPresentation(
+        let merged = mergedScreen(for: screen)
+
+        // Compute a cheap row-affecting key: the activity items (source of base rows + chunks)
+        // plus a draft key derived from providerFacts when isAgent (live draft growth changes visible rows).
+        // During finalizedDwell (evil fixture / real long Pi), activityItems and draftKey are stable while
+        // providerFacts, finalOutputDiagnostic, isAgent, extensionUI notifications (for autoScrollTrigger)
+        // continue to churn. Returning the cached presentation instance prevents the published
+        // FocusedStructuredSessionPresentation (and its feed/autoScrollTrigger) from mutating.
+        let draftKey: String? = screen.isAgentTurnInProgress
+            ? (screen.providerFacts.liveAssistantDraftText ?? "ev:(screen.providerFacts.providerEventCount)")
+            : nil
+
+        if let last = lastRowStablePresentation,
+           last.session.id == screen.session.id,
+           merged.activityItems == lastSourceActivityItems,
+           draftKey == lastLiveDraftKey {
+            // Row-affecting inputs unchanged → reuse prior presentation (stable autoScrollTrigger + chunks).
+            // Callers still call applyLiveScreen separately for paging availability state.
+            return last
+        }
+
+        let pres = FocusedStructuredSessionPresentation(
             session: screen.session,
-            feed: feedPresenter.presentation(for: mergedScreen(for: screen)),
+            feed: feedPresenter.presentation(for: merged),
             autoScrollTrigger: structuredSessionAutoScrollTrigger(for: screen)
         )
+        lastRowStablePresentation = pres
+        lastSourceActivityItems = merged.activityItems
+        lastLiveDraftKey = draftKey
+        return pres
     }
 
     private func mergedScreen(for screen: SessionScreen) -> SessionScreen {
@@ -190,6 +223,9 @@ final class StructuredSessionHistoryPagingController {
         historicalActivityItems = []
         isLoading = false
         errorMessage = nil
+        lastRowStablePresentation = nil
+        lastSourceActivityItems = []
+        lastLiveDraftKey = nil
         refreshAvailability()
     }
 

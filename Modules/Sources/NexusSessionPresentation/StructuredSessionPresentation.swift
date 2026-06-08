@@ -328,6 +328,14 @@ public final class FocusedStructuredSessionChromePresenter {
     private let tokenUsagePresenter: StructuredSessionTokenUsagePresenter
     private let slashCommandBuilder: (SessionScreen) -> [StructuredSessionSlashCommand]
 
+    /// Last chrome presentation returned while the row-affecting inputs were stable.
+    /// Mirrors the guard in StructuredSessionHistoryPagingController.presentation to keep
+    /// chrome from mutating on pure providerFacts / diagnostic / turn-progress / extensionUI churn
+    /// when activityItems and isAgentTurnInProgress (and thus draft visibility) are unchanged (#208).
+    private var lastStablePresentation: FocusedStructuredSessionChromePresentation?
+    private var lastSourceActivityItems: [SessionActivityItem] = []
+    private var lastIsAgent: Bool = false
+
     public init() {
         self.tokenUsagePresenter = StructuredSessionTokenUsagePresenter()
         self.slashCommandBuilder = structuredSessionSlashCommands(for:)
@@ -346,13 +354,28 @@ public final class FocusedStructuredSessionChromePresenter {
             return nil
         }
 
-        return FocusedStructuredSessionChromePresentation(
+        // Cheap delta: activityItems (row source) + isAgentTurnInProgress (controls draft visibility in feed,
+        // but chrome itself only re-publishes when the visible chrome inputs change).
+        // ProviderFacts (tokenUsage), finalOutputDiagnostic, extensionUI, and pure isAgent toggles without
+        // row change must not force a new chrome value during dwells.
+        if let last = lastStablePresentation,
+           last.session.id == screen.session.id,
+           screen.activityItems == lastSourceActivityItems,
+           screen.isAgentTurnInProgress == lastIsAgent {
+            return last
+        }
+
+        let pres = FocusedStructuredSessionChromePresentation(
             session: screen.session,
             extensionUI: screen.extensionUI,
             isAgentTurnInProgress: screen.isAgentTurnInProgress,
             tokenUsage: tokenUsagePresenter.presentation(for: screen),
             slashCommands: slashCommandBuilder(screen)
         )
+        lastStablePresentation = pres
+        lastSourceActivityItems = screen.activityItems
+        lastIsAgent = screen.isAgentTurnInProgress
+        return pres
     }
 }
 

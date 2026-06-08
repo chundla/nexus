@@ -59,6 +59,31 @@ struct NexusAppProfilingFixtureTests {
         #expect(finalizedLatency.providerRuntimeLatencyMilliseconds > 0)
         #expect(finalizedLatency.serviceObservationLatencyMilliseconds != nil)
 
+        // Regression for #208: during finalizedDwell (evil fixture churns providerFacts + finalOutputDiagnostic +
+        // isAgentTurnInProgress + extensionUI notifications for autoScrollTrigger, while keeping activityItems
+        // and isAgent stable), the focusedStructuredSessionPresentation (feed + autoScrollTrigger) and chrome
+        // must not mutate. Live diagnostic values must still advance via the underlying screen.
+        let dwellStablePresentation = finalizedPresentation
+        let dwellStableChrome = model.focusedStructuredSessionChromePresentation
+        let dwellStableRowID = finalizedRow.id
+        var dwellSamplesChecked = 0
+        for _ in 0 ..< 8 {
+            try await Task.sleep(nanoseconds: 35_000_000)
+            if let snap = model.focusedStructuredSessionDiagnosticSnapshot,
+               snap.observation.isAgentTurnInProgress {
+                break
+            }
+            if let p = model.focusedStructuredSessionPresentation {
+                #expect(p.feed.activityRows.last?.id == dwellStableRowID, "rows must stay stable in dwell")
+                #expect(p == dwellStablePresentation, "focusedStructuredSessionPresentation (incl. autoScrollTrigger + activityRowChunks) must not mutate on providerFacts/diagnostic/turn-progress churn when activityItems unchanged (#208)")
+            }
+            if let ch = model.focusedStructuredSessionChromePresentation, let stableCh = dwellStableChrome {
+                #expect(ch == stableCh, "focusedStructuredSessionChromePresentation must not mutate on pure metadata churn when activityItems unchanged (#208)")
+            }
+            dwellSamplesChecked += 1
+        }
+        #expect(dwellSamplesChecked > 0)
+
         for _ in 0 ..< 80 {
             if let snapshot = model.focusedStructuredSessionDiagnosticSnapshot,
                let row = model.focusedStructuredSessionPresentation?.feed.activityRows.last,
