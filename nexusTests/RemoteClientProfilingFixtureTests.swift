@@ -103,6 +103,7 @@ struct RemoteClientProfilingFixtureTests {
             try await Task.sleep(nanoseconds: 50_000_000)
         }
 
+        try await model.takeFocusedRemoteSessionControl(columns: 44, rows: 12)
         try await model.sendInputToFocusedRemoteSession("ship it")
 
         let snapshot = try #require(model.focusedStructuredSessionDiagnosticSnapshot)
@@ -111,5 +112,77 @@ struct RemoteClientProfilingFixtureTests {
         #expect(finalOutputLatency.serviceObservationLatencyMilliseconds == 10)
         #expect(finalOutputLatency.isVisibleInPresentation)
         #expect(finalOutputLatency.visibleActivityRowText == "Pi: Fixture reply for: ship it")
+    }
+
+    @Test func bootstrapStreamsDeterministicStructuredFeedProfilingBursts() async throws {
+        let model = RemoteClientPairingModel.bootstrap(environment: [
+            "NEXUS_REMOTE_CLIENT_FIXTURE": "streaming-feed-profile"
+        ])
+
+        await model.refreshActivePairedMacCatalog()
+        let session = try await model.launchOrResumeDefaultSession(
+            workspaceID: UUID(uuidString: "44444444-4444-4444-4444-444444444444")!,
+            providerID: .pi
+        )
+
+        await model.focusRemoteSession(sessionID: session.id, workspaceID: session.workspaceID)
+        for _ in 0 ..< 40 where model.focusedStructuredSessionPresentation == nil {
+            try await Task.sleep(nanoseconds: 25_000_000)
+        }
+
+        let initialPresentation = try #require(model.focusedStructuredSessionPresentation)
+        let initialRow = try #require(initialPresentation.feed.activityRows.last)
+        let initialCommandCount = initialPresentation.feed.activityRows.filter { $0.title == "Command" }.count
+
+        #expect(initialPresentation.feed.activityRows.count >= 100)
+        #expect(initialPresentation.feed.thinkingIndicator == StructuredSessionThinkingIndicator(text: "Thinking…"))
+        #expect(initialRow.conversationPresentation?.isStreaming == true)
+
+        for _ in 0 ..< 40 where model.focusedStructuredSessionPresentation?.feed.activityRows.last?.text == initialRow.text {
+            try await Task.sleep(nanoseconds: 25_000_000)
+        }
+
+        let expandedDraftRow = try #require(model.focusedStructuredSessionPresentation?.feed.activityRows.last)
+        #expect(expandedDraftRow.id == initialRow.id)
+        #expect(expandedDraftRow.conversationPresentation?.isStreaming == true)
+        #expect(expandedDraftRow.text != initialRow.text)
+
+        for _ in 0 ..< 80 where model.focusedStructuredSessionDiagnosticSnapshot?.observation.isAgentTurnInProgress != false {
+            try await Task.sleep(nanoseconds: 25_000_000)
+        }
+
+        let finalizedPresentation = try #require(model.focusedStructuredSessionPresentation)
+        let finalizedRow = try #require(finalizedPresentation.feed.activityRows.last)
+
+        for _ in 0 ..< 40 where model.focusedStructuredSessionDiagnosticSnapshot?.finalOutputLatency?.isVisibleInPresentation != true {
+            try await Task.sleep(nanoseconds: 25_000_000)
+        }
+
+        let finalizedSnapshot = try #require(model.focusedStructuredSessionDiagnosticSnapshot)
+        let finalOutputLatency = try #require(finalizedSnapshot.finalOutputLatency)
+
+        #expect(finalizedRow.id == initialRow.id)
+        #expect(finalizedRow.conversationPresentation?.isStreaming == false)
+        #expect(finalizedPresentation.feed.thinkingIndicator == nil)
+        #expect(finalizedPresentation.feed.activityRows.count == initialPresentation.feed.activityRows.count + 1)
+        #expect(finalizedPresentation.feed.activityRows.filter { $0.title == "Command" }.count == initialCommandCount + 1)
+        #expect(finalOutputLatency.providerRuntimeLatencyMilliseconds > 0)
+        #expect(finalOutputLatency.serviceObservationLatencyMilliseconds != nil)
+
+        for _ in 0 ..< 80 {
+            if let snapshot = model.focusedStructuredSessionDiagnosticSnapshot,
+               let row = model.focusedStructuredSessionPresentation?.feed.activityRows.last,
+               snapshot.observation.isAgentTurnInProgress,
+               row.id != initialRow.id,
+               row.conversationPresentation?.isStreaming == true {
+                break
+            }
+            try await Task.sleep(nanoseconds: 25_000_000)
+        }
+
+        let nextDraftRow = try #require(model.focusedStructuredSessionPresentation?.feed.activityRows.last)
+        #expect(nextDraftRow.id != initialRow.id)
+        #expect(nextDraftRow.conversationPresentation?.isStreaming == true)
+        #expect(model.focusedStructuredSessionDiagnosticSnapshot?.observation.isAgentTurnInProgress == true)
     }
 }

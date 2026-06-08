@@ -136,7 +136,10 @@ These tests do not replace SwiftUI Instruments, but they catch `Remote Client` b
 
 ### Repeatable iPhone Remote Client trace fixture
 
-For a deterministic iPhone `Remote Client` profiling pass, launch the app with `NEXUS_REMOTE_CLIENT_FIXTURE=invalidation-baseline` set in the iOS run scheme environment.
+Use one of these deterministic `Remote Client` fixture modes in the iOS run scheme environment:
+
+- `NEXUS_REMOTE_CLIENT_FIXTURE=invalidation-baseline` for browse refreshes plus simple focused `Session` appends
+- `NEXUS_REMOTE_CLIENT_FIXTURE=streaming-feed-profile` for the long-running structured-feed stress path with preseeded history, live Pi draft growth, alternating small/large command output, and deterministic turn finalization
 
 A repeatable simulator dry run looks like this:
 
@@ -150,21 +153,29 @@ xcodebuildmcp simulator launch-app --json '{
   "simulatorId": "ECA0B50A-0AC8-479A-B26B-F48E05077E3B",
   "bundleId": "com.chundla.nexus",
   "env": {
-    "NEXUS_REMOTE_CLIENT_FIXTURE": "invalidation-baseline"
+    "NEXUS_REMOTE_CLIENT_FIXTURE": "streaming-feed-profile"
   }
 }'
 ```
 
-That fixture starts with:
+The `invalidation-baseline` fixture starts with:
 - one active **Paired Mac** already selected and reachable
 - a two-Workspace `Workspace Catalog` already available after refresh
 - a launchable Pi structured **Session** in `Baseline API`
 - automatic transcript-only focused `Session` updates after you open that conversation
 
-Suggested trace path:
-1. capture the home screen while tapping **Refresh** to exercise **Paired Mac** availability plus `Workspace Catalog` refreshes
-2. open `Baseline API` → `Pi` → **Open conversation**
-3. keep the trace running long enough to capture the automatic `Fixture update ...` activity appends on the structured `Session` surface
+The `streaming-feed-profile` fixture keeps the same navigation shape, but the conversation opens into a heavier structured-feed scenario:
+- ~100 preseeded structured activity rows spanning multiple chunks
+- deterministic live Pi draft growth every `200 ms`
+- finalized assistant responses that preserve the live row identity
+- alternating compact and multi-line command output previews on each completed turn
+
+Suggested trace paths:
+1. use `invalidation-baseline` when you need `Paired Mac` / `Workspace Catalog` refresh invalidation evidence
+2. use `streaming-feed-profile` when you need live structured-feed layout evidence:
+   - open `Baseline API` → `Pi` → **Open conversation**
+   - leave the trace running while the draft expands, finalizes, and starts the next turn automatically
+   - compare the trace with `RemoteClientProfilingFixtureTests/bootstrapStreamsDeterministicStructuredFeedProfilingBursts`
 
 Important: `xcrun xctrace` currently reports `The SwiftUI instrument is not supported on the Simulator` for this app flow, so use the simulator fixture for deterministic navigation rehearsal and focused test validation, but run the final SwiftUI invalidation trace from Xcode Instruments on a physical iPhone.
 

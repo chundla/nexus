@@ -18,6 +18,285 @@ extension RemoteClientPairingModel {
 private enum RemoteClientFixtureMode: String {
     case invalidationBaseline = "invalidation-baseline"
     case thinkingDiagnosis = "thinking-diagnosis"
+    case streamingFeedProfile = "streaming-feed-profile"
+}
+
+private enum RemoteClientStreamingFeedProfile {
+    nonisolated static let updateIntervalNanoseconds: UInt64 = 200_000_000
+    nonisolated private static let seededTurnCount = 28
+    nonisolated private static let modelIdentifier = "xai/grok-4.3"
+    nonisolated private static let totalTokenLimit = 128_000
+    nonisolated private static let draftPrefixFractions: [Double] = [0.18, 0.38, 0.62, 0.85]
+
+    enum Phase: Equatable {
+        case drafting(step: Int)
+        case finalized
+    }
+
+    struct State {
+        var turnIndex: Int
+        var phase: Phase
+        var transcript: String
+        var activityItems: [SessionActivityItem]
+        var providerEventSequence: Int
+    }
+
+    nonisolated static func makeInitialState() -> State {
+        var transcriptLines = ["Pi shared Session stream connected"]
+        var activityItems = [SessionActivityItem(kind: .status, text: "Pi shared Session stream connected")]
+        var providerEventSequence = 0
+
+        for turnIndex in 0 ..< seededTurnCount {
+            let prompt = userPrompt(for: turnIndex)
+            let assistantMessage = finalizedAssistantMessage(for: turnIndex)
+
+            activityItems.append(SessionActivityItem(kind: .message, text: "You: \(prompt)"))
+            activityItems.append(SessionActivityItem(
+                kind: .progress,
+                text: "Planning streaming burst \(turnIndex)",
+                detailText: progressDetail(for: turnIndex)
+            ))
+            activityItems.append(SessionActivityItem(
+                kind: .command,
+                text: commandTitle(for: turnIndex),
+                detailText: commandOutput(for: turnIndex)
+            ))
+            activityItems.append(SessionActivityItem(kind: .message, text: "Pi: \(assistantMessage)"))
+
+            if turnIndex.isMultiple(of: 4) {
+                activityItems.append(SessionActivityItem(kind: .status, text: "Trace marker \(turnIndex) captured"))
+            }
+
+            transcriptLines.append("You: \(prompt)")
+            transcriptLines.append("Pi: \(assistantMessage)")
+            providerEventSequence += 2
+        }
+
+        let historyState = State(
+            turnIndex: seededTurnCount - 1,
+            phase: .finalized,
+            transcript: transcriptLines.joined(separator: "\n"),
+            activityItems: activityItems,
+            providerEventSequence: providerEventSequence
+        )
+        return startTurn(after: historyState, turnIndex: seededTurnCount)
+    }
+
+    nonisolated static func advance(_ state: State) -> State {
+        switch state.phase {
+        case .drafting(let step):
+            if step < draftPrefixFractions.count - 1 {
+                var updated = state
+                updated.phase = .drafting(step: step + 1)
+                updated.providerEventSequence += 1
+                return updated
+            }
+
+            return finalizeTurn(state)
+        case .finalized:
+            return startTurn(after: state, turnIndex: state.turnIndex + 1)
+        }
+    }
+
+    nonisolated static func screen(
+        for state: State,
+        session: Session,
+        controller: SessionController,
+        terminalColumns: Int,
+        terminalRows: Int
+    ) -> SessionScreen {
+        let providerFacts = StructuredSessionProviderFacts(
+            providerEventCount: max(1, state.providerEventSequence),
+            lastProviderEventSequence: max(1, state.providerEventSequence),
+            lastProviderEventType: providerEventType(for: state.phase),
+            liveAssistantDraftText: liveAssistantDraftText(for: state),
+            tokenUsage: tokenUsage(for: state),
+            modelIdentifier: modelIdentifier
+        )
+
+        let finalOutputDiagnostic: StructuredSessionFinalOutputDiagnostic? = if case .finalized = state.phase,
+           let assistantItem = state.activityItems.last(where: { $0.kind == .message && $0.text.hasPrefix("Pi: ") }) {
+            StructuredSessionFinalOutputDiagnostic(
+                trigger: .turnEnd,
+                providerEventSequence: max(1, state.providerEventSequence),
+                providerRuntimeLatencyMilliseconds: 6 + (state.turnIndex % 5),
+                serviceObservationLatencyMilliseconds: 11 + (state.turnIndex % 7),
+                expectedActivityItemID: assistantItem.id,
+                expectedActivityItemText: assistantItem.text,
+                expectedThinkingIndicatorVisible: false
+            )
+        } else {
+            nil
+        }
+
+        return SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            controller: controller,
+            transcript: state.transcript,
+            terminalColumns: terminalColumns,
+            terminalRows: terminalRows,
+            activityItems: state.activityItems,
+            providerFacts: providerFacts,
+            finalOutputDiagnostic: finalOutputDiagnostic,
+            isAgentTurnInProgress: isDrafting(state.phase)
+        )
+    }
+
+    nonisolated private static func startTurn(after state: State, turnIndex: Int) -> State {
+        let prompt = userPrompt(for: turnIndex)
+        var transcript = state.transcript
+        if transcript.isEmpty == false {
+            transcript += "\n"
+        }
+        transcript += "You: \(prompt)"
+
+        return State(
+            turnIndex: turnIndex,
+            phase: .drafting(step: 0),
+            transcript: transcript,
+            activityItems: state.activityItems + [
+                SessionActivityItem(kind: .message, text: "You: \(prompt)"),
+                SessionActivityItem(
+                    kind: .progress,
+                    text: "Planning streaming burst \(turnIndex)",
+                    detailText: progressDetail(for: turnIndex)
+                )
+            ],
+            providerEventSequence: state.providerEventSequence + 1
+        )
+    }
+
+    nonisolated private static func finalizeTurn(_ state: State) -> State {
+        let assistantMessage = finalizedAssistantMessage(for: state.turnIndex)
+        var transcript = state.transcript
+        if transcript.isEmpty == false {
+            transcript += "\n"
+        }
+        transcript += "Pi: \(assistantMessage)"
+
+        return State(
+            turnIndex: state.turnIndex,
+            phase: .finalized,
+            transcript: transcript,
+            activityItems: state.activityItems + [
+                SessionActivityItem(
+                    kind: .command,
+                    text: commandTitle(for: state.turnIndex),
+                    detailText: commandOutput(for: state.turnIndex)
+                ),
+                SessionActivityItem(kind: .message, text: "Pi: \(assistantMessage)")
+            ],
+            providerEventSequence: state.providerEventSequence + 1
+        )
+    }
+
+    nonisolated private static func providerEventType(for phase: Phase) -> String {
+        switch phase {
+        case .drafting:
+            "message_update"
+        case .finalized:
+            "turn_end"
+        }
+    }
+
+    nonisolated private static func liveAssistantDraftText(for state: State) -> String? {
+        guard case .drafting(let step) = state.phase else {
+            return nil
+        }
+
+        let fragments = draftFragments(for: state.turnIndex)
+        return fragments[min(step, fragments.count - 1)]
+    }
+
+    nonisolated private static func tokenUsage(for state: State) -> StructuredSessionProviderTokenUsage {
+        let draftStep = if case .drafting(let step) = state.phase { step } else { draftPrefixFractions.count }
+        let usedTokens = min(
+            totalTokenLimit - 1,
+            34_000 + (state.turnIndex * 913) + (draftStep * 271)
+        )
+        let percent = Int((Double(usedTokens) / Double(totalTokenLimit)) * 100.0)
+        return StructuredSessionProviderTokenUsage(
+            usedTokens: usedTokens,
+            totalTokens: totalTokenLimit,
+            percent: percent
+        )
+    }
+
+    nonisolated private static func draftFragments(for turnIndex: Int) -> [String] {
+        let message = finalizedAssistantMessage(for: turnIndex)
+        return draftPrefixFractions.map { fraction in
+            prefixedDraftText(message, fraction: fraction)
+        }
+    }
+
+    nonisolated private static func prefixedDraftText(_ text: String, fraction: Double) -> String {
+        guard text.isEmpty == false else {
+            return text
+        }
+
+        let characterCount = max(1, min(text.count, Int(Double(text.count) * fraction)))
+        let endIndex = text.index(text.startIndex, offsetBy: characterCount)
+        return String(text[..<endIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    nonisolated private static func userPrompt(for turnIndex: Int) -> String {
+        "Profile the structured feed burst \(turnIndex)"
+    }
+
+    nonisolated private static func finalizedAssistantMessage(for turnIndex: Int) -> String {
+        """
+        ### Streaming burst \(turnIndex)
+        - keep the scroll anchor near the live tail
+        - preserve finalized assistant output without clipping
+        - collapse only the streaming draft preview when the text grows
+
+        ```swift
+        let burst = \(turnIndex)
+        let visibleRows = \(92 + (turnIndex % 11))
+        let profile = \"structured-feed\"
+        ```
+
+        This deterministic fixture alternates compact and multi-line command output so Instruments can sample stable layout pressure while the live draft keeps changing height.
+        """
+    }
+
+    nonisolated private static func progressDetail(for turnIndex: Int) -> String {
+        """
+        preloadedRows=\(92 + turnIndex)
+        liveDraftPhase=\(turnIndex % draftPrefixFractions.count)
+        feedMode=streaming-feed-profile
+        """
+    }
+
+    nonisolated private static func commandTitle(for turnIndex: Int) -> String {
+        if turnIndex.isMultiple(of: 2) {
+            return "swift test --filter StructuredFeedBurst\(turnIndex)"
+        }
+
+        return "git diff --stat -- StreamingBurst\(turnIndex).swift"
+    }
+
+    nonisolated private static func commandOutput(for turnIndex: Int) -> String {
+        if turnIndex.isMultiple(of: 2) {
+            return """
+            Test Suite 'StructuredFeedBurst\(turnIndex)' started
+            Test Case '-[StructuredFeedBurst\(turnIndex) testTailAppend]' passed (0.04 seconds)
+            Executed 1 test, with 0 failures in 0.04 seconds
+            """
+        }
+
+        return (0 ..< 14).map { index in
+            "StreamingBurst\(turnIndex).swift | \(index + 1) insertions | chunk \(index)"
+        }.joined(separator: "\n")
+    }
+
+    nonisolated private static func isDrafting(_ phase: Phase) -> Bool {
+        if case .drafting = phase {
+            return true
+        }
+        return false
+    }
 }
 
 private enum RemoteClientFixture {
@@ -78,6 +357,7 @@ private enum RemoteClientFixture {
         private let providerDetail: ProviderDetail
         private var latestScreen: SessionScreen
         private var autoUpdateCount = 0
+        private var streamingFeedProfileState: RemoteClientStreamingFeedProfile.State?
 
         init(pairedMac: PairedMac, mode: RemoteClientFixtureMode) {
             self.pairedMac = pairedMac
@@ -172,23 +452,42 @@ private enum RemoteClientFixture {
                 failedSessions: []
             )
 
-            let isThinkingFixture = mode == .thinkingDiagnosis
-            let initialMessage = isThinkingFixture
-                ? "Pi: thinking step 0"
-                : "Pi: Profiling fixture ready"
-            latestScreen = SessionScreen(
-                session: session,
-                primarySurface: .structuredActivityFeed,
-                controller: .mac,
-                transcript: isThinkingFixture
-                    ? "Pi shared Session stream connected\n\(initialMessage)"
-                    : "Pi shared Session stream connected",
-                activityItems: [
-                    SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"),
-                    SessionActivityItem(kind: .message, text: initialMessage)
-                ],
-                isAgentTurnInProgress: isThinkingFixture
-            )
+            switch mode {
+            case .streamingFeedProfile:
+                let state = RemoteClientStreamingFeedProfile.makeInitialState()
+                streamingFeedProfileState = state
+                latestScreen = RemoteClientStreamingFeedProfile.screen(
+                    for: state,
+                    session: session,
+                    controller: .mac,
+                    terminalColumns: 80,
+                    terminalRows: 24
+                )
+            case .thinkingDiagnosis:
+                latestScreen = SessionScreen(
+                    session: session,
+                    primarySurface: .structuredActivityFeed,
+                    controller: .mac,
+                    transcript: "Pi shared Session stream connected\nPi: thinking step 0",
+                    activityItems: [
+                        SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"),
+                        SessionActivityItem(kind: .message, text: "Pi: thinking step 0")
+                    ],
+                    isAgentTurnInProgress: true
+                )
+            case .invalidationBaseline:
+                latestScreen = SessionScreen(
+                    session: session,
+                    primarySurface: .structuredActivityFeed,
+                    controller: .mac,
+                    transcript: "Pi shared Session stream connected",
+                    activityItems: [
+                        SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"),
+                        SessionActivityItem(kind: .message, text: "Pi: Profiling fixture ready")
+                    ],
+                    isAgentTurnInProgress: false
+                )
+            }
         }
 
         func fetchStatus(host: String, port: Int) async throws -> RemotePairedMacStatus {
@@ -237,9 +536,18 @@ private enum RemoteClientFixture {
             latestScreen = SessionScreen(
                 session: stoppedSession,
                 primarySurface: .structuredActivityFeed,
-                controller: .mac,
+                controller: latestScreen.controller,
                 transcript: latestScreen.transcript,
-                activityItems: latestScreen.activityItems + [SessionActivityItem(kind: .status, text: "Fixture Session stopped")]
+                terminalColumns: latestScreen.terminalColumns,
+                terminalRows: latestScreen.terminalRows,
+                activityItems: latestScreen.activityItems + [SessionActivityItem(kind: .status, text: "Fixture Session stopped")],
+                approvalRequests: latestScreen.approvalRequests,
+                extensionUI: latestScreen.extensionUI,
+                slashCommands: latestScreen.slashCommands,
+                providerEvents: latestScreen.providerEvents,
+                providerFacts: latestScreen.providerFacts,
+                finalOutputDiagnostic: latestScreen.finalOutputDiagnostic,
+                isAgentTurnInProgress: false
             )
             return stoppedSession
         }
@@ -253,39 +561,19 @@ private enum RemoteClientFixture {
         }
 
         func takeSessionControl(for pairedMac: PairedMac, sessionID: UUID, columns: Int, rows: Int) async throws -> SessionScreen {
-            latestScreen = SessionScreen(
-                session: latestScreen.session,
-                primarySurface: latestScreen.primarySurface,
+            rebuildLatestScreen(
                 controller: .pairedDevice(pairedMac.pairedDeviceID!),
-                transcript: latestScreen.transcript,
                 terminalColumns: columns,
-                terminalRows: rows,
-                activityItems: latestScreen.activityItems,
-                approvalRequests: latestScreen.approvalRequests,
-                extensionUI: latestScreen.extensionUI,
-                providerEvents: latestScreen.providerEvents,
-                providerFacts: latestScreen.providerFacts,
-                isAgentTurnInProgress: latestScreen.isAgentTurnInProgress
+                terminalRows: rows
             )
-            return latestScreen
         }
 
         func releaseSessionControl(for pairedMac: PairedMac, sessionID: UUID) async throws -> SessionScreen {
-            latestScreen = SessionScreen(
-                session: latestScreen.session,
-                primarySurface: latestScreen.primarySurface,
+            rebuildLatestScreen(
                 controller: .mac,
-                transcript: latestScreen.transcript,
                 terminalColumns: latestScreen.terminalColumns,
-                terminalRows: latestScreen.terminalRows,
-                activityItems: latestScreen.activityItems,
-                approvalRequests: latestScreen.approvalRequests,
-                extensionUI: latestScreen.extensionUI,
-                providerEvents: latestScreen.providerEvents,
-                providerFacts: latestScreen.providerFacts,
-                isAgentTurnInProgress: latestScreen.isAgentTurnInProgress
+                terminalRows: latestScreen.terminalRows
             )
-            return latestScreen
         }
 
         func sendSessionInput(for pairedMac: PairedMac, sessionID: UUID, text: String) async throws -> SessionScreen {
@@ -320,16 +608,21 @@ private enum RemoteClientFixture {
             onUpdate: @escaping @Sendable (SessionScreen) -> Void,
             onDisconnect: @escaping @Sendable (any Error) -> Void
         ) async throws -> any SessionScreenObservation {
+            _ = onDisconnect
+
+            let updateIntervalNanoseconds = mode == .streamingFeedProfile
+                ? RemoteClientStreamingFeedProfile.updateIntervalNanoseconds
+                : 750_000_000
             let task = Task {
                 onUpdate(self.latestScreen)
 
                 while Task.isCancelled == false {
-                    try? await Task.sleep(nanoseconds: 750_000_000)
+                    try? await Task.sleep(nanoseconds: updateIntervalNanoseconds)
                     guard Task.isCancelled == false else {
                         break
                     }
 
-                    let updatedScreen = self.appendAutoUpdate()
+                    let updatedScreen = self.advanceObservedScreen()
                     onUpdate(updatedScreen)
                 }
             }
@@ -337,6 +630,58 @@ private enum RemoteClientFixture {
             return FixtureSessionScreenObservation {
                 task.cancel()
             }
+        }
+
+        private func advanceObservedScreen() -> SessionScreen {
+            if let state = streamingFeedProfileState {
+                let updatedState = RemoteClientStreamingFeedProfile.advance(state)
+                streamingFeedProfileState = updatedState
+                latestScreen = RemoteClientStreamingFeedProfile.screen(
+                    for: updatedState,
+                    session: session,
+                    controller: latestScreen.controller,
+                    terminalColumns: latestScreen.terminalColumns,
+                    terminalRows: latestScreen.terminalRows
+                )
+                return latestScreen
+            }
+
+            return appendAutoUpdate()
+        }
+
+        private func rebuildLatestScreen(
+            controller: SessionController,
+            terminalColumns: Int,
+            terminalRows: Int
+        ) -> SessionScreen {
+            if let state = streamingFeedProfileState {
+                latestScreen = RemoteClientStreamingFeedProfile.screen(
+                    for: state,
+                    session: latestScreen.session,
+                    controller: controller,
+                    terminalColumns: terminalColumns,
+                    terminalRows: terminalRows
+                )
+                return latestScreen
+            }
+
+            latestScreen = SessionScreen(
+                session: latestScreen.session,
+                primarySurface: latestScreen.primarySurface,
+                controller: controller,
+                transcript: latestScreen.transcript,
+                terminalColumns: terminalColumns,
+                terminalRows: terminalRows,
+                activityItems: latestScreen.activityItems,
+                approvalRequests: latestScreen.approvalRequests,
+                extensionUI: latestScreen.extensionUI,
+                slashCommands: latestScreen.slashCommands,
+                providerEvents: latestScreen.providerEvents,
+                providerFacts: latestScreen.providerFacts,
+                finalOutputDiagnostic: latestScreen.finalOutputDiagnostic,
+                isAgentTurnInProgress: latestScreen.isAgentTurnInProgress
+            )
+            return latestScreen
         }
 
         private func appendAutoUpdate() -> SessionScreen {
@@ -354,6 +699,7 @@ private enum RemoteClientFixture {
                 activityItems: latestScreen.activityItems + [SessionActivityItem(kind: .message, text: line)],
                 approvalRequests: latestScreen.approvalRequests,
                 extensionUI: latestScreen.extensionUI,
+                slashCommands: latestScreen.slashCommands,
                 providerEvents: latestScreen.providerEvents,
                 providerFacts: latestScreen.providerFacts,
                 isAgentTurnInProgress: mode == .thinkingDiagnosis
@@ -375,6 +721,7 @@ private enum RemoteClientFixture {
                 activityItems: latestScreen.activityItems + [userItem, agentItem],
                 approvalRequests: latestScreen.approvalRequests,
                 extensionUI: latestScreen.extensionUI,
+                slashCommands: latestScreen.slashCommands,
                 providerEvents: latestScreen.providerEvents,
                 providerFacts: latestScreen.providerFacts,
                 finalOutputDiagnostic: StructuredSessionFinalOutputDiagnostic(
