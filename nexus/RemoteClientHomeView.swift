@@ -2328,11 +2328,7 @@ private struct RemoteSessionScreenView: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
                 .frame(maxWidth: 420, alignment: .leading)
-                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .stroke(NexusIOSTheme.softLine, lineWidth: 1)
-                }
+                .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                 Spacer(minLength: 48)
             }
         case .command:
@@ -2360,11 +2356,7 @@ private struct RemoteSessionScreenView: View {
                 }
                 .padding(14)
                 .frame(maxWidth: 520, alignment: .leading)
-                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(accentColor.opacity(0.22), lineWidth: 1)
-                }
+                .background(Color.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 Spacer(minLength: 48)
             }
         case .error:
@@ -2385,11 +2377,7 @@ private struct RemoteSessionScreenView: View {
                 }
                 .padding(14)
                 .frame(maxWidth: 520, alignment: .leading)
-                .background(accentColor.opacity(0.16), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(accentColor.opacity(0.28), lineWidth: 1)
-                }
+                .background(accentColor.opacity(0.2), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 Spacer(minLength: 48)
             }
         case .system:
@@ -2426,11 +2414,7 @@ private struct RemoteSessionScreenView: View {
                     }
                     .padding(14)
                     .frame(maxWidth: 520, alignment: .leading)
-                    .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .stroke(NexusIOSTheme.softLine, lineWidth: 1)
-                    }
+                    .background(Color.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                     Spacer(minLength: 48)
                 } else {
                     Spacer()

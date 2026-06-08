@@ -1661,11 +1661,7 @@ struct ContentView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(NexusMacTheme.softLine, lineWidth: 1)
-            }
+            .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .frame(maxWidth: 520, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         case .command:
@@ -1692,11 +1688,7 @@ struct ContentView: View {
                 }
             }
             .padding(12)
-            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(accent.opacity(0.22), lineWidth: 1)
-            }
+            .background(Color.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .frame(maxWidth: 620, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         case .error:
@@ -1716,11 +1708,7 @@ struct ContentView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(12)
-            .background(accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(accent.opacity(0.28), lineWidth: 1)
-            }
+            .background(accent.opacity(0.18), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .frame(maxWidth: 620, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         case .system:
@@ -1756,11 +1744,7 @@ struct ContentView: View {
                         }
                     }
                     .padding(12)
-                    .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(NexusMacTheme.softLine, lineWidth: 1)
-                    }
+                    .background(Color.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     .frame(maxWidth: 620, alignment: .leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
