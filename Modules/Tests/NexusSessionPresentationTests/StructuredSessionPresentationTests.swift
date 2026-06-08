@@ -840,11 +840,14 @@ struct StructuredSessionPresentationTests {
         ))
 
         #expect(firstDraftPresentation.activityRows.map(\.text) == ["You: hello", "Pi: wor"])
+        #expect(firstDraftPresentation.activityRows.last?.conversationPresentation?.isStreaming == true)
         let draftRowID = try #require(firstDraftPresentation.activityRows.last?.id)
         #expect(streamedDraftPresentation.activityRows.map(\.text) == ["You: hello", "Pi: world"])
         #expect(streamedDraftPresentation.activityRows.last?.id == draftRowID)
+        #expect(streamedDraftPresentation.activityRows.last?.conversationPresentation?.isStreaming == true)
         #expect(finalizedPresentation.activityRows.map(\.text) == ["You: hello", "Pi: world"])
         #expect(finalizedPresentation.activityRows.last?.id == draftRowID)
+        #expect(finalizedPresentation.activityRows.last?.conversationPresentation?.isStreaming == false)
         #expect(finalizedPresentation.activityRows.filter { $0.text == "Pi: world" }.count == 1)
     }
 

@@ -1647,8 +1647,8 @@ struct ContentView: View {
                     .font(NexusMacTheme.bodyFont(10, relativeTo: .caption).weight(.medium))
                     .foregroundStyle(NexusMacTheme.mutedText)
 
-                structuredSessionMarkdownText(
-                    conversation.text,
+                structuredSessionAssistantResponseView(
+                    conversation,
                     font: NexusMacTheme.bodyFont(13),
                     color: .white.opacity(0.94)
                 )
@@ -1765,6 +1765,32 @@ struct ContentView: View {
     }
 
     @ViewBuilder
+    private func structuredSessionAssistantResponseView(
+        _ conversation: StructuredSessionConversationPresentation,
+        font: Font,
+        color: Color
+    ) -> some View {
+        if conversation.isStreaming,
+           structuredSessionShouldCollapseStreamingMarkdownPreview(conversation.text) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(verbatim: conversation.text)
+                    .font(font)
+                    .foregroundStyle(color)
+                    .structuredSessionFeedTextSelection()
+                    .lineLimit(18)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Text("Streaming response preview truncated until completion.")
+                    .font(NexusMacTheme.bodyFont(10, relativeTo: .caption))
+                    .foregroundStyle(NexusMacTheme.mutedText)
+            }
+        } else {
+            structuredSessionMarkdownText(conversation.text, font: font, color: color)
+        }
+    }
+
+    @ViewBuilder
     private func structuredSessionDetailTextView(_ text: String, isTruncated: Bool, font: Font) -> some View {
         let showsCollapsedPreview = structuredSessionShouldCollapseDetailPreview(text)
 
@@ -1802,6 +1828,10 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
         .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func structuredSessionShouldCollapseStreamingMarkdownPreview(_ text: String) -> Bool {
+        structuredSessionEstimatedWrappedLineCount(for: text, charactersPerLine: 72) > 18 || text.count > 6_000
     }
 
     private func structuredSessionShouldCollapseDetailPreview(_ text: String) -> Bool {

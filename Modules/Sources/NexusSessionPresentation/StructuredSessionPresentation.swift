@@ -188,10 +188,16 @@ public enum StructuredSessionConversationRole: Equatable {
 public struct StructuredSessionConversationPresentation: Equatable {
     public let role: StructuredSessionConversationRole
     public let text: String
+    public let isStreaming: Bool
 
-    public init(role: StructuredSessionConversationRole, text: String) {
+    public init(
+        role: StructuredSessionConversationRole,
+        text: String,
+        isStreaming: Bool = false
+    ) {
         self.role = role
         self.text = text
+        self.isStreaming = isStreaming
     }
 }
 
@@ -612,16 +618,33 @@ private func structuredSessionLiveAssistantDraftRow(
     text: String,
     providerDisplayName: String
 ) -> StructuredSessionActivityRow {
-    annotateStructuredSessionActivityRows(
-        [StructuredSessionActivityRow(
-            id: id,
-            title: "Message",
-            systemImage: structuredSessionActivitySystemImage(for: .message),
-            text: text,
-            emphasis: structuredSessionActivityEmphasis(for: .message)
-        )],
+    let baseRow = StructuredSessionActivityRow(
+        id: id,
+        title: "Message",
+        systemImage: structuredSessionActivitySystemImage(for: .message),
+        text: text,
+        emphasis: structuredSessionActivityEmphasis(for: .message)
+    )
+    let conversation = structuredSessionConversationPresentation(
+        for: baseRow,
         providerDisplayName: providerDisplayName
-    )[0]
+    )
+
+    return StructuredSessionActivityRow(
+        id: baseRow.id,
+        title: baseRow.title,
+        systemImage: baseRow.systemImage,
+        text: baseRow.text,
+        detailText: baseRow.detailText,
+        isDetailTextTruncated: baseRow.isDetailTextTruncated,
+        emphasis: baseRow.emphasis,
+        conversationPresentation: StructuredSessionConversationPresentation(
+            role: conversation.role,
+            text: conversation.text,
+            isStreaming: true
+        ),
+        showsExpandedSystemCard: baseRow.showsExpandedSystemCard
+    )
 }
 
 private func structuredSessionLiveAssistantDraftText(for screen: SessionScreen) -> String? {

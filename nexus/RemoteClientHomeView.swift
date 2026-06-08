@@ -2313,8 +2313,8 @@ private struct RemoteSessionScreenView: View {
                         .font(NexusIOSTheme.bodyFont(11, relativeTo: .caption, weight: .medium))
                         .foregroundStyle(NexusIOSTheme.mutedText)
 
-                    structuredSessionMarkdownText(
-                        conversation.text,
+                    structuredSessionAssistantResponseView(
+                        conversation,
                         font: NexusIOSTheme.bodyFont(15),
                         color: .white.opacity(0.94)
                     )
@@ -2435,6 +2435,32 @@ private struct RemoteSessionScreenView: View {
     }
 
     @ViewBuilder
+    private func structuredSessionAssistantResponseView(
+        _ conversation: StructuredSessionConversationPresentation,
+        font: Font,
+        color: Color
+    ) -> some View {
+        if conversation.isStreaming,
+           structuredSessionShouldCollapseStreamingMarkdownPreview(conversation.text) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(verbatim: conversation.text)
+                    .font(font)
+                    .foregroundStyle(color)
+                    .textSelection(.enabled)
+                    .lineLimit(18)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Text("Streaming response preview truncated until completion.")
+                    .font(NexusIOSTheme.bodyFont(11, relativeTo: .caption))
+                    .foregroundStyle(NexusIOSTheme.mutedText)
+            }
+        } else {
+            structuredSessionMarkdownText(conversation.text, font: font, color: color)
+        }
+    }
+
+    @ViewBuilder
     private func structuredSessionDetailTextView(_ text: String, isTruncated: Bool, font: Font) -> some View {
         let showsCollapsedPreview = structuredSessionShouldCollapseDetailPreview(text)
 
@@ -2472,6 +2498,10 @@ private struct RemoteSessionScreenView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
         .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func structuredSessionShouldCollapseStreamingMarkdownPreview(_ text: String) -> Bool {
+        structuredSessionEstimatedWrappedLineCount(for: text, charactersPerLine: 56) > 18 || text.count > 6_000
     }
 
     private func structuredSessionShouldCollapseDetailPreview(_ text: String) -> Bool {
