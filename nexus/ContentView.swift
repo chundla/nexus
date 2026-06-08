@@ -1670,7 +1670,7 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         case .command:
             VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                HStack(alignment: .top, spacing: 4) {
                     Image(systemName: row.systemImage)
                         .font(NexusMacTheme.monoFont(10, relativeTo: .caption))
                         .foregroundStyle(accent)
@@ -1701,7 +1701,7 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         case .error:
             VStack(alignment: .leading, spacing: 5) {
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                HStack(alignment: .top, spacing: 4) {
                     Image(systemName: row.systemImage)
                         .font(NexusMacTheme.bodyFont(11, relativeTo: .caption).weight(.semibold))
                         .foregroundStyle(accent)
@@ -1727,7 +1727,7 @@ struct ContentView: View {
             Group {
                 if row.showsExpandedSystemCard {
                     VStack(alignment: .leading, spacing: 8) {
-                        HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        HStack(alignment: .top, spacing: 4) {
                             Image(systemName: row.systemImage)
                                 .font(NexusMacTheme.bodyFont(11, relativeTo: .caption).weight(.medium))
                                 .foregroundStyle(NexusMacTheme.mutedText)
@@ -1764,7 +1764,7 @@ struct ContentView: View {
                     .frame(maxWidth: 620, alignment: .leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    HStack(alignment: .top, spacing: 4) {
                         Image(systemName: row.systemImage)
                             .font(NexusMacTheme.bodyFont(11, relativeTo: .caption))
                             .foregroundStyle(NexusMacTheme.mutedText)

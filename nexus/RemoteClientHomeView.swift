@@ -2338,7 +2338,7 @@ private struct RemoteSessionScreenView: View {
         case .command:
             HStack {
                 VStack(alignment: .leading, spacing: 8) {
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    HStack(alignment: .top, spacing: 4) {
                         Image(systemName: row.systemImage)
                             .font(NexusIOSTheme.monoFont(10, relativeTo: .caption))
                             .foregroundStyle(accentColor)
@@ -2370,7 +2370,7 @@ private struct RemoteSessionScreenView: View {
         case .error:
             HStack {
                 VStack(alignment: .leading, spacing: 6) {
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    HStack(alignment: .top, spacing: 4) {
                         Image(systemName: row.systemImage)
                             .font(NexusIOSTheme.bodyFont(12, relativeTo: .caption, weight: .semibold))
                             .foregroundStyle(accentColor)
@@ -2396,7 +2396,7 @@ private struct RemoteSessionScreenView: View {
             HStack {
                 if row.showsExpandedSystemCard {
                     VStack(alignment: .leading, spacing: 8) {
-                        HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        HStack(alignment: .top, spacing: 4) {
                             Image(systemName: row.systemImage)
                                 .font(NexusIOSTheme.bodyFont(12, relativeTo: .caption, weight: .medium))
                                 .foregroundStyle(NexusIOSTheme.mutedText)
@@ -2434,7 +2434,7 @@ private struct RemoteSessionScreenView: View {
                     Spacer(minLength: 48)
                 } else {
                     Spacer()
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    HStack(alignment: .top, spacing: 4) {
                         Image(systemName: row.systemImage)
                             .font(NexusIOSTheme.bodyFont(11, relativeTo: .caption))
                             .foregroundStyle(NexusIOSTheme.mutedText)
