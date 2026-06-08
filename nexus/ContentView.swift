@@ -52,6 +52,8 @@ struct ContentView: View {
     @State private var terminalFocusToken = UUID()
     @State private var presentedError: PresentedError?
     @State private var structuredSessionAutoScrollCoordinator = StructuredSessionAutoScrollCoordinator()
+    @State private var expandedStructuredSessionMessageRowIDs: Set<UUID> = []
+    @State private var expandedStructuredSessionCommandOutputRowIDs: Set<UUID> = []
 
     private let terminalLayout = TerminalViewportLayout.live
 
@@ -1642,23 +1644,42 @@ struct ContentView: View {
                 .frame(maxWidth: 520, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .trailing)
         case .assistant(let label):
+            let isExpanded = expandedStructuredSessionMessageRowIDs.contains(row.id)
+            let showsCollapsedPreview = structuredSessionShouldCollapseMarkdownPreview(conversation.text)
+
             VStack(alignment: .leading, spacing: 3) {
                 Text(label)
                     .font(NexusMacTheme.bodyFont(10, relativeTo: .caption).weight(.medium))
                     .foregroundStyle(NexusMacTheme.mutedText)
-                // Fixed-height clipped viewport for the markdown body.
-                // The earlier nested ScrollView stabilized streaming height growth,
-                // but manual scrolling in the outer macOS feed now reproduces hangs.
-                // Keep the geometry stable without nesting a second scrolling region
-                // inside the live feed ScrollView.
-                structuredSessionMarkdownText(
-                    conversation.text,
-                    font: NexusMacTheme.bodyFont(13),
-                    color: .white.opacity(0.94)
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .frame(height: 280, alignment: .top)
-                .clipped()
+
+                Group {
+                    if showsCollapsedPreview && isExpanded == false {
+                        structuredSessionMarkdownText(
+                            conversation.text,
+                            font: NexusMacTheme.bodyFont(13),
+                            color: .white.opacity(0.94)
+                        )
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(height: 280, alignment: .top)
+                        .clipped()
+                    } else {
+                        structuredSessionMarkdownText(
+                            conversation.text,
+                            font: NexusMacTheme.bodyFont(13),
+                            color: .white.opacity(0.94)
+                        )
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+
+                if showsCollapsedPreview {
+                    Button(isExpanded ? "Collapse response" : "Show full response") {
+                        toggleStructuredSessionMessageExpansion(row.id)
+                    }
+                    .buttonStyle(.plain)
+                    .font(NexusMacTheme.bodyFont(11, relativeTo: .caption).weight(.medium))
+                    .foregroundStyle(NexusMacTheme.gold)
+                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -1683,6 +1704,7 @@ struct ContentView: View {
                 if let detailText = row.detailText {
                     structuredSessionDetailTextView(
                         detailText,
+                        rowID: row.id,
                         isTruncated: row.isDetailTextTruncated,
                         font: NexusMacTheme.monoFont(11, relativeTo: .callout)
                     )
@@ -1771,19 +1793,39 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func structuredSessionDetailTextView(_ text: String, isTruncated: Bool, font: Font) -> some View {
+    private func structuredSessionDetailTextView(_ text: String, rowID: UUID, isTruncated: Bool, font: Font) -> some View {
+        let isExpanded = expandedStructuredSessionCommandOutputRowIDs.contains(rowID)
+        let showsCollapsedPreview = structuredSessionShouldCollapseDetailPreview(text)
+
         VStack(alignment: .leading, spacing: 8) {
-            // Fixed-height clipped viewport for live tool output previews.
-            // Avoid nested ScrollView-in-ScrollView interaction on macOS while still
-            // preventing growing detailText from expanding the row during streaming.
-            Text(verbatim: text)
-                .font(font)
-                .foregroundStyle(.white.opacity(0.84))
-                .structuredSessionFeedTextSelection()
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .frame(height: 200, alignment: .top)
-                .clipped()
+            Group {
+                if showsCollapsedPreview && isExpanded == false {
+                    Text(verbatim: text)
+                        .font(font)
+                        .foregroundStyle(.white.opacity(0.84))
+                        .structuredSessionFeedTextSelection()
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(height: 200, alignment: .top)
+                        .clipped()
+                } else {
+                    Text(verbatim: text)
+                        .font(font)
+                        .foregroundStyle(.white.opacity(0.84))
+                        .structuredSessionFeedTextSelection()
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+
+            if showsCollapsedPreview && isTruncated == false {
+                Button(isExpanded ? "Collapse output" : "Show full output") {
+                    toggleStructuredSessionCommandOutputExpansion(rowID)
+                }
+                .buttonStyle(.plain)
+                .font(NexusMacTheme.bodyFont(10, relativeTo: .caption).weight(.medium))
+                .foregroundStyle(NexusMacTheme.gold)
+            }
 
             if isTruncated {
                 Text("Output preview truncated for smooth scrolling.")
@@ -1794,6 +1836,42 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
         .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func structuredSessionShouldCollapseMarkdownPreview(_ text: String) -> Bool {
+        structuredSessionEstimatedWrappedLineCount(for: text, charactersPerLine: 72) > 14
+    }
+
+    private func structuredSessionShouldCollapseDetailPreview(_ text: String) -> Bool {
+        structuredSessionEstimatedWrappedLineCount(for: text, charactersPerLine: 84) > 10
+    }
+
+    private func structuredSessionEstimatedWrappedLineCount(for text: String, charactersPerLine: Int) -> Int {
+        let clampedCharactersPerLine = max(12, charactersPerLine)
+        let wrappedLineCount = text
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .reduce(into: 0) { count, line in
+                let lineLength = max(1, line.count)
+                count += max(1, Int(ceil(Double(lineLength) / Double(clampedCharactersPerLine))))
+            }
+
+        return max(1, wrappedLineCount)
+    }
+
+    private func toggleStructuredSessionMessageExpansion(_ rowID: UUID) {
+        if expandedStructuredSessionMessageRowIDs.contains(rowID) {
+            expandedStructuredSessionMessageRowIDs.remove(rowID)
+        } else {
+            expandedStructuredSessionMessageRowIDs.insert(rowID)
+        }
+    }
+
+    private func toggleStructuredSessionCommandOutputExpansion(_ rowID: UUID) {
+        if expandedStructuredSessionCommandOutputRowIDs.contains(rowID) {
+            expandedStructuredSessionCommandOutputRowIDs.remove(rowID)
+        } else {
+            expandedStructuredSessionCommandOutputRowIDs.insert(rowID)
+        }
     }
 
     private func structuredSessionThinkingIndicatorView(_ indicator: StructuredSessionThinkingIndicator) -> some View {
