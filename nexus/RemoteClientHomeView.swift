@@ -1448,8 +1448,6 @@ private struct RemoteSessionScreenView: View {
     @State private var activeExtensionDialogID: String?
     @State private var presentedError: RemoteClientHomePresentedError?
     @State private var structuredSessionAutoScrollCoordinator = StructuredSessionAutoScrollCoordinator()
-    @State private var expandedStructuredSessionMessageRowIDs: Set<UUID> = []
-    @State private var expandedStructuredSessionCommandOutputRowIDs: Set<UUID> = []
     @FocusState private var isStructuredPromptFocused: Bool
     @FocusState private var isTerminalInputFocused: Bool
 
@@ -2309,42 +2307,18 @@ private struct RemoteSessionScreenView: View {
                 .frame(maxWidth: 420, alignment: .trailing)
             }
         case .assistant(let label):
-            let isExpanded = expandedStructuredSessionMessageRowIDs.contains(row.id)
-            let showsCollapsedPreview = structuredSessionShouldCollapseMarkdownPreview(conversation.text)
-
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(label)
                         .font(NexusIOSTheme.bodyFont(11, relativeTo: .caption, weight: .medium))
                         .foregroundStyle(NexusIOSTheme.mutedText)
 
-                    Group {
-                        if showsCollapsedPreview && isExpanded == false {
-                            structuredSessionMarkdownText(
-                                conversation.text,
-                                font: NexusIOSTheme.bodyFont(15),
-                                color: .white.opacity(0.94)
-                            )
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .frame(height: 280, alignment: .top)
-                            .clipped()
-                        } else {
-                            structuredSessionMarkdownText(
-                                conversation.text,
-                                font: NexusIOSTheme.bodyFont(15),
-                                color: .white.opacity(0.94)
-                            )
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-
-                    if showsCollapsedPreview {
-                        Button(isExpanded ? "Collapse response" : "Show full response") {
-                            toggleStructuredSessionMessageExpansion(row.id)
-                        }
-                        .font(NexusIOSTheme.bodyFont(12, relativeTo: .caption, weight: .medium))
-                        .foregroundStyle(NexusIOSTheme.gold)
-                    }
+                    structuredSessionMarkdownText(
+                        conversation.text,
+                        font: NexusIOSTheme.bodyFont(15),
+                        color: .white.opacity(0.94)
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
@@ -2370,7 +2344,6 @@ private struct RemoteSessionScreenView: View {
                     if let detailText = row.detailText {
                         structuredSessionDetailTextView(
                             detailText,
-                            rowID: row.id,
                             isTruncated: row.isDetailTextTruncated,
                             font: NexusIOSTheme.monoFont(12, relativeTo: .callout)
                         )
@@ -2462,13 +2435,12 @@ private struct RemoteSessionScreenView: View {
     }
 
     @ViewBuilder
-    private func structuredSessionDetailTextView(_ text: String, rowID: UUID, isTruncated: Bool, font: Font) -> some View {
-        let isExpanded = expandedStructuredSessionCommandOutputRowIDs.contains(rowID)
+    private func structuredSessionDetailTextView(_ text: String, isTruncated: Bool, font: Font) -> some View {
         let showsCollapsedPreview = structuredSessionShouldCollapseDetailPreview(text)
 
         VStack(alignment: .leading, spacing: 8) {
             Group {
-                if showsCollapsedPreview && isExpanded == false {
+                if showsCollapsedPreview {
                     Text(verbatim: text)
                         .font(font)
                         .foregroundStyle(.white.opacity(0.84))
@@ -2487,16 +2459,12 @@ private struct RemoteSessionScreenView: View {
                 }
             }
 
-            if showsCollapsedPreview && isTruncated == false {
-                Button(isExpanded ? "Collapse output" : "Show full output") {
-                    toggleStructuredSessionCommandOutputExpansion(rowID)
-                }
-                .font(NexusIOSTheme.bodyFont(12, relativeTo: .caption, weight: .medium))
-                .foregroundStyle(NexusIOSTheme.gold)
-            }
-
             if isTruncated {
                 Text("Output preview truncated for smoother scrolling.")
+                    .font(NexusIOSTheme.bodyFont(11, relativeTo: .caption))
+                    .foregroundStyle(NexusIOSTheme.mutedText)
+            } else if showsCollapsedPreview {
+                Text("Long output preview truncated for smoother scrolling.")
                     .font(NexusIOSTheme.bodyFont(11, relativeTo: .caption))
                     .foregroundStyle(NexusIOSTheme.mutedText)
             }
@@ -2504,10 +2472,6 @@ private struct RemoteSessionScreenView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
         .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
-    private func structuredSessionShouldCollapseMarkdownPreview(_ text: String) -> Bool {
-        structuredSessionEstimatedWrappedLineCount(for: text, charactersPerLine: 56) > 14
     }
 
     private func structuredSessionShouldCollapseDetailPreview(_ text: String) -> Bool {
@@ -2524,22 +2488,6 @@ private struct RemoteSessionScreenView: View {
             }
 
         return max(1, wrappedLineCount)
-    }
-
-    private func toggleStructuredSessionMessageExpansion(_ rowID: UUID) {
-        if expandedStructuredSessionMessageRowIDs.contains(rowID) {
-            expandedStructuredSessionMessageRowIDs.remove(rowID)
-        } else {
-            expandedStructuredSessionMessageRowIDs.insert(rowID)
-        }
-    }
-
-    private func toggleStructuredSessionCommandOutputExpansion(_ rowID: UUID) {
-        if expandedStructuredSessionCommandOutputRowIDs.contains(rowID) {
-            expandedStructuredSessionCommandOutputRowIDs.remove(rowID)
-        } else {
-            expandedStructuredSessionCommandOutputRowIDs.insert(rowID)
-        }
     }
 
     private func structuredSessionApprovalRequestView(

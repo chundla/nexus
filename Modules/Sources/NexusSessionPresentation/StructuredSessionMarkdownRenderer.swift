@@ -372,6 +372,7 @@ public struct StructuredSessionMarkdownText: View {
     private let font: Font
     private let color: Color
     private let renderer: StructuredSessionMarkdownRenderer
+    private let fixedVerticalSize: Bool
 
     @State private var renderedContent: StructuredSessionRenderedText
 
@@ -379,12 +380,14 @@ public struct StructuredSessionMarkdownText: View {
         markdown: String,
         font: Font,
         color: Color,
-        renderer: StructuredSessionMarkdownRenderer = .shared
+        renderer: StructuredSessionMarkdownRenderer = .shared,
+        fixedVerticalSize: Bool = false
     ) {
         self.markdown = markdown
         self.font = font
         self.color = color
         self.renderer = renderer
+        self.fixedVerticalSize = fixedVerticalSize
         _renderedContent = State(initialValue: renderer.renderContent(markdown))
     }
 
@@ -400,9 +403,22 @@ public struct StructuredSessionMarkdownText: View {
         .font(font)
         .foregroundColor(color)
         .structuredSessionFeedTextSelection()
-        .fixedSize(horizontal: false, vertical: true)
+        .modifier(StructuredSessionMarkdownVerticalSizingModifier(fixedVerticalSize: fixedVerticalSize))
         .onChange(of: markdown) { newValue in
             renderedContent = renderer.renderContent(newValue)
+        }
+    }
+}
+
+private struct StructuredSessionMarkdownVerticalSizingModifier: ViewModifier {
+    let fixedVerticalSize: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if fixedVerticalSize {
+            content.fixedSize(horizontal: false, vertical: true)
+        } else {
+            content
         }
     }
 }
