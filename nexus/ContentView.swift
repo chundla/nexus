@@ -1537,7 +1537,6 @@ struct ContentView: View {
                         }
                         .padding(.horizontal, 14)
                         .padding(.vertical, 14)
-                        .scrollTargetLayout()
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .onAppear {

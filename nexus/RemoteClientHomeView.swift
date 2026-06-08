@@ -2129,7 +2129,6 @@ private struct RemoteSessionScreenView: View {
                     .padding(.horizontal, horizontalPadding)
                     .padding(.top, 14)
                     .padding(.bottom, 120)
-                    .scrollTargetLayout()
                 }
                 .onAppear {
                     structuredSessionAutoScrollCoordinator.request(.immediate) { animation in
@@ -2240,7 +2239,6 @@ private struct RemoteSessionScreenView: View {
                     .frame(height: 1)
                     .id(conversationBottomID)
             }
-            .scrollTargetLayout()
         }
     }
 
