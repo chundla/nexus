@@ -2419,7 +2419,7 @@ private struct RemoteSessionScreenView: View {
         color: Color
     ) -> some View {
         if conversation.isStreaming,
-           structuredSessionShouldCollapseStreamingMarkdownPreview(conversation.text) {
+           structuredSessionShouldCollapseStreamingMarkdownPreview(conversation.text, charactersPerLine: 56) {
             VStack(alignment: .leading, spacing: 8) {
                 Text(verbatim: conversation.text)
                     .font(font)
@@ -2440,7 +2440,7 @@ private struct RemoteSessionScreenView: View {
 
     @ViewBuilder
     private func structuredSessionDetailTextView(_ text: String, isTruncated: Bool, font: Font) -> some View {
-        let showsCollapsedPreview = structuredSessionShouldCollapseDetailPreview(text)
+        let showsCollapsedPreview = structuredSessionShouldCollapseDetailPreview(text, charactersPerLine: 60)
 
         VStack(alignment: .leading, spacing: 8) {
             Group {
@@ -2476,26 +2476,6 @@ private struct RemoteSessionScreenView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
         .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
-    private func structuredSessionShouldCollapseStreamingMarkdownPreview(_ text: String) -> Bool {
-        structuredSessionEstimatedWrappedLineCount(for: text, charactersPerLine: 56) > 18 || text.count > 6_000
-    }
-
-    private func structuredSessionShouldCollapseDetailPreview(_ text: String) -> Bool {
-        structuredSessionEstimatedWrappedLineCount(for: text, charactersPerLine: 60) > 10
-    }
-
-    private func structuredSessionEstimatedWrappedLineCount(for text: String, charactersPerLine: Int) -> Int {
-        let clampedCharactersPerLine = max(12, charactersPerLine)
-        let wrappedLineCount = text
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .reduce(into: 0) { count, line in
-                let lineLength = max(1, line.count)
-                count += max(1, Int(ceil(Double(lineLength) / Double(clampedCharactersPerLine))))
-            }
-
-        return max(1, wrappedLineCount)
     }
 
     private func structuredSessionApprovalRequestView(

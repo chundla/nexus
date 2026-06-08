@@ -1976,3 +1976,34 @@ private func structuredSessionActivityEmphasis(for kind: SessionActivityItem.Kin
         .success
     }
 }
+
+// MARK: - Feed row content collapse decisions (for live streaming draft + long detail bounding)
+
+/// Pure, cheap, testable predicates that decide when to bound live assistant previews
+/// and long command/system detail output inside structured feed rows.
+///
+/// These power the truncation branches in `ContentView` and `RemoteClientHomeView`
+/// so rapid tail appends and ~200 ms streaming draft growth (see `StructuredFeedProfilingFixture`)
+/// do not feed unbounded `ViewLayoutEngine` / `explicitAlignment` work.
+/// The `charactersPerLine` is platform-tuned (higher on macOS for wider rendering,
+/// lower on iOS). Thresholds and behavior are the locked contract for row geometry stability.
+/// Full finalized content is never collapsed by these paths; only live drafts and long details.
+public func structuredSessionShouldCollapseStreamingMarkdownPreview(_ text: String, charactersPerLine: Int) -> Bool {
+    structuredSessionEstimatedWrappedLineCount(for: text, charactersPerLine: charactersPerLine) > 18 || text.count > 6_000
+}
+
+public func structuredSessionShouldCollapseDetailPreview(_ text: String, charactersPerLine: Int) -> Bool {
+    structuredSessionEstimatedWrappedLineCount(for: text, charactersPerLine: charactersPerLine) > 10
+}
+
+private func structuredSessionEstimatedWrappedLineCount(for text: String, charactersPerLine: Int) -> Int {
+    let clampedCharactersPerLine = max(12, charactersPerLine)
+    let wrappedLineCount = text
+        .split(separator: "\n", omittingEmptySubsequences: false)
+        .reduce(into: 0) { count, line in
+            let lineLength = max(1, line.count)
+            count += max(1, Int(ceil(Double(lineLength) / Double(clampedCharactersPerLine))))
+        }
+
+    return max(1, wrappedLineCount)
+}

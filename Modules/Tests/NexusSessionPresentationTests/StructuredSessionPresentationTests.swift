@@ -1665,4 +1665,43 @@ struct StructuredSessionPresentationTests {
 
         #expect(applyStructuredSessionSlashCommand(command, to: "  /go") == "  /goal ")
     }
+
+    // Collapse decision regression tests for #205.
+    // These unit-test the pure bounding logic that keeps structured feed row content
+    // (assistant streaming previews + long detail/command output) from growing unbounded
+    // during live draft appends. They are the "new regression test for row geometry stability
+    // under burst" (the decisions are what stop the 200 ms fixture bursts from thrashing
+    // layout in the tail). Thresholds/captions match the original view implementations exactly
+    // so finalize behavior and visuals are preserved. The views now delegate here.
+    @Test func structuredSessionShouldCollapseStreamingMarkdownPreviewRespectsLineAndCharThresholds() {
+        // Short content: never collapse (both platform widths)
+        #expect(structuredSessionShouldCollapseStreamingMarkdownPreview("short reply", charactersPerLine: 72) == false)
+        #expect(structuredSessionShouldCollapseStreamingMarkdownPreview("Pi: hi", charactersPerLine: 56) == false)
+
+        // Char count bomb (> 6_000) collapses regardless of wrapping
+        let charBomb = String(repeating: "x", count: 6_001)
+        #expect(structuredSessionShouldCollapseStreamingMarkdownPreview(charBomb, charactersPerLine: 72) == true)
+
+        // Wrapped lines at macOS width (72 chars/line, >18 lines)
+        let macLong = (0 ..< 20).map { _ in String(repeating: "m", count: 70) }.joined(separator: "\n")
+        #expect(structuredSessionShouldCollapseStreamingMarkdownPreview(macLong, charactersPerLine: 72) == true)
+
+        // Wrapped lines at iOS width (56 chars/line)
+        let iosLong = (0 ..< 20).map { _ in String(repeating: "i", count: 50) }.joined(separator: "\n")
+        #expect(structuredSessionShouldCollapseStreamingMarkdownPreview(iosLong, charactersPerLine: 56) == true)
+
+        // Boundary: exactly 18 lines at width does not trigger (strict > 18)
+        let macBoundary = (0 ..< 18).map { _ in String(repeating: "b", count: 72) }.joined(separator: "\n")
+        #expect(structuredSessionShouldCollapseStreamingMarkdownPreview(macBoundary, charactersPerLine: 72) == false)
+    }
+
+    @Test func structuredSessionShouldCollapseDetailPreviewRespectsDetailThreshold() {
+        #expect(structuredSessionShouldCollapseDetailPreview("short output", charactersPerLine: 84) == false)
+        #expect(structuredSessionShouldCollapseDetailPreview("short output", charactersPerLine: 60) == false)
+
+        // >10 wrapped lines triggers (mac 84 or iOS 60)
+        let detailLong = (0 ..< 12).map { "line \($0)" }.joined(separator: "\n")
+        #expect(structuredSessionShouldCollapseDetailPreview(detailLong, charactersPerLine: 84) == true)
+        #expect(structuredSessionShouldCollapseDetailPreview(detailLong, charactersPerLine: 60) == true)
+    }
 }

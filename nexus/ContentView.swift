@@ -1750,7 +1750,7 @@ struct ContentView: View {
         color: Color
     ) -> some View {
         if conversation.isStreaming,
-           structuredSessionShouldCollapseStreamingMarkdownPreview(conversation.text) {
+           structuredSessionShouldCollapseStreamingMarkdownPreview(conversation.text, charactersPerLine: 72) {
             VStack(alignment: .leading, spacing: 8) {
                 Text(verbatim: conversation.text)
                     .font(font)
@@ -1771,7 +1771,7 @@ struct ContentView: View {
 
     @ViewBuilder
     private func structuredSessionDetailTextView(_ text: String, isTruncated: Bool, font: Font) -> some View {
-        let showsCollapsedPreview = structuredSessionShouldCollapseDetailPreview(text)
+        let showsCollapsedPreview = structuredSessionShouldCollapseDetailPreview(text, charactersPerLine: 84)
 
         VStack(alignment: .leading, spacing: 8) {
             Group {
@@ -1807,26 +1807,6 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
         .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-
-    private func structuredSessionShouldCollapseStreamingMarkdownPreview(_ text: String) -> Bool {
-        structuredSessionEstimatedWrappedLineCount(for: text, charactersPerLine: 72) > 18 || text.count > 6_000
-    }
-
-    private func structuredSessionShouldCollapseDetailPreview(_ text: String) -> Bool {
-        structuredSessionEstimatedWrappedLineCount(for: text, charactersPerLine: 84) > 10
-    }
-
-    private func structuredSessionEstimatedWrappedLineCount(for text: String, charactersPerLine: Int) -> Int {
-        let clampedCharactersPerLine = max(12, charactersPerLine)
-        let wrappedLineCount = text
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .reduce(into: 0) { count, line in
-                let lineLength = max(1, line.count)
-                count += max(1, Int(ceil(Double(lineLength) / Double(clampedCharactersPerLine))))
-            }
-
-        return max(1, wrappedLineCount)
     }
 
     private func structuredSessionThinkingIndicatorView(_ indicator: StructuredSessionThinkingIndicator) -> some View {
