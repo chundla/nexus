@@ -1651,13 +1651,11 @@ struct ContentView: View {
                     font: NexusMacTheme.bodyFont(13),
                     color: .white.opacity(0.94)
                 )
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .frame(maxWidth: 520, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
         case .command:
             VStack(alignment: .leading, spacing: 8) {
                 Text(row.title)
@@ -1679,7 +1677,6 @@ struct ContentView: View {
             .padding(12)
             .background(Color.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .frame(maxWidth: 620, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
         case .error:
             VStack(alignment: .leading, spacing: 5) {
                 Text("Error")
@@ -1694,7 +1691,6 @@ struct ContentView: View {
             .padding(12)
             .background(accent.opacity(0.18), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .frame(maxWidth: 620, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
         case .system:
             Group {
                 if row.showsExpandedSystemCard {
@@ -1707,7 +1703,6 @@ struct ContentView: View {
                             .foregroundStyle(.white.opacity(0.92))
                             .structuredSessionFeedTextSelection()
                             .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
                         if let detailText = row.detailText {
                             structuredSessionMarkdownText(
                                 detailText,
@@ -1725,7 +1720,6 @@ struct ContentView: View {
                     .padding(12)
                     .background(Color.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     .frame(maxWidth: 620, alignment: .leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
                     Text(conversation.text)
                         .font(NexusMacTheme.bodyFont(11, relativeTo: .caption))
@@ -1758,7 +1752,6 @@ struct ContentView: View {
                     .structuredSessionFeedTextSelection()
                     .lineLimit(18)
                     .truncationMode(.tail)
-                    .frame(maxWidth: .infinity, alignment: .leading)
 
                 Text("Streaming response preview truncated until completion.")
                     .font(NexusMacTheme.bodyFont(10, relativeTo: .caption))
@@ -1780,8 +1773,6 @@ struct ContentView: View {
                         .font(font)
                         .foregroundStyle(.white.opacity(0.84))
                         .structuredSessionFeedTextSelection()
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                         .frame(height: 200, alignment: .top)
                         .clipped()
                 } else {
@@ -1789,8 +1780,6 @@ struct ContentView: View {
                         .font(font)
                         .foregroundStyle(.white.opacity(0.84))
                         .structuredSessionFeedTextSelection()
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
 

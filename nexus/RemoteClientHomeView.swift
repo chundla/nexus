@@ -2316,7 +2316,6 @@ private struct RemoteSessionScreenView: View {
                         font: NexusIOSTheme.bodyFont(15),
                         color: .white.opacity(0.94)
                     )
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
@@ -2375,7 +2374,6 @@ private struct RemoteSessionScreenView: View {
                             .foregroundStyle(.white.opacity(0.92))
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
                         if let detailText = row.detailText {
                             structuredSessionMarkdownText(
                                 detailText,
@@ -2427,7 +2425,6 @@ private struct RemoteSessionScreenView: View {
                     .textSelection(.enabled)
                     .lineLimit(18)
                     .truncationMode(.tail)
-                    .frame(maxWidth: .infinity, alignment: .leading)
 
                 Text("Streaming response preview truncated until completion.")
                     .font(NexusIOSTheme.bodyFont(11, relativeTo: .caption))
@@ -2449,8 +2446,6 @@ private struct RemoteSessionScreenView: View {
                         .font(font)
                         .foregroundStyle(.white.opacity(0.84))
                         .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                         .frame(height: 200, alignment: .top)
                         .clipped()
                 } else {
@@ -2458,8 +2453,6 @@ private struct RemoteSessionScreenView: View {
                         .font(font)
                         .foregroundStyle(.white.opacity(0.84))
                         .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
 
