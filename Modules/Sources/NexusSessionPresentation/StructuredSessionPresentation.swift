@@ -2362,6 +2362,36 @@ public func structuredSessionShouldCollapseDetailPreview(_ text: String, charact
     structuredSessionEstimatedWrappedLineCount(for: text, charactersPerLine: charactersPerLine) > 10
 }
 
+/// Fixed viewport height (points) for collapsed command/system detail previews in the structured feed.
+/// Matches the `frame(height:)` used in macOS and iOS session views so layout does not grow with full output.
+public let structuredSessionFeedCollapsedDetailViewportHeight: CGFloat = 200
+
+/// Line cap for bounded assistant markdown previews (streaming and finalized) in feed rows.
+public let structuredSessionFeedAssistantMarkdownPreviewLineLimit = 18
+
+public struct StructuredSessionFeedAssistantMarkdownDisplayPolicy: Equatable {
+    public let showsCollapsedPreview: Bool
+    public let previewLineLimit: Int
+
+    public init(showsCollapsedPreview: Bool, previewLineLimit: Int) {
+        self.showsCollapsedPreview = showsCollapsedPreview
+        self.previewLineLimit = previewLineLimit
+    }
+}
+
+/// Decides when finalized (non-streaming) assistant responses should use bounded preview layout
+/// instead of full multiline markdown layout during scroll.
+public func structuredSessionFeedAssistantMarkdownDisplayPolicy(
+    for text: String,
+    charactersPerLine: Int
+) -> StructuredSessionFeedAssistantMarkdownDisplayPolicy {
+    let collapse = structuredSessionShouldCollapseStreamingMarkdownPreview(text, charactersPerLine: charactersPerLine)
+    return StructuredSessionFeedAssistantMarkdownDisplayPolicy(
+        showsCollapsedPreview: collapse,
+        previewLineLimit: structuredSessionFeedAssistantMarkdownPreviewLineLimit
+    )
+}
+
 private func structuredSessionEstimatedWrappedLineCount(for text: String, charactersPerLine: Int) -> Int {
     let clampedCharactersPerLine = max(12, charactersPerLine)
     let wrappedLineCount = text

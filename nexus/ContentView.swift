@@ -1738,17 +1738,13 @@ struct ContentView: View {
                             .structuredSessionFeedTextSelection()
                             .fixedSize(horizontal: false, vertical: true)
                         if let detailText = row.detailText {
-                            structuredSessionMarkdownText(
+                            structuredSessionSystemDetailMarkdownView(
                                 detailText,
+                                isTruncated: row.isDetailTextTruncated,
                                 font: NexusMacTheme.bodyFont(13),
-                                color: .white.opacity(0.92)
+                                color: .white.opacity(0.92),
+                                charactersPerLine: 84
                             )
-
-                            if row.isDetailTextTruncated {
-                                Text("Output preview truncated for smooth scrolling.")
-                                    .font(NexusMacTheme.bodyFont(10, relativeTo: .caption))
-                                    .foregroundStyle(NexusMacTheme.mutedText)
-                            }
                         }
                     }
                     .padding(12)
@@ -1769,6 +1765,45 @@ struct ContentView: View {
 
     private func structuredSessionMarkdownText(_ text: String, font: Font, color: Color) -> some View {
         StructuredSessionMarkdownText(markdown: text, font: font, color: color)
+    }
+
+    @ViewBuilder
+    private func structuredSessionSystemDetailMarkdownView(
+        _ text: String,
+        isTruncated: Bool,
+        font: Font,
+        color: Color,
+        charactersPerLine: Int
+    ) -> some View {
+        let showsCollapsedPreview = structuredSessionShouldCollapseDetailPreview(
+            text,
+            charactersPerLine: charactersPerLine
+        )
+
+        VStack(alignment: .leading, spacing: 8) {
+            Group {
+                if showsCollapsedPreview {
+                    structuredSessionMarkdownText(text, font: font, color: color)
+                        .frame(
+                            height: structuredSessionFeedCollapsedDetailViewportHeight,
+                            alignment: .top
+                        )
+                        .clipped()
+                } else {
+                    structuredSessionMarkdownText(text, font: font, color: color)
+                }
+            }
+
+            if isTruncated {
+                Text("Output preview truncated for smooth scrolling.")
+                    .font(NexusMacTheme.bodyFont(10, relativeTo: .caption))
+                    .foregroundStyle(NexusMacTheme.mutedText)
+            } else if showsCollapsedPreview {
+                Text("Long output preview truncated for smooth scrolling.")
+                    .font(NexusMacTheme.bodyFont(10, relativeTo: .caption))
+                    .foregroundStyle(NexusMacTheme.mutedText)
+            }
+        }
     }
 
     @ViewBuilder
@@ -1793,7 +1828,28 @@ struct ContentView: View {
                 }
             }
         } else {
-            structuredSessionMarkdownText(conversation.text, font: font, color: color)
+            let policy = structuredSessionFeedAssistantMarkdownDisplayPolicy(
+                for: conversation.text,
+                charactersPerLine: 72
+            )
+            if policy.showsCollapsedPreview {
+                VStack(alignment: .leading, spacing: 8) {
+                    structuredSessionMarkdownText(conversation.text, font: font, color: color)
+                        .lineLimit(policy.previewLineLimit)
+                        .truncationMode(.tail)
+                        .frame(
+                            height: structuredSessionFeedCollapsedDetailViewportHeight,
+                            alignment: .top
+                        )
+                        .clipped()
+
+                    Text("Long response preview truncated for smooth scrolling.")
+                        .font(NexusMacTheme.bodyFont(10, relativeTo: .caption))
+                        .foregroundStyle(NexusMacTheme.mutedText)
+                }
+            } else {
+                structuredSessionMarkdownText(conversation.text, font: font, color: color)
+            }
         }
     }
 
@@ -1808,7 +1864,10 @@ struct ContentView: View {
                         .font(font)
                         .foregroundStyle(.white.opacity(0.84))
                         .structuredSessionFeedTextSelection()
-                        .frame(height: 200, alignment: .top)
+                        .frame(
+                            height: structuredSessionFeedCollapsedDetailViewportHeight,
+                            alignment: .top
+                        )
                         .clipped()
                 } else {
                     Text(verbatim: text)

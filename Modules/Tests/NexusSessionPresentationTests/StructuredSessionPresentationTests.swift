@@ -1778,6 +1778,19 @@ struct StructuredSessionPresentationTests {
         #expect(structuredSessionShouldCollapseDetailPreview(detailLong, charactersPerLine: 60) == true)
     }
 
+    @Test func structuredSessionFeedAssistantMarkdownDisplayPolicyBoundsLongFinalizedResponses() {
+        let short = structuredSessionFeedAssistantMarkdownDisplayPolicy(for: "Done.", charactersPerLine: 72)
+        #expect(short == StructuredSessionFeedAssistantMarkdownDisplayPolicy(
+            showsCollapsedPreview: false,
+            previewLineLimit: structuredSessionFeedAssistantMarkdownPreviewLineLimit
+        ))
+
+        let long = (0 ..< 20).map { _ in String(repeating: "a", count: 70) }.joined(separator: "\n")
+        let policy = structuredSessionFeedAssistantMarkdownDisplayPolicy(for: long, charactersPerLine: 72)
+        #expect(policy.showsCollapsedPreview)
+        #expect(policy.previewLineLimit == 18)
+    }
+
     // MARK: - Feed scroll policy (#211)
 
     @Test func structuredSessionFeedScrollTargetUsesLiveDraftRowWhileStreaming() throws {

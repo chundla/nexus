@@ -116,6 +116,17 @@ CLI `red_marked_count` counts Instruments **Red** hitch markers in `hitches-upda
 
 Post–#215–#217 (and #218 on iOS), record a **new** trace with the same harness and compare JSON + UI hitch counts against this baseline. Comment results on **#214**.
 
+### macOS text layout slice (#220)
+
+Code-side mitigations (automated guardrails + macOS `ContentView`):
+
+- `structuredSessionDetailTextPreview` still bounds row `detailText` at build time (12 lines / 4k chars).
+- Finalized assistant markdown uses `structuredSessionFeedAssistantMarkdownDisplayPolicy` (same thresholds as streaming collapse) with a fixed **200 pt** viewport when long.
+- System-card markdown `detailText` uses the same bounded viewport as command detail previews.
+- Presentation tests: `structuredSessionFeedAssistantMarkdownDisplayPolicyBoundsLongFinalizedResponses` plus existing collapse/detail-preview tests.
+
+After rebuilding macOS Debug from HEAD, re-profile with `NEXUS_MAC_PROFILE_FIXTURE=structured-feed-profile` and export metrics; compare worst hitch / hitch count to the 09-06 baseline above.
+
 ## Related
 
 - Umbrella: GitHub issue **#214**
