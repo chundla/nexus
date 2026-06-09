@@ -1102,6 +1102,36 @@ public func structuredSessionAutoScrollAnimation(
     }
 }
 
+/// Distance from the scroll content bottom to the visible viewport bottom (points). Zero when flush with bottom.
+public func structuredSessionIsPinnedToBottomFromBottomDistance(
+    _ distanceFromBottom: CGFloat,
+    pinThreshold: CGFloat = 48
+) -> Bool {
+    distanceFromBottom <= pinThreshold
+}
+
+public func structuredSessionRequestBottomScroll(
+    intent: StructuredSessionBottomScrollIntent,
+    coordinator: StructuredSessionAutoScrollCoordinator,
+    draftGrowthThrottle: StructuredSessionDraftGrowthScrollThrottle,
+    performScroll: @escaping (StructuredSessionAutoScrollAnimation) -> Void
+) {
+    guard let animation = structuredSessionAutoScrollAnimation(for: intent) else {
+        return
+    }
+
+    switch intent {
+    case .none:
+        return
+    case .draftGrowthCoalesced:
+        draftGrowthThrottle.requestIfDue {
+            coordinator.request(animation, perform: performScroll)
+        }
+    case .immediate, .animated:
+        coordinator.request(animation, perform: performScroll)
+    }
+}
+
 /// Buckets rapid live-draft growth scroll cues (~100–150ms) while pinned to bottom.
 public final class StructuredSessionDraftGrowthScrollThrottle: @unchecked Sendable {
     private let minimumInterval: TimeInterval

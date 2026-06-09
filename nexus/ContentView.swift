@@ -52,6 +52,9 @@ struct ContentView: View {
     @State private var terminalFocusToken = UUID()
     @State private var presentedError: PresentedError?
     @State private var structuredSessionAutoScrollCoordinator = StructuredSessionAutoScrollCoordinator()
+    @State private var structuredSessionDraftGrowthScrollThrottle = StructuredSessionDraftGrowthScrollThrottle()
+    @State private var structuredSessionIsPinnedToBottom = true
+    @State private var structuredSessionFeedScrollSnapshot: StructuredSessionFeedScrollSnapshot?
 
     private let terminalLayout = TerminalViewportLayout.live
 
@@ -1528,20 +1531,73 @@ struct ContentView: View {
                                 if let thinkingIndicator = feedPresentation.thinkingIndicator {
                                     structuredSessionThinkingIndicatorView(thinkingIndicator)
                                 }
-
-                                Color.clear
-                                    .frame(height: 1)
-                                    .id("conversation-bottom")
                             }
+
+                            Color.clear
+                                .frame(height: 1)
+                                .id(structuredSessionFeedBottomSentinelID)
                         }
                         .padding(.horizontal, 14)
                         .padding(.vertical, 14)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                        max(
+                            0,
+                            geometry.contentSize.height
+                                - geometry.contentOffset.y
+                                - geometry.containerSize.height
+                        )
+                    } action: { _, distanceFromBottom in
+                        structuredSessionIsPinnedToBottom = structuredSessionIsPinnedToBottomFromBottomDistance(
+                            distanceFromBottom
+                        )
+                    }
                     .onAppear {
-                        structuredSessionAutoScrollCoordinator.request(.immediate) { _ in
-                            proxy.scrollTo("conversation-bottom", anchor: .bottom)
+                        structuredSessionIsPinnedToBottom = true
+                        let snapshot = structuredPresentation.structuredSessionFeedScrollSnapshot
+                        structuredSessionFeedScrollSnapshot = snapshot
+                        structuredSessionRequestBottomScroll(
+                            intent: .immediate,
+                            coordinator: structuredSessionAutoScrollCoordinator,
+                            draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
+                            performScroll: { animation in
+                                structuredSessionPerformBottomScroll(
+                                    using: proxy,
+                                    presentation: structuredPresentation,
+                                    animation: animation
+                                )
+                            }
+                        )
+                    }
+                    .onChange(of: structuredPresentation.session.id) { _, _ in
+                        structuredSessionIsPinnedToBottom = true
+                        structuredSessionFeedScrollSnapshot = nil
+                    }
+                    .onChange(of: structuredPresentation.structuredSessionFeedScrollSnapshot) { _, current in
+                        guard let previous = structuredSessionFeedScrollSnapshot else {
+                            structuredSessionFeedScrollSnapshot = current
+                            return
                         }
+
+                        let intent = structuredSessionBottomScrollIntent(
+                            previous: previous,
+                            current: current,
+                            isPinnedToBottom: structuredSessionIsPinnedToBottom
+                        )
+                        structuredSessionRequestBottomScroll(
+                            intent: intent,
+                            coordinator: structuredSessionAutoScrollCoordinator,
+                            draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
+                            performScroll: { animation in
+                                structuredSessionPerformBottomScroll(
+                                    using: proxy,
+                                    presentation: structuredPresentation,
+                                    animation: animation
+                                )
+                            }
+                        )
+                        structuredSessionFeedScrollSnapshot = current
                     }
                 }
 
@@ -1920,6 +1976,26 @@ struct ContentView: View {
             NexusMacTheme.coral
         case .success:
             NexusMacTheme.teal
+        }
+    }
+
+    private func structuredSessionPerformBottomScroll(
+        using proxy: ScrollViewProxy,
+        presentation: FocusedStructuredSessionPresentation,
+        animation: StructuredSessionAutoScrollAnimation
+    ) {
+        let targetID = presentation.structuredSessionFeedScrollTarget.scrollTargetID
+        let scroll = {
+            proxy.scrollTo(targetID, anchor: .bottom)
+        }
+
+        switch animation {
+        case .immediate:
+            scroll()
+        case .animated:
+            withAnimation(.easeOut(duration: 0.18)) {
+                scroll()
+            }
         }
     }
 

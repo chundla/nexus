@@ -1965,4 +1965,65 @@ struct StructuredSessionPresentationTests {
         #expect(throttle.requestIfDue { performed += 1 })
         #expect(performed == 2)
     }
+
+    @Test func structuredSessionIsPinnedToBottomFromBottomDistanceTreatsNearBottomAsPinned() {
+        #expect(structuredSessionIsPinnedToBottomFromBottomDistance(0))
+        #expect(structuredSessionIsPinnedToBottomFromBottomDistance(24))
+        #expect(structuredSessionIsPinnedToBottomFromBottomDistance(48))
+        #expect(structuredSessionIsPinnedToBottomFromBottomDistance(49) == false)
+        #expect(structuredSessionIsPinnedToBottomFromBottomDistance(120) == false)
+    }
+
+    @Test func structuredSessionRequestBottomScrollUsesThrottleOnlyForDraftGrowthCoalescedIntent() {
+        var now = 0.0
+        let throttle = StructuredSessionDraftGrowthScrollThrottle(minimumInterval: 0.12, now: { now })
+        var scheduled: [() -> Void] = []
+        let coordinator = StructuredSessionAutoScrollCoordinator { work in
+            scheduled.append(work)
+        }
+        var performed: [StructuredSessionAutoScrollAnimation] = []
+        let scroll: (StructuredSessionAutoScrollAnimation) -> Void = { animation in
+            performed.append(animation)
+        }
+
+        structuredSessionRequestBottomScroll(
+            intent: .immediate,
+            coordinator: coordinator,
+            draftGrowthThrottle: throttle,
+            performScroll: scroll
+        )
+        #expect(scheduled.count == 1)
+        scheduled.first?()
+        #expect(performed == [.immediate])
+
+        structuredSessionRequestBottomScroll(
+            intent: .draftGrowthCoalesced,
+            coordinator: coordinator,
+            draftGrowthThrottle: throttle,
+            performScroll: scroll
+        )
+        #expect(scheduled.count == 2)
+        scheduled.last?()
+        #expect(performed == [.immediate, .immediate])
+
+        now = 0.05
+        structuredSessionRequestBottomScroll(
+            intent: .draftGrowthCoalesced,
+            coordinator: coordinator,
+            draftGrowthThrottle: throttle,
+            performScroll: scroll
+        )
+        #expect(scheduled.count == 2)
+
+        now = 0.13
+        structuredSessionRequestBottomScroll(
+            intent: .draftGrowthCoalesced,
+            coordinator: coordinator,
+            draftGrowthThrottle: throttle,
+            performScroll: scroll
+        )
+        #expect(scheduled.count == 3)
+        scheduled.last?()
+        #expect(performed == [.immediate, .immediate, .immediate])
+    }
 }
