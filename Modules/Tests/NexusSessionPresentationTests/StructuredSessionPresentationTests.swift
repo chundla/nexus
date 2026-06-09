@@ -160,9 +160,41 @@ struct StructuredSessionPresentationTests {
         #expect(structuredSessionAutoScrollTrigger(for: screen) == StructuredSessionAutoScrollTrigger(
             lastActivityRowID: screen.activityItems.last?.id,
             pendingApprovalRequestIDs: [pendingApprovalID],
-            pendingDialogIDs: ["dialog-1"],
-            notificationIDs: [notificationID]
+            pendingDialogIDs: ["dialog-1"]
         ))
+    }
+
+    @Test func structuredSessionAutoScrollTriggerIgnoresExtensionNotificationChurn() {
+        let activityID = UUID()
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let base = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [SessionActivityItem(id: activityID, kind: .message, text: "Pi: hi")],
+            extensionUI: SessionExtensionUIState(
+                notifications: [SessionExtensionUINotification(id: UUID(), kind: .info, message: "a")]
+            ),
+            isAgentTurnInProgress: false
+        )
+        let churnedNotifications = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [SessionActivityItem(id: activityID, kind: .message, text: "Pi: hi")],
+            extensionUI: SessionExtensionUIState(
+                notifications: [SessionExtensionUINotification(id: UUID(), kind: .warning, message: "b")]
+            ),
+            isAgentTurnInProgress: false
+        )
+
+        #expect(structuredSessionAutoScrollTrigger(for: base) == structuredSessionAutoScrollTrigger(for: churnedNotifications))
     }
 
     @Test func structuredSessionAutoScrollTriggerIgnoresNonFeedPresentationChanges() {
@@ -231,14 +263,12 @@ struct StructuredSessionPresentationTests {
         let previous = StructuredSessionAutoScrollTrigger(
             lastActivityRowID: firstActivityID,
             pendingApprovalRequestIDs: [],
-            pendingDialogIDs: [],
-            notificationIDs: []
+            pendingDialogIDs: []
         )
         let current = StructuredSessionAutoScrollTrigger(
             lastActivityRowID: secondActivityID,
             pendingApprovalRequestIDs: [],
-            pendingDialogIDs: [],
-            notificationIDs: []
+            pendingDialogIDs: []
         )
 
         #expect(structuredSessionAutoScrollAnimation(previous: previous, current: current) == .immediate)
@@ -249,14 +279,12 @@ struct StructuredSessionPresentationTests {
         let previous = StructuredSessionAutoScrollTrigger(
             lastActivityRowID: activityID,
             pendingApprovalRequestIDs: [],
-            pendingDialogIDs: [],
-            notificationIDs: []
+            pendingDialogIDs: []
         )
         let current = StructuredSessionAutoScrollTrigger(
             lastActivityRowID: activityID,
             pendingApprovalRequestIDs: [UUID()],
-            pendingDialogIDs: [],
-            notificationIDs: []
+            pendingDialogIDs: []
         )
 
         #expect(structuredSessionAutoScrollAnimation(previous: previous, current: current) == .animated)
@@ -845,6 +873,13 @@ struct StructuredSessionPresentationTests {
         #expect(streamedDraftPresentation.activityRows.map(\.text) == ["You: hello", "Pi: world"])
         #expect(streamedDraftPresentation.activityRows.last?.id == draftRowID)
         #expect(streamedDraftPresentation.activityRows.last?.conversationPresentation?.isStreaming == true)
+        let sealedChunkCount = firstDraftPresentation.activityRowChunks.count
+        #expect(streamedDraftPresentation.activityRowChunks.count == sealedChunkCount)
+        #expect(
+            zip(firstDraftPresentation.activityRowChunks, streamedDraftPresentation.activityRowChunks).allSatisfy {
+                $0.id == $1.id && $0.rows.count == $1.rows.count
+            }
+        )
         #expect(finalizedPresentation.activityRows.map(\.text) == ["You: hello", "Pi: world"])
         #expect(finalizedPresentation.activityRows.last?.id == draftRowID)
         #expect(finalizedPresentation.activityRows.last?.conversationPresentation?.isStreaming == false)

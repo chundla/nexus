@@ -564,29 +564,57 @@ public final class StructuredSessionFeedPresenter {
             }
             return structuredSessionActivityRow(row, replacingIDWith: presentedRowID)
         }
-        var chunks = cachedActivityRowChunks.map { chunk in
-            StructuredSessionActivityRowChunk(
-                id: chunk.id,
-                rows: chunk.rows.map { row in
-                    guard let presentedRowID = presentedRowIDByActivityItemID[row.id] else {
-                        return row
+
+        var chunks = cachedActivityRowChunks
+        if presentedRowIDByActivityItemID.isEmpty == false {
+            chunks = chunks.map { chunk in
+                StructuredSessionActivityRowChunk(
+                    id: chunk.id,
+                    rows: chunk.rows.map { row in
+                        guard let presentedRowID = presentedRowIDByActivityItemID[row.id] else {
+                            return row
+                        }
+                        return structuredSessionActivityRow(row, replacingIDWith: presentedRowID)
                     }
-                    return structuredSessionActivityRow(row, replacingIDWith: presentedRowID)
-                }
-            )
+                )
+            }
         }
 
         if let liveDraftRow {
             rows.append(liveDraftRow)
-            chunks = appendStructuredSessionActivityRowChunks(
+            chunks = structuredSessionChunksByUpdatingLiveDraftRow(
                 chunks,
-                rows: [liveDraftRow],
+                liveDraftRow: liveDraftRow,
                 liveTailChunkSize: liveTailChunkSize
             )
         }
 
         return (rows, chunks)
     }
+}
+
+private func structuredSessionChunksByUpdatingLiveDraftRow(
+    _ chunks: [StructuredSessionActivityRowChunk],
+    liveDraftRow: StructuredSessionActivityRow,
+    liveTailChunkSize: Int
+) -> [StructuredSessionActivityRowChunk] {
+    if let lastChunkIndex = chunks.indices.last,
+       let rowIndex = chunks[lastChunkIndex].rows.firstIndex(where: { $0.id == liveDraftRow.id }) {
+        var updatedRows = chunks[lastChunkIndex].rows
+        updatedRows[rowIndex] = liveDraftRow
+        var updatedChunks = chunks
+        updatedChunks[lastChunkIndex] = StructuredSessionActivityRowChunk(
+            id: chunks[lastChunkIndex].id,
+            rows: updatedRows
+        )
+        return updatedChunks
+    }
+
+    return appendStructuredSessionActivityRowChunks(
+        chunks,
+        rows: [liveDraftRow],
+        liveTailChunkSize: liveTailChunkSize
+    )
 }
 
 public func structuredSessionActivityRows(for screen: SessionScreen) -> [StructuredSessionActivityRow] {
@@ -853,18 +881,15 @@ public struct StructuredSessionAutoScrollTrigger: Equatable {
     public let lastActivityRowID: UUID?
     public let pendingApprovalRequestIDs: [UUID]
     public let pendingDialogIDs: [String]
-    public let notificationIDs: [UUID]
 
     public init(
         lastActivityRowID: UUID?,
         pendingApprovalRequestIDs: [UUID],
-        pendingDialogIDs: [String],
-        notificationIDs: [UUID]
+        pendingDialogIDs: [String]
     ) {
         self.lastActivityRowID = lastActivityRowID
         self.pendingApprovalRequestIDs = pendingApprovalRequestIDs
         self.pendingDialogIDs = pendingDialogIDs
-        self.notificationIDs = notificationIDs
     }
 }
 
@@ -928,8 +953,7 @@ public func structuredSessionAutoScrollTrigger(for screen: SessionScreen) -> Str
         pendingApprovalRequestIDs: screen.approvalRequests
             .filter { $0.state == .pending }
             .map(\.id),
-        pendingDialogIDs: screen.extensionUI?.pendingDialogs.map(\.id) ?? [],
-        notificationIDs: screen.extensionUI?.notifications.map(\.id) ?? []
+        pendingDialogIDs: screen.extensionUI?.pendingDialogs.map(\.id) ?? []
     )
 }
 

@@ -150,8 +150,8 @@ final class StructuredSessionHistoryPagingController {
         // Compute a cheap row-affecting key: the activity items (source of base rows + chunks)
         // plus a draft key derived from providerFacts when isAgent (live draft growth changes visible rows).
         // During finalizedDwell (evil fixture / real long Pi), activityItems and draftKey are stable while
-        // providerFacts, finalOutputDiagnostic, isAgent, extensionUI notifications (for autoScrollTrigger)
-        // continue to churn. Returning the cached presentation instance prevents the published
+        // providerFacts, finalOutputDiagnostic, isAgent, and extensionUI notification churn
+        // continue during dwell. Returning the cached presentation instance prevents the published
         // FocusedStructuredSessionPresentation (and its feed/autoScrollTrigger) from mutating.
         let draftKey: String? = screen.isAgentTurnInProgress
             ? (screen.providerFacts.liveAssistantDraftText ?? "ev:(screen.providerFacts.providerEventCount)")

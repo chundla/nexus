@@ -11,7 +11,7 @@ nonisolated enum StructuredFeedProfilingFixture {
     enum Phase: Equatable {
         case drafting(step: Int)
         case finalized
-        case finalizedDwell(remaining: Int)  // post-turn_end dwell: isAgent=false, finalOutputDiagnostic present, activity rows stable (no appends), but providerEventSequence and extensionUI notifications continue to tick every 200 ms. Provides a reliable multi-tick window (~1 s) for observers to sample turn-end state + continued StructuredSessionAutoScrollTrigger churn before the next turn's startTurn appends You+progress rows.
+        case finalizedDwell(remaining: Int)  // post-turn_end dwell: isAgent=false, finalOutputDiagnostic present, activity rows stable (no appends), but providerEventSequence and extensionUI notifications continue to tick every 200 ms. Provides a reliable multi-tick window (~1 s) for observers to sample turn-end state before the next turn's startTurn appends You+progress rows.
     }
 
     private static let postTurnDwellTicks = 5
@@ -137,7 +137,7 @@ nonisolated enum StructuredFeedProfilingFixture {
         // - providerFacts (liveAssistantDraftText + tokenUsage growth + event seq during drafting)
         // - isAgentTurnInProgress toggles (true while drafting)
         // - finalOutputDiagnostic appears only on .finalized / turn_end
-        // - extensionUI notifications rotate every observation → StructuredSessionAutoScrollTrigger.notificationIDs churn
+        // - extensionUI notifications rotate every observation (metadata churn; must not republish feed presentation during dwell)
         // - thinking indicator visibility derived from isAgentTurnInProgress in presentation
         let extensionUI: SessionExtensionUIState?
         switch state.phase {
@@ -152,8 +152,8 @@ nonisolated enum StructuredFeedProfilingFixture {
                 statuses: [SessionExtensionUIStatus(key: "draft", text: "drafting \(step)")]
             )
         case .finalizedDwell:
-            // Continue notification/status churn during dwell so AutoScrollTrigger.notificationIDs keeps changing
-            // on every 200 ms tick even though activity rows and isAgentTurnInProgress are stable.
+            // Continue notification/status churn during dwell on every 200 ms tick even though activity rows
+            // and isAgentTurnInProgress are stable (presentation reuse must hold).
             let notif = SessionExtensionUINotification(
                 id: Self.deterministicNotificationID(sequence: state.providerEventSequence),
                 kind: .info,
@@ -183,7 +183,7 @@ nonisolated enum StructuredFeedProfilingFixture {
     }
 
     private static func deterministicNotificationID(sequence: Int) -> UUID {
-        // Stable, unique per sequence so autoScrollTrigger.notificationIDs mutates on (nearly) every tick
+        // Stable, unique per sequence for extensionUI notification churn on (nearly) every tick
         let last = String(format: "%012x", UInt64(sequence) & 0x0000_ffff_ffff_ffff)
         let s = "feedc0de-0000-0000-0000-\(last)"
         return UUID(uuidString: s)!

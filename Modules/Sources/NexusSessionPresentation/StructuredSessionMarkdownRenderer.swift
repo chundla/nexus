@@ -405,7 +405,9 @@ public struct StructuredSessionMarkdownText: View {
         .structuredSessionFeedTextSelection()
         .modifier(StructuredSessionMarkdownVerticalSizingModifier(fixedVerticalSize: fixedVerticalSize))
         .onChange(of: markdown) { newValue in
-            renderedContent = renderer.renderContent(newValue)
+            let next = renderer.renderContent(newValue)
+            guard next != renderedContent else { return }
+            renderedContent = next
         }
     }
 }

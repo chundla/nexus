@@ -2129,7 +2129,6 @@ private struct RemoteSessionScreenView: View {
                     .padding(.top, 14)
                     .padding(.bottom, 120)
                 }
-                .defaultScrollAnchor(.bottom)
                 .onAppear {
                     structuredSessionAutoScrollCoordinator.request(.immediate) { animation in
                         scrollStructuredSessionToBottom(using: proxy, animation: animation)
@@ -2409,8 +2408,7 @@ private struct RemoteSessionScreenView: View {
         font: Font,
         color: Color
     ) -> some View {
-        if conversation.isStreaming,
-           structuredSessionShouldCollapseStreamingMarkdownPreview(conversation.text, charactersPerLine: 56) {
+        if conversation.isStreaming {
             VStack(alignment: .leading, spacing: 8) {
                 Text(verbatim: conversation.text)
                     .font(font)
@@ -2419,9 +2417,11 @@ private struct RemoteSessionScreenView: View {
                     .lineLimit(18)
                     .truncationMode(.tail)
 
-                Text("Streaming response preview truncated until completion.")
-                    .font(NexusIOSTheme.bodyFont(11, relativeTo: .caption))
-                    .foregroundStyle(NexusIOSTheme.mutedText)
+                if structuredSessionShouldCollapseStreamingMarkdownPreview(conversation.text, charactersPerLine: 56) {
+                    Text("Streaming response preview truncated until completion.")
+                        .font(NexusIOSTheme.bodyFont(11, relativeTo: .caption))
+                        .foregroundStyle(NexusIOSTheme.mutedText)
+                }
             }
         } else {
             structuredSessionMarkdownText(conversation.text, font: font, color: color)

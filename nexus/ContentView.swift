@@ -1537,7 +1537,6 @@ struct ContentView: View {
                         .padding(.horizontal, 14)
                         .padding(.vertical, 14)
                     }
-                    .defaultScrollAnchor(.bottom)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .onAppear {
                         structuredSessionAutoScrollCoordinator.request(.immediate) { _ in
@@ -1727,8 +1726,7 @@ struct ContentView: View {
         font: Font,
         color: Color
     ) -> some View {
-        if conversation.isStreaming,
-           structuredSessionShouldCollapseStreamingMarkdownPreview(conversation.text, charactersPerLine: 72) {
+        if conversation.isStreaming {
             VStack(alignment: .leading, spacing: 8) {
                 Text(verbatim: conversation.text)
                     .font(font)
@@ -1737,9 +1735,11 @@ struct ContentView: View {
                     .lineLimit(18)
                     .truncationMode(.tail)
 
-                Text("Streaming response preview truncated until completion.")
-                    .font(NexusMacTheme.bodyFont(10, relativeTo: .caption))
-                    .foregroundStyle(NexusMacTheme.mutedText)
+                if structuredSessionShouldCollapseStreamingMarkdownPreview(conversation.text, charactersPerLine: 72) {
+                    Text("Streaming response preview truncated until completion.")
+                        .font(NexusMacTheme.bodyFont(10, relativeTo: .caption))
+                        .foregroundStyle(NexusMacTheme.mutedText)
+                }
             }
         } else {
             structuredSessionMarkdownText(conversation.text, font: font, color: color)
