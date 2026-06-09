@@ -1974,6 +1974,39 @@ struct StructuredSessionPresentationTests {
         #expect(structuredSessionIsPinnedToBottomFromBottomDistance(120) == false)
     }
 
+    @Test func structuredSessionFeedPinStateKeepsFollowingWhenContentGrowsAtTopOffset() {
+        let initial = StructuredSessionFeedPinState()
+        let afterGrowth = structuredSessionFeedPinState(
+            previous: initial,
+            distanceFromBottom: 800,
+            contentOffsetY: 0
+        )
+        #expect(afterGrowth.isFollowingBottom)
+        #expect(afterGrowth.userHasDetachedFromBottom == false)
+    }
+
+    @Test func structuredSessionFeedPinStateDetachesWhenUserScrollsUp() {
+        let initial = StructuredSessionFeedPinState()
+        let detached = structuredSessionFeedPinState(
+            previous: initial,
+            distanceFromBottom: 400,
+            contentOffsetY: 120
+        )
+        #expect(detached.isFollowingBottom == false)
+        #expect(detached.userHasDetachedFromBottom)
+    }
+
+    @Test func structuredSessionFeedPinStateReattachesAtBottom() {
+        let detached = StructuredSessionFeedPinState(isFollowingBottom: false, userHasDetachedFromBottom: true)
+        let reattached = structuredSessionFeedPinState(
+            previous: detached,
+            distanceFromBottom: 12,
+            contentOffsetY: 500
+        )
+        #expect(reattached.isFollowingBottom)
+        #expect(reattached.userHasDetachedFromBottom == false)
+    }
+
     @Test func structuredSessionRequestBottomScrollUsesThrottleOnlyForDraftGrowthCoalescedIntent() {
         var now = 0.0
         let throttle = StructuredSessionDraftGrowthScrollThrottle(minimumInterval: 0.12, now: { now })

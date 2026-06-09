@@ -1110,6 +1110,68 @@ public func structuredSessionIsPinnedToBottomFromBottomDistance(
     distanceFromBottom <= pinThreshold
 }
 
+/// Scroll metrics sampled from `ScrollView` geometry for pin/follow policy.
+public struct StructuredSessionScrollGeometrySample: Equatable {
+    public let distanceFromBottom: CGFloat
+    public let contentOffsetY: CGFloat
+
+    public init(distanceFromBottom: CGFloat, contentOffsetY: CGFloat) {
+        self.distanceFromBottom = distanceFromBottom
+        self.contentOffsetY = contentOffsetY
+    }
+}
+
+/// Tracks whether the feed should keep following new tail content vs the user reading history.
+public struct StructuredSessionFeedPinState: Equatable {
+    public var isFollowingBottom: Bool
+    /// User scrolled away from the bottom (not merely content growing while offset stayed at top).
+    public var userHasDetachedFromBottom: Bool
+
+    public init(isFollowingBottom: Bool = true, userHasDetachedFromBottom: Bool = false) {
+        self.isFollowingBottom = isFollowingBottom
+        self.userHasDetachedFromBottom = userHasDetachedFromBottom
+    }
+}
+
+public func structuredSessionFeedPinState(
+    previous: StructuredSessionFeedPinState,
+    distanceFromBottom: CGFloat,
+    contentOffsetY: CGFloat,
+    pinThreshold: CGFloat = 48,
+    topContentOffsetTolerance: CGFloat = 8
+) -> StructuredSessionFeedPinState {
+    structuredSessionFeedPinState(
+        previous: previous,
+        sample: StructuredSessionScrollGeometrySample(
+            distanceFromBottom: distanceFromBottom,
+            contentOffsetY: contentOffsetY
+        ),
+        pinThreshold: pinThreshold,
+        topContentOffsetTolerance: topContentOffsetTolerance
+    )
+}
+
+public func structuredSessionFeedPinState(
+    previous: StructuredSessionFeedPinState,
+    sample: StructuredSessionScrollGeometrySample,
+    pinThreshold: CGFloat = 48,
+    topContentOffsetTolerance: CGFloat = 8
+) -> StructuredSessionFeedPinState {
+    if sample.distanceFromBottom <= pinThreshold {
+        return StructuredSessionFeedPinState(isFollowingBottom: true, userHasDetachedFromBottom: false)
+    }
+
+    // Content grew (or first layout) while the scroll offset is still at the top — keep following.
+    if sample.contentOffsetY <= topContentOffsetTolerance {
+        return StructuredSessionFeedPinState(
+            isFollowingBottom: previous.userHasDetachedFromBottom == false,
+            userHasDetachedFromBottom: previous.userHasDetachedFromBottom
+        )
+    }
+
+    return StructuredSessionFeedPinState(isFollowingBottom: false, userHasDetachedFromBottom: true)
+}
+
 public func structuredSessionRequestBottomScroll(
     intent: StructuredSessionBottomScrollIntent,
     coordinator: StructuredSessionAutoScrollCoordinator,

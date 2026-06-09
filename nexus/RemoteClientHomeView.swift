@@ -1449,7 +1449,7 @@ private struct RemoteSessionScreenView: View {
     @State private var presentedError: RemoteClientHomePresentedError?
     @State private var structuredSessionAutoScrollCoordinator = StructuredSessionAutoScrollCoordinator()
     @State private var structuredSessionDraftGrowthScrollThrottle = StructuredSessionDraftGrowthScrollThrottle()
-    @State private var structuredSessionIsPinnedToBottom = true
+    @State private var structuredSessionPinState = StructuredSessionFeedPinState()
     @State private var structuredSessionFeedScrollSnapshot: StructuredSessionFeedScrollSnapshot?
     @FocusState private var isStructuredPromptFocused: Bool
     @FocusState private var isTerminalInputFocused: Bool
@@ -2126,20 +2126,24 @@ private struct RemoteSessionScreenView: View {
                     .padding(.top, 14)
                     .padding(.bottom, 120)
                 }
-                .onScrollGeometryChange(for: CGFloat.self) { geometry in
-                    max(
-                        0,
-                        geometry.contentSize.height
-                            - geometry.contentOffset.y
-                            - geometry.containerSize.height
+                .onScrollGeometryChange(for: StructuredSessionScrollGeometrySample.self) { geometry in
+                    StructuredSessionScrollGeometrySample(
+                        distanceFromBottom: max(
+                            0,
+                            geometry.contentSize.height
+                                - geometry.contentOffset.y
+                                - geometry.containerSize.height
+                        ),
+                        contentOffsetY: geometry.contentOffset.y
                     )
-                } action: { _, distanceFromBottom in
-                    structuredSessionIsPinnedToBottom = structuredSessionIsPinnedToBottomFromBottomDistance(
-                        distanceFromBottom
+                } action: { _, sample in
+                    structuredSessionPinState = structuredSessionFeedPinState(
+                        previous: structuredSessionPinState,
+                        sample: sample
                     )
                 }
                 .onAppear {
-                    structuredSessionIsPinnedToBottom = true
+                    structuredSessionPinState = StructuredSessionFeedPinState()
                     let snapshot = presentation.structuredSessionFeedScrollSnapshot
                     structuredSessionFeedScrollSnapshot = snapshot
                     let scrollToBottom = { (animation: StructuredSessionAutoScrollAnimation) in
@@ -2165,13 +2169,13 @@ private struct RemoteSessionScreenView: View {
                     }
                 }
                 .onChange(of: presentation.session.id) { _, _ in
-                    structuredSessionIsPinnedToBottom = true
+                    structuredSessionPinState = StructuredSessionFeedPinState()
                     structuredSessionFeedScrollSnapshot = nil
                 }
                 .onChange(of: presentation.structuredSessionFeedScrollSnapshot) { _, current in
                     guard let previous = structuredSessionFeedScrollSnapshot else {
                         structuredSessionFeedScrollSnapshot = current
-                        if structuredSessionIsPinnedToBottom {
+                        if structuredSessionPinState.isFollowingBottom {
                             structuredSessionRequestBottomScroll(
                                 intent: .immediate,
                                 coordinator: structuredSessionAutoScrollCoordinator,
@@ -2191,7 +2195,7 @@ private struct RemoteSessionScreenView: View {
                     let intent = structuredSessionBottomScrollIntent(
                         previous: previous,
                         current: current,
-                        isPinnedToBottom: structuredSessionIsPinnedToBottom
+                        isPinnedToBottom: structuredSessionPinState.isFollowingBottom
                     )
                     structuredSessionRequestBottomScroll(
                         intent: intent,
