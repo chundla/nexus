@@ -102,6 +102,46 @@ struct StructuredSessionHistoryPagingControllerTests {
         #expect(await fetchCounter.value == 0)
     }
 
+    @Test func providerEventChurnDuringAgentTurnDoesNotRebuildPresentationWhenRowsStable() throws {
+        let session = testSession(providerID: .pi)
+        let activity = SessionActivityItem(kind: .message, text: "You: hi")
+        let controller = StructuredSessionHistoryPagingController(pageSize: 20) { sessionID, _, _ in
+            StructuredSessionHistoryPage(sessionID: sessionID, activityItems: [], providerEvents: [], nextCursor: nil)
+        }
+        let baseScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            terminalColumns: 80,
+            terminalRows: 24,
+            activityItems: [activity],
+            providerEvents: [],
+            providerFacts: StructuredSessionProviderFacts(providerEventCount: 1, liveAssistantDraftText: nil),
+            isAgentTurnInProgress: true
+        )
+
+        controller.applyLiveScreen(baseScreen)
+        let first = try #require(controller.presentation(for: baseScreen))
+
+        let churnedScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            terminalColumns: 80,
+            terminalRows: 24,
+            activityItems: [activity],
+            providerEvents: [
+                providerEvent(sequence: 1, payload: "{\"type\":\"message_update\",\"assistantMessageEvent\":{\"type\":\"text_delta\",\"delta\":\"x\"}}")
+            ],
+            providerFacts: StructuredSessionProviderFacts(providerEventCount: 99, liveAssistantDraftText: nil),
+            isAgentTurnInProgress: true
+        )
+
+        _ = try #require(controller.presentation(for: churnedScreen))
+        #expect(controller.presentationRebuildCount == 1)
+        #expect(first == controller.presentation(for: churnedScreen))
+    }
+
     @Test func loadingOlderActivityDoesNotMergeHistoricalProviderEventsIntoLivePresentation() async throws {
         let session = testSession(providerID: .pi)
         let liveActivity = SessionActivityItem(kind: .message, text: "You: Keep going")

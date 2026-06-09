@@ -29,6 +29,9 @@ final class StructuredSessionHistoryPagingController {
     private var lastSourceActivityItems: [SessionActivityItem] = []
     private var lastLiveDraftKey: String?
 
+    /// Counts full feed rebuilds; used by tests to verify row-stable caching (#208 / Pi provider churn).
+    private(set) var presentationRebuildCount = 0
+
     init(pageSize: Int = 200, fetchPage: @escaping FetchPage) {
         self.pageSize = max(1, pageSize)
         self.fetchPage = fetchPage
@@ -153,8 +156,9 @@ final class StructuredSessionHistoryPagingController {
         // providerFacts, finalOutputDiagnostic, isAgent, and extensionUI notification churn
         // continue during dwell. Returning the cached presentation instance prevents the published
         // FocusedStructuredSessionPresentation (and its feed/autoScrollTrigger) from mutating.
+        // Only live draft text affects visible rows; provider-event churn must not bust this cache.
         let draftKey: String? = screen.isAgentTurnInProgress
-            ? (screen.providerFacts.liveAssistantDraftText ?? "ev:(screen.providerFacts.providerEventCount)")
+            ? screen.providerFacts.liveAssistantDraftText
             : nil
 
         if let last = lastRowStablePresentation,
@@ -166,6 +170,7 @@ final class StructuredSessionHistoryPagingController {
             return last
         }
 
+        presentationRebuildCount += 1
         let pres = FocusedStructuredSessionPresentation(
             session: screen.session,
             feed: feedPresenter.presentation(for: merged),
@@ -226,6 +231,7 @@ final class StructuredSessionHistoryPagingController {
         lastRowStablePresentation = nil
         lastSourceActivityItems = []
         lastLiveDraftKey = nil
+        presentationRebuildCount = 0
         refreshAvailability()
     }
 
