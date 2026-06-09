@@ -1448,10 +1448,11 @@ private struct RemoteSessionScreenView: View {
     @State private var activeExtensionDialogID: String?
     @State private var presentedError: RemoteClientHomePresentedError?
     @State private var structuredSessionAutoScrollCoordinator = StructuredSessionAutoScrollCoordinator()
+    @State private var structuredSessionDraftGrowthScrollThrottle = StructuredSessionDraftGrowthScrollThrottle()
+    @State private var structuredSessionIsPinnedToBottom = true
+    @State private var structuredSessionFeedScrollSnapshot: StructuredSessionFeedScrollSnapshot?
     @FocusState private var isStructuredPromptFocused: Bool
     @FocusState private var isTerminalInputFocused: Bool
-
-    private let conversationBottomID = "conversation-bottom"
 
     private var screen: SessionScreen? {
         guard model.focusedSessionID == session.id else {
@@ -2117,22 +2118,71 @@ private struct RemoteSessionScreenView: View {
 
                         structuredSessionActivityFeed(feedPresentation: feedPresentation)
 
-                        if let thinkingIndicator = feedPresentation.thinkingIndicator {
-                            structuredSessionThinkingIndicatorView(thinkingIndicator)
-                        }
-
                         Color.clear
                             .frame(height: 1)
-                            .id(conversationBottomID)
+                            .id(structuredSessionFeedBottomSentinelID)
                     }
                     .padding(.horizontal, horizontalPadding)
                     .padding(.top, 14)
                     .padding(.bottom, 120)
                 }
+                .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                    max(
+                        0,
+                        geometry.contentSize.height
+                            - geometry.contentOffset.y
+                            - geometry.containerSize.height
+                    )
+                } action: { _, distanceFromBottom in
+                    structuredSessionIsPinnedToBottom = structuredSessionIsPinnedToBottomFromBottomDistance(
+                        distanceFromBottom
+                    )
+                }
                 .onAppear {
-                    structuredSessionAutoScrollCoordinator.request(.immediate) { animation in
-                        scrollStructuredSessionToBottom(using: proxy, animation: animation)
+                    structuredSessionIsPinnedToBottom = true
+                    let snapshot = presentation.structuredSessionFeedScrollSnapshot
+                    structuredSessionFeedScrollSnapshot = snapshot
+                    structuredSessionRequestBottomScroll(
+                        intent: .immediate,
+                        coordinator: structuredSessionAutoScrollCoordinator,
+                        draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
+                        performScroll: { animation in
+                            structuredSessionPerformBottomScroll(
+                                using: proxy,
+                                presentation: presentation,
+                                animation: animation
+                            )
+                        }
+                    )
+                }
+                .onChange(of: presentation.session.id) { _, _ in
+                    structuredSessionIsPinnedToBottom = true
+                    structuredSessionFeedScrollSnapshot = nil
+                }
+                .onChange(of: presentation.structuredSessionFeedScrollSnapshot) { _, current in
+                    guard let previous = structuredSessionFeedScrollSnapshot else {
+                        structuredSessionFeedScrollSnapshot = current
+                        return
                     }
+
+                    let intent = structuredSessionBottomScrollIntent(
+                        previous: previous,
+                        current: current,
+                        isPinnedToBottom: structuredSessionIsPinnedToBottom
+                    )
+                    structuredSessionRequestBottomScroll(
+                        intent: intent,
+                        coordinator: structuredSessionAutoScrollCoordinator,
+                        draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
+                        performScroll: { animation in
+                            structuredSessionPerformBottomScroll(
+                                using: proxy,
+                                presentation: presentation,
+                                animation: animation
+                            )
+                        }
+                    )
+                    structuredSessionFeedScrollSnapshot = current
                 }
             }
         }
@@ -2226,10 +2276,6 @@ private struct RemoteSessionScreenView: View {
                 if let thinkingIndicator = feedPresentation.thinkingIndicator {
                     structuredSessionThinkingIndicatorView(thinkingIndicator)
                 }
-
-                Color.clear
-                    .frame(height: 1)
-                    .id(conversationBottomID)
             }
         }
     }
@@ -2238,12 +2284,14 @@ private struct RemoteSessionScreenView: View {
         extensionUI.title != nil || extensionUI.statuses.isEmpty == false || extensionUI.notifications.isEmpty == false
     }
 
-    private func scrollStructuredSessionToBottom(
+    private func structuredSessionPerformBottomScroll(
         using proxy: ScrollViewProxy,
-        animation: StructuredSessionAutoScrollAnimation = .animated
+        presentation: FocusedStructuredSessionPresentation,
+        animation: StructuredSessionAutoScrollAnimation
     ) {
+        let targetID = presentation.structuredSessionFeedScrollTarget.scrollTargetID
         let scroll = {
-            proxy.scrollTo(conversationBottomID, anchor: .bottom)
+            proxy.scrollTo(targetID, anchor: .bottom)
         }
 
         switch animation {
