@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<trace-query-result>
+<node xpath='//trace-toc[1]/run[1]/data[1]/table[1]'>
+<schema name="hitches-updates"/>
+<row><start-time id="238" fmt="00:11.947.653">11947653875</start-time><duration id="239" fmt="31.93 ms">31932958</duration></row>
+<row><start-time ref="238"/><duration ref="239"/><event-concept id="242" fmt="Red">Red</event-concept><uint32 id="243" fmt="1">1</uint32></row>
+</node>
+</trace-query-result>

@@ -299,6 +299,10 @@ Interpretation:
 
 For final manual captures, pair the macOS canonical sample deltas with Instruments memory graphs on macOS or a physical iPhone so the qualitative trace lines up with the repeatable counters above.
 
+## Structured Session live trace harness (#219)
+
+For repeatable **SwiftUI** hitch exports on the 09-06-style structured-feed workload (macOS `NEXUS_MAC_PROFILE_FIXTURE=structured-feed-profile`, iOS device `NEXUS_REMOTE_CLIENT_FIXTURE=streaming-feed-profile`), see [structured-session-instruments-harness.md](./structured-session-instruments-harness.md).
+
 ## Profiling guidance
 
 Use the automated baselines first. If a regression is user-visible, then profile the matching macOS app flow on the same machine and branch so the UI trace can be compared with the service baseline output above.

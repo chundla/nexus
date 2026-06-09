@@ -1,0 +1,54 @@
+{
+  "trace": "/Users/ck/source/repos/nexus/09-06.trace",
+  "runs": [
+    {
+      "run": 1,
+      "platform": "macOS",
+      "device_name": "IBMMacBookski",
+      "template_name": "SwiftUI",
+      "duration_seconds": 377.906,
+      "hitches": {
+        "red_marked_count": 1,
+        "worst_red_marked_ms": 31.93,
+        "frame_lifetime_over_16_67ms_count": 4417,
+        "frame_lifetime_over_33ms_count": 753,
+        "worst_frame_lifetime_ms": 186.09
+      },
+      "swiftui": {
+        "update_groups_worst_ms": 0.0,
+        "top_update_group_descriptions": []
+      }
+    },
+    {
+      "run": 2,
+      "platform": "iOS",
+      "device_name": "IBMiPhoneski",
+      "template_name": "SwiftUI",
+      "duration_seconds": 421.001,
+      "hitches": {
+        "red_marked_count": 1,
+        "worst_red_marked_ms": 16.84,
+        "frame_lifetime_over_16_67ms_count": 2339,
+        "frame_lifetime_over_33ms_count": 653,
+        "worst_frame_lifetime_ms": 237.7
+      },
+      "swiftui": {
+        "update_groups_worst_ms": 136.69,
+        "top_update_group_descriptions": [
+          "(MainThreadRequiringScrollPhase Void)",
+          "(ScrollActionDispatcher&lt;OnScrollGeometryChangeModifier.GeometryActionProvider&gt; Void)",
+          "(ScrollStateEnqueueRequests Void)",
+          "(ScrollViewAdjustedState SystemScrollLayoutState)",
+          "(ScrollViewAdjustedBehavior ResolvedScrollBehavior?)",
+          "(ValueActionDispatcher&lt;_ValueActionModifier2&lt;StructuredSessionAutoScrollTrigger&gt;&gt; Void)",
+          "(ValueActionDispatcher&lt;_ValueActionModifier2&lt;StructuredSessionFeedScrollSnapshot&gt;&gt; Void)",
+          "(DynamicPreferenceCombiner&lt;UpdateScrollStateRequestKey&gt; Array&lt;ScrollStateRequest&gt;)",
+          "(ForEachChild&lt;Array&lt;StructuredSessionActivityRow&gt;, UUID, IDView&lt;EquatableView, UUID&gt;&gt; IDView&lt;EquatableView&lt;IOSEquatableStructuredSessionActivityRow&gt;, UUID&gt;)",
+          "(ScrollViewDisplayListFrame CGRect)",
+          "(EquatableView&lt;IOSEquatableStructuredSessionActivityRow&gt;.Child IOSEquatableStructuredSessionActivityRow&lt;_ConditionalContent&lt;_ConditionalContent, HStack&gt;&gt;)",
+          "(_External Array&lt;Scrollable&gt;)"
+        ]
+      }
+    }
+  ]
+}
