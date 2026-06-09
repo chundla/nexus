@@ -1564,75 +1564,36 @@ struct ContentView: View {
                     }
                     .onAppear {
                         structuredSessionPinState = StructuredSessionFeedPinState()
-                        let snapshot = structuredPresentation.structuredSessionFeedScrollSnapshot
-                        structuredSessionFeedScrollSnapshot = snapshot
-                        let scrollToBottom = { (animation: StructuredSessionAutoScrollAnimation) in
-                            StructuredSessionFeedScrollSupport.scheduleFollowBottomScroll(
-                                position: $structuredSessionFeedScrollPosition,
-                                animation: animation
+                        structuredSessionFeedScrollSnapshot = StructuredSessionFeedScrollSupport
+                            .applyStructuredSessionFeedScrollSnapshotTransition(
+                                previous: nil,
+                                current: structuredPresentation.structuredSessionFeedScrollSnapshot,
+                                isFollowingBottom: structuredSessionPinState.isFollowingBottom,
+                                coordinator: structuredSessionAutoScrollCoordinator,
+                                draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
+                                scrollPosition: $structuredSessionFeedScrollPosition
                             )
-                        }
-                        structuredSessionRequestBottomScroll(
-                            intent: .immediate,
-                            coordinator: structuredSessionAutoScrollCoordinator,
-                            draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
-                            performScroll: scrollToBottom
-                        )
-                    }
-                    .onChange(of: structuredPresentation.autoScrollTrigger) { _, _ in
-                        guard structuredSessionPinState.isFollowingBottom else { return }
-                        StructuredSessionFeedScrollSupport.scheduleFollowBottomScroll(
-                            position: $structuredSessionFeedScrollPosition,
-                            animation: .immediate
-                        )
-                    }
-                    .onChange(of: structuredSessionFeedFollowScrollToken(for: structuredPresentation)) { _, _ in
-                        guard structuredSessionPinState.isFollowingBottom else { return }
-                        StructuredSessionFeedScrollSupport.scheduleFollowBottomScroll(
-                            position: $structuredSessionFeedScrollPosition,
-                            animation: .immediate
-                        )
                     }
                     .onChange(of: structuredPresentation.session.id) { _, _ in
                         structuredSessionPinState = StructuredSessionFeedPinState()
                         structuredSessionFeedScrollSnapshot = nil
                     }
                     .onChange(of: structuredPresentation.structuredSessionFeedScrollSnapshot) { _, current in
-                        guard let previous = structuredSessionFeedScrollSnapshot else {
-                            structuredSessionFeedScrollSnapshot = current
-                            if structuredSessionPinState.isFollowingBottom {
-                                structuredSessionRequestBottomScroll(
-                                    intent: .immediate,
-                                    coordinator: structuredSessionAutoScrollCoordinator,
-                                    draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
-                                    performScroll: { animation in
-                                        StructuredSessionFeedScrollSupport.scheduleFollowBottomScroll(
-                                            position: $structuredSessionFeedScrollPosition,
-                                            animation: animation
-                                        )
-                                    }
-                                )
-                            }
+                        guard structuredSessionFeedScrollSnapshotIfScrollPolicyChanged(
+                            previous: structuredSessionFeedScrollSnapshot,
+                            current: current
+                        ) != nil else {
                             return
                         }
-
-                        let intent = structuredSessionBottomScrollIntent(
-                            previous: previous,
-                            current: current,
-                            isPinnedToBottom: structuredSessionPinState.isFollowingBottom
-                        )
-                        structuredSessionRequestBottomScroll(
-                            intent: intent,
-                            coordinator: structuredSessionAutoScrollCoordinator,
-                            draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
-                            performScroll: { animation in
-                                StructuredSessionFeedScrollSupport.scheduleFollowBottomScroll(
-                                    position: $structuredSessionFeedScrollPosition,
-                                    animation: animation
-                                )
-                            }
-                        )
-                        structuredSessionFeedScrollSnapshot = current
+                        structuredSessionFeedScrollSnapshot = StructuredSessionFeedScrollSupport
+                            .applyStructuredSessionFeedScrollSnapshotTransition(
+                                previous: structuredSessionFeedScrollSnapshot,
+                                current: current,
+                                isFollowingBottom: structuredSessionPinState.isFollowingBottom,
+                                coordinator: structuredSessionAutoScrollCoordinator,
+                                draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
+                                scrollPosition: $structuredSessionFeedScrollPosition
+                            )
                     }
 
                 if isReady, let structuredChrome {

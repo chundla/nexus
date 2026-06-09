@@ -1942,6 +1942,38 @@ struct StructuredSessionPresentationTests {
         #expect(structuredSessionShouldRequestBottomScroll(previous: previous, current: current, isPinnedToBottom: false) == false)
     }
 
+    @Test func structuredSessionFeedScrollSnapshotIfScrollPolicyChangedSkipsEqualSnapshots() {
+        let activityID = UUID()
+        let session = Session(id: UUID(), workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready)
+        let feed = StructuredSessionFeedPresentation(
+            copy: structuredSessionPresentationCopy(for: SessionScreen(session: session, primarySurface: .structuredActivityFeed, transcript: "")),
+            activityRows: [
+                StructuredSessionActivityRow(
+                    id: activityID,
+                    title: "Message",
+                    systemImage: "message",
+                    text: "Pi: stable",
+                    emphasis: .accent
+                )
+            ],
+            pendingApprovalRequests: [],
+            thinkingIndicator: nil
+        )
+        let presentation = FocusedStructuredSessionPresentation(
+            session: session,
+            feed: feed,
+            autoScrollTrigger: StructuredSessionAutoScrollTrigger(
+                lastActivityRowID: activityID,
+                pendingApprovalRequestIDs: [],
+                pendingDialogIDs: []
+            )
+        )
+        let snapshot = structuredSessionFeedScrollSnapshot(for: presentation)
+
+        #expect(structuredSessionFeedScrollSnapshotIfScrollPolicyChanged(previous: nil, current: snapshot) == snapshot)
+        #expect(structuredSessionFeedScrollSnapshotIfScrollPolicyChanged(previous: snapshot, current: snapshot) == nil)
+    }
+
     @Test func structuredSessionBottomScrollIntentCoalescesLiveDraftGrowthWithoutChangingRowIDWhilePinned() throws {
         let session = Session(id: UUID(), workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready)
         let draftRowID = UUID()

@@ -39,4 +39,43 @@ enum StructuredSessionFeedScrollSupport {
             scrollToBottom(position, animation: .immediate)
         }
     }
+
+    /// Applies bottom-scroll policy for a feed scroll snapshot transition; returns the snapshot to store.
+    static func applyStructuredSessionFeedScrollSnapshotTransition(
+        previous: StructuredSessionFeedScrollSnapshot?,
+        current: StructuredSessionFeedScrollSnapshot,
+        isFollowingBottom: Bool,
+        coordinator: StructuredSessionAutoScrollCoordinator,
+        draftGrowthThrottle: StructuredSessionDraftGrowthScrollThrottle,
+        scrollPosition: Binding<ScrollPosition>
+    ) -> StructuredSessionFeedScrollSnapshot {
+        let performScroll = { (animation: StructuredSessionAutoScrollAnimation) in
+            scheduleFollowBottomScroll(position: scrollPosition, animation: animation)
+        }
+
+        guard let previous else {
+            if isFollowingBottom {
+                structuredSessionRequestBottomScroll(
+                    intent: .immediate,
+                    coordinator: coordinator,
+                    draftGrowthThrottle: draftGrowthThrottle,
+                    performScroll: performScroll
+                )
+            }
+            return current
+        }
+
+        let intent = structuredSessionBottomScrollIntent(
+            previous: previous,
+            current: current,
+            isPinnedToBottom: isFollowingBottom
+        )
+        structuredSessionRequestBottomScroll(
+            intent: intent,
+            coordinator: coordinator,
+            draftGrowthThrottle: draftGrowthThrottle,
+            performScroll: performScroll
+        )
+        return current
+    }
 }

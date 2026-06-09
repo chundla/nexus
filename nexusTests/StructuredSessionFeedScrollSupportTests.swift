@@ -63,4 +63,42 @@ struct StructuredSessionFeedScrollSupportTests {
         scheduled.first?()
         #expect(StructuredSessionFeedScrollSupport.scrollToBottomInvocationCountForTesting == 1)
     }
+
+    @Test func applyStructuredSessionFeedScrollSnapshotTransitionDoesNotScrollWhenNotFollowingBottom() {
+        StructuredSessionFeedScrollSupport.resetScrollToBottomInvocationCountForTesting()
+        var scrollPosition = ScrollPosition(edge: .bottom)
+        let binding = Binding(get: { scrollPosition }, set: { scrollPosition = $0 })
+        let activityID = UUID()
+        let trigger = StructuredSessionAutoScrollTrigger(
+            lastActivityRowID: activityID,
+            pendingApprovalRequestIDs: [],
+            pendingDialogIDs: []
+        )
+        let previous = StructuredSessionFeedScrollSnapshot(
+            feedScrollTarget: .activityRow(activityID),
+            autoScrollTrigger: trigger,
+            liveDraftGrowthToken: nil
+        )
+        let current = StructuredSessionFeedScrollSnapshot(
+            feedScrollTarget: .activityRow(UUID()),
+            autoScrollTrigger: StructuredSessionAutoScrollTrigger(
+                lastActivityRowID: UUID(),
+                pendingApprovalRequestIDs: [],
+                pendingDialogIDs: []
+            ),
+            liveDraftGrowthToken: nil
+        )
+        let coordinator = StructuredSessionAutoScrollCoordinator { work in work() }
+
+        _ = StructuredSessionFeedScrollSupport.applyStructuredSessionFeedScrollSnapshotTransition(
+            previous: previous,
+            current: current,
+            isFollowingBottom: false,
+            coordinator: coordinator,
+            draftGrowthThrottle: StructuredSessionDraftGrowthScrollThrottle(minimumInterval: 0.12, now: { 0 }),
+            scrollPosition: binding
+        )
+
+        #expect(StructuredSessionFeedScrollSupport.scrollToBottomInvocationCountForTesting == 0)
+    }
 }

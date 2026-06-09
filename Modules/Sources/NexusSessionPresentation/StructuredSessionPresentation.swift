@@ -1105,6 +1105,17 @@ public func structuredSessionShouldRequestBottomScroll(
     structuredSessionBottomScrollIntent(previous: previous, current: current, isPinnedToBottom: isPinnedToBottom) != .none
 }
 
+/// Returns nil when scroll-policy inputs are unchanged — avoids `@State` churn from recomputed snapshots.
+public func structuredSessionFeedScrollSnapshotIfScrollPolicyChanged(
+    previous: StructuredSessionFeedScrollSnapshot?,
+    current: StructuredSessionFeedScrollSnapshot
+) -> StructuredSessionFeedScrollSnapshot? {
+    guard let previous else {
+        return current
+    }
+    return previous == current ? nil : current
+}
+
 public func structuredSessionAutoScrollAnimation(
     for intent: StructuredSessionBottomScrollIntent
 ) -> StructuredSessionAutoScrollAnimation? {
