@@ -55,6 +55,7 @@ struct ContentView: View {
     @State private var structuredSessionDraftGrowthScrollThrottle = StructuredSessionDraftGrowthScrollThrottle()
     @State private var structuredSessionPinState = StructuredSessionFeedPinState()
     @State private var structuredSessionFeedScrollSnapshot: StructuredSessionFeedScrollSnapshot?
+    @State private var structuredSessionFeedScrollPosition = ScrollPosition(edge: .bottom)
 
     private let terminalLayout = TerminalViewportLayout.live
 
@@ -1500,8 +1501,7 @@ struct ContentView: View {
                         .padding(.top, 14)
                 }
 
-                ScrollViewReader { proxy in
-                    ScrollView {
+                ScrollView {
                         LazyVStack(alignment: .leading, spacing: 8) {
                             structuredSessionHistoryPagingControls()
                                 .padding(.bottom, 6)
@@ -1540,7 +1540,9 @@ struct ContentView: View {
                         }
                         .padding(.horizontal, 14)
                         .padding(.vertical, 14)
+                        .scrollTargetLayout()
                     }
+                    .scrollPosition($structuredSessionFeedScrollPosition)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .onScrollGeometryChange(for: StructuredSessionScrollGeometrySample.self) { geometry in
                         StructuredSessionScrollGeometrySample(
@@ -1563,7 +1565,10 @@ struct ContentView: View {
                         let snapshot = structuredPresentation.structuredSessionFeedScrollSnapshot
                         structuredSessionFeedScrollSnapshot = snapshot
                         let scrollToBottom = { (animation: StructuredSessionAutoScrollAnimation) in
-                            structuredSessionScheduleFollowBottomScroll(using: proxy, animation: animation)
+                            StructuredSessionFeedScrollSupport.scheduleFollowBottomScroll(
+                                position: $structuredSessionFeedScrollPosition,
+                                animation: animation
+                            )
                         }
                         structuredSessionRequestBottomScroll(
                             intent: .immediate,
@@ -1574,7 +1579,10 @@ struct ContentView: View {
                     }
                     .onChange(of: structuredPresentation.autoScrollTrigger) { _, _ in
                         guard structuredSessionPinState.isFollowingBottom else { return }
-                        structuredSessionScheduleFollowBottomScroll(using: proxy, animation: .immediate)
+                        StructuredSessionFeedScrollSupport.scheduleFollowBottomScroll(
+                            position: $structuredSessionFeedScrollPosition,
+                            animation: .immediate
+                        )
                     }
                     .onChange(of: structuredPresentation.session.id) { _, _ in
                         structuredSessionPinState = StructuredSessionFeedPinState()
@@ -1589,7 +1597,10 @@ struct ContentView: View {
                                     coordinator: structuredSessionAutoScrollCoordinator,
                                     draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
                                     performScroll: { animation in
-                                        structuredSessionScheduleFollowBottomScroll(using: proxy, animation: animation)
+                                        StructuredSessionFeedScrollSupport.scheduleFollowBottomScroll(
+                                            position: $structuredSessionFeedScrollPosition,
+                                            animation: animation
+                                        )
                                     }
                                 )
                             }
@@ -1606,12 +1617,14 @@ struct ContentView: View {
                             coordinator: structuredSessionAutoScrollCoordinator,
                             draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
                             performScroll: { animation in
-                                structuredSessionScheduleFollowBottomScroll(using: proxy, animation: animation)
+                                StructuredSessionFeedScrollSupport.scheduleFollowBottomScroll(
+                                    position: $structuredSessionFeedScrollPosition,
+                                    animation: animation
+                                )
                             }
                         )
                         structuredSessionFeedScrollSnapshot = current
                     }
-                }
 
                 if isReady, let structuredChrome {
                     MacStructuredSessionComposerSection(
@@ -1988,41 +2001,6 @@ struct ContentView: View {
             NexusMacTheme.coral
         case .success:
             NexusMacTheme.teal
-        }
-    }
-
-    private func structuredSessionPerformBottomScroll(
-        using proxy: ScrollViewProxy,
-        animation: StructuredSessionAutoScrollAnimation
-    ) {
-        // Always scroll to the bottom sentinel (chat pattern). Row UUID targets inside nested
-        // LazyVStack + equatable wrappers are often not registered with ScrollViewReader.
-        let targetID = structuredSessionFeedBottomSentinelID
-        let scroll = {
-            proxy.scrollTo(targetID, anchor: .bottom)
-        }
-
-        switch animation {
-        case .immediate:
-            scroll()
-        case .animated:
-            withAnimation(.easeOut(duration: 0.18)) {
-                scroll()
-            }
-        }
-    }
-
-    private func structuredSessionScheduleFollowBottomScroll(
-        using proxy: ScrollViewProxy,
-        animation: StructuredSessionAutoScrollAnimation
-    ) {
-        structuredSessionPerformBottomScroll(using: proxy, animation: animation)
-        DispatchQueue.main.async {
-            structuredSessionPerformBottomScroll(using: proxy, animation: .immediate)
-        }
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(80))
-            structuredSessionPerformBottomScroll(using: proxy, animation: .immediate)
         }
     }
 

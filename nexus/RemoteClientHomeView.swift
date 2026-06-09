@@ -1451,6 +1451,7 @@ private struct RemoteSessionScreenView: View {
     @State private var structuredSessionDraftGrowthScrollThrottle = StructuredSessionDraftGrowthScrollThrottle()
     @State private var structuredSessionPinState = StructuredSessionFeedPinState()
     @State private var structuredSessionFeedScrollSnapshot: StructuredSessionFeedScrollSnapshot?
+    @State private var structuredSessionFeedScrollPosition = ScrollPosition(edge: .bottom)
     @FocusState private var isStructuredPromptFocused: Bool
     @FocusState private var isTerminalInputFocused: Bool
 
@@ -2111,8 +2112,7 @@ private struct RemoteSessionScreenView: View {
                 approvalRequestPresentation: approvalRequestPresentation
             )
 
-            ScrollViewReader { proxy in
-                ScrollView {
+            ScrollView {
                     LazyVStack(alignment: .leading, spacing: 10) {
                         structuredSessionHistoryPagingControls()
 
@@ -2125,7 +2125,9 @@ private struct RemoteSessionScreenView: View {
                     .padding(.horizontal, horizontalPadding)
                     .padding(.top, 14)
                     .padding(.bottom, 120)
+                    .scrollTargetLayout()
                 }
+                .scrollPosition($structuredSessionFeedScrollPosition)
                 .onScrollGeometryChange(for: StructuredSessionScrollGeometrySample.self) { geometry in
                     StructuredSessionScrollGeometrySample(
                         distanceFromBottom: max(
@@ -2147,7 +2149,10 @@ private struct RemoteSessionScreenView: View {
                     let snapshot = presentation.structuredSessionFeedScrollSnapshot
                     structuredSessionFeedScrollSnapshot = snapshot
                     let scrollToBottom = { (animation: StructuredSessionAutoScrollAnimation) in
-                        structuredSessionScheduleFollowBottomScroll(using: proxy, animation: animation)
+                        StructuredSessionFeedScrollSupport.scheduleFollowBottomScroll(
+                            position: $structuredSessionFeedScrollPosition,
+                            animation: animation
+                        )
                     }
                     structuredSessionRequestBottomScroll(
                         intent: .immediate,
@@ -2158,7 +2163,10 @@ private struct RemoteSessionScreenView: View {
                 }
                 .onChange(of: presentation.autoScrollTrigger) { _, _ in
                     guard structuredSessionPinState.isFollowingBottom else { return }
-                    structuredSessionScheduleFollowBottomScroll(using: proxy, animation: .immediate)
+                    StructuredSessionFeedScrollSupport.scheduleFollowBottomScroll(
+                        position: $structuredSessionFeedScrollPosition,
+                        animation: .immediate
+                    )
                 }
                 .onChange(of: presentation.session.id) { _, _ in
                     structuredSessionPinState = StructuredSessionFeedPinState()
@@ -2173,7 +2181,10 @@ private struct RemoteSessionScreenView: View {
                                 coordinator: structuredSessionAutoScrollCoordinator,
                                 draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
                                 performScroll: { animation in
-                                    structuredSessionScheduleFollowBottomScroll(using: proxy, animation: animation)
+                                    StructuredSessionFeedScrollSupport.scheduleFollowBottomScroll(
+                                        position: $structuredSessionFeedScrollPosition,
+                                        animation: animation
+                                    )
                                 }
                             )
                         }
@@ -2190,12 +2201,14 @@ private struct RemoteSessionScreenView: View {
                         coordinator: structuredSessionAutoScrollCoordinator,
                         draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
                         performScroll: { animation in
-                            structuredSessionScheduleFollowBottomScroll(using: proxy, animation: animation)
+                            StructuredSessionFeedScrollSupport.scheduleFollowBottomScroll(
+                                position: $structuredSessionFeedScrollPosition,
+                                animation: animation
+                            )
                         }
                     )
                     structuredSessionFeedScrollSnapshot = current
                 }
-            }
         }
     }
 
@@ -2294,39 +2307,6 @@ private struct RemoteSessionScreenView: View {
 
     private func shouldShowStructuredSessionExtensionSummary(_ extensionUI: SessionExtensionUIState) -> Bool {
         extensionUI.title != nil || extensionUI.statuses.isEmpty == false || extensionUI.notifications.isEmpty == false
-    }
-
-    private func structuredSessionPerformBottomScroll(
-        using proxy: ScrollViewProxy,
-        animation: StructuredSessionAutoScrollAnimation
-    ) {
-        let targetID = structuredSessionFeedBottomSentinelID
-        let scroll = {
-            proxy.scrollTo(targetID, anchor: .bottom)
-        }
-
-        switch animation {
-        case .immediate:
-            scroll()
-        case .animated:
-            withAnimation(.easeOut(duration: 0.18)) {
-                scroll()
-            }
-        }
-    }
-
-    private func structuredSessionScheduleFollowBottomScroll(
-        using proxy: ScrollViewProxy,
-        animation: StructuredSessionAutoScrollAnimation
-    ) {
-        structuredSessionPerformBottomScroll(using: proxy, animation: animation)
-        DispatchQueue.main.async {
-            structuredSessionPerformBottomScroll(using: proxy, animation: .immediate)
-        }
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(80))
-            structuredSessionPerformBottomScroll(using: proxy, animation: .immediate)
-        }
     }
 
     private func structuredSessionThinkingIndicatorView(_ indicator: StructuredSessionThinkingIndicator) -> some View {
