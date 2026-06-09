@@ -2139,10 +2139,12 @@ private struct RemoteSessionScreenView: View {
                         contentOffsetY: geometry.contentOffset.y
                     )
                 } action: { _, sample in
-                    structuredSessionPinState = structuredSessionFeedPinState(
+                    if let next = structuredSessionFeedPinStateIfChanged(
                         previous: structuredSessionPinState,
                         sample: sample
-                    )
+                    ) {
+                        structuredSessionPinState = next
+                    }
                 }
                 .onAppear {
                     structuredSessionPinState = StructuredSessionFeedPinState()
@@ -2162,6 +2164,13 @@ private struct RemoteSessionScreenView: View {
                     )
                 }
                 .onChange(of: presentation.autoScrollTrigger) { _, _ in
+                    guard structuredSessionPinState.isFollowingBottom else { return }
+                    StructuredSessionFeedScrollSupport.scheduleFollowBottomScroll(
+                        position: $structuredSessionFeedScrollPosition,
+                        animation: .immediate
+                    )
+                }
+                .onChange(of: structuredSessionFeedFollowScrollToken(for: presentation)) { _, _ in
                     guard structuredSessionPinState.isFollowingBottom else { return }
                     StructuredSessionFeedScrollSupport.scheduleFollowBottomScroll(
                         position: $structuredSessionFeedScrollPosition,

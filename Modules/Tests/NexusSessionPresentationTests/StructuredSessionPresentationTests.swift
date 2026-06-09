@@ -2007,6 +2007,45 @@ struct StructuredSessionPresentationTests {
         #expect(reattached.userHasDetachedFromBottom == false)
     }
 
+    @Test func structuredSessionFeedPinStateIfChangedSkipsRedundantGeometrySamples() {
+        let initial = StructuredSessionFeedPinState()
+        let sample = StructuredSessionScrollGeometrySample(distanceFromBottom: 400, contentOffsetY: 0)
+        #expect(structuredSessionFeedPinStateIfChanged(previous: initial, sample: sample) == nil)
+    }
+
+    @Test func structuredSessionFeedFollowScrollTokenChangesWhenDraftGrows() {
+        let session = Session(id: UUID(), workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready)
+        let rowID = UUID()
+        func presentation(text: String) -> FocusedStructuredSessionPresentation {
+            let row = StructuredSessionActivityRow(
+                id: rowID,
+                title: "Message",
+                systemImage: "message",
+                text: text,
+                emphasis: .accent,
+                conversationPresentation: StructuredSessionConversationPresentation(
+                    role: .assistant(label: "Pi"),
+                    text: text,
+                    isStreaming: true
+                )
+            )
+            let feed = StructuredSessionFeedPresentation(
+                copy: structuredSessionPresentationCopy(for: SessionScreen(session: session, primarySurface: .structuredActivityFeed, transcript: "")),
+                activityRows: [row],
+                pendingApprovalRequests: [],
+                thinkingIndicator: nil
+            )
+            return FocusedStructuredSessionPresentation(
+                session: session,
+                feed: feed,
+                autoScrollTrigger: StructuredSessionAutoScrollTrigger(lastActivityRowID: rowID, pendingApprovalRequestIDs: [], pendingDialogIDs: [])
+            )
+        }
+        let short = structuredSessionFeedFollowScrollToken(for: presentation(text: "a"))
+        let long = structuredSessionFeedFollowScrollToken(for: presentation(text: "abcdef"))
+        #expect(short != long)
+    }
+
     @Test func structuredSessionRequestBottomScrollUsesThrottleOnlyForDraftGrowthCoalescedIntent() {
         var now = 0.0
         let throttle = StructuredSessionDraftGrowthScrollThrottle(minimumInterval: 0.12, now: { now })

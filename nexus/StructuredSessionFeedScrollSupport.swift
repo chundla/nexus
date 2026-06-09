@@ -16,16 +16,13 @@ enum StructuredSessionFeedScrollSupport {
         }
     }
 
+    /// One immediate scroll plus a single post-layout retry (run 3: triple scroll amplified main-thread work).
     static func scheduleFollowBottomScroll(
         position: Binding<ScrollPosition>,
         animation: StructuredSessionAutoScrollAnimation
     ) {
         scrollToBottom(position, animation: animation)
         DispatchQueue.main.async {
-            scrollToBottom(position, animation: .immediate)
-        }
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(80))
             scrollToBottom(position, animation: .immediate)
         }
     }

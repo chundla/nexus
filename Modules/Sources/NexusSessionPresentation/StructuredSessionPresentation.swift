@@ -1172,6 +1172,34 @@ public func structuredSessionFeedPinState(
     return StructuredSessionFeedPinState(isFollowingBottom: false, userHasDetachedFromBottom: true)
 }
 
+/// Coarse feed tail signature for scroll follow when `structuredSessionFeedScrollSnapshot` is stable (#208 cache).
+public func structuredSessionFeedFollowScrollToken(
+    for presentation: FocusedStructuredSessionPresentation
+) -> String {
+    let rows = presentation.feed.activityRows
+    let lastRow = rows.last
+    let draftSuffix = lastRow?.conversationPresentation?.isStreaming == true
+        ? "-\(lastRow?.text.count ?? 0)"
+        : ""
+    return "\(rows.count)-\(lastRow?.id.uuidString ?? "none")\(draftSuffix)"
+}
+
+/// Returns nil when pin state is unchanged — avoids `@State` churn from scroll geometry (expensive updates on main).
+public func structuredSessionFeedPinStateIfChanged(
+    previous: StructuredSessionFeedPinState,
+    sample: StructuredSessionScrollGeometrySample,
+    pinThreshold: CGFloat = 48,
+    topContentOffsetTolerance: CGFloat = 8
+) -> StructuredSessionFeedPinState? {
+    let next = structuredSessionFeedPinState(
+        previous: previous,
+        sample: sample,
+        pinThreshold: pinThreshold,
+        topContentOffsetTolerance: topContentOffsetTolerance
+    )
+    return next == previous ? nil : next
+}
+
 public func structuredSessionRequestBottomScroll(
     intent: StructuredSessionBottomScrollIntent,
     coordinator: StructuredSessionAutoScrollCoordinator,
