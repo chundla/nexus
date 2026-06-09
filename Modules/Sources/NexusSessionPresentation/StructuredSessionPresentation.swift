@@ -282,6 +282,25 @@ public struct FocusedStructuredSessionPresentation: Equatable {
         self.feed = feed
         self.autoScrollTrigger = autoScrollTrigger
     }
+
+    public var structuredSessionFeedScrollTarget: StructuredSessionFeedScrollTarget {
+        NexusSessionPresentation.structuredSessionFeedScrollTarget(for: self)
+    }
+
+    public var structuredSessionFeedScrollSnapshot: StructuredSessionFeedScrollSnapshot {
+        NexusSessionPresentation.structuredSessionFeedScrollSnapshot(for: self)
+    }
+
+    public func structuredSessionShouldRequestBottomScroll(
+        previous: StructuredSessionFeedScrollSnapshot,
+        isPinnedToBottom: Bool
+    ) -> Bool {
+        NexusSessionPresentation.structuredSessionShouldRequestBottomScroll(
+            previous: previous,
+            current: structuredSessionFeedScrollSnapshot,
+            isPinnedToBottom: isPinnedToBottom
+        )
+    }
 }
 
 public struct FocusedStructuredSessionChromePresentation: Equatable {
@@ -955,6 +974,159 @@ public func structuredSessionAutoScrollTrigger(for screen: SessionScreen) -> Str
             .map(\.id),
         pendingDialogIDs: screen.extensionUI?.pendingDialogs.map(\.id) ?? []
     )
+}
+
+public let structuredSessionFeedBottomSentinelID = "conversation-bottom"
+
+public enum StructuredSessionFeedScrollTarget: Equatable {
+    case activityRow(UUID)
+    case bottomSentinel
+
+    public var scrollTargetID: AnyHashable {
+        switch self {
+        case .activityRow(let id):
+            return id
+        case .bottomSentinel:
+            return structuredSessionFeedBottomSentinelID
+        }
+    }
+}
+
+/// Inputs for bottom-scroll policy separate from raw `StructuredSessionAutoScrollTrigger` churn.
+public struct StructuredSessionFeedScrollSnapshot: Equatable {
+    public let feedScrollTarget: StructuredSessionFeedScrollTarget
+    public let autoScrollTrigger: StructuredSessionAutoScrollTrigger
+    /// Non-nil while a live assistant draft row is visible; changes when draft text grows.
+    public let liveDraftGrowthToken: String?
+
+    public init(
+        feedScrollTarget: StructuredSessionFeedScrollTarget,
+        autoScrollTrigger: StructuredSessionAutoScrollTrigger,
+        liveDraftGrowthToken: String?
+    ) {
+        self.feedScrollTarget = feedScrollTarget
+        self.autoScrollTrigger = autoScrollTrigger
+        self.liveDraftGrowthToken = liveDraftGrowthToken
+    }
+}
+
+public enum StructuredSessionBottomScrollIntent: Equatable {
+    case none
+    case immediate
+    case animated
+    case draftGrowthCoalesced
+}
+
+public func structuredSessionFeedScrollTarget(
+    for presentation: FocusedStructuredSessionPresentation
+) -> StructuredSessionFeedScrollTarget {
+    if let streamingRow = presentation.feed.activityRows.last,
+       streamingRow.conversationPresentation?.isStreaming == true {
+        return .activityRow(streamingRow.id)
+    }
+
+    if let lastRowID = presentation.feed.activityRows.last?.id {
+        return .activityRow(lastRowID)
+    }
+
+    return .bottomSentinel
+}
+
+public func structuredSessionFeedScrollSnapshot(
+    for presentation: FocusedStructuredSessionPresentation
+) -> StructuredSessionFeedScrollSnapshot {
+    let target = structuredSessionFeedScrollTarget(for: presentation)
+    let growthToken: String?
+    if case .activityRow(let rowID) = target,
+       let row = presentation.feed.activityRows.last,
+       row.id == rowID,
+       row.conversationPresentation?.isStreaming == true {
+        growthToken = row.text
+    } else {
+        growthToken = nil
+    }
+
+    return StructuredSessionFeedScrollSnapshot(
+        feedScrollTarget: target,
+        autoScrollTrigger: presentation.autoScrollTrigger,
+        liveDraftGrowthToken: growthToken
+    )
+}
+
+public func structuredSessionBottomScrollIntent(
+    previous: StructuredSessionFeedScrollSnapshot,
+    current: StructuredSessionFeedScrollSnapshot,
+    isPinnedToBottom: Bool
+) -> StructuredSessionBottomScrollIntent {
+    guard isPinnedToBottom else {
+        return .none
+    }
+
+    if previous.autoScrollTrigger.lastActivityRowID != current.autoScrollTrigger.lastActivityRowID {
+        return .immediate
+    }
+
+    if previous.autoScrollTrigger.pendingApprovalRequestIDs != current.autoScrollTrigger.pendingApprovalRequestIDs
+        || previous.autoScrollTrigger.pendingDialogIDs != current.autoScrollTrigger.pendingDialogIDs {
+        return .animated
+    }
+
+    if previous.liveDraftGrowthToken != nil,
+       current.liveDraftGrowthToken != nil,
+       previous.feedScrollTarget == current.feedScrollTarget,
+       previous.liveDraftGrowthToken != current.liveDraftGrowthToken {
+        return .draftGrowthCoalesced
+    }
+
+    return .none
+}
+
+public func structuredSessionShouldRequestBottomScroll(
+    previous: StructuredSessionFeedScrollSnapshot,
+    current: StructuredSessionFeedScrollSnapshot,
+    isPinnedToBottom: Bool
+) -> Bool {
+    structuredSessionBottomScrollIntent(previous: previous, current: current, isPinnedToBottom: isPinnedToBottom) != .none
+}
+
+public func structuredSessionAutoScrollAnimation(
+    for intent: StructuredSessionBottomScrollIntent
+) -> StructuredSessionAutoScrollAnimation? {
+    switch intent {
+    case .none:
+        return nil
+    case .immediate, .draftGrowthCoalesced:
+        return .immediate
+    case .animated:
+        return .animated
+    }
+}
+
+/// Buckets rapid live-draft growth scroll cues (~100–150ms) while pinned to bottom.
+public final class StructuredSessionDraftGrowthScrollThrottle: @unchecked Sendable {
+    private let minimumInterval: TimeInterval
+    private let now: () -> TimeInterval
+    private var lastPerformedAt: TimeInterval?
+
+    public init(
+        minimumInterval: TimeInterval = 0.12,
+        now: @escaping () -> TimeInterval = { Date().timeIntervalSinceReferenceDate }
+    ) {
+        self.minimumInterval = minimumInterval
+        self.now = now
+    }
+
+    @discardableResult
+    public func requestIfDue(_ perform: () -> Void) -> Bool {
+        let current = now()
+        if let lastPerformedAt,
+           current - lastPerformedAt < minimumInterval {
+            return false
+        }
+        lastPerformedAt = current
+        perform()
+        return true
+    }
 }
 
 public func structuredSessionPresentationCopy(for screen: SessionScreen) -> StructuredSessionPresentationCopy {

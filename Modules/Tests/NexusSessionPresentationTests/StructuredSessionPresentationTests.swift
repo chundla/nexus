@@ -1739,4 +1739,230 @@ struct StructuredSessionPresentationTests {
         #expect(structuredSessionShouldCollapseDetailPreview(detailLong, charactersPerLine: 84) == true)
         #expect(structuredSessionShouldCollapseDetailPreview(detailLong, charactersPerLine: 60) == true)
     }
+
+    // MARK: - Feed scroll policy (#211)
+
+    @Test func structuredSessionFeedScrollTargetUsesLiveDraftRowWhileStreaming() throws {
+        let session = Session(id: UUID(), workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready)
+        let userItem = SessionActivityItem(kind: .message, text: "You: hi")
+        let presenter = StructuredSessionFeedPresenter()
+        let screen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [userItem],
+            providerFacts: StructuredSessionProviderFacts(liveAssistantDraftText: "draft"),
+            isAgentTurnInProgress: true
+        )
+        let feed = presenter.presentation(for: screen)
+        let presentation = FocusedStructuredSessionPresentation(
+            session: session,
+            feed: feed,
+            autoScrollTrigger: structuredSessionAutoScrollTrigger(for: screen)
+        )
+
+        let draftRowID = try #require(feed.activityRows.last?.id)
+        #expect(structuredSessionFeedScrollTarget(for: presentation) == .activityRow(draftRowID))
+    }
+
+    @Test func structuredSessionFeedScrollTargetFallsBackToBottomSentinelWhenFeedEmpty() {
+        let session = Session(id: UUID(), workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready)
+        let presentation = FocusedStructuredSessionPresentation(
+            session: session,
+            feed: StructuredSessionFeedPresentation(
+                copy: structuredSessionPresentationCopy(for: SessionScreen(session: session, primarySurface: .structuredActivityFeed, transcript: "")),
+                activityRows: [],
+                pendingApprovalRequests: [],
+                thinkingIndicator: nil
+            ),
+            autoScrollTrigger: StructuredSessionAutoScrollTrigger(
+                lastActivityRowID: nil,
+                pendingApprovalRequestIDs: [],
+                pendingDialogIDs: []
+            )
+        )
+
+        #expect(structuredSessionFeedScrollTarget(for: presentation) == .bottomSentinel)
+    }
+
+    @Test func structuredSessionBottomScrollIntentIgnoresDwellAndMetadataChurnWhenPinned() {
+        let activityID = UUID()
+        let session = Session(id: UUID(), workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready)
+        let row = StructuredSessionActivityRow(
+            id: activityID,
+            title: "Message",
+            systemImage: "message",
+            text: "Pi: stable",
+            emphasis: .accent
+        )
+        let feed = StructuredSessionFeedPresentation(
+            copy: structuredSessionPresentationCopy(for: SessionScreen(session: session, primarySurface: .structuredActivityFeed, transcript: "")),
+            activityRows: [row],
+            pendingApprovalRequests: [],
+            thinkingIndicator: nil
+        )
+        let trigger = StructuredSessionAutoScrollTrigger(
+            lastActivityRowID: activityID,
+            pendingApprovalRequestIDs: [],
+            pendingDialogIDs: []
+        )
+        let presentation = FocusedStructuredSessionPresentation(session: session, feed: feed, autoScrollTrigger: trigger)
+        let snapshot = structuredSessionFeedScrollSnapshot(for: presentation)
+
+        // Dwell-stable feed: same rows and trigger as live metadata churn (#208) would still publish.
+        #expect(
+            structuredSessionBottomScrollIntent(
+                previous: snapshot,
+                current: snapshot,
+                isPinnedToBottom: true
+            ) == .none
+        )
+        #expect(structuredSessionShouldRequestBottomScroll(
+            previous: snapshot,
+            current: snapshot,
+            isPinnedToBottom: true
+        ) == false)
+    }
+
+    @Test func structuredSessionBottomScrollIntentRequestsAnimatedScrollWhenPendingChromeChangesWhilePinned() {
+        let activityID = UUID()
+        let session = Session(id: UUID(), workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready)
+        let feed = StructuredSessionFeedPresentation(
+            copy: structuredSessionPresentationCopy(for: SessionScreen(session: session, primarySurface: .structuredActivityFeed, transcript: "")),
+            activityRows: [
+                StructuredSessionActivityRow(
+                    id: activityID,
+                    title: "Message",
+                    systemImage: "message",
+                    text: "Pi: stable",
+                    emphasis: .accent
+                )
+            ],
+            pendingApprovalRequests: [],
+            thinkingIndicator: nil
+        )
+        let previous = structuredSessionFeedScrollSnapshot(for: FocusedStructuredSessionPresentation(
+            session: session,
+            feed: feed,
+            autoScrollTrigger: StructuredSessionAutoScrollTrigger(
+                lastActivityRowID: activityID,
+                pendingApprovalRequestIDs: [],
+                pendingDialogIDs: []
+            )
+        ))
+        let current = structuredSessionFeedScrollSnapshot(for: FocusedStructuredSessionPresentation(
+            session: session,
+            feed: feed,
+            autoScrollTrigger: StructuredSessionAutoScrollTrigger(
+                lastActivityRowID: activityID,
+                pendingApprovalRequestIDs: [UUID()],
+                pendingDialogIDs: ["dialog-1"]
+            )
+        ))
+
+        #expect(
+            structuredSessionBottomScrollIntent(previous: previous, current: current, isPinnedToBottom: true)
+                == .animated
+        )
+    }
+
+    @Test func structuredSessionBottomScrollIntentRequestsImmediateScrollWhenLastActivityRowAppendsWhilePinned() {
+        let firstID = UUID()
+        let secondID = UUID()
+        let session = Session(id: UUID(), workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready)
+        func presentation(lastRowID: UUID) -> FocusedStructuredSessionPresentation {
+            let row = StructuredSessionActivityRow(
+                id: lastRowID,
+                title: "Message",
+                systemImage: "message",
+                text: "Pi: row",
+                emphasis: .accent
+            )
+            return FocusedStructuredSessionPresentation(
+                session: session,
+                feed: StructuredSessionFeedPresentation(
+                    copy: structuredSessionPresentationCopy(for: SessionScreen(session: session, primarySurface: .structuredActivityFeed, transcript: "")),
+                    activityRows: [row],
+                    pendingApprovalRequests: [],
+                    thinkingIndicator: nil
+                ),
+                autoScrollTrigger: StructuredSessionAutoScrollTrigger(
+                    lastActivityRowID: lastRowID,
+                    pendingApprovalRequestIDs: [],
+                    pendingDialogIDs: []
+                )
+            )
+        }
+
+        let previous = structuredSessionFeedScrollSnapshot(for: presentation(lastRowID: firstID))
+        let current = structuredSessionFeedScrollSnapshot(for: presentation(lastRowID: secondID))
+
+        #expect(
+            structuredSessionBottomScrollIntent(previous: previous, current: current, isPinnedToBottom: true) == .immediate
+        )
+        #expect(structuredSessionShouldRequestBottomScroll(previous: previous, current: current, isPinnedToBottom: true))
+        #expect(structuredSessionShouldRequestBottomScroll(previous: previous, current: current, isPinnedToBottom: false) == false)
+    }
+
+    @Test func structuredSessionBottomScrollIntentCoalescesLiveDraftGrowthWithoutChangingRowIDWhilePinned() throws {
+        let session = Session(id: UUID(), workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready)
+        let draftRowID = UUID()
+        let sealedActivityRowID = UUID()
+        func snapshot(text: String) -> StructuredSessionFeedScrollSnapshot {
+            let row = StructuredSessionActivityRow(
+                id: draftRowID,
+                title: "Message",
+                systemImage: "message",
+                text: text,
+                emphasis: .accent,
+                conversationPresentation: StructuredSessionConversationPresentation(
+                    role: .assistant(label: "Pi"),
+                    text: text,
+                    isStreaming: true
+                )
+            )
+            let presentation = FocusedStructuredSessionPresentation(
+                session: session,
+                feed: StructuredSessionFeedPresentation(
+                    copy: structuredSessionPresentationCopy(for: SessionScreen(session: session, primarySurface: .structuredActivityFeed, transcript: "")),
+                    activityRows: [row],
+                    pendingApprovalRequests: [],
+                    thinkingIndicator: nil
+                ),
+                autoScrollTrigger: StructuredSessionAutoScrollTrigger(
+                    lastActivityRowID: sealedActivityRowID,
+                    pendingApprovalRequestIDs: [],
+                    pendingDialogIDs: []
+                )
+            )
+            return structuredSessionFeedScrollSnapshot(for: presentation)
+        }
+
+        let previous = snapshot(text: "Pi: hel")
+        let current = snapshot(text: "Pi: hello")
+
+        #expect(previous.feedScrollTarget == .activityRow(draftRowID))
+
+        #expect(
+            structuredSessionBottomScrollIntent(previous: previous, current: current, isPinnedToBottom: true)
+                == .draftGrowthCoalesced
+        )
+    }
+
+    @Test func structuredSessionDraftGrowthScrollThrottleBucketsRapidCoalescedRequests() {
+        var now = 0.0
+        let throttle = StructuredSessionDraftGrowthScrollThrottle(minimumInterval: 0.12, now: { now })
+        var performed = 0
+
+        #expect(throttle.requestIfDue { performed += 1 })
+        #expect(performed == 1)
+
+        now = 0.05
+        #expect(throttle.requestIfDue { performed += 1 } == false)
+        #expect(performed == 1)
+
+        now = 0.13
+        #expect(throttle.requestIfDue { performed += 1 })
+        #expect(performed == 2)
+    }
 }
