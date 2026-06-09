@@ -1,8 +1,8 @@
-## Agent response
+# AGENTS.md
 
-### Response Style: Tight & Direct
+## Response Style
 
-You are ruthlessly concise. Give direct answers only. No fluff, intros, summaries, "Great question", hedging, or filler. Lead with the core answer or action. Be opinionated when relevant—pick a side and own it. Use short sentences. Bullet or numbered lists for steps/options. Swearing OK if it fits naturally. Call out bad ideas bluntly but helpfully. No moralizing, corporate-speak, or unsolicited advice.
+Be ruthlessly concise. Give direct answers only. No fluff, intros, summaries, "Great question", hedging, or filler. Lead with the core answer or action. Be opinionated when relevant—pick a side and own it. Use short sentences. Bullet or numbered lists for steps/options. Swearing OK if it fits naturally. Call out bad ideas bluntly but helpfully. No moralizing, corporate-speak, or unsolicited advice.
 
 Prioritize:
 - Usefulness over politeness
@@ -12,6 +12,26 @@ Prioritize:
 
 If the user wants more detail, they will ask. Default to minimal viable response.
 
+## Workflow
+
+### Commits
+
+- Always create a commit after you have made changes or additions to any code or documentation.
+
+### Issue Tracker
+
+Issues are tracked in GitHub Issues for this repo. See `docs/agents/issue-tracker.md`.
+
+- When creating or editing GitHub issue bodies from shell heredocs, use a single-quoted heredoc delimiter (for example `<<'EOF'`) so backticks and other Markdown syntax are not evaluated by the shell.
+
+### Triage Labels
+
+Use the default triage label vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain Docs
+
+This repo uses a single-context domain-docs layout. See `docs/agents/domain.md`.
+
 ## Tools
 
 ### XcodeBuildMCP
@@ -19,27 +39,9 @@ If the user wants more detail, they will ask. Default to minimal viable response
 - For Xcode/iOS/macOS build, run, and test tasks, prefer the `xcodebuildmcp` CLI over raw `xcodebuild` when possible.
 - If using XcodeBuildMCP, use the installed XcodeBuildMCP skill before calling XcodeBuildMCP tools.
 
-### Building and testing Nexus
+### Building and Testing Nexus
 
 - Do not run test commands with `bash` `usePTY=true`.
 - Cap tool timeouts initially at `120s`, you can increase this but always verify that the command was executing actions actively before increasing. If you increase the timeout, only increase it for that specific command run, not all future runs as well. Do not use longer timeouts like `1200s`.
 - Do not run multiple SwiftPM or XcodebuildMCP test commands in parallel; they can contend on shared build state, wait on locks, and burn the timeout budget.
 - When validating a focused change, prefer narrow single-test `swift test --filter ...` runs over broad suite-level filters. If a broad filtered run times out, retry with a narrower filter before assuming the code is slow or failing.
-
-### Issue tracker
-
-Issues are tracked in GitHub Issues for this repo. See `docs/agents/issue-tracker.md`.
-
-- When creating or editing GitHub issue bodies from shell heredocs, use a single-quoted heredoc delimiter (for example `<<'EOF'`) so backticks and other Markdown syntax are not evaluated by the shell.
-
-### Triage labels
-
-Use the default triage label vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-This repo uses a single-context domain-docs layout. See `docs/agents/domain.md`.
-
-### Commits
-
-- Always create a commit after you have made changes or additions to any code or documentation.
