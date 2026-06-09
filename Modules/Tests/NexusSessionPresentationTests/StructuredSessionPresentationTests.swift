@@ -783,6 +783,44 @@ struct StructuredSessionPresentationTests {
         #expect(secondPresentation.pendingApprovalRequests == [pendingRequest])
         #expect(secondPresentation.thinkingIndicator == nil)
         #expect(builtItemIDs == [[firstActivity.id, secondActivity.id], [thirdActivity.id]])
+        #expect(presenter.activityRowFullRebuildCount == 1)
+        #expect(presenter.activityRowIncrementalAppendCount == 1)
+        #expect(presenter.activityRowTailRebuildCount == 0)
+    }
+
+    @Test func structuredSessionFeedPresenterCountsIncrementalPathsAcrossLongAppendOnlyBurst() {
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        var items: [SessionActivityItem] = [
+            SessionActivityItem(kind: .message, text: "Pi: one")
+        ]
+        let presenter = StructuredSessionFeedPresenter()
+
+        _ = presenter.presentation(for: SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: items
+        ))
+
+        for index in 2...6 {
+            items.append(SessionActivityItem(kind: .message, text: "Pi: \(index)"))
+            _ = presenter.presentation(for: SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                transcript: "",
+                activityItems: items
+            ))
+        }
+
+        #expect(presenter.activityRowFullRebuildCount == 1)
+        #expect(presenter.activityRowIncrementalAppendCount == 5)
+        #expect(presenter.activityRowTailRebuildCount == 0)
     }
 
     @Test func structuredSessionFeedPresenterStreamsLivePiAssistantDraftAndReusesItsRowIdentityWhenTurnFinalizes() throws {

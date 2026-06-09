@@ -349,11 +349,15 @@ public final class FocusedStructuredSessionChromePresenter {
 
     /// Last chrome presentation returned while the row-affecting inputs were stable.
     /// Mirrors the guard in StructuredSessionHistoryPagingController.presentation to keep
-    /// chrome from mutating on pure providerFacts / diagnostic / turn-progress / extensionUI churn
-    /// when activityItems and isAgentTurnInProgress (and thus draft visibility) are unchanged (#208).
+    /// chrome from mutating on pure providerFacts / diagnostic / turn-progress churn when
+    /// activityItems and isAgentTurnInProgress are unchanged (#208).
+    /// Slash commands and extension UI still invalidate so composer menus stay current after `/clear`
+    /// and when Pi repopulates live skill commands.
     private var lastStablePresentation: FocusedStructuredSessionChromePresentation?
     private var lastSourceActivityItems: [SessionActivityItem] = []
     private var lastIsAgent: Bool = false
+    private var lastSourceSlashCommands: [SessionSlashCommand]?
+    private var lastSourceExtensionUI: SessionExtensionUIState?
 
     public init() {
         self.tokenUsagePresenter = StructuredSessionTokenUsagePresenter()
@@ -380,7 +384,9 @@ public final class FocusedStructuredSessionChromePresenter {
         if let last = lastStablePresentation,
            last.session.id == screen.session.id,
            screen.activityItems == lastSourceActivityItems,
-           screen.isAgentTurnInProgress == lastIsAgent {
+           screen.isAgentTurnInProgress == lastIsAgent,
+           screen.slashCommands == lastSourceSlashCommands,
+           screen.extensionUI == lastSourceExtensionUI {
             return last
         }
 
@@ -394,6 +400,8 @@ public final class FocusedStructuredSessionChromePresenter {
         lastStablePresentation = pres
         lastSourceActivityItems = screen.activityItems
         lastIsAgent = screen.isAgentTurnInProgress
+        lastSourceSlashCommands = screen.slashCommands
+        lastSourceExtensionUI = screen.extensionUI
         return pres
     }
 }
@@ -420,6 +428,11 @@ public final class StructuredSessionFeedPresenter {
     private var cachedActivityRowChunks: [StructuredSessionActivityRowChunk] = []
     private var presentedRowIDByActivityItemID: [UUID: UUID] = [:]
     private var liveAssistantDraft: LiveAssistantDraftState?
+
+    /// Test-only counters for rebuild vs incremental activity-row paths (#216).
+    private(set) var activityRowFullRebuildCount = 0
+    private(set) var activityRowIncrementalAppendCount = 0
+    private(set) var activityRowTailRebuildCount = 0
 
     public init() {
         self.rowBuilder = structuredSessionActivityRows(for:)
@@ -482,6 +495,7 @@ public final class StructuredSessionFeedPresenter {
                 rows: appendedRows,
                 liveTailChunkSize: liveTailChunkSize
             )
+            activityRowIncrementalAppendCount += 1
             return cachedActivityRows
         }
 
@@ -526,6 +540,7 @@ public final class StructuredSessionFeedPresenter {
         cachedActivityItems = activityItems
         cachedActivityRows = preservedRows + rebuiltRows
         cachedActivityRowChunks = Array(cachedActivityRowChunks.prefix { $0.id < rebuildStartIndex }) + rebuiltChunks
+        activityRowTailRebuildCount += 1
         return cachedActivityRows
     }
 
@@ -547,6 +562,7 @@ public final class StructuredSessionFeedPresenter {
             chunkSize: chunkSize,
             liveTailChunkSize: liveTailChunkSize
         )
+        activityRowFullRebuildCount += 1
         return rows
     }
 
