@@ -167,11 +167,7 @@ struct StructuredSessionMarkdownRendererTests {
         )
     }
 
-    @Test func structuredSessionFeedTextSelectionDefaultsMatchPlatformPolicy() {
-        #if os(macOS)
+    @Test func structuredSessionFeedTextSelectionIsDisabledForScrollPerformance() {
         #expect(StructuredSessionFeedTextSelectionPolicy.isEnabled == false)
-        #else
-        #expect(StructuredSessionFeedTextSelectionPolicy.isEnabled == true)
-        #endif
     }
 }

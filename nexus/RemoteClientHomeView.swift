@@ -2312,13 +2312,15 @@ private struct RemoteSessionScreenView: View {
                     Text(conversation.text)
                         .font(NexusIOSTheme.bodyFont(15))
                         .foregroundStyle(.white)
-                        .textSelection(.enabled)
+                        .structuredSessionFeedTextSelection()
+                        .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
                         .background(NexusIOSTheme.gold, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                 }
                 .frame(maxWidth: 420, alignment: .trailing)
             }
+            .structuredSessionFeedRowCompositing()
         case .assistant(let label):
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
@@ -2338,6 +2340,7 @@ private struct RemoteSessionScreenView: View {
                 .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                 Spacer(minLength: 48)
             }
+            .structuredSessionFeedRowCompositing()
         case .command:
             HStack {
                 VStack(alignment: .leading, spacing: 8) {
@@ -2347,7 +2350,8 @@ private struct RemoteSessionScreenView: View {
                     Text(conversation.text)
                         .font(NexusIOSTheme.monoFont(12, relativeTo: .callout))
                         .foregroundStyle(.white.opacity(0.92))
-                        .textSelection(.enabled)
+                        .structuredSessionFeedTextSelection()
+                        .fixedSize(horizontal: false, vertical: true)
                     if let detailText = row.detailText {
                         structuredSessionDetailTextView(
                             detailText,
@@ -2361,6 +2365,7 @@ private struct RemoteSessionScreenView: View {
                 .background(Color.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 Spacer(minLength: 48)
             }
+            .structuredSessionFeedRowCompositing()
         case .error:
             HStack {
                 VStack(alignment: .leading, spacing: 6) {
@@ -2370,13 +2375,15 @@ private struct RemoteSessionScreenView: View {
                     Text(conversation.text)
                         .font(NexusIOSTheme.bodyFont(14))
                         .foregroundStyle(.white.opacity(0.94))
-                        .textSelection(.enabled)
+                        .structuredSessionFeedTextSelection()
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(14)
                 .frame(maxWidth: 520, alignment: .leading)
                 .background(accentColor.opacity(0.2), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 Spacer(minLength: 48)
             }
+            .structuredSessionFeedRowCompositing()
         case .system:
             HStack {
                 if row.showsExpandedSystemCard {
@@ -2387,7 +2394,7 @@ private struct RemoteSessionScreenView: View {
                         Text(verbatim: conversation.text)
                             .font(NexusIOSTheme.bodyFont(14))
                             .foregroundStyle(.white.opacity(0.92))
-                            .textSelection(.enabled)
+                            .structuredSessionFeedTextSelection()
                             .fixedSize(horizontal: false, vertical: true)
                         if let detailText = row.detailText {
                             structuredSessionMarkdownText(
@@ -2418,6 +2425,7 @@ private struct RemoteSessionScreenView: View {
                     Spacer()
                 }
             }
+            .structuredSessionFeedRowCompositing()
         }
     }
 
@@ -2436,7 +2444,7 @@ private struct RemoteSessionScreenView: View {
                 Text(verbatim: conversation.text)
                     .font(font)
                     .foregroundStyle(color)
-                    .textSelection(.enabled)
+                    .structuredSessionFeedTextSelection()
                     .lineLimit(18)
                     .truncationMode(.tail)
 
@@ -2461,14 +2469,15 @@ private struct RemoteSessionScreenView: View {
                     Text(verbatim: text)
                         .font(font)
                         .foregroundStyle(.white.opacity(0.84))
-                        .textSelection(.enabled)
+                        .structuredSessionFeedTextSelection()
                         .frame(height: 200, alignment: .top)
                         .clipped()
                 } else {
                     Text(verbatim: text)
                         .font(font)
                         .foregroundStyle(.white.opacity(0.84))
-                        .textSelection(.enabled)
+                        .structuredSessionFeedTextSelection()
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
 

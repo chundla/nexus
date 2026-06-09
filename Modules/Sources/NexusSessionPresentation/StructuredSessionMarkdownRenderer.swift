@@ -342,20 +342,17 @@ public final class StructuredSessionMarkdownRenderer: @unchecked Sendable {
 }
 
 enum StructuredSessionFeedTextSelectionPolicy {
+    /// Feed text selection is disabled on all platforms during scroll/stream.
+    /// macOS: selection overlays can thrash layout on large multiline rows.
+    /// iOS: Instruments hitch (~109 offscreen passes) correlated with per-line
+    /// selection overlay work across many visible activity rows.
     static var isEnabled: Bool {
-        #if os(macOS)
         false
-        #else
-        true
-        #endif
     }
 }
 
 @available(macOS 12.0, iOS 15.0, *)
 public extension View {
-    /// macOS SwiftUI selection overlays can enter a layout invalidation loop for
-    /// large multiline structured Session feed content, so keep feed text
-    /// non-selectable there while preserving selection on iOS.
     @ViewBuilder
     func structuredSessionFeedTextSelection() -> some View {
         if StructuredSessionFeedTextSelectionPolicy.isEnabled {
@@ -363,6 +360,17 @@ public extension View {
         } else {
             textSelection(.disabled)
         }
+    }
+
+    /// Flatten per-row bubble chrome into one layer so scrolling does not
+    /// re-rasterize every nested shape independently (iOS GPU offscreen passes).
+    @ViewBuilder
+    func structuredSessionFeedRowCompositing() -> some View {
+        #if os(iOS)
+        compositingGroup()
+        #else
+        self
+        #endif
     }
 }
 

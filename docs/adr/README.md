@@ -41,3 +41,4 @@ Initial set:
 33. Some remote structured Sessions may be ready without a continuously attached live runtime
 34. Provider Modules are the single Provider seam
 35. Persisted structured Session history is Session Record scoped, with explicit export
+36. Structured session feed: iOS GPU offscreen pass mitigations
