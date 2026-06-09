@@ -2142,18 +2142,27 @@ private struct RemoteSessionScreenView: View {
                     structuredSessionIsPinnedToBottom = true
                     let snapshot = presentation.structuredSessionFeedScrollSnapshot
                     structuredSessionFeedScrollSnapshot = snapshot
+                    let scrollToBottom = { (animation: StructuredSessionAutoScrollAnimation) in
+                        structuredSessionPerformBottomScroll(
+                            using: proxy,
+                            presentation: presentation,
+                            animation: animation
+                        )
+                    }
                     structuredSessionRequestBottomScroll(
                         intent: .immediate,
                         coordinator: structuredSessionAutoScrollCoordinator,
                         draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
-                        performScroll: { animation in
-                            structuredSessionPerformBottomScroll(
-                                using: proxy,
-                                presentation: presentation,
-                                animation: animation
-                            )
-                        }
+                        performScroll: scrollToBottom
                     )
+                    DispatchQueue.main.async {
+                        structuredSessionRequestBottomScroll(
+                            intent: .immediate,
+                            coordinator: structuredSessionAutoScrollCoordinator,
+                            draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
+                            performScroll: scrollToBottom
+                        )
+                    }
                 }
                 .onChange(of: presentation.session.id) { _, _ in
                     structuredSessionIsPinnedToBottom = true
@@ -2162,6 +2171,20 @@ private struct RemoteSessionScreenView: View {
                 .onChange(of: presentation.structuredSessionFeedScrollSnapshot) { _, current in
                     guard let previous = structuredSessionFeedScrollSnapshot else {
                         structuredSessionFeedScrollSnapshot = current
+                        if structuredSessionIsPinnedToBottom {
+                            structuredSessionRequestBottomScroll(
+                                intent: .immediate,
+                                coordinator: structuredSessionAutoScrollCoordinator,
+                                draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
+                                performScroll: { animation in
+                                    structuredSessionPerformBottomScroll(
+                                        using: proxy,
+                                        presentation: presentation,
+                                        animation: animation
+                                    )
+                                }
+                            )
+                        }
                         return
                     }
 
@@ -2267,6 +2290,7 @@ private struct RemoteSessionScreenView: View {
                                     structuredSessionActivityRowView(row)
                                 }
                                 .equatable()
+                                .id(row.id)
                             }
                         }
                     }

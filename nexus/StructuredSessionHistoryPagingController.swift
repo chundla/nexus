@@ -169,7 +169,7 @@ final class StructuredSessionHistoryPagingController {
         let pres = FocusedStructuredSessionPresentation(
             session: screen.session,
             feed: feedPresenter.presentation(for: merged),
-            autoScrollTrigger: structuredSessionAutoScrollTrigger(for: screen)
+            autoScrollTrigger: structuredSessionAutoScrollTrigger(for: merged)
         )
         lastRowStablePresentation = pres
         lastSourceActivityItems = merged.activityItems

@@ -1522,6 +1522,7 @@ struct ContentView: View {
                                                     structuredSessionActivityRowView(row)
                                                 }
                                                 .equatable()
+                                                .id(row.id)
                                             }
                                         }
                                     }
@@ -1557,18 +1558,27 @@ struct ContentView: View {
                         structuredSessionIsPinnedToBottom = true
                         let snapshot = structuredPresentation.structuredSessionFeedScrollSnapshot
                         structuredSessionFeedScrollSnapshot = snapshot
+                        let scrollToBottom = { (animation: StructuredSessionAutoScrollAnimation) in
+                            structuredSessionPerformBottomScroll(
+                                using: proxy,
+                                presentation: structuredPresentation,
+                                animation: animation
+                            )
+                        }
                         structuredSessionRequestBottomScroll(
                             intent: .immediate,
                             coordinator: structuredSessionAutoScrollCoordinator,
                             draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
-                            performScroll: { animation in
-                                structuredSessionPerformBottomScroll(
-                                    using: proxy,
-                                    presentation: structuredPresentation,
-                                    animation: animation
-                                )
-                            }
+                            performScroll: scrollToBottom
                         )
+                        DispatchQueue.main.async {
+                            structuredSessionRequestBottomScroll(
+                                intent: .immediate,
+                                coordinator: structuredSessionAutoScrollCoordinator,
+                                draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
+                                performScroll: scrollToBottom
+                            )
+                        }
                     }
                     .onChange(of: structuredPresentation.session.id) { _, _ in
                         structuredSessionIsPinnedToBottom = true
@@ -1577,6 +1587,20 @@ struct ContentView: View {
                     .onChange(of: structuredPresentation.structuredSessionFeedScrollSnapshot) { _, current in
                         guard let previous = structuredSessionFeedScrollSnapshot else {
                             structuredSessionFeedScrollSnapshot = current
+                            if structuredSessionIsPinnedToBottom {
+                                structuredSessionRequestBottomScroll(
+                                    intent: .immediate,
+                                    coordinator: structuredSessionAutoScrollCoordinator,
+                                    draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
+                                    performScroll: { animation in
+                                        structuredSessionPerformBottomScroll(
+                                            using: proxy,
+                                            presentation: structuredPresentation,
+                                            animation: animation
+                                        )
+                                    }
+                                )
+                            }
                             return
                         }
 
