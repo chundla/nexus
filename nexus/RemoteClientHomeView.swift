@@ -2147,11 +2147,7 @@ private struct RemoteSessionScreenView: View {
                     let snapshot = presentation.structuredSessionFeedScrollSnapshot
                     structuredSessionFeedScrollSnapshot = snapshot
                     let scrollToBottom = { (animation: StructuredSessionAutoScrollAnimation) in
-                        structuredSessionPerformBottomScroll(
-                            using: proxy,
-                            presentation: presentation,
-                            animation: animation
-                        )
+                        structuredSessionScheduleFollowBottomScroll(using: proxy, animation: animation)
                     }
                     structuredSessionRequestBottomScroll(
                         intent: .immediate,
@@ -2159,14 +2155,10 @@ private struct RemoteSessionScreenView: View {
                         draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
                         performScroll: scrollToBottom
                     )
-                    DispatchQueue.main.async {
-                        structuredSessionRequestBottomScroll(
-                            intent: .immediate,
-                            coordinator: structuredSessionAutoScrollCoordinator,
-                            draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
-                            performScroll: scrollToBottom
-                        )
-                    }
+                }
+                .onChange(of: presentation.autoScrollTrigger) { _, _ in
+                    guard structuredSessionPinState.isFollowingBottom else { return }
+                    structuredSessionScheduleFollowBottomScroll(using: proxy, animation: .immediate)
                 }
                 .onChange(of: presentation.session.id) { _, _ in
                     structuredSessionPinState = StructuredSessionFeedPinState()
@@ -2181,11 +2173,7 @@ private struct RemoteSessionScreenView: View {
                                 coordinator: structuredSessionAutoScrollCoordinator,
                                 draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
                                 performScroll: { animation in
-                                    structuredSessionPerformBottomScroll(
-                                        using: proxy,
-                                        presentation: presentation,
-                                        animation: animation
-                                    )
+                                    structuredSessionScheduleFollowBottomScroll(using: proxy, animation: animation)
                                 }
                             )
                         }
@@ -2202,11 +2190,7 @@ private struct RemoteSessionScreenView: View {
                         coordinator: structuredSessionAutoScrollCoordinator,
                         draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
                         performScroll: { animation in
-                            structuredSessionPerformBottomScroll(
-                                using: proxy,
-                                presentation: presentation,
-                                animation: animation
-                            )
+                            structuredSessionScheduleFollowBottomScroll(using: proxy, animation: animation)
                         }
                     )
                     structuredSessionFeedScrollSnapshot = current
@@ -2314,10 +2298,9 @@ private struct RemoteSessionScreenView: View {
 
     private func structuredSessionPerformBottomScroll(
         using proxy: ScrollViewProxy,
-        presentation: FocusedStructuredSessionPresentation,
         animation: StructuredSessionAutoScrollAnimation
     ) {
-        let targetID = presentation.structuredSessionFeedScrollTarget.scrollTargetID
+        let targetID = structuredSessionFeedBottomSentinelID
         let scroll = {
             proxy.scrollTo(targetID, anchor: .bottom)
         }
@@ -2329,6 +2312,20 @@ private struct RemoteSessionScreenView: View {
             withAnimation(.easeOut(duration: 0.18)) {
                 scroll()
             }
+        }
+    }
+
+    private func structuredSessionScheduleFollowBottomScroll(
+        using proxy: ScrollViewProxy,
+        animation: StructuredSessionAutoScrollAnimation
+    ) {
+        structuredSessionPerformBottomScroll(using: proxy, animation: animation)
+        DispatchQueue.main.async {
+            structuredSessionPerformBottomScroll(using: proxy, animation: .immediate)
+        }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(80))
+            structuredSessionPerformBottomScroll(using: proxy, animation: .immediate)
         }
     }
 

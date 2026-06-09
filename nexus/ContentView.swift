@@ -1563,11 +1563,7 @@ struct ContentView: View {
                         let snapshot = structuredPresentation.structuredSessionFeedScrollSnapshot
                         structuredSessionFeedScrollSnapshot = snapshot
                         let scrollToBottom = { (animation: StructuredSessionAutoScrollAnimation) in
-                            structuredSessionPerformBottomScroll(
-                                using: proxy,
-                                presentation: structuredPresentation,
-                                animation: animation
-                            )
+                            structuredSessionScheduleFollowBottomScroll(using: proxy, animation: animation)
                         }
                         structuredSessionRequestBottomScroll(
                             intent: .immediate,
@@ -1575,14 +1571,10 @@ struct ContentView: View {
                             draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
                             performScroll: scrollToBottom
                         )
-                        DispatchQueue.main.async {
-                            structuredSessionRequestBottomScroll(
-                                intent: .immediate,
-                                coordinator: structuredSessionAutoScrollCoordinator,
-                                draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
-                                performScroll: scrollToBottom
-                            )
-                        }
+                    }
+                    .onChange(of: structuredPresentation.autoScrollTrigger) { _, _ in
+                        guard structuredSessionPinState.isFollowingBottom else { return }
+                        structuredSessionScheduleFollowBottomScroll(using: proxy, animation: .immediate)
                     }
                     .onChange(of: structuredPresentation.session.id) { _, _ in
                         structuredSessionPinState = StructuredSessionFeedPinState()
@@ -1597,11 +1589,7 @@ struct ContentView: View {
                                     coordinator: structuredSessionAutoScrollCoordinator,
                                     draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
                                     performScroll: { animation in
-                                        structuredSessionPerformBottomScroll(
-                                            using: proxy,
-                                            presentation: structuredPresentation,
-                                            animation: animation
-                                        )
+                                        structuredSessionScheduleFollowBottomScroll(using: proxy, animation: animation)
                                     }
                                 )
                             }
@@ -1618,11 +1606,7 @@ struct ContentView: View {
                             coordinator: structuredSessionAutoScrollCoordinator,
                             draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
                             performScroll: { animation in
-                                structuredSessionPerformBottomScroll(
-                                    using: proxy,
-                                    presentation: structuredPresentation,
-                                    animation: animation
-                                )
+                                structuredSessionScheduleFollowBottomScroll(using: proxy, animation: animation)
                             }
                         )
                         structuredSessionFeedScrollSnapshot = current
@@ -2009,10 +1993,11 @@ struct ContentView: View {
 
     private func structuredSessionPerformBottomScroll(
         using proxy: ScrollViewProxy,
-        presentation: FocusedStructuredSessionPresentation,
         animation: StructuredSessionAutoScrollAnimation
     ) {
-        let targetID = presentation.structuredSessionFeedScrollTarget.scrollTargetID
+        // Always scroll to the bottom sentinel (chat pattern). Row UUID targets inside nested
+        // LazyVStack + equatable wrappers are often not registered with ScrollViewReader.
+        let targetID = structuredSessionFeedBottomSentinelID
         let scroll = {
             proxy.scrollTo(targetID, anchor: .bottom)
         }
@@ -2024,6 +2009,20 @@ struct ContentView: View {
             withAnimation(.easeOut(duration: 0.18)) {
                 scroll()
             }
+        }
+    }
+
+    private func structuredSessionScheduleFollowBottomScroll(
+        using proxy: ScrollViewProxy,
+        animation: StructuredSessionAutoScrollAnimation
+    ) {
+        structuredSessionPerformBottomScroll(using: proxy, animation: animation)
+        DispatchQueue.main.async {
+            structuredSessionPerformBottomScroll(using: proxy, animation: .immediate)
+        }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(80))
+            structuredSessionPerformBottomScroll(using: proxy, animation: .immediate)
         }
     }
 
