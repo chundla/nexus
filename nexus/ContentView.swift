@@ -1664,16 +1664,20 @@ struct ContentView: View {
 
         switch conversation.role {
         case .user:
-            Text(conversation.text)
-                .font(NexusMacTheme.bodyFont(13))
-                .foregroundStyle(.white)
-                .structuredSessionFeedTextSelection()
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(NexusMacTheme.gold, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .frame(maxWidth: 520, alignment: .leading)
-                .frame(maxWidth: .infinity, alignment: .trailing)
+            HStack {
+                Spacer(minLength: 48)
+                Text(conversation.text)
+                    .font(NexusMacTheme.bodyFont(13))
+                    .foregroundStyle(.white)
+                    .structuredSessionFeedTextSelection()
+                    .multilineTextAlignment(.trailing)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(NexusMacTheme.gold, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .frame(maxWidth: 520, alignment: .trailing)
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
         case .assistant(let label):
             VStack(alignment: .leading, spacing: 3) {
                 Text(label)
