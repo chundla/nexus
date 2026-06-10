@@ -1,6 +1,7 @@
 import NexusSessionPresentation
 import SwiftUI
 
+@MainActor
 enum StructuredSessionFeedScrollSupport {
     /// Test hook: counts each `scrollToBottom` invocation (including optional layout retry).
     static var scrollToBottomInvocationCountForTesting = 0
@@ -29,8 +30,8 @@ enum StructuredSessionFeedScrollSupport {
         position: Binding<ScrollPosition>,
         animation: StructuredSessionAutoScrollAnimation,
         layoutRetry: Bool = false,
-        schedulePostLayoutRetry: (@escaping @Sendable () -> Void) -> Void = { work in
-            DispatchQueue.main.async(execute: work)
+        schedulePostLayoutRetry: (@escaping @MainActor () -> Void) -> Void = { work in
+            Task { @MainActor in work() }
         }
     ) {
         scrollToBottom(position, animation: animation)
