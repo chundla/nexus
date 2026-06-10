@@ -47,7 +47,17 @@ Steady hitch correlations: recurring **swift_retain/release**, **___chkstk_darwi
 
 **Takeaway (#224):** Sustained cost is **many small hitches** (42–92 ms), not single giants. Background **string split** work is the largest CPU bucket in the steady window — align with markdown/feed text processing (`StructuredSessionMarkdown*`, bounded preview, hydration). Run 6 is **worse** than run 4 on hitch count in this window.
 
-## Sign-off vs issues
+## Sign-off vs issues (GitHub #224 / #225)
 
-- **#225** acceptance (&lt;296 ms red in first 30 s): run 6 **308 ms** red-marked — **not met**.
-- **#224** sustained: run 6 **339/min** full session and higher steady-window hitch count vs run 4 — **not met**.
+**#225** (startup, same ~5–7 min trace as #224):
+
+- Red-marked in first 30 s: **&lt; 296 ms** (run 4)
+- `analyze_trace --window 0:30000` worst animation hitch: **&lt; 333 ms** (run 4)
+- Must not fail **#224** gates on that trace (below)
+
+**#224** (steady, run 4 baseline — not run 1 ~27/min):
+
+- Full session `frames_over_33ms_per_minute`: **≤ 260** (≥20% below run 4 **326**)
+- `analyze_trace --window 120000:400000` animation hitch count: **≤ 814** (run 4)
+
+**Current run 6:** #225 **308 ms** red — not met. #224 **339/min**, **2341** steady hitches — not met.
