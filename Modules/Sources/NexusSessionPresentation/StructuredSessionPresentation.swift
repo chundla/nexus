@@ -93,6 +93,11 @@ public struct StructuredSessionFeedPresentation: Equatable {
         activityRowChunks.flatMap(\.rows)
     }
 
+    /// Row order for feed `LazyVStack` iteration (same as `activityRows`).
+    public var feedActivityRowIDs: [UUID] {
+        activityRows.map(\.id)
+    }
+
     public init(
         copy: StructuredSessionPresentationCopy,
         activityRows: [StructuredSessionActivityRow],

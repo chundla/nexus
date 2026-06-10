@@ -1098,6 +1098,7 @@ struct StructuredSessionPresentationTests {
         )
 
         #expect(presentation.activityRows == [firstRow, secondRow])
+        #expect(presentation.feedActivityRowIDs == [firstRow.id, secondRow.id])
     }
 
     @Test func structuredSessionFeedPresenterKeepsEarlierChunksStableAcrossLongAppendOnlyBursts() {

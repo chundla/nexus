@@ -1502,14 +1502,12 @@ struct ContentView: View {
                                 )
                                 .frame(maxWidth: .infinity, minHeight: 220)
                             } else {
-                                ForEach(feedPresentation.activityRowChunks) { chunk in
-                                    ForEach(chunk.rows) { row in
-                                        MacEquatableStructuredSessionActivityRow(row: row) {
-                                            structuredSessionActivityRowView(row)
-                                        }
-                                        .equatable()
-                                        .id(row.id)
+                                ForEach(feedPresentation.activityRows) { row in
+                                    MacEquatableStructuredSessionActivityRow(row: row) {
+                                        structuredSessionActivityRowView(row)
                                     }
+                                    .equatable()
+                                    .id(row.id)
                                 }
 
                                 if let thinkingIndicator = feedPresentation.thinkingIndicator {
