@@ -43,6 +43,7 @@ struct ContentView: View {
     @State private var structuredSessionPinState = StructuredSessionFeedPinState()
     @State private var structuredSessionFeedScrollSnapshot: StructuredSessionFeedScrollSnapshot?
     @State private var structuredSessionFeedScrollPosition = ScrollPosition(edge: .bottom)
+    @State private var structuredSessionMacOSFeedShowsActivityRows = false
     @State private var expandedStructuredSessionAssistantResponseRowIDs: Set<UUID> = []
 
     private let terminalLayout = TerminalViewportLayout.live
@@ -1501,7 +1502,7 @@ struct ContentView: View {
                                     description: Text(feedPresentation.copy.emptyStateDescription)
                                 )
                                 .frame(maxWidth: .infinity, minHeight: 220)
-                            } else {
+                            } else if structuredSessionMacOSFeedShowsActivityRows {
                                 ForEach(feedPresentation.activityRows) { row in
                                     MacEquatableStructuredSessionActivityRow(row: row) {
                                         structuredSessionActivityRowView(row)
@@ -1545,6 +1546,7 @@ struct ContentView: View {
                     }
                     .onAppear {
                         structuredSessionPinState = StructuredSessionFeedPinState()
+                        structuredSessionScheduleMacOSFeedActivityRowsIfNeeded()
                         structuredSessionFeedScrollSnapshot = StructuredSessionFeedScrollSupport
                             .applyStructuredSessionFeedScrollSnapshotTransition(
                                 previous: nil,
@@ -1560,6 +1562,8 @@ struct ContentView: View {
                         structuredSessionPinState = StructuredSessionFeedPinState()
                         structuredSessionFeedScrollSnapshot = nil
                         expandedStructuredSessionAssistantResponseRowIDs = []
+                        structuredSessionMacOSFeedShowsActivityRows = false
+                        structuredSessionScheduleMacOSFeedActivityRowsIfNeeded()
                     }
                     .onChange(of: structuredPresentation.structuredSessionFeedScrollSnapshot) { _, current in
                         guard structuredSessionFeedScrollSnapshotIfScrollPolicyChanged(
@@ -1603,6 +1607,20 @@ struct ContentView: View {
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .nexusPanel(tint: NexusMacTheme.coral)
+        }
+    }
+
+    private func structuredSessionScheduleMacOSFeedActivityRowsIfNeeded() {
+        guard StructuredSessionFeedMacOSStartupPolicy.defersActivityRowsUntilAfterFirstLayoutTurn else {
+            structuredSessionMacOSFeedShowsActivityRows = true
+            return
+        }
+        guard structuredSessionMacOSFeedShowsActivityRows == false else {
+            return
+        }
+        Task { @MainActor in
+            await Task.yield()
+            structuredSessionMacOSFeedShowsActivityRows = true
         }
     }
 
