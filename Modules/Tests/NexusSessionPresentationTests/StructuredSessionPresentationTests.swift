@@ -1869,6 +1869,17 @@ struct StructuredSessionPresentationTests {
         #expect(long.previewLineLimit == 18)
     }
 
+    @Test func structuredSessionFeedStreamingAssistantDisplayTextTrimsLongLiveDrafts() {
+        let longBody = (0 ..< 20).map { _ in String(repeating: "a", count: 70) }.joined(separator: "\n")
+        let policy = structuredSessionFeedStreamingAssistantDisplayPolicy(for: longBody, charactersPerLine: 72)
+        let display = structuredSessionFeedStreamingAssistantDisplayText(for: longBody, policy: policy)
+        #expect(display.count < longBody.count)
+        #expect(display == structuredSessionFeedAssistantMarkdownBoundedPreviewText(for: longBody))
+
+        let shortPolicy = structuredSessionFeedStreamingAssistantDisplayPolicy(for: "Pi: hi", charactersPerLine: 72)
+        #expect(structuredSessionFeedStreamingAssistantDisplayText(for: "Pi: hi", policy: shortPolicy) == "Pi: hi")
+    }
+
     @Test func structuredSessionShouldCollapseStreamingMarkdownPreviewRespectsLineAndCharThresholds() {
         // Short content: never collapse (both platform widths)
         #expect(structuredSessionShouldCollapseStreamingMarkdownPreview("short reply", charactersPerLine: 72) == false)

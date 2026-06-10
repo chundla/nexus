@@ -2430,10 +2430,14 @@ private struct RemoteSessionScreenView: View {
                 for: conversation.text,
                 charactersPerLine: 56
             )
+            let streamingDisplayText = structuredSessionFeedStreamingAssistantDisplayText(
+                for: conversation.text,
+                policy: streamingPolicy
+            )
             VStack(alignment: .leading, spacing: 8) {
                 Group {
                     if streamingPolicy.usesBoundedViewport {
-                        Text(verbatim: conversation.text)
+                        Text(verbatim: streamingDisplayText)
                             .font(font)
                             .foregroundStyle(color)
                             .structuredSessionFeedTextSelection()
@@ -2445,7 +2449,7 @@ private struct RemoteSessionScreenView: View {
                             )
                             .clipped()
                     } else {
-                        Text(verbatim: conversation.text)
+                        Text(verbatim: streamingDisplayText)
                             .font(font)
                             .foregroundStyle(color)
                             .structuredSessionFeedTextSelection()

@@ -2594,6 +2594,21 @@ public func structuredSessionFeedStreamingAssistantDisplayPolicy(
     )
 }
 
+/// Text bound for live assistant `Text` during streaming (#224). When the viewport is bounded,
+/// typeset only the trimmed preview — not the full growing draft on every Pi tick.
+public func structuredSessionFeedStreamingAssistantDisplayText(
+    for text: String,
+    policy: StructuredSessionFeedStreamingAssistantDisplayPolicy
+) -> String {
+    guard policy.usesBoundedViewport else {
+        return text
+    }
+    return structuredSessionFeedAssistantMarkdownBoundedPreviewText(
+        for: text,
+        maximumLines: policy.previewLineLimit
+    )
+}
+
 private func structuredSessionEstimatedWrappedLineCount(for text: String, charactersPerLine: Int) -> Int {
     let clampedCharactersPerLine = max(12, charactersPerLine)
     let wrappedLineCount = text

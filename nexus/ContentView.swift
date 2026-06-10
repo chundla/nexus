@@ -1807,10 +1807,14 @@ struct ContentView: View {
                 for: conversation.text,
                 charactersPerLine: 72
             )
+            let streamingDisplayText = structuredSessionFeedStreamingAssistantDisplayText(
+                for: conversation.text,
+                policy: streamingPolicy
+            )
             VStack(alignment: .leading, spacing: 8) {
                 Group {
                     if streamingPolicy.usesBoundedViewport {
-                        Text(verbatim: conversation.text)
+                        Text(verbatim: streamingDisplayText)
                             .font(font)
                             .foregroundStyle(color)
                             .structuredSessionFeedTextSelection()
@@ -1822,7 +1826,7 @@ struct ContentView: View {
                             )
                             .clipped()
                     } else {
-                        Text(verbatim: conversation.text)
+                        Text(verbatim: streamingDisplayText)
                             .font(font)
                             .foregroundStyle(color)
                             .structuredSessionFeedTextSelection()
