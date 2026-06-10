@@ -1,5 +1,5 @@
 {
-  "note": "214.trace macOS SwiftUI profiling. Rates are frames/min from hitches-frame-lifetimes. Run 4/5: NEXUS_MAC_PROFILE_FIXTURE=structured-feed-profile. Export: python3 scripts/export_structured_session_trace_metrics.py --input 214.trace --run N. Full-bundle --toc may SIGSEGV; per-run --run is fine.",
+  "note": "214.trace macOS SwiftUI profiling. Rates are frames/min from hitches-frame-lifetimes. Run 4/5/6: NEXUS_MAC_PROFILE_FIXTURE=structured-feed-profile. Export: python3 scripts/export_structured_session_trace_metrics.py --input 214.trace --run N. Windowed stacks: docs/baselines/214-trace-window-analysis.md (analyze_trace.py). Full-bundle --toc may SIGSEGV; per-run --run is fine.",
   "trace": "214.trace",
   "runs": [
     {
@@ -64,17 +64,23 @@
     },
     {
       "run": 6,
-      "label": "post-225 bounded-markdown short trace (separate bundle; orientation only)",
-      "duration_seconds": 32.531,
+      "label": "post-224-225 long re-profile (latest macOS in 214.trace)",
+      "duration_seconds": 449.891,
       "hitches": {
-        "worst_red_marked_ms": 298.29,
-        "frame_lifetime_over_33ms_count": 87,
-        "frame_lifetime_over_16_67ms_count": 666,
-        "worst_frame_lifetime_ms": 375.96,
-        "frames_over_33ms_per_minute": 160.5,
-        "frames_over_16_67ms_per_minute": 1228.4
+        "worst_red_marked_ms": 308.39,
+        "worst_red_marked_start": "00:01.256",
+        "red_marked_count": 1,
+        "frame_lifetime_over_33ms_count": 2540,
+        "frame_lifetime_over_16_67ms_count": 5557,
+        "worst_frame_lifetime_ms": 371.85,
+        "frames_over_33ms_per_minute": 338.7,
+        "frames_over_16_67ms_per_minute": 741.2
       },
-      "note": "Not the same session as run 5; short capture only."
+      "signoff": {
+        "224_sustained": "338.7/min full session; steady window 120–400 s has ~2.4× animation hitches vs run 4 — not met",
+        "225_startup_red": "308 ms red @ ~1.26 s; analyze_trace 0–30 s worst 350 ms expensive app update — not met vs 296 ms run 4"
+      },
+      "window_analysis": "docs/baselines/214-trace-window-analysis.md"
     }
   ]
 }
