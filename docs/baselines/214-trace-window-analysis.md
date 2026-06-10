@@ -1,22 +1,16 @@
 # `214.trace` windowed analysis (runs 4 vs 6)
 
-Generated with `swiftui-expert-skill` `analyze_trace.py` (not the repo hitch exporter).
+Maintainer workflow (record → export → windows → baseline JSON): [structured-session-instruments-harness.md](../structured-session-instruments-harness.md) — **Windowed analysis**.
+
+This file is example output for runs 4 and 6. Commands:
 
 ```bash
-SKILL="${HOME}/.pi/agent/skills/swiftui-expert-skill"
+# Canonical copy-paste block lives in the harness doc (SWIFTUI_TRACE_SKILL + both windows).
+SKILL="${SWIFTUI_TRACE_SKILL:-$HOME/.pi/agent/skills/swiftui-expert-skill}"
 TRACE="214.trace"
-# #225 — first 30 s
-python3 "$SKILL/scripts/analyze_trace.py" --trace "$TRACE" --run 6 \
-  --window 0:30000 --output /tmp/225-run6
-# #224 — steady (skip first 2 min)
-python3 "$SKILL/scripts/analyze_trace.py" --trace "$TRACE" --run 6 \
-  --window 120000:400000 --output /tmp/224-run6
-```
-
-Repo aggregate export (full session):
-
-```bash
-python3 scripts/export_structured_session_trace_metrics.py --input 214.trace --run 6
+python3 scripts/export_structured_session_trace_metrics.py --input "$TRACE" --run 6
+python3 "$SKILL/scripts/analyze_trace.py" --trace "$TRACE" --run 6 --window 0:30000 --output /tmp/225-run6
+python3 "$SKILL/scripts/analyze_trace.py" --trace "$TRACE" --run 6 --window 120000:400000 --output /tmp/224-run6
 ```
 
 ## #225 startup window (`0:30000` ms)
