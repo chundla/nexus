@@ -1452,6 +1452,7 @@ private struct RemoteSessionScreenView: View {
     @State private var structuredSessionPinState = StructuredSessionFeedPinState()
     @State private var structuredSessionFeedScrollSnapshot: StructuredSessionFeedScrollSnapshot?
     @State private var structuredSessionFeedScrollPosition = ScrollPosition(edge: .bottom)
+    @State private var expandedStructuredSessionAssistantResponseRowIDs: Set<UUID> = []
     @FocusState private var isStructuredPromptFocused: Bool
     @FocusState private var isTerminalInputFocused: Bool
 
@@ -2161,6 +2162,7 @@ private struct RemoteSessionScreenView: View {
                 .onChange(of: presentation.session.id) { _, _ in
                     structuredSessionPinState = StructuredSessionFeedPinState()
                     structuredSessionFeedScrollSnapshot = nil
+                    expandedStructuredSessionAssistantResponseRowIDs = []
                 }
                 .onChange(of: presentation.structuredSessionFeedScrollSnapshot) { _, current in
                     guard structuredSessionFeedScrollSnapshotIfScrollPolicyChanged(
@@ -2330,6 +2332,7 @@ private struct RemoteSessionScreenView: View {
 
                     structuredSessionAssistantResponseView(
                         conversation,
+                        rowID: row.id,
                         font: NexusIOSTheme.bodyFont(15),
                         color: .white.opacity(0.94)
                     )
@@ -2436,6 +2439,7 @@ private struct RemoteSessionScreenView: View {
     @ViewBuilder
     private func structuredSessionAssistantResponseView(
         _ conversation: StructuredSessionConversationPresentation,
+        rowID: UUID,
         font: Font,
         color: Color
     ) -> some View {
@@ -2455,7 +2459,36 @@ private struct RemoteSessionScreenView: View {
                 }
             }
         } else {
-            structuredSessionMarkdownText(conversation.text, font: font, color: color)
+            let policy = structuredSessionFeedAssistantMarkdownDisplayPolicy(
+                for: conversation.text,
+                charactersPerLine: 56
+            )
+            let showsFullResponse = expandedStructuredSessionAssistantResponseRowIDs.contains(rowID)
+            if policy.showsCollapsedPreview, showsFullResponse == false {
+                VStack(alignment: .leading, spacing: 8) {
+                    structuredSessionMarkdownText(conversation.text, font: font, color: color)
+                        .lineLimit(policy.previewLineLimit)
+                        .truncationMode(.tail)
+                        .frame(
+                            height: structuredSessionFeedCollapsedDetailViewportHeight,
+                            alignment: .top
+                        )
+                        .clipped()
+
+                    Text(policy.collapsedFootnote)
+                        .font(NexusIOSTheme.bodyFont(11, relativeTo: .caption))
+                        .foregroundStyle(NexusIOSTheme.mutedText)
+
+                    Button(policy.showFullResponseTitle) {
+                        expandedStructuredSessionAssistantResponseRowIDs.insert(rowID)
+                    }
+                    .buttonStyle(.plain)
+                    .font(NexusIOSTheme.bodyFont(11, relativeTo: .caption, weight: .medium))
+                    .foregroundStyle(NexusIOSTheme.gold)
+                }
+            } else {
+                structuredSessionMarkdownText(conversation.text, font: font, color: color)
+            }
         }
     }
 
@@ -2470,7 +2503,10 @@ private struct RemoteSessionScreenView: View {
                         .font(font)
                         .foregroundStyle(.white.opacity(0.84))
                         .structuredSessionFeedTextSelection()
-                        .frame(height: 200, alignment: .top)
+                        .frame(
+                            height: structuredSessionFeedCollapsedDetailViewportHeight,
+                            alignment: .top
+                        )
                         .clipped()
                 } else {
                     Text(verbatim: text)

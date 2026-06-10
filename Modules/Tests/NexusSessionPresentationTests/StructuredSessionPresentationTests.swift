@@ -1829,6 +1829,9 @@ struct StructuredSessionPresentationTests {
         #expect(conversation.text.isEmpty == false)
         let policy = structuredSessionFeedAssistantMarkdownDisplayPolicy(for: conversation.text, charactersPerLine: 72)
         #expect(policy.showsCollapsedPreview)
+
+        let iosPolicy = structuredSessionFeedAssistantMarkdownDisplayPolicy(for: conversation.text, charactersPerLine: 56)
+        #expect(iosPolicy.showsCollapsedPreview)
     }
 
     // MARK: - Feed scroll policy (#211)
