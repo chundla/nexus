@@ -2,6 +2,11 @@ import Foundation
 @testable import NexusSessionPresentation
 import Testing
 
+@MainActor
+private final class StructuredSessionMarkdownHydrationDeliveryCounter {
+    var count = 0
+}
+
 struct StructuredSessionMarkdownRendererTests {
     @Test func rendererSkipsMarkdownParsingForPlainText() {
         var parseCallCount = 0
@@ -238,8 +243,39 @@ struct StructuredSessionMarkdownRendererTests {
 
         #expect(parseCallCount == 0)
 
+        await Task.yield()
         await StructuredSessionMarkdownRowHydrationScheduler.drainForTesting()
 
         #expect(parseCallCount == 1)
+    }
+
+    @Test @MainActor func structuredSessionMarkdownRowHydrationSchedulerDeliversAllScheduledRows() async {
+        var parseCallCount = 0
+        let renderer = StructuredSessionMarkdownRenderer(
+            cacheLimit: 8,
+            parser: { text in
+                parseCallCount += 1
+                return AttributedString("rendered: \(text)")
+            }
+        )
+        let deliveryCounter = StructuredSessionMarkdownHydrationDeliveryCounter()
+
+        for index in 0 ..< 4 {
+            StructuredSessionMarkdownRowHydrationScheduler.scheduleHydration(
+                markdown: "**item \(index)**",
+                renderer: renderer
+            ) { _ in
+                deliveryCounter.count += 1
+            }
+        }
+
+        await Task.yield()
+        await StructuredSessionMarkdownRowHydrationScheduler.drainForTesting()
+
+        #expect(parseCallCount == 4)
+        #expect(deliveryCounter.count == 4)
+        let flushCount = await StructuredSessionMarkdownRowHydrationScheduler.deliveryFlushCountForTesting()
+        #expect(flushCount >= 1)
+        #expect(flushCount < 4)
     }
 }

@@ -1628,6 +1628,10 @@ private func structuredSessionPrewarmAssistantMarkdownCache(
     guard #available(macOS 12.0, iOS 15.0, *) else {
         return
     }
+    #if os(macOS)
+    // Row onAppear hydration owns first paint; bulk prewarm contended with utility parse + main-thread flushes (#225).
+    return
+    #else
     let renderTexts = structuredSessionAssistantMarkdownRenderTexts(
         for: rows,
         providerDisplayName: providerDisplayName
@@ -1636,6 +1640,7 @@ private func structuredSessionPrewarmAssistantMarkdownCache(
         return
     }
     StructuredSessionAssistantMarkdownPrewarmScheduler.schedule(renderTexts: renderTexts)
+    #endif
 }
 
 /// Defers markdown parse/typeset off the main thread during first structured feed paint (#225).

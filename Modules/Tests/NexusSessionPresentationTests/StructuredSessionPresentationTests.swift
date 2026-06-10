@@ -957,8 +957,13 @@ struct StructuredSessionPresentationTests {
         await StructuredSessionAssistantMarkdownPrewarmScheduler.drainForTesting()
 
         let metrics = StructuredSessionMarkdownRenderer.shared.metricsSnapshot()
+        #if os(macOS)
+        #expect(metrics.parseCount == 0)
+        #expect(metrics.cacheMissCount == 0)
+        #else
         #expect(metrics.parseCount >= 1)
         #expect(metrics.cacheMissCount >= 1)
+        #endif
     }
 
     @Test func structuredSessionFeedPresenterPrewarmsBoundedAssistantMarkdownForLongFinalizedResponses() async {
@@ -985,10 +990,19 @@ struct StructuredSessionPresentationTests {
 
         let bounded = structuredSessionFeedAssistantMarkdownBoundedPreviewText(for: longBody)
         let metricsAfterRebuild = StructuredSessionMarkdownRenderer.shared.metricsSnapshot()
+        #if os(macOS)
+        #expect(metricsAfterRebuild.parseCount == 0)
+        #else
         #expect(metricsAfterRebuild.cacheMissCount >= 1)
+        #endif
         _ = StructuredSessionMarkdownRenderer.shared.renderContent(bounded)
         let metricsAfterSecondRender = StructuredSessionMarkdownRenderer.shared.metricsSnapshot()
+        #if os(macOS)
+        #expect(metricsAfterSecondRender.cacheMissCount == 1)
+        #expect(metricsAfterSecondRender.cacheHitCount == 0)
+        #else
         #expect(metricsAfterSecondRender.cacheHitCount == metricsAfterRebuild.cacheHitCount + 1)
+        #endif
     }
 
     @Test func structuredSessionFeedPresenterUsesProviderFactsForLivePiDraftsWithoutReparsingRawEvents() {

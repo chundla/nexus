@@ -344,6 +344,11 @@ public final class StructuredSessionMarkdownRenderer: @unchecked Sendable {
 /// Parses deferred row markdown off the main thread, then delivers on the main actor (#225).
 @available(macOS 12.0, iOS 15.0, *)
 public enum StructuredSessionMarkdownRowHydrationScheduler {
+    private struct RenderedDelivery: Sendable {
+        let rendered: StructuredSessionRenderedText
+        let deliver: @Sendable @MainActor (StructuredSessionRenderedText) -> Void
+    }
+
     private actor Queue {
         struct Job {
             let markdown: String
@@ -375,6 +380,24 @@ public enum StructuredSessionMarkdownRowHydrationScheduler {
             }
             isDraining = false
             return true
+        }
+
+        var deliveryFlushCountForTesting = 0
+
+        func recordDeliveryFlushForTesting() {
+            deliveryFlushCountForTesting += 1
+        }
+
+        func deliveryFlushCountForTestingSnapshot() -> Int {
+            deliveryFlushCountForTesting
+        }
+
+        func resetDeliveryFlushCountForTesting() {
+            deliveryFlushCountForTesting = 0
+        }
+
+        func hasPendingOrDraining() -> Bool {
+            isDraining || pendingJobs.isEmpty == false
         }
 
         func waitUntilIdle() async {
@@ -409,18 +432,40 @@ public enum StructuredSessionMarkdownRowHydrationScheduler {
                 return
             }
 
+            var deliveries: [RenderedDelivery] = []
+            deliveries.reserveCapacity(batch.count)
             for job in batch {
                 let rendered = job.renderer.renderContent(job.markdown)
-                await MainActor.run {
-                    job.deliver(rendered)
+                deliveries.append(RenderedDelivery(rendered: rendered, deliver: job.deliver))
+            }
+
+            await MainActor.run {
+                for delivery in deliveries {
+                    delivery.deliver(delivery.rendered)
                 }
             }
+            await queue.recordDeliveryFlushForTesting()
         }
     }
 
     /// Waits until scheduled hydration work finishes; for tests only.
     public static func drainForTesting() async {
+        for _ in 0 ..< 512 {
+            if await queue.hasPendingOrDraining() {
+                break
+            }
+            await Task.yield()
+        }
         await queue.waitUntilIdle()
+    }
+
+    /// Number of batched main-actor delivery flushes since last reset; for tests only.
+    public static func deliveryFlushCountForTesting() async -> Int {
+        await queue.deliveryFlushCountForTestingSnapshot()
+    }
+
+    public static func resetDeliveryFlushCountForTesting() async {
+        await queue.resetDeliveryFlushCountForTesting()
     }
 }
 
