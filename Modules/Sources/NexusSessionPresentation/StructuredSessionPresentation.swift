@@ -2369,13 +2369,28 @@ public let structuredSessionFeedCollapsedDetailViewportHeight: CGFloat = 200
 /// Line cap for bounded assistant markdown previews (streaming and finalized) in feed rows.
 public let structuredSessionFeedAssistantMarkdownPreviewLineLimit = 18
 
+/// Footnote shown under bounded finalized assistant markdown in the structured feed.
+public let structuredSessionFeedAssistantMarkdownCollapsedFootnote = "Long response preview truncated for smooth scrolling."
+
+/// Action label that expands a bounded finalized assistant response to full markdown in the feed.
+public let structuredSessionFeedAssistantMarkdownShowFullResponseTitle = "Show full response"
+
 public struct StructuredSessionFeedAssistantMarkdownDisplayPolicy: Equatable {
     public let showsCollapsedPreview: Bool
     public let previewLineLimit: Int
+    public let collapsedFootnote: String
+    public let showFullResponseTitle: String
 
-    public init(showsCollapsedPreview: Bool, previewLineLimit: Int) {
+    public init(
+        showsCollapsedPreview: Bool,
+        previewLineLimit: Int,
+        collapsedFootnote: String = structuredSessionFeedAssistantMarkdownCollapsedFootnote,
+        showFullResponseTitle: String = structuredSessionFeedAssistantMarkdownShowFullResponseTitle
+    ) {
         self.showsCollapsedPreview = showsCollapsedPreview
         self.previewLineLimit = previewLineLimit
+        self.collapsedFootnote = collapsedFootnote
+        self.showFullResponseTitle = showFullResponseTitle
     }
 }
 

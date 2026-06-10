@@ -1789,6 +1789,46 @@ struct StructuredSessionPresentationTests {
         let policy = structuredSessionFeedAssistantMarkdownDisplayPolicy(for: long, charactersPerLine: 72)
         #expect(policy.showsCollapsedPreview)
         #expect(policy.previewLineLimit == 18)
+        #expect(policy.showFullResponseTitle == structuredSessionFeedAssistantMarkdownShowFullResponseTitle)
+    }
+
+    @Test func structuredSessionFeedPresenterFinalizeKeepsNonEmptyAssistantBodyWhenLongResponseUsesBoundedPreview() throws {
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let userPrompt = SessionActivityItem(kind: .message, text: "You: summarize")
+        let longBody = (0 ..< 20).map { "line \($0) " + String(repeating: "x", count: 60) }.joined(separator: "\n")
+        let finalizedAssistantMessage = SessionActivityItem(kind: .message, text: "Pi: \(longBody)")
+        let presenter = StructuredSessionFeedPresenter()
+
+        let draftPresentation = presenter.presentation(for: SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [userPrompt],
+            providerFacts: StructuredSessionProviderFacts(liveAssistantDraftText: String(longBody.prefix(80))),
+            isAgentTurnInProgress: true
+        ))
+        #expect(draftPresentation.activityRows.last?.conversationPresentation?.isStreaming == true)
+
+        let finalizedPresentation = presenter.presentation(for: SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [userPrompt, finalizedAssistantMessage],
+            isAgentTurnInProgress: false
+        ))
+
+        let finalizedRow = try #require(finalizedPresentation.activityRows.last)
+        let conversation = try #require(finalizedRow.conversationPresentation)
+        #expect(conversation.isStreaming == false)
+        #expect(conversation.text.isEmpty == false)
+        let policy = structuredSessionFeedAssistantMarkdownDisplayPolicy(for: conversation.text, charactersPerLine: 72)
+        #expect(policy.showsCollapsedPreview)
     }
 
     // MARK: - Feed scroll policy (#211)

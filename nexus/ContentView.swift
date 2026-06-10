@@ -56,6 +56,7 @@ struct ContentView: View {
     @State private var structuredSessionPinState = StructuredSessionFeedPinState()
     @State private var structuredSessionFeedScrollSnapshot: StructuredSessionFeedScrollSnapshot?
     @State private var structuredSessionFeedScrollPosition = ScrollPosition(edge: .bottom)
+    @State private var expandedStructuredSessionAssistantResponseRowIDs: Set<UUID> = []
 
     private let terminalLayout = TerminalViewportLayout.live
 
@@ -1577,6 +1578,7 @@ struct ContentView: View {
                     .onChange(of: structuredPresentation.session.id) { _, _ in
                         structuredSessionPinState = StructuredSessionFeedPinState()
                         structuredSessionFeedScrollSnapshot = nil
+                        expandedStructuredSessionAssistantResponseRowIDs = []
                     }
                     .onChange(of: structuredPresentation.structuredSessionFeedScrollSnapshot) { _, current in
                         guard structuredSessionFeedScrollSnapshotIfScrollPolicyChanged(
@@ -1686,6 +1688,7 @@ struct ContentView: View {
 
                 structuredSessionAssistantResponseView(
                     conversation,
+                    rowID: row.id,
                     font: NexusMacTheme.bodyFont(13),
                     color: .white.opacity(0.94)
                 )
@@ -1813,6 +1816,7 @@ struct ContentView: View {
     @ViewBuilder
     private func structuredSessionAssistantResponseView(
         _ conversation: StructuredSessionConversationPresentation,
+        rowID: UUID,
         font: Font,
         color: Color
     ) -> some View {
@@ -1836,7 +1840,8 @@ struct ContentView: View {
                 for: conversation.text,
                 charactersPerLine: 72
             )
-            if policy.showsCollapsedPreview {
+            let showsFullResponse = expandedStructuredSessionAssistantResponseRowIDs.contains(rowID)
+            if policy.showsCollapsedPreview, showsFullResponse == false {
                 VStack(alignment: .leading, spacing: 8) {
                     structuredSessionMarkdownText(conversation.text, font: font, color: color)
                         .lineLimit(policy.previewLineLimit)
@@ -1847,9 +1852,16 @@ struct ContentView: View {
                         )
                         .clipped()
 
-                    Text("Long response preview truncated for smooth scrolling.")
+                    Text(policy.collapsedFootnote)
                         .font(NexusMacTheme.bodyFont(10, relativeTo: .caption))
                         .foregroundStyle(NexusMacTheme.mutedText)
+
+                    Button(policy.showFullResponseTitle) {
+                        expandedStructuredSessionAssistantResponseRowIDs.insert(rowID)
+                    }
+                    .buttonStyle(.plain)
+                    .font(NexusMacTheme.bodyFont(11, relativeTo: .caption).weight(.medium))
+                    .foregroundStyle(NexusMacTheme.gold)
                 }
             } else {
                 structuredSessionMarkdownText(conversation.text, font: font, color: color)
