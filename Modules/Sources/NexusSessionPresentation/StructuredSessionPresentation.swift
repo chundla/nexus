@@ -1048,6 +1048,13 @@ public func structuredSessionFeedScrollTarget(
     return .bottomSentinel
 }
 
+/// Coarse draft-length bucket for scroll policy (#224). Small per-tick text deltas during streaming
+/// should not change scroll snapshots and force bottom scroll + layout on every provider event.
+public func structuredSessionLiveDraftScrollGrowthToken(for draftText: String) -> String {
+    let bucket = max(0, draftText.count) / 96
+    return "bucket-\(bucket)"
+}
+
 public func structuredSessionFeedScrollSnapshot(
     for presentation: FocusedStructuredSessionPresentation
 ) -> StructuredSessionFeedScrollSnapshot {
@@ -1057,7 +1064,7 @@ public func structuredSessionFeedScrollSnapshot(
        let row = presentation.feed.activityRows.last,
        row.id == rowID,
        row.conversationPresentation?.isStreaming == true {
-        growthToken = row.text
+        growthToken = structuredSessionLiveDraftScrollGrowthToken(for: row.text)
     } else {
         growthToken = nil
     }
@@ -2403,6 +2410,28 @@ public func structuredSessionFeedAssistantMarkdownDisplayPolicy(
     let collapse = structuredSessionShouldCollapseStreamingMarkdownPreview(text, charactersPerLine: charactersPerLine)
     return StructuredSessionFeedAssistantMarkdownDisplayPolicy(
         showsCollapsedPreview: collapse,
+        previewLineLimit: structuredSessionFeedAssistantMarkdownPreviewLineLimit
+    )
+}
+
+public struct StructuredSessionFeedStreamingAssistantDisplayPolicy: Equatable {
+    public let usesBoundedViewport: Bool
+    public let previewLineLimit: Int
+
+    public init(usesBoundedViewport: Bool, previewLineLimit: Int) {
+        self.usesBoundedViewport = usesBoundedViewport
+        self.previewLineLimit = previewLineLimit
+    }
+}
+
+/// Bounds live assistant draft layout when estimated wrapped lines exceed the streaming preview cap (#224).
+public func structuredSessionFeedStreamingAssistantDisplayPolicy(
+    for text: String,
+    charactersPerLine: Int
+) -> StructuredSessionFeedStreamingAssistantDisplayPolicy {
+    let collapse = structuredSessionShouldCollapseStreamingMarkdownPreview(text, charactersPerLine: charactersPerLine)
+    return StructuredSessionFeedStreamingAssistantDisplayPolicy(
+        usesBoundedViewport: collapse,
         previewLineLimit: structuredSessionFeedAssistantMarkdownPreviewLineLimit
     )
 }

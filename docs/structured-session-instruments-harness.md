@@ -128,6 +128,8 @@ Committed snapshot: [baselines/214-trace-macOS-runs.json](./baselines/214-trace-
 
 Peak single-frame cost improved on run 4; **sustained** >33 ms/min is still far above run 1. If `xctrace export --toc` SIGSEGV on the multi-run bundle, export per run: `--run N` or xpath `run[@number="4"]` only.
 
+**#224 root cause (code path, pre re-profile):** steady-state Pi streaming in the fixture (~200 ms ticks) was coupling (1) per-character `liveDraftGrowthToken` changes → `onChange(structuredSessionFeedScrollSnapshot)` → coalesced `scrollToBottom` + layout, and (2) long live drafts using `lineLimit` without a fixed viewport so `Text` layout height still grew with draft length. Mitigation: bucketed draft growth tokens (`structuredSessionLiveDraftScrollGrowthToken`, 96-char buckets) and `structuredSessionFeedStreamingAssistantDisplayPolicy` fixed 200 pt viewport when collapse applies. Re-profile with the harness above and append **run 5** to `214-trace-macOS-runs.json` via `export_structured_session_trace_metrics.py`.
+
 ### macOS text layout slice (#220)
 
 Code-side mitigations (automated guardrails + macOS `ContentView`):

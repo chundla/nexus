@@ -2444,15 +2444,35 @@ private struct RemoteSessionScreenView: View {
         color: Color
     ) -> some View {
         if conversation.isStreaming {
+            let streamingPolicy = structuredSessionFeedStreamingAssistantDisplayPolicy(
+                for: conversation.text,
+                charactersPerLine: 56
+            )
             VStack(alignment: .leading, spacing: 8) {
-                Text(verbatim: conversation.text)
-                    .font(font)
-                    .foregroundStyle(color)
-                    .structuredSessionFeedTextSelection()
-                    .lineLimit(18)
-                    .truncationMode(.tail)
+                Group {
+                    if streamingPolicy.usesBoundedViewport {
+                        Text(verbatim: conversation.text)
+                            .font(font)
+                            .foregroundStyle(color)
+                            .structuredSessionFeedTextSelection()
+                            .lineLimit(streamingPolicy.previewLineLimit)
+                            .truncationMode(.tail)
+                            .frame(
+                                height: structuredSessionFeedCollapsedDetailViewportHeight,
+                                alignment: .top
+                            )
+                            .clipped()
+                    } else {
+                        Text(verbatim: conversation.text)
+                            .font(font)
+                            .foregroundStyle(color)
+                            .structuredSessionFeedTextSelection()
+                            .lineLimit(streamingPolicy.previewLineLimit)
+                            .truncationMode(.tail)
+                    }
+                }
 
-                if structuredSessionShouldCollapseStreamingMarkdownPreview(conversation.text, charactersPerLine: 56) {
+                if streamingPolicy.usesBoundedViewport {
                     Text("Streaming response preview truncated until completion.")
                         .font(NexusIOSTheme.bodyFont(11, relativeTo: .caption))
                         .foregroundStyle(NexusIOSTheme.mutedText)

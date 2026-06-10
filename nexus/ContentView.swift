@@ -1821,15 +1821,35 @@ struct ContentView: View {
         color: Color
     ) -> some View {
         if conversation.isStreaming {
+            let streamingPolicy = structuredSessionFeedStreamingAssistantDisplayPolicy(
+                for: conversation.text,
+                charactersPerLine: 72
+            )
             VStack(alignment: .leading, spacing: 8) {
-                Text(verbatim: conversation.text)
-                    .font(font)
-                    .foregroundStyle(color)
-                    .structuredSessionFeedTextSelection()
-                    .lineLimit(18)
-                    .truncationMode(.tail)
+                Group {
+                    if streamingPolicy.usesBoundedViewport {
+                        Text(verbatim: conversation.text)
+                            .font(font)
+                            .foregroundStyle(color)
+                            .structuredSessionFeedTextSelection()
+                            .lineLimit(streamingPolicy.previewLineLimit)
+                            .truncationMode(.tail)
+                            .frame(
+                                height: structuredSessionFeedCollapsedDetailViewportHeight,
+                                alignment: .top
+                            )
+                            .clipped()
+                    } else {
+                        Text(verbatim: conversation.text)
+                            .font(font)
+                            .foregroundStyle(color)
+                            .structuredSessionFeedTextSelection()
+                            .lineLimit(streamingPolicy.previewLineLimit)
+                            .truncationMode(.tail)
+                    }
+                }
 
-                if structuredSessionShouldCollapseStreamingMarkdownPreview(conversation.text, charactersPerLine: 72) {
+                if streamingPolicy.usesBoundedViewport {
                     Text("Streaming response preview truncated until completion.")
                         .font(NexusMacTheme.bodyFont(10, relativeTo: .caption))
                         .foregroundStyle(NexusMacTheme.mutedText)

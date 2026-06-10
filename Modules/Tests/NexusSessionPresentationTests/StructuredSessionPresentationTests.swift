@@ -1746,6 +1746,18 @@ struct StructuredSessionPresentationTests {
     // under burst" (the decisions are what stop the 200 ms fixture bursts from thrashing
     // layout in the tail). Thresholds/captions match the original view implementations exactly
     // so finalize behavior and visuals are preserved. The views now delegate here.
+    @Test func structuredSessionFeedStreamingAssistantDisplayPolicyBoundsLongLiveDrafts() {
+        let short = structuredSessionFeedStreamingAssistantDisplayPolicy(for: "Pi: hi", charactersPerLine: 72)
+        #expect(short.usesBoundedViewport == false)
+
+        let long = structuredSessionFeedStreamingAssistantDisplayPolicy(
+            for: (0 ..< 20).map { _ in String(repeating: "a", count: 70) }.joined(separator: "\n"),
+            charactersPerLine: 72
+        )
+        #expect(long.usesBoundedViewport)
+        #expect(long.previewLineLimit == 18)
+    }
+
     @Test func structuredSessionShouldCollapseStreamingMarkdownPreviewRespectsLineAndCharThresholds() {
         // Short content: never collapse (both platform widths)
         #expect(structuredSessionShouldCollapseStreamingMarkdownPreview("short reply", charactersPerLine: 72) == false)
@@ -2064,14 +2076,70 @@ struct StructuredSessionPresentationTests {
             return structuredSessionFeedScrollSnapshot(for: presentation)
         }
 
-        let previous = snapshot(text: "Pi: hel")
-        let current = snapshot(text: "Pi: hello")
+        let previous = snapshot(text: "Pi: " + String(repeating: "a", count: 100))
+        let current = snapshot(text: "Pi: " + String(repeating: "a", count: 200))
 
         #expect(previous.feedScrollTarget == .activityRow(draftRowID))
 
         #expect(
             structuredSessionBottomScrollIntent(previous: previous, current: current, isPinnedToBottom: true)
                 == .draftGrowthCoalesced
+        )
+    }
+
+    @Test func structuredSessionLiveDraftScrollGrowthTokenBucketsSmallDraftDeltas() {
+        let shortA = structuredSessionLiveDraftScrollGrowthToken(for: "Pi: hel")
+        let shortB = structuredSessionLiveDraftScrollGrowthToken(for: "Pi: hello")
+        #expect(shortA == shortB)
+
+        let longA = structuredSessionLiveDraftScrollGrowthToken(for: String(repeating: "a", count: 200))
+        let longB = structuredSessionLiveDraftScrollGrowthToken(for: String(repeating: "a", count: 280))
+        #expect(longA == longB)
+
+        let longC = structuredSessionLiveDraftScrollGrowthToken(for: String(repeating: "a", count: 400))
+        #expect(longA != longC)
+    }
+
+    @Test func structuredSessionFeedScrollSnapshotSkipsDraftGrowthScrollWithinGrowthBucket() throws {
+        let session = Session(id: UUID(), workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready)
+        let draftRowID = UUID()
+        func snapshot(text: String) -> StructuredSessionFeedScrollSnapshot {
+            let row = StructuredSessionActivityRow(
+                id: draftRowID,
+                title: "Message",
+                systemImage: "message",
+                text: text,
+                emphasis: .accent,
+                conversationPresentation: StructuredSessionConversationPresentation(
+                    role: .assistant(label: "Pi"),
+                    text: text,
+                    isStreaming: true
+                )
+            )
+            let presentation = FocusedStructuredSessionPresentation(
+                session: session,
+                feed: StructuredSessionFeedPresentation(
+                    copy: structuredSessionPresentationCopy(for: SessionScreen(session: session, primarySurface: .structuredActivityFeed, transcript: "")),
+                    activityRows: [row],
+                    pendingApprovalRequests: [],
+                    thinkingIndicator: nil
+                ),
+                autoScrollTrigger: StructuredSessionAutoScrollTrigger(
+                    lastActivityRowID: draftRowID,
+                    pendingApprovalRequestIDs: [],
+                    pendingDialogIDs: []
+                )
+            )
+            return structuredSessionFeedScrollSnapshot(for: presentation)
+        }
+
+        let previous = snapshot(text: "Pi: hel")
+        let current = snapshot(text: "Pi: hello")
+        #expect(previous == current)
+        #expect(structuredSessionFeedScrollSnapshotIfScrollPolicyChanged(previous: previous, current: current) == nil)
+        #expect(
+            structuredSessionBottomScrollIntent(previous: previous, current: current, isPinnedToBottom: true)
+                == .none
         )
     }
 
