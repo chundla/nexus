@@ -1608,7 +1608,14 @@ private func structuredSessionPrewarmAssistantMarkdownCache(
             continue
         }
         if #available(macOS 12.0, iOS 15.0, *) {
-            _ = StructuredSessionMarkdownRenderer.shared.renderContent(conversation.text)
+            let body = conversation.text
+            let renderText: String
+            if structuredSessionShouldCollapseStreamingMarkdownPreview(body, charactersPerLine: 72) {
+                renderText = structuredSessionFeedAssistantMarkdownBoundedPreviewText(for: body)
+            } else {
+                renderText = body
+            }
+            _ = StructuredSessionMarkdownRenderer.shared.renderContent(renderText)
         }
     }
 }
@@ -2432,6 +2439,14 @@ public func structuredSessionFeedAssistantMarkdownDisplayPolicy(
         showsCollapsedPreview: collapse,
         previewLineLimit: structuredSessionFeedAssistantMarkdownPreviewLineLimit
     )
+}
+
+/// Trims assistant markdown before bounded preview layout so first paint does not parse or typeset the full body (#225).
+public func structuredSessionFeedAssistantMarkdownBoundedPreviewText(
+    for text: String,
+    maximumLines: Int = structuredSessionFeedAssistantMarkdownPreviewLineLimit
+) -> String {
+    structuredSessionDetailTextPreview(for: text, maximumLines: maximumLines).text
 }
 
 public struct StructuredSessionFeedStreamingAssistantDisplayPolicy: Equatable {

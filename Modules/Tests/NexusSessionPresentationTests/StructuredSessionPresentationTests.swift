@@ -956,6 +956,35 @@ struct StructuredSessionPresentationTests {
         #expect(metrics.cacheMissCount >= 1)
     }
 
+    @Test func structuredSessionFeedPresenterPrewarmsBoundedAssistantMarkdownForLongFinalizedResponses() {
+        let longBody = (0 ..< 20).map { _ in "- " + String(repeating: "a", count: 68) }.joined(separator: "\n")
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let screen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [SessionActivityItem(kind: .message, text: "Pi: \(longBody)")],
+            isAgentTurnInProgress: false
+        )
+        let presenter = StructuredSessionFeedPresenter()
+        StructuredSessionMarkdownRenderer.shared.resetMetrics(clearCache: true)
+
+        _ = presenter.presentation(for: screen)
+
+        let bounded = structuredSessionFeedAssistantMarkdownBoundedPreviewText(for: longBody)
+        let metricsAfterRebuild = StructuredSessionMarkdownRenderer.shared.metricsSnapshot()
+        #expect(metricsAfterRebuild.cacheMissCount >= 1)
+        _ = StructuredSessionMarkdownRenderer.shared.renderContent(bounded)
+        let metricsAfterSecondRender = StructuredSessionMarkdownRenderer.shared.metricsSnapshot()
+        #expect(metricsAfterSecondRender.cacheHitCount == metricsAfterRebuild.cacheHitCount + 1)
+    }
+
     @Test func structuredSessionFeedPresenterUsesProviderFactsForLivePiDraftsWithoutReparsingRawEvents() {
         let session = Session(
             id: UUID(),
@@ -1834,6 +1863,16 @@ struct StructuredSessionPresentationTests {
         #expect(policy.showsCollapsedPreview)
         #expect(policy.previewLineLimit == 18)
         #expect(policy.showFullResponseTitle == structuredSessionFeedAssistantMarkdownShowFullResponseTitle)
+    }
+
+    @Test func structuredSessionFeedAssistantMarkdownBoundedPreviewTextTruncatesBeforeMarkdownParse() {
+        let short = structuredSessionFeedAssistantMarkdownBoundedPreviewText(for: "Done.")
+        #expect(short == "Done.")
+
+        let long = (0 ..< 25).map { "line \($0) " + String(repeating: "z", count: 50) }.joined(separator: "\n")
+        let bounded = structuredSessionFeedAssistantMarkdownBoundedPreviewText(for: long)
+        #expect(bounded.split(separator: "\n", omittingEmptySubsequences: false).count <= structuredSessionFeedAssistantMarkdownPreviewLineLimit)
+        #expect(bounded.count < long.count)
     }
 
     @Test func structuredSessionFeedPresenterFinalizeKeepsNonEmptyAssistantBodyWhenLongResponseUsesBoundedPreview() throws {

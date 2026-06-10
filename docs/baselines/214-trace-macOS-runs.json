@@ -40,6 +40,20 @@
         "frames_over_33ms_per_minute": 326.4,
         "frames_over_16_67ms_per_minute": 1096.0
       }
+    },
+    {
+      "run": 6,
+      "label": "post-225-bounded-markdown-preview (local short trace)",
+      "duration_seconds": 32.531,
+      "hitches": {
+        "worst_red_marked_ms": 298.29,
+        "frame_lifetime_over_33ms_count": 87,
+        "frame_lifetime_over_16_67ms_count": 666,
+        "worst_frame_lifetime_ms": 375.96,
+        "frames_over_33ms_per_minute": 160.5,
+        "frames_over_16_67ms_per_minute": 1228.4
+      },
+      "note": "structured-feed-profile.trace run 1; ~32s capture on HEAD after bounded collapsed-assistant markdown. Worst red ~298 ms at ~1.26s — not yet clearly below run 4 296 ms baseline; longer harness re-profile still needed."
     }
   ]
 }

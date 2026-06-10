@@ -1863,8 +1863,9 @@ struct ContentView: View {
             )
             let showsFullResponse = expandedStructuredSessionAssistantResponseRowIDs.contains(rowID)
             if policy.showsCollapsedPreview, showsFullResponse == false {
+                let previewMarkdown = structuredSessionFeedAssistantMarkdownBoundedPreviewText(for: conversation.text)
                 VStack(alignment: .leading, spacing: 8) {
-                    structuredSessionMarkdownText(conversation.text, font: font, color: color)
+                    structuredSessionMarkdownText(previewMarkdown, font: font, color: color)
                         .lineLimit(policy.previewLineLimit)
                         .truncationMode(.tail)
                         .frame(

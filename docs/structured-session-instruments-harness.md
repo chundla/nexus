@@ -144,9 +144,9 @@ Copy `duration_seconds` and `hitches` fields into a new `runs[]` entry (`run`: 5
 
 **Likely main-thread coupling (code + timing):** first structured feed paint with ~100+ `LazyVStack` chunks, finalized assistant markdown (`StructuredSessionMarkdownText` / typesetter), and redundant `scrollToBottom` on `ScrollView.onAppear` while `ScrollPosition(edge: .bottom)` already anchors the tail.
 
-**Mitigations in tree (#225):** skip initial follow scroll when bottom edge is already active (`scrollPositionUsesBottomEdge` on macOS `ContentView`); prewarm finalized assistant markdown in `StructuredSessionFeedPresenter` after full row rebuild so first layout hits the renderer cache.
+**Mitigations in tree (#225):** skip initial follow scroll when bottom edge is already active (`scrollPositionUsesBottomEdge` on macOS `ContentView`); prewarm finalized assistant markdown in `StructuredSessionFeedPresenter` after full row rebuild; parse/typeset only **bounded** assistant markdown for collapsed long responses (`structuredSessionFeedAssistantMarkdownBoundedPreviewText` in macOS/iOS feed views + matching prewarm path) so first `LazyVStack` paint does not layout full multiline bodies behind `lineLimit`.
 
-Re-profile with the harness and append **run 6** (`label`: `post-225`) to `214-trace-macOS-runs.json`; target worst red-marked hitch in the first **30 s** clearly below **296 ms**.
+Re-profile with the full harness (~5–7 min) and append a long-session run to `214-trace-macOS-runs.json`; target worst red-marked hitch in the first **30 s** clearly below **296 ms**. Local short trace **run 6** (~32 s) is recorded in the baseline JSON for orientation only.
 
 ### macOS text layout slice (#220)
 
