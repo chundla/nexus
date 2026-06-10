@@ -101,4 +101,39 @@ struct StructuredSessionFeedScrollSupportTests {
 
         #expect(StructuredSessionFeedScrollSupport.scrollToBottomInvocationCountForTesting == 0)
     }
+
+    @Test func applyStructuredSessionFeedScrollSnapshotTransitionSkipsScrollWithinDraftGrowthBucket() {
+        StructuredSessionFeedScrollSupport.resetScrollToBottomInvocationCountForTesting()
+        var scrollPosition = ScrollPosition(edge: .bottom)
+        let binding = Binding(get: { scrollPosition }, set: { scrollPosition = $0 })
+        let activityID = UUID()
+        let trigger = StructuredSessionAutoScrollTrigger(
+            lastActivityRowID: activityID,
+            pendingApprovalRequestIDs: [],
+            pendingDialogIDs: []
+        )
+        let bucketToken = structuredSessionLiveDraftScrollGrowthToken(for: String(repeating: "a", count: 200))
+        let previous = StructuredSessionFeedScrollSnapshot(
+            feedScrollTarget: .activityRow(activityID),
+            autoScrollTrigger: trigger,
+            liveDraftGrowthToken: bucketToken
+        )
+        let current = StructuredSessionFeedScrollSnapshot(
+            feedScrollTarget: .activityRow(activityID),
+            autoScrollTrigger: trigger,
+            liveDraftGrowthToken: bucketToken
+        )
+        let coordinator = StructuredSessionAutoScrollCoordinator { work in work() }
+
+        _ = StructuredSessionFeedScrollSupport.applyStructuredSessionFeedScrollSnapshotTransition(
+            previous: previous,
+            current: current,
+            isFollowingBottom: true,
+            coordinator: coordinator,
+            draftGrowthThrottle: StructuredSessionDraftGrowthScrollThrottle(minimumInterval: 0.12, now: { 0 }),
+            scrollPosition: binding
+        )
+
+        #expect(StructuredSessionFeedScrollSupport.scrollToBottomInvocationCountForTesting == 0)
+    }
 }
