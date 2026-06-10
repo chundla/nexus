@@ -2,6 +2,8 @@
 
 Maintainer-local workflow to reproduce the **09-06** live structured **Session** workload and export comparable SwiftUI hitch metrics for macOS and iOS **before/after** perf slices (#215–#220).
 
+**Agents:** trace-gated work (**#224**, **#225**) uses the [SwiftUI trace diagnosis loop](./agents/swiftui-trace-diagnosis-loop.md) (`swiftui-trace-diagnosis` subagent), not the TDD subagent by default.
+
 This harness does **not** run in CI and does **not** require a paired physical device in automation. Final SwiftUI traces still require Xcode Instruments (or `xctrace`) on a Mac; iOS SwiftUI templates require a **physical iPhone** (not Simulator).
 
 ## Prerequisites
