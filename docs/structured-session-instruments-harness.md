@@ -116,6 +116,18 @@ CLI `red_marked_count` counts Instruments **Red** hitch markers in `hitches-upda
 
 Post–#215–#217 (and #218 on iOS), record a **new** trace with the same harness and compare JSON + UI hitch counts against this baseline. Comment results on **#214**.
 
+### Reporter `214.trace` macOS comparison (runs 1 / 3 / 4)
+
+Committed snapshot: [baselines/214-trace-macOS-runs.json](./baselines/214-trace-macOS-runs.json). Run **4** = `NEXUS_MAC_PROFILE_FIXTURE=structured-feed-profile` after **#221–#223**, ~4.2 min, no parallel `xctest` signposts.
+
+| Run | When | >33 ms frames/min | Worst frame | Worst red hitch |
+| --- | --- | --- | --- | --- |
+| 1 | Pre #221–#223 | ~27 | 928 ms | 349 ms (~1.2 s) |
+| 3 | Post (longer session) | ~202 | 716 ms | 360 ms |
+| 4 | Post (clean re-profile) | ~326 | 355 ms | **296 ms** (~1.3 s) |
+
+Peak single-frame cost improved on run 4; **sustained** >33 ms/min is still far above run 1. If `xctrace export --toc` SIGSEGV on the multi-run bundle, export per run: `--run N` or xpath `run[@number="4"]` only.
+
 ### macOS text layout slice (#220)
 
 Code-side mitigations (automated guardrails + macOS `ContentView`):

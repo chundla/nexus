@@ -1,0 +1,45 @@
+{
+  "note": "214.trace macOS SwiftUI profiling. Rates are frames/min from hitches-frame-lifetimes. Run 4: NEXUS_MAC_PROFILE_FIXTURE=structured-feed-profile, no parallel xctest (verified). Export script may SIGSEGV on full-bundle --toc; use per-run xpath.",
+  "trace": "214.trace",
+  "runs": [
+    {
+      "run": 1,
+      "label": "pre-221-223",
+      "duration_seconds": 517.097,
+      "hitches": {
+        "worst_red_marked_ms": 349.37,
+        "frame_lifetime_over_33ms_count": 229,
+        "frame_lifetime_over_16_67ms_count": 1772,
+        "worst_frame_lifetime_ms": 927.64,
+        "frames_over_33ms_per_minute": 26.6,
+        "frames_over_16_67ms_per_minute": 205.6
+      }
+    },
+    {
+      "run": 3,
+      "label": "post-221-223",
+      "duration_seconds": 404.468,
+      "hitches": {
+        "worst_red_marked_ms": 360.23,
+        "frame_lifetime_over_33ms_count": 1363,
+        "frame_lifetime_over_16_67ms_count": 3985,
+        "worst_frame_lifetime_ms": 715.75,
+        "frames_over_33ms_per_minute": 202.2,
+        "frames_over_16_67ms_per_minute": 591.1
+      }
+    },
+    {
+      "run": 4,
+      "label": "post-221-223 fixture re-profile",
+      "duration_seconds": 252.356,
+      "hitches": {
+        "worst_red_marked_ms": 296.23,
+        "frame_lifetime_over_33ms_count": 1373,
+        "frame_lifetime_over_16_67ms_count": 4608,
+        "worst_frame_lifetime_ms": 354.67,
+        "frames_over_33ms_per_minute": 326.4,
+        "frames_over_16_67ms_per_minute": 1096.0
+      }
+    }
+  ]
+}
