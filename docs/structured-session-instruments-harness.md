@@ -138,6 +138,16 @@ python3 scripts/export_structured_session_trace_metrics.py \
 
 Copy `duration_seconds` and `hitches` fields into a new `runs[]` entry (`run`: 5, `label`: `post-224`).
 
+### macOS startup red hitch (#225, `214.trace` run 4)
+
+**Dominant stack (trace export, not full Time Profiler):** run 4 worst red-marked hitch **296.23 ms** at **~00:01.289** (`hitches-updates`, swap `0xa258a`). Matching worst frame lifetime **354.67 ms** at **~00:01.256** (`hitches-frame-lifetimes`, same swap id). `swiftui-update-groups` had no rows for this run in CLI export.
+
+**Likely main-thread coupling (code + timing):** first structured feed paint with ~100+ `LazyVStack` chunks, finalized assistant markdown (`StructuredSessionMarkdownText` / typesetter), and redundant `scrollToBottom` on `ScrollView.onAppear` while `ScrollPosition(edge: .bottom)` already anchors the tail.
+
+**Mitigations in tree (#225):** skip initial follow scroll when bottom edge is already active (`scrollPositionUsesBottomEdge` on macOS `ContentView`); prewarm finalized assistant markdown in `StructuredSessionFeedPresenter` after full row rebuild so first layout hits the renderer cache.
+
+Re-profile with the harness and append **run 6** (`label`: `post-225`) to `214-trace-macOS-runs.json`; target worst red-marked hitch in the first **30 s** clearly below **296 ms**.
+
 ### macOS text layout slice (#220)
 
 Code-side mitigations (automated guardrails + macOS `ContentView`):

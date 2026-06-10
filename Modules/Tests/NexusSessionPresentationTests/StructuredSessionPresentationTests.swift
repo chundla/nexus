@@ -924,6 +924,38 @@ struct StructuredSessionPresentationTests {
         #expect(finalizedPresentation.activityRows.filter { $0.text == "Pi: world" }.count == 1)
     }
 
+    @Test func structuredSessionFeedPresenterPrewarmsFinalizedAssistantMarkdownAfterFullRebuild() {
+        let markdownBody = """
+        ### Burst
+        - item one
+        ```swift
+        let x = 1
+        ```
+        """
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let screen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [SessionActivityItem(kind: .message, text: "Pi: \(markdownBody)")],
+            isAgentTurnInProgress: false
+        )
+        let presenter = StructuredSessionFeedPresenter()
+        StructuredSessionMarkdownRenderer.shared.resetMetrics(clearCache: true)
+
+        _ = presenter.presentation(for: screen)
+
+        let metrics = StructuredSessionMarkdownRenderer.shared.metricsSnapshot()
+        #expect(metrics.parseCount >= 1)
+        #expect(metrics.cacheMissCount >= 1)
+    }
+
     @Test func structuredSessionFeedPresenterUsesProviderFactsForLivePiDraftsWithoutReparsingRawEvents() {
         let session = Session(
             id: UUID(),

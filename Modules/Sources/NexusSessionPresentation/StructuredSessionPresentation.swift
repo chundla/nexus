@@ -562,6 +562,7 @@ public final class StructuredSessionFeedPresenter {
             chunkSize: chunkSize,
             liveTailChunkSize: liveTailChunkSize
         )
+        structuredSessionPrewarmAssistantMarkdownCache(for: rows, providerDisplayName: providerDisplayName)
         activityRowFullRebuildCount += 1
         return rows
     }
@@ -1591,6 +1592,25 @@ public func structuredSessionConversationPresentation(
     }
 
     return StructuredSessionConversationPresentation(role: role, text: row.text)
+}
+
+private func structuredSessionPrewarmAssistantMarkdownCache(
+    for rows: [StructuredSessionActivityRow],
+    providerDisplayName: String
+) {
+    for row in rows {
+        guard row.conversationPresentation?.isStreaming != true else {
+            continue
+        }
+        let conversation = row.conversationPresentation
+            ?? structuredSessionConversationPresentation(for: row, providerDisplayName: providerDisplayName)
+        guard case .assistant = conversation.role else {
+            continue
+        }
+        if #available(macOS 12.0, iOS 15.0, *) {
+            _ = StructuredSessionMarkdownRenderer.shared.renderContent(conversation.text)
+        }
+    }
 }
 
 private func annotateStructuredSessionActivityRows(

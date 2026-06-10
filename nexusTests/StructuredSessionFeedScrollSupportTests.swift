@@ -102,6 +102,35 @@ struct StructuredSessionFeedScrollSupportTests {
         #expect(StructuredSessionFeedScrollSupport.scrollToBottomInvocationCountForTesting == 0)
     }
 
+    @Test func applyStructuredSessionFeedScrollSnapshotTransitionSkipsInitialScrollWhenScrollPositionUsesBottomEdge() {
+        StructuredSessionFeedScrollSupport.resetScrollToBottomInvocationCountForTesting()
+        var scrollPosition = ScrollPosition(edge: .bottom)
+        let binding = Binding(get: { scrollPosition }, set: { scrollPosition = $0 })
+        let activityID = UUID()
+        let current = StructuredSessionFeedScrollSnapshot(
+            feedScrollTarget: .activityRow(activityID),
+            autoScrollTrigger: StructuredSessionAutoScrollTrigger(
+                lastActivityRowID: activityID,
+                pendingApprovalRequestIDs: [],
+                pendingDialogIDs: []
+            ),
+            liveDraftGrowthToken: nil
+        )
+        let coordinator = StructuredSessionAutoScrollCoordinator { work in work() }
+
+        _ = StructuredSessionFeedScrollSupport.applyStructuredSessionFeedScrollSnapshotTransition(
+            previous: nil,
+            current: current,
+            isFollowingBottom: true,
+            coordinator: coordinator,
+            draftGrowthThrottle: StructuredSessionDraftGrowthScrollThrottle(minimumInterval: 0.12, now: { 0 }),
+            scrollPosition: binding,
+            scrollPositionUsesBottomEdge: true
+        )
+
+        #expect(StructuredSessionFeedScrollSupport.scrollToBottomInvocationCountForTesting == 0)
+    }
+
     @Test func applyStructuredSessionFeedScrollSnapshotTransitionSkipsScrollWithinDraftGrowthBucket() {
         StructuredSessionFeedScrollSupport.resetScrollToBottomInvocationCountForTesting()
         var scrollPosition = ScrollPosition(edge: .bottom)

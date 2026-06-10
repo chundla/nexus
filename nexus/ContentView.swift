@@ -1572,7 +1572,8 @@ struct ContentView: View {
                                 isFollowingBottom: structuredSessionPinState.isFollowingBottom,
                                 coordinator: structuredSessionAutoScrollCoordinator,
                                 draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
-                                scrollPosition: $structuredSessionFeedScrollPosition
+                                scrollPosition: $structuredSessionFeedScrollPosition,
+                                scrollPositionUsesBottomEdge: true
                             )
                     }
                     .onChange(of: structuredPresentation.session.id) { _, _ in
