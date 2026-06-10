@@ -176,6 +176,14 @@ struct StructuredSessionMarkdownRendererTests {
         #expect(StructuredSessionFeedTextSelectionPolicy.isEnabled == false)
     }
 
+    @Test func structuredSessionMarkdownDefersHydrationUntilAfterFirstLayoutTurnOnMacOS() {
+        #if os(macOS)
+        #expect(StructuredSessionMarkdownTextInitialRenderPolicy.defersMarkdownHydrationUntilAfterFirstLayoutTurn)
+        #else
+        #expect(StructuredSessionMarkdownTextInitialRenderPolicy.defersMarkdownHydrationUntilAfterFirstLayoutTurn == false)
+        #endif
+    }
+
     @Test func structuredSessionMarkdownDisplayedContentDefersParseUntilAppearOnMacOS() {
         var parseCallCount = 0
         let renderer = StructuredSessionMarkdownRenderer(

@@ -436,13 +436,13 @@ public final class StructuredSessionFeedPresenter {
 
     public init() {
         self.rowBuilder = structuredSessionActivityRows(for:)
-        self.chunkSize = structuredSessionActivityRowChunkSize
-        self.liveTailChunkSize = structuredSessionLiveTailActivityRowChunkSize
+        self.chunkSize = structuredSessionDefaultActivityRowChunkSize
+        self.liveTailChunkSize = structuredSessionDefaultLiveTailActivityRowChunkSize
     }
 
     init(
-        chunkSize: Int = structuredSessionActivityRowChunkSize,
-        liveTailChunkSize: Int = structuredSessionLiveTailActivityRowChunkSize,
+        chunkSize: Int = structuredSessionDefaultActivityRowChunkSize,
+        liveTailChunkSize: Int = structuredSessionDefaultLiveTailActivityRowChunkSize,
         _ rowBuilder: @escaping ([SessionActivityItem]) -> [StructuredSessionActivityRow]
     ) {
         let normalizedChunkSize = max(1, chunkSize)
@@ -798,10 +798,30 @@ private func structuredSessionDraftMatchesFinalizedMessage(draftText: String, fi
 private let structuredSessionActivityRowChunkSize = 40
 private let structuredSessionLiveTailActivityRowChunkSize = 8
 
+/// macOS structured feed startup: fewer `LazyVStack` chunk boundaries on first bottom-edge layout (#225).
+private let structuredSessionMacOSActivityRowChunkSize = 96
+private let structuredSessionMacOSLiveTailActivityRowChunkSize = 16
+
+var structuredSessionDefaultActivityRowChunkSize: Int {
+    #if os(macOS)
+    structuredSessionMacOSActivityRowChunkSize
+    #else
+    structuredSessionActivityRowChunkSize
+    #endif
+}
+
+var structuredSessionDefaultLiveTailActivityRowChunkSize: Int {
+    #if os(macOS)
+    structuredSessionMacOSLiveTailActivityRowChunkSize
+    #else
+    structuredSessionLiveTailActivityRowChunkSize
+    #endif
+}
+
 func structuredSessionActivityRowChunks(
     for activityRows: [StructuredSessionActivityRow],
-    chunkSize: Int = structuredSessionActivityRowChunkSize,
-    liveTailChunkSize: Int = structuredSessionLiveTailActivityRowChunkSize
+    chunkSize: Int = structuredSessionDefaultActivityRowChunkSize,
+    liveTailChunkSize: Int = structuredSessionDefaultLiveTailActivityRowChunkSize
 ) -> [StructuredSessionActivityRowChunk] {
     guard activityRows.isEmpty == false else {
         return []

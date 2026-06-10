@@ -492,6 +492,15 @@ public enum StructuredSessionMarkdownTextInitialRenderPolicy {
         false
         #endif
     }
+
+    /// Lets the first plain-text `LazyVStack` layout finish before row hydration schedules parse work (#225).
+    public static var defersMarkdownHydrationUntilAfterFirstLayoutTurn: Bool {
+        #if os(macOS)
+        true
+        #else
+        false
+        #endif
+    }
 }
 
 @available(macOS 12.0, iOS 15.0, *)
@@ -606,12 +615,22 @@ public struct StructuredSessionMarkdownText: View {
                 renderedContent = next
                 return
             }
-            StructuredSessionMarkdownRowHydrationScheduler.scheduleHydration(
-                markdown: markdown,
-                renderer: renderer
-            ) { next in
-                guard next != renderedContent else { return }
-                renderedContent = next
+            let scheduleHydration = {
+                StructuredSessionMarkdownRowHydrationScheduler.scheduleHydration(
+                    markdown: markdown,
+                    renderer: renderer
+                ) { next in
+                    guard next != renderedContent else { return }
+                    renderedContent = next
+                }
+            }
+            if StructuredSessionMarkdownTextInitialRenderPolicy.defersMarkdownHydrationUntilAfterFirstLayoutTurn {
+                Task { @MainActor in
+                    await Task.yield()
+                    scheduleHydration()
+                }
+            } else {
+                scheduleHydration()
             }
         }
         .onChange(of: markdown) { newValue in

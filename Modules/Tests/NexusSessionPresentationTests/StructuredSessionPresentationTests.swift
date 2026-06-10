@@ -4,6 +4,16 @@ import NexusDomain
 import Testing
 
 struct StructuredSessionPresentationTests {
+    @Test func structuredSessionDefaultActivityRowChunkSizeUsesLargerSealedChunksOnMacOS() {
+        #if os(macOS)
+        #expect(structuredSessionDefaultActivityRowChunkSize == 96)
+        #expect(structuredSessionDefaultLiveTailActivityRowChunkSize == 16)
+        #else
+        #expect(structuredSessionDefaultActivityRowChunkSize == 40)
+        #expect(structuredSessionDefaultLiveTailActivityRowChunkSize == 8)
+        #endif
+    }
+
     @Test func structuredSessionActivityRowsDescribeSharedSessionActivityKinds() {
         let session = Session(
             id: UUID(),
