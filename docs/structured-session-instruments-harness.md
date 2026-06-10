@@ -125,8 +125,9 @@ Committed snapshot: [baselines/214-trace-macOS-runs.json](./baselines/214-trace-
 | 1 | Pre #221–#223 | ~27 | 928 ms | 349 ms (~1.2 s) |
 | 3 | Post (longer session) | ~202 | 716 ms | 360 ms |
 | 4 | Post (clean re-profile) | ~326 | 355 ms | **296 ms** (~1.3 s) |
+| 5 | Post **#224–#225** (maintainer, `214.trace`) | **~300** | 442 ms | **350 ms** (~1.23 s) |
 
-Peak single-frame cost improved on run 4; **sustained** >33 ms/min is still far above run 1. If `xctrace export --toc` SIGSEGV on the multi-run bundle, export per run: `--run N` or xpath `run[@number="4"]` only.
+Peak single-frame cost improved on run 4; **sustained** >33 ms/min is still far above run 1. Run **5** (~5.2 min, 2026-06-10) shows a modest drop in >33 ms/min vs run 4 but **not** near run 1; startup red hitch **regressed** vs run 4 on worst red-marked duration. If `xctrace export --toc` SIGSEGV on the multi-run bundle, export per run: `--run N` or xpath `run[@number="4"]` only.
 
 **#224 root cause (code path, pre re-profile):** steady-state Pi streaming in the fixture (~200 ms ticks) was coupling (1) per-character `liveDraftGrowthToken` changes → `onChange(structuredSessionFeedScrollSnapshot)` → coalesced `scrollToBottom` + layout, and (2) long live drafts using `lineLimit` without a fixed viewport so `Text` layout height still grew with draft length. Mitigation: bucketed draft growth tokens (`structuredSessionLiveDraftScrollGrowthToken`, 96-char buckets) and `structuredSessionFeedStreamingAssistantDisplayPolicy` fixed 200 pt viewport when collapse applies. Re-profile with the harness above and append **run 5** to `214-trace-macOS-runs.json`:
 

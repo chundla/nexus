@@ -1,5 +1,5 @@
 {
-  "note": "214.trace macOS SwiftUI profiling. Rates are frames/min from hitches-frame-lifetimes. Run 4: NEXUS_MAC_PROFILE_FIXTURE=structured-feed-profile, no parallel xctest (verified). Export script may SIGSEGV on full-bundle --toc; use per-run xpath.",
+  "note": "214.trace macOS SwiftUI profiling. Rates are frames/min from hitches-frame-lifetimes. Run 4/5: NEXUS_MAC_PROFILE_FIXTURE=structured-feed-profile. Export: python3 scripts/export_structured_session_trace_metrics.py --input 214.trace --run N. Full-bundle --toc may SIGSEGV; per-run --run is fine.",
   "trace": "214.trace",
   "runs": [
     {
@@ -8,6 +8,7 @@
       "duration_seconds": 517.097,
       "hitches": {
         "worst_red_marked_ms": 349.37,
+        "worst_red_marked_start": "~00:01.2",
         "frame_lifetime_over_33ms_count": 229,
         "frame_lifetime_over_16_67ms_count": 1772,
         "worst_frame_lifetime_ms": 927.64,
@@ -34,6 +35,7 @@
       "duration_seconds": 252.356,
       "hitches": {
         "worst_red_marked_ms": 296.23,
+        "worst_red_marked_start": "~00:01.289",
         "frame_lifetime_over_33ms_count": 1373,
         "frame_lifetime_over_16_67ms_count": 4608,
         "worst_frame_lifetime_ms": 354.67,
@@ -42,8 +44,27 @@
       }
     },
     {
+      "run": 5,
+      "label": "post-224-225 maintainer re-profile (214.trace latest macOS)",
+      "duration_seconds": 311.337,
+      "hitches": {
+        "worst_red_marked_ms": 350.05,
+        "worst_red_marked_start": "00:01.228",
+        "red_marked_count": 1,
+        "frame_lifetime_over_33ms_count": 1558,
+        "frame_lifetime_over_16_67ms_count": 3963,
+        "worst_frame_lifetime_ms": 442.26,
+        "frames_over_33ms_per_minute": 300.3,
+        "frames_over_16_67ms_per_minute": 763.7
+      },
+      "signoff": {
+        "224_sustained": "modest improvement vs run 4 (~326→~300/min) but far from run 1 (~27/min); acceptance not met",
+        "225_startup_red": "350 ms in first 30 s vs 296 ms baseline; acceptance not met"
+      }
+    },
+    {
       "run": 6,
-      "label": "post-225-bounded-markdown-preview (local short trace)",
+      "label": "post-225 bounded-markdown short trace (separate bundle; orientation only)",
       "duration_seconds": 32.531,
       "hitches": {
         "worst_red_marked_ms": 298.29,
@@ -53,7 +74,7 @@
         "frames_over_33ms_per_minute": 160.5,
         "frames_over_16_67ms_per_minute": 1228.4
       },
-      "note": "structured-feed-profile.trace run 1; ~32s capture on HEAD after bounded collapsed-assistant markdown. Worst red ~298 ms at ~1.26s — not yet clearly below run 4 296 ms baseline; longer harness re-profile still needed."
+      "note": "Not the same session as run 5; short capture only."
     }
   ]
 }
