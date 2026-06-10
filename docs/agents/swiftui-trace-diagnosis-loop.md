@@ -1,12 +1,14 @@
 # SwiftUI trace diagnosis loop (agents)
 
-Use this workflow for **trace-gated** SwiftUI performance issues (**#224**, **#225**, **#214** umbrella), not the default **`ready-for-agent-tdd`** subagent.
+**Generic loop + trace record/analyze:** `~/.pi/agent/skills/swiftui-trace-diagnosis-loop/SKILL.md` and subagent **`swiftui-trace-diagnosis`** (any repo). This file is the **Nexus overlay** (harness, windows, baselines).
+
+Use for **trace-gated** SwiftUI perf, not **`ready-for-agent-tdd`** by default.
 
 ## Pi agent setup
 
 | Piece | Location |
 | --- | --- |
-| Orchestration skill | `~/.pi/agent/skills/swiftui-trace-diagnosis-loop/SKILL.md` |
+| Orchestration skill (generic) | `~/.pi/agent/skills/swiftui-trace-diagnosis-loop/SKILL.md` |
 | Subagent | `~/.pi/agent/agents/swiftui-trace-diagnosis.md` |
 
 Parent delegates with:
@@ -21,7 +23,7 @@ Optional trace: 214.trace run 6 for differential only; new trace required for si
 ## Nested skills (mandatory)
 
 1. **`diagnose`** — perf feedback loop, ranked hypotheses, one change per trace, verify on original repro.
-2. **`swiftui-expert-skill`** — `analyze_trace.py`, optional `record_trace.py` (see below).
+2. **`swiftui-expert-skill`** — `analyze_trace.py`, `record_trace.py` (launch/attach/stop-file — documented in the generic skill).
 3. **`swiftui-performance-audit`** — code-first review **after** trace narrows files, **before** edit.
 
 **Not** **`tdd`** as the lead loop unless the slice is an explicit policy test (e.g. scroll growth bucket).
@@ -40,19 +42,24 @@ Full steps: [structured-session-instruments-harness.md](../structured-session-in
 
 Acceptance thresholds are on GitHub **#224** / **#225** bodies (run **4** baseline, not run 1 ~27/min).
 
-## Can the agent record its own trace?
+## Nexus: recording traces
 
-**Yes on host Mac**, via `swiftui-expert-skill/scripts/record_trace.py` (`references/trace-recording.md`):
+Generic commands: generic skill § **Recording traces**. Nexus-specific:
 
-- **Launch** Debug `nexus.app` with `--env NEXUS_MAC_PROFILE_FIXTURE=structured-feed-profile` and `--time-limit 7m` after `xcodebuild` build.
-- **Attach** to a user-launched `nexus` (Xcode run with same env) for HITL scroll workload.
-- **Stop-file** flow: agent starts background record; maintainer scrolls per harness; `touch /tmp/stop-trace`.
+```bash
+xcodebuild -scheme nexus -project nexus.xcodeproj -configuration Debug -destination 'platform=macOS' build
+APP="$(find ~/Library/Developer/Xcode/DerivedData -path '*/Build/Products/Debug/nexus.app' -type d 2>/dev/null | head -1)"
+SWIFTUI_TRACE_SKILL="${SWIFTUI_TRACE_SKILL:-$HOME/.pi/agent/skills/swiftui-expert-skill}"
 
-**Caveats:**
+# Launch + fixture (startup + ticks; scroll often needs attach + HITL)
+python3 "$SWIFTUI_TRACE_SKILL/scripts/record_trace.py" --launch "$APP" \
+  --env NEXUS_MAC_PROFILE_FIXTURE=structured-feed-profile --time-limit 7m --output /tmp/nexus-feed.trace
 
-- Sign-off workload (scroll up, follow bottom, expand/finalize) usually needs **maintainer HITL** during attach recording; launch-only captures startup + fixture ticks, not full harness.
-- Use **SwiftUI** template on Mac; confirm trace process path is **DerivedData Debug** `nexus.app`.
-- iOS device traces need a physical phone; Simulator uses **Time Profiler** template.
+# Attach after Xcode Run with same env; maintainer does harness scroll → touch /tmp/stop-trace if using --stop-file
+python3 "$SWIFTUI_TRACE_SKILL/scripts/record_trace.py" --attach nexus --time-limit 7m --output /tmp/nexus-feed.trace
+```
+
+Confirm trace process path is **DerivedData Debug** `nexus.app`. Full harness workload: [structured-session-instruments-harness.md](../structured-session-instruments-harness.md).
 
 ## When to use which subagent
 
