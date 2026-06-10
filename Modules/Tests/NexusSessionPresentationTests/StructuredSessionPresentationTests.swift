@@ -924,7 +924,7 @@ struct StructuredSessionPresentationTests {
         #expect(finalizedPresentation.activityRows.filter { $0.text == "Pi: world" }.count == 1)
     }
 
-    @Test func structuredSessionFeedPresenterPrewarmsFinalizedAssistantMarkdownAfterFullRebuild() {
+    @Test func structuredSessionFeedPresenterDefersAssistantMarkdownPrewarmUntilAfterPresentationReturns() async {
         let markdownBody = """
         ### Burst
         - item one
@@ -951,12 +951,17 @@ struct StructuredSessionPresentationTests {
 
         _ = presenter.presentation(for: screen)
 
+        let metricsBeforeDrain = StructuredSessionMarkdownRenderer.shared.metricsSnapshot()
+        #expect(metricsBeforeDrain.parseCount == 0)
+
+        await StructuredSessionAssistantMarkdownPrewarmScheduler.drainForTesting()
+
         let metrics = StructuredSessionMarkdownRenderer.shared.metricsSnapshot()
         #expect(metrics.parseCount >= 1)
         #expect(metrics.cacheMissCount >= 1)
     }
 
-    @Test func structuredSessionFeedPresenterPrewarmsBoundedAssistantMarkdownForLongFinalizedResponses() {
+    @Test func structuredSessionFeedPresenterPrewarmsBoundedAssistantMarkdownForLongFinalizedResponses() async {
         let longBody = (0 ..< 20).map { _ in "- " + String(repeating: "a", count: 68) }.joined(separator: "\n")
         let session = Session(
             id: UUID(),
@@ -976,6 +981,7 @@ struct StructuredSessionPresentationTests {
         StructuredSessionMarkdownRenderer.shared.resetMetrics(clearCache: true)
 
         _ = presenter.presentation(for: screen)
+        await StructuredSessionAssistantMarkdownPrewarmScheduler.drainForTesting()
 
         let bounded = structuredSessionFeedAssistantMarkdownBoundedPreviewText(for: longBody)
         let metricsAfterRebuild = StructuredSessionMarkdownRenderer.shared.metricsSnapshot()

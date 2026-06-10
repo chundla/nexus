@@ -1594,10 +1594,13 @@ public func structuredSessionConversationPresentation(
     return StructuredSessionConversationPresentation(role: role, text: row.text)
 }
 
-private func structuredSessionPrewarmAssistantMarkdownCache(
+private func structuredSessionAssistantMarkdownRenderTexts(
     for rows: [StructuredSessionActivityRow],
     providerDisplayName: String
-) {
+) -> [String] {
+    var texts: [String] = []
+    texts.reserveCapacity(rows.count)
+
     for row in rows {
         guard row.conversationPresentation?.isStreaming != true else {
             continue
@@ -1607,16 +1610,106 @@ private func structuredSessionPrewarmAssistantMarkdownCache(
         guard case .assistant = conversation.role else {
             continue
         }
-        if #available(macOS 12.0, iOS 15.0, *) {
-            let body = conversation.text
-            let renderText: String
-            if structuredSessionShouldCollapseStreamingMarkdownPreview(body, charactersPerLine: 72) {
-                renderText = structuredSessionFeedAssistantMarkdownBoundedPreviewText(for: body)
-            } else {
-                renderText = body
-            }
-            _ = StructuredSessionMarkdownRenderer.shared.renderContent(renderText)
+        let body = conversation.text
+        if structuredSessionShouldCollapseStreamingMarkdownPreview(body, charactersPerLine: 72) {
+            texts.append(structuredSessionFeedAssistantMarkdownBoundedPreviewText(for: body))
+        } else {
+            texts.append(body)
         }
+    }
+
+    return texts
+}
+
+private func structuredSessionPrewarmAssistantMarkdownCache(
+    for rows: [StructuredSessionActivityRow],
+    providerDisplayName: String
+) {
+    guard #available(macOS 12.0, iOS 15.0, *) else {
+        return
+    }
+    let renderTexts = structuredSessionAssistantMarkdownRenderTexts(
+        for: rows,
+        providerDisplayName: providerDisplayName
+    )
+    guard renderTexts.isEmpty == false else {
+        return
+    }
+    StructuredSessionAssistantMarkdownPrewarmScheduler.schedule(renderTexts: renderTexts)
+}
+
+/// Defers markdown parse/typeset off the main thread during first structured feed paint (#225).
+@available(macOS 12.0, iOS 15.0, *)
+public enum StructuredSessionAssistantMarkdownPrewarmScheduler {
+    private actor Queue {
+        var pendingRenderTexts: [[String]] = []
+        var isDraining = false
+
+        func enqueue(_ renderTexts: [String]) -> Bool {
+            pendingRenderTexts.append(renderTexts)
+            guard isDraining == false else {
+                return false
+            }
+            isDraining = true
+            return true
+        }
+
+        func dequeueBatch() -> [[String]] {
+            let batch = pendingRenderTexts
+            pendingRenderTexts = []
+            return batch
+        }
+
+        func markIdleIfEmpty() -> Bool {
+            guard pendingRenderTexts.isEmpty else {
+                return false
+            }
+            isDraining = false
+            return true
+        }
+
+        func waitUntilIdle() async {
+            while isDraining || pendingRenderTexts.isEmpty == false {
+                await Task.yield()
+            }
+        }
+    }
+
+    private static let queue = Queue()
+
+    static func schedule(renderTexts: [String]) {
+        Task.detached(priority: .utility) {
+            let shouldStartDrain = await queue.enqueue(renderTexts)
+            guard shouldStartDrain else {
+                return
+            }
+            await drainUntilIdle()
+        }
+    }
+
+    private static func drainUntilIdle() async {
+        while true {
+            let batch = await queue.dequeueBatch()
+            guard batch.isEmpty == false else {
+                _ = await queue.markIdleIfEmpty()
+                return
+            }
+
+            renderPrewarmBatch(batch)
+        }
+    }
+
+    private static func renderPrewarmBatch(_ batch: [[String]]) {
+        for texts in batch {
+            for text in texts {
+                _ = StructuredSessionMarkdownRenderer.shared.renderContent(text)
+            }
+        }
+    }
+
+    /// Waits until scheduled prewarm work finishes; for tests only.
+    public static func drainForTesting() async {
+        await queue.waitUntilIdle()
     }
 }
 

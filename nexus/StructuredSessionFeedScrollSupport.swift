@@ -51,6 +51,10 @@ enum StructuredSessionFeedScrollSupport {
         scrollPosition: Binding<ScrollPosition>,
         scrollPositionUsesBottomEdge: Bool = false
     ) -> StructuredSessionFeedScrollSnapshot {
+        if scrollPositionUsesBottomEdge {
+            return current
+        }
+
         let performScroll = { (animation: StructuredSessionAutoScrollAnimation) in
             scheduleFollowBottomScroll(position: scrollPosition, animation: animation)
         }
