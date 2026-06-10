@@ -43,7 +43,7 @@ struct ContentView: View {
     @State private var structuredSessionPinState = StructuredSessionFeedPinState()
     @State private var structuredSessionFeedScrollSnapshot: StructuredSessionFeedScrollSnapshot?
     @State private var structuredSessionFeedScrollPosition = ScrollPosition(edge: .bottom)
-    @State private var structuredSessionMacOSFeedShowsActivityRows = false
+    @State private var structuredSessionMacOSFeedVisibleTailRowCount = 0
     @State private var expandedStructuredSessionAssistantResponseRowIDs: Set<UUID> = []
 
     private let terminalLayout = TerminalViewportLayout.live
@@ -1502,8 +1502,12 @@ struct ContentView: View {
                                     description: Text(feedPresentation.copy.emptyStateDescription)
                                 )
                                 .frame(maxWidth: .infinity, minHeight: 220)
-                            } else if structuredSessionMacOSFeedShowsActivityRows {
-                                ForEach(feedPresentation.activityRows) { row in
+                            } else if feedPresentation.activityRows.isEmpty == false {
+                                let visibleRows = StructuredSessionFeedMacOSStartupPolicy.visibleActivityRows(
+                                    in: feedPresentation,
+                                    visibleTailRowCount: structuredSessionMacOSFeedVisibleTailRowCount
+                                )
+                                ForEach(visibleRows) { row in
                                     MacEquatableStructuredSessionActivityRow(row: row) {
                                         structuredSessionActivityRowView(row)
                                     }
@@ -1511,7 +1515,10 @@ struct ContentView: View {
                                     .id(row.id)
                                 }
 
-                                if let thinkingIndicator = feedPresentation.thinkingIndicator {
+                                if StructuredSessionFeedMacOSStartupPolicy.shouldShowThinkingIndicator(
+                                    in: feedPresentation,
+                                    visibleTailRowCount: structuredSessionMacOSFeedVisibleTailRowCount
+                                ), let thinkingIndicator = feedPresentation.thinkingIndicator {
                                     structuredSessionThinkingIndicatorView(thinkingIndicator)
                                 }
                             }
@@ -1562,7 +1569,7 @@ struct ContentView: View {
                         structuredSessionPinState = StructuredSessionFeedPinState()
                         structuredSessionFeedScrollSnapshot = nil
                         expandedStructuredSessionAssistantResponseRowIDs = []
-                        structuredSessionMacOSFeedShowsActivityRows = false
+                        structuredSessionMacOSFeedVisibleTailRowCount = 0
                         structuredSessionScheduleMacOSFeedActivityRowsIfNeeded()
                     }
                     .onChange(of: structuredPresentation.structuredSessionFeedScrollSnapshot) { _, current in
@@ -1611,16 +1618,41 @@ struct ContentView: View {
     }
 
     private func structuredSessionScheduleMacOSFeedActivityRowsIfNeeded() {
-        guard StructuredSessionFeedMacOSStartupPolicy.defersActivityRowsUntilAfterFirstLayoutTurn else {
-            structuredSessionMacOSFeedShowsActivityRows = true
+        guard StructuredSessionFeedMacOSStartupPolicy.usesProgressiveActivityRowReveal else {
+            structuredSessionMacOSFeedVisibleTailRowCount = Int.max
             return
         }
-        guard structuredSessionMacOSFeedShowsActivityRows == false else {
+        guard structuredSessionMacOSFeedVisibleTailRowCount == 0 else {
             return
         }
         Task { @MainActor in
             await Task.yield()
-            structuredSessionMacOSFeedShowsActivityRows = true
+            structuredSessionRevealMacOSFeedActivityRowsProgressively()
+        }
+    }
+
+    private func structuredSessionRevealMacOSFeedActivityRowsProgressively() {
+        guard let feed = appModel.focusedStructuredSessionPresentation?.feed else {
+            return
+        }
+        let total = feed.activityRows.count
+        guard total > 0 else {
+            structuredSessionMacOSFeedVisibleTailRowCount = 0
+            return
+        }
+        let initial = min(StructuredSessionFeedMacOSStartupPolicy.initialVisibleTailRowCount, total)
+        structuredSessionMacOSFeedVisibleTailRowCount = initial
+        guard initial < total else {
+            return
+        }
+        let batch = StructuredSessionFeedMacOSStartupPolicy.visibleTailRowsPerRevealBatch
+        Task { @MainActor in
+            var visible = initial
+            while visible < total {
+                await Task.yield()
+                visible = min(visible + batch, total)
+                structuredSessionMacOSFeedVisibleTailRowCount = visible
+            }
         }
     }
 
