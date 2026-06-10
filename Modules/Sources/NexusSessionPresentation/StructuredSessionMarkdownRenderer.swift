@@ -503,6 +503,21 @@ public enum StructuredSessionMarkdownTextInitialRenderPolicy {
     }
 }
 
+#if os(macOS)
+/// When false, `StructuredSessionMarkdownText` keeps plain text and skips row hydration (#225 startup).
+private struct StructuredSessionFeedMarkdownHydrationAllowedKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
+@available(macOS 12.0, *)
+public extension EnvironmentValues {
+    var structuredSessionFeedMarkdownHydrationAllowed: Bool {
+        get { self[StructuredSessionFeedMarkdownHydrationAllowedKey.self] }
+        set { self[StructuredSessionFeedMarkdownHydrationAllowedKey.self] = newValue }
+    }
+}
+#endif
+
 @available(macOS 12.0, iOS 15.0, *)
 func structuredSessionMarkdownDisplayedContent(
     markdown: String,
@@ -562,6 +577,9 @@ public struct StructuredSessionMarkdownText: View {
 
     @State private var hasAppeared = false
     @State private var renderedContent: StructuredSessionRenderedText
+    #if os(macOS)
+    @Environment(\.structuredSessionFeedMarkdownHydrationAllowed) private var feedMarkdownHydrationAllowed
+    #endif
 
     public init(
         markdown: String,
@@ -615,24 +633,17 @@ public struct StructuredSessionMarkdownText: View {
                 renderedContent = next
                 return
             }
-            let scheduleHydration = {
-                StructuredSessionMarkdownRowHydrationScheduler.scheduleHydration(
-                    markdown: markdown,
-                    renderer: renderer
-                ) { next in
-                    guard next != renderedContent else { return }
-                    renderedContent = next
-                }
-            }
-            if StructuredSessionMarkdownTextInitialRenderPolicy.defersMarkdownHydrationUntilAfterFirstLayoutTurn {
-                Task { @MainActor in
-                    await Task.yield()
-                    scheduleHydration()
-                }
-            } else {
-                scheduleHydration()
-            }
+            #if os(macOS)
+            guard feedMarkdownHydrationAllowed else { return }
+            #endif
+            structuredSessionMarkdownTextScheduleRowHydration()
         }
+        #if os(macOS)
+        .onChange(of: feedMarkdownHydrationAllowed) { allowed in
+            guard allowed, hasAppeared else { return }
+            structuredSessionMarkdownTextScheduleRowHydration()
+        }
+        #endif
         .onChange(of: markdown) { newValue in
             let next = structuredSessionMarkdownDisplayedContent(
                 markdown: newValue,
@@ -642,6 +653,30 @@ public struct StructuredSessionMarkdownText: View {
             )
             guard next != renderedContent else { return }
             renderedContent = next
+        }
+    }
+
+    private func structuredSessionMarkdownTextScheduleRowHydration() {
+        guard defersInitialMarkdownParse,
+              StructuredSessionMarkdownRenderer.requiresMarkdownParsing(markdown) else {
+            return
+        }
+        let scheduleHydration = {
+            StructuredSessionMarkdownRowHydrationScheduler.scheduleHydration(
+                markdown: markdown,
+                renderer: renderer
+            ) { next in
+                guard next != renderedContent else { return }
+                renderedContent = next
+            }
+        }
+        if StructuredSessionMarkdownTextInitialRenderPolicy.defersMarkdownHydrationUntilAfterFirstLayoutTurn {
+            Task { @MainActor in
+                await Task.yield()
+                scheduleHydration()
+            }
+        } else {
+            scheduleHydration()
         }
     }
 }

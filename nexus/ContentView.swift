@@ -1530,6 +1530,13 @@ struct ContentView: View {
                         .padding(.horizontal, 14)
                         .padding(.vertical, 14)
                         .scrollTargetLayout()
+                        .environment(
+                            \.structuredSessionFeedMarkdownHydrationAllowed,
+                            StructuredSessionFeedMacOSStartupPolicy.isFeedMarkdownHydrationAllowed(
+                                visibleTailRowCount: structuredSessionMacOSFeedVisibleTailRowCount,
+                                totalActivityRowCount: feedPresentation.activityRows.count
+                            )
+                        )
                     }
                     .scrollPosition($structuredSessionFeedScrollPosition)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -11,12 +11,17 @@ enum StructuredSessionFeedMacOSStartupPolicy {
 
     /// First batch after the defer turn: only the last N rows (bottom-edge follow stays near the tail).
     static var initialVisibleTailRowCount: Int {
-        8
+        4
     }
 
     /// Additional rows revealed per main-actor turn (`Task.yield` between batches).
     static var visibleTailRowsPerRevealBatch: Int {
-        8
+        4
+    }
+
+    /// When false, row `StructuredSessionMarkdownText` stays plain until full reveal (#225).
+    static var allowsMarkdownHydrationDuringProgressiveReveal: Bool {
+        false
     }
 
     static func visibleActivityRows(
@@ -44,6 +49,16 @@ enum StructuredSessionFeedMacOSStartupPolicy {
             return false
         }
         return feed.thinkingIndicator != nil
+    }
+
+    static func isFeedMarkdownHydrationAllowed(visibleTailRowCount: Int, totalActivityRowCount: Int) -> Bool {
+        guard usesProgressiveActivityRowReveal else {
+            return true
+        }
+        guard allowsMarkdownHydrationDuringProgressiveReveal else {
+            return visibleTailRowCount >= totalActivityRowCount
+        }
+        return true
     }
 }
 #endif

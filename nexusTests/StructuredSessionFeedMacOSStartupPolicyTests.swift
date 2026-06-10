@@ -27,9 +27,9 @@ struct StructuredSessionFeedMacOSStartupPolicyTests {
         )
 
         #expect(StructuredSessionFeedMacOSStartupPolicy.visibleActivityRows(in: feed, visibleTailRowCount: 0).isEmpty)
-        let eight = StructuredSessionFeedMacOSStartupPolicy.visibleActivityRows(in: feed, visibleTailRowCount: 8)
-        #expect(eight.count == 8)
-        #expect(eight.map(\.title) == (12 ..< 20).map { "Row \($0)" })
+        let four = StructuredSessionFeedMacOSStartupPolicy.visibleActivityRows(in: feed, visibleTailRowCount: 4)
+        #expect(four.count == 4)
+        #expect(four.map(\.title) == (16 ..< 20).map { "Row \($0)" })
         #expect(StructuredSessionFeedMacOSStartupPolicy.visibleActivityRows(in: feed, visibleTailRowCount: 20).count == 20)
     }
 
@@ -54,6 +54,21 @@ struct StructuredSessionFeedMacOSStartupPolicyTests {
 
         #expect(StructuredSessionFeedMacOSStartupPolicy.shouldShowThinkingIndicator(in: feed, visibleTailRowCount: 0) == false)
         #expect(StructuredSessionFeedMacOSStartupPolicy.shouldShowThinkingIndicator(in: feed, visibleTailRowCount: 1) == true)
+    }
+
+    @Test func markdownHydrationBlockedUntilFullReveal() {
+        #expect(
+            StructuredSessionFeedMacOSStartupPolicy.isFeedMarkdownHydrationAllowed(
+                visibleTailRowCount: 4,
+                totalActivityRowCount: 20
+            ) == false
+        )
+        #expect(
+            StructuredSessionFeedMacOSStartupPolicy.isFeedMarkdownHydrationAllowed(
+                visibleTailRowCount: 20,
+                totalActivityRowCount: 20
+            ) == true
+        )
     }
 }
 #endif
