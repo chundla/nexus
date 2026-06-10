@@ -368,9 +368,13 @@ public enum StructuredSessionMarkdownRowHydrationScheduler {
             return true
         }
 
-        func dequeueBatch() -> [Job] {
-            let batch = pendingJobs
-            pendingJobs = []
+        func dequeueUpTo(_ limit: Int) -> [Job] {
+            guard limit > 0, pendingJobs.isEmpty == false else {
+                return []
+            }
+            let count = min(limit, pendingJobs.count)
+            let batch = Array(pendingJobs.prefix(count))
+            pendingJobs.removeFirst(count)
             return batch
         }
 
@@ -409,6 +413,15 @@ public enum StructuredSessionMarkdownRowHydrationScheduler {
 
     private static let queue = Queue()
 
+    /// Limits SwiftUI row state updates per main-actor turn during bottom-edge first paint (#225).
+    private static var maxDeliveriesPerMainActorFlush: Int {
+        #if os(macOS)
+        6
+        #else
+        Int.max
+        #endif
+    }
+
     public static func scheduleHydration(
         markdown: String,
         renderer: StructuredSessionMarkdownRenderer,
@@ -426,7 +439,7 @@ public enum StructuredSessionMarkdownRowHydrationScheduler {
 
     private static func drainUntilIdle() async {
         while true {
-            let batch = await queue.dequeueBatch()
+            let batch = await queue.dequeueUpTo(maxDeliveriesPerMainActorFlush)
             guard batch.isEmpty == false else {
                 _ = await queue.markIdleIfEmpty()
                 return
@@ -445,6 +458,7 @@ public enum StructuredSessionMarkdownRowHydrationScheduler {
                 }
             }
             await queue.recordDeliveryFlushForTesting()
+            await Task.yield()
         }
     }
 

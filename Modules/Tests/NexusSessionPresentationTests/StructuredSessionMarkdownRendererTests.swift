@@ -278,4 +278,39 @@ struct StructuredSessionMarkdownRendererTests {
         #expect(flushCount >= 1)
         #expect(flushCount < 4)
     }
+
+    @Test @MainActor func structuredSessionMarkdownRowHydrationSchedulerCapsMainActorDeliveriesPerFlush() async {
+        var parseCallCount = 0
+        let renderer = StructuredSessionMarkdownRenderer(
+            cacheLimit: 16,
+            parser: { text in
+                parseCallCount += 1
+                return AttributedString("rendered: \(text)")
+            }
+        )
+        let deliveryCounter = StructuredSessionMarkdownHydrationDeliveryCounter()
+        let jobCount = 12
+
+        for index in 0 ..< jobCount {
+            StructuredSessionMarkdownRowHydrationScheduler.scheduleHydration(
+                markdown: "**cap \(index)**",
+                renderer: renderer
+            ) { _ in
+                deliveryCounter.count += 1
+            }
+        }
+
+        await Task.yield()
+        await StructuredSessionMarkdownRowHydrationScheduler.drainForTesting()
+
+        #expect(parseCallCount == jobCount)
+        #expect(deliveryCounter.count == jobCount)
+        let flushCount = await StructuredSessionMarkdownRowHydrationScheduler.deliveryFlushCountForTesting()
+        #if os(macOS)
+        #expect(flushCount >= 2)
+        #expect(flushCount < jobCount)
+        #else
+        #expect(flushCount == 1)
+        #endif
+    }
 }
