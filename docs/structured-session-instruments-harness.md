@@ -171,6 +171,7 @@ Committed snapshot: [baselines/214-trace-macOS-runs.json](./baselines/214-trace-
 | 4 | Post (clean re-profile) | ~326 | 355 ms | **296 ms** (~1.3 s) |
 | 5 | Post **#224–#225** (maintainer, `214.trace`) | **~300** | 442 ms | **350 ms** (~1.23 s) |
 | 6 | Post **#224–#225** (latest long, `214.trace`) | **~339** | 372 ms | **308 ms** (~1.26 s) |
+| 7 | Post **a1ad200 + 83844ad** (`224-225.trace`, ~7.8 min) | **~205** | 618 ms | **314 ms** (~1.08 s) |
 
 Sign-off commands and thresholds: **Windowed analysis** section above. Run **6** (~7.5 min) is the latest long capture in `214.trace`; neither **#224** nor **#225** passes on run 6. If `xctrace export --toc` SIGSEGV on a multi-run bundle, use `--run N` on both exporters only.
 

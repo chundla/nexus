@@ -81,6 +81,27 @@
         "225_startup_red": "308 ms red @ ~1.26 s; analyze_trace 0–30 s worst 350 ms expensive app update — not met vs 296 ms run 4"
       },
       "window_analysis": "docs/baselines/214-trace-window-analysis.md"
+    },
+    {
+      "run": 7,
+      "label": "post-a1ad200-83844ad (224-225.trace, maintainer 2026-06-10)",
+      "trace_file": "224-225.trace",
+      "duration_seconds": 469.694,
+      "hitches": {
+        "worst_red_marked_ms": 313.93,
+        "worst_red_marked_start": "00:01.075",
+        "red_marked_count": 1,
+        "frame_lifetime_over_33ms_count": 1603,
+        "frame_lifetime_over_16_67ms_count": 3295,
+        "worst_frame_lifetime_ms": 617.72,
+        "frames_over_33ms_per_minute": 204.8,
+        "frames_over_16_67ms_per_minute": 421.0
+      },
+      "signoff": {
+        "224_sustained": "PASS — 204.8/min (≤260); steady window 120–400 s animation hitches 610 (≤814)",
+        "225_startup_red": "FAIL — red 313.93 ms @ ~1.08 s (need <296); analyze_trace 0–30 s worst animation hitch 342 ms (need <333)"
+      },
+      "window_analysis": "Maintainer capture; analyze_trace --window 0:30000 and 120000:400000 on 224-225.trace run 1"
     }
   ]
 }
