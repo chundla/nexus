@@ -126,4 +126,4 @@ Before exploring unfamiliar areas: read `CONTEXT.md` and relevant `docs/adr/` en
 
 - Concurrency fixes and reviews: `/skill:swift-concurrency-expert`
 - SwiftUI performance or Liquid Glass: relevant skills under `swiftui-*` when the task is UI-heavy
-- **Trace-gated SwiftUI perf** (hitches, Instruments sign-off, structured Session feed **#224** / **#225**): `/skill:swiftui-trace-diagnosis-loop` and subagent **`swiftui-trace-diagnosis`** — see `docs/agents/swiftui-trace-diagnosis-loop.md` (mandatory **diagnose** + **swiftui-expert-skill** + **swiftui-performance-audit**; not **tdd** as the default loop)
+- **Trace-gated SwiftUI perf** (Instruments / hitch acceptance): `docs/agents/swiftui-trace-diagnosis-loop.md` — not the default **tdd** subagent
