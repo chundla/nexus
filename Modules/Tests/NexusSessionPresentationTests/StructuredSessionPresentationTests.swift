@@ -4,13 +4,32 @@ import NexusDomain
 import Testing
 
 struct StructuredSessionPresentationTests {
-    @Test func structuredSessionDefaultActivityRowChunkSizeUsesLargerSealedChunksOnMacOS() {
+    @Test func structuredSessionDefaultActivityRowChunkSizeUsesSingleRowSealedChunksOnMacOS() {
         #if os(macOS)
-        #expect(structuredSessionDefaultActivityRowChunkSize == 96)
+        #expect(structuredSessionDefaultActivityRowChunkSize == 1)
         #expect(structuredSessionDefaultLiveTailActivityRowChunkSize == 16)
         #else
         #expect(structuredSessionDefaultActivityRowChunkSize == 40)
         #expect(structuredSessionDefaultLiveTailActivityRowChunkSize == 8)
+        #endif
+    }
+
+    @Test func structuredSessionActivityRowChunksSealOneRowPerChunkOnMacOS() {
+        let rows = (0 ..< 5).map { index in
+            StructuredSessionActivityRow(
+                id: UUID(),
+                title: "Message",
+                systemImage: "message",
+                text: "Pi: \(index)",
+                emphasis: .accent
+            )
+        }
+        let chunks = structuredSessionActivityRowChunks(for: rows)
+        #if os(macOS)
+        #expect(chunks.count == 5)
+        #expect(chunks.allSatisfy { $0.rows.count == 1 })
+        #else
+        #expect(chunks.count >= 1)
         #endif
     }
 

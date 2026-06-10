@@ -798,8 +798,8 @@ private func structuredSessionDraftMatchesFinalizedMessage(draftText: String, fi
 private let structuredSessionActivityRowChunkSize = 40
 private let structuredSessionLiveTailActivityRowChunkSize = 8
 
-/// macOS structured feed startup: fewer `LazyVStack` chunk boundaries on first bottom-edge layout (#225).
-private let structuredSessionMacOSActivityRowChunkSize = 96
+/// macOS structured feed startup: one row per sealed chunk so `LazyVStack` does not eager-layout 96 rows inside a `VStack` (#225).
+private let structuredSessionMacOSActivityRowChunkSize = 1
 private let structuredSessionMacOSLiveTailActivityRowChunkSize = 16
 
 var structuredSessionDefaultActivityRowChunkSize: Int {

@@ -16,19 +16,6 @@ private struct IOSEquatableStructuredSessionActivityRow<Content: View>: View, Eq
     }
 }
 
-private struct IOSEquatableStructuredSessionActivityChunk<Content: View>: View, Equatable {
-    let chunk: StructuredSessionActivityRowChunk
-    @ViewBuilder let content: () -> Content
-
-    static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.chunk == rhs.chunk
-    }
-
-    var body: some View {
-        content()
-    }
-}
-
 struct RemoteClientHomeView: View {
     @Bindable var model: RemoteClientPairingModel
 
@@ -2256,18 +2243,13 @@ private struct RemoteSessionScreenView: View {
         } else {
             LazyVStack(spacing: 10) {
                 ForEach(feedPresentation.activityRowChunks) { chunk in
-                    IOSEquatableStructuredSessionActivityChunk(chunk: chunk) {
-                        VStack(spacing: 10) {
-                            ForEach(chunk.rows) { row in
-                                IOSEquatableStructuredSessionActivityRow(row: row) {
-                                    structuredSessionActivityRowView(row)
-                                }
-                                .equatable()
-                                .id(row.id)
-                            }
+                    ForEach(chunk.rows) { row in
+                        IOSEquatableStructuredSessionActivityRow(row: row) {
+                            structuredSessionActivityRowView(row)
                         }
+                        .equatable()
+                        .id(row.id)
                     }
-                    .equatable()
                 }
 
                 if let thinkingIndicator = feedPresentation.thinkingIndicator {
