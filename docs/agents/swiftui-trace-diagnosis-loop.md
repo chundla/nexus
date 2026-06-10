@@ -69,6 +69,10 @@ Confirm trace process path is **DerivedData Debug** `nexus.app`. Full harness wo
 | Unit-testable policy / feature slice | **`ready-for-agent-tdd`** |
 | General code without perf proof | **`general`** |
 
+## `ready-for-agent-loop` / `rfa` prompt
+
+Parent prompt (`~/.pi/agent/prompts/ready-for-agent-loop.md`) processes **`bug` + `ready-for-agent`** before **`enhancement` + `ready-for-agent`**, then **`needs-triage`**. It routes trace-gated issues to **`swiftui-trace-diagnosis`** + `/skill:swiftui-trace-diagnosis-loop`; everything else stays on TDD. Label perf regressions **`bug`**, not **`enhancement`**, when acceptance is trace sign-off.
+
 ## Related
 
 - [issue-tracker.md](./issue-tracker.md)

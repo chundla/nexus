@@ -4,6 +4,8 @@ The skills speak in terms of five canonical triage roles. This file maps those r
 
 | Label in eng/skills | Label in our tracker | Meaning                                  |
 | -------------------------- | -------------------- | ---------------------------------------- |
+| `bug` (category)           | `bug`                | Something broken or regressed            |
+| `enhancement` (category)   | `enhancement`        | New feature or improvement               |
 | `needs-triage`             | `needs-triage`       | Maintainer needs to evaluate this issue  |
 | `needs-info`               | `needs-info`         | Waiting on reporter for more information |
 | `ready-for-agent`          | `ready-for-agent`    | Fully specified, ready for an AFK agent  |
