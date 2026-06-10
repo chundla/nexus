@@ -219,4 +219,27 @@ struct StructuredSessionMarkdownRendererTests {
         #expect(displayed == .plain("plain status"))
         #expect(parseCallCount == 0)
     }
+
+    @Test func structuredSessionMarkdownRowHydrationSchedulerDefersParseOffMainThread() async {
+        var parseCallCount = 0
+        let renderer = StructuredSessionMarkdownRenderer(
+            cacheLimit: 4,
+            parser: { text in
+                parseCallCount += 1
+                return AttributedString("rendered: \(text)")
+            }
+        )
+        let markdown = "**bold**"
+
+        StructuredSessionMarkdownRowHydrationScheduler.scheduleHydration(
+            markdown: markdown,
+            renderer: renderer
+        ) { _ in }
+
+        #expect(parseCallCount == 0)
+
+        await StructuredSessionMarkdownRowHydrationScheduler.drainForTesting()
+
+        #expect(parseCallCount == 1)
+    }
 }

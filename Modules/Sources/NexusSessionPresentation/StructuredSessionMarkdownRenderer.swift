@@ -341,6 +341,89 @@ public final class StructuredSessionMarkdownRenderer: @unchecked Sendable {
     }
 }
 
+/// Parses deferred row markdown off the main thread, then delivers on the main actor (#225).
+@available(macOS 12.0, iOS 15.0, *)
+public enum StructuredSessionMarkdownRowHydrationScheduler {
+    private actor Queue {
+        struct Job {
+            let markdown: String
+            let renderer: StructuredSessionMarkdownRenderer
+            let deliver: @Sendable @MainActor (StructuredSessionRenderedText) -> Void
+        }
+
+        var pendingJobs: [Job] = []
+        var isDraining = false
+
+        func enqueue(_ job: Job) -> Bool {
+            pendingJobs.append(job)
+            guard isDraining == false else {
+                return false
+            }
+            isDraining = true
+            return true
+        }
+
+        func dequeueBatch() -> [Job] {
+            let batch = pendingJobs
+            pendingJobs = []
+            return batch
+        }
+
+        func markIdleIfEmpty() -> Bool {
+            guard pendingJobs.isEmpty else {
+                return false
+            }
+            isDraining = false
+            return true
+        }
+
+        func waitUntilIdle() async {
+            while isDraining || pendingJobs.isEmpty == false {
+                await Task.yield()
+            }
+        }
+    }
+
+    private static let queue = Queue()
+
+    public static func scheduleHydration(
+        markdown: String,
+        renderer: StructuredSessionMarkdownRenderer,
+        deliver: @escaping @MainActor (StructuredSessionRenderedText) -> Void
+    ) {
+        let job = Queue.Job(markdown: markdown, renderer: renderer, deliver: deliver)
+        Task.detached(priority: .utility) {
+            let shouldStartDrain = await queue.enqueue(job)
+            guard shouldStartDrain else {
+                return
+            }
+            await drainUntilIdle()
+        }
+    }
+
+    private static func drainUntilIdle() async {
+        while true {
+            let batch = await queue.dequeueBatch()
+            guard batch.isEmpty == false else {
+                _ = await queue.markIdleIfEmpty()
+                return
+            }
+
+            for job in batch {
+                let rendered = job.renderer.renderContent(job.markdown)
+                await MainActor.run {
+                    job.deliver(rendered)
+                }
+            }
+        }
+    }
+
+    /// Waits until scheduled hydration work finishes; for tests only.
+    public static func drainForTesting() async {
+        await queue.waitUntilIdle()
+    }
+}
+
 /// macOS structured feed startup: avoid synchronous markdown parse during first `LazyVStack` layout (#225).
 public enum StructuredSessionMarkdownTextInitialRenderPolicy {
     public static var defersMarkdownParseUntilFirstAppear: Bool {
@@ -452,14 +535,25 @@ public struct StructuredSessionMarkdownText: View {
         .onAppear {
             guard hasAppeared == false else { return }
             hasAppeared = true
-            let next = structuredSessionMarkdownDisplayedContent(
+            guard defersInitialMarkdownParse,
+                  StructuredSessionMarkdownRenderer.requiresMarkdownParsing(markdown) else {
+                let next = structuredSessionMarkdownDisplayedContent(
+                    markdown: markdown,
+                    renderer: renderer,
+                    defersParseUntilAppear: false,
+                    hasAppeared: true
+                )
+                guard next != renderedContent else { return }
+                renderedContent = next
+                return
+            }
+            StructuredSessionMarkdownRowHydrationScheduler.scheduleHydration(
                 markdown: markdown,
-                renderer: renderer,
-                defersParseUntilAppear: false,
-                hasAppeared: true
-            )
-            guard next != renderedContent else { return }
-            renderedContent = next
+                renderer: renderer
+            ) { next in
+                guard next != renderedContent else { return }
+                renderedContent = next
+            }
         }
         .onChange(of: markdown) { newValue in
             let next = structuredSessionMarkdownDisplayedContent(
