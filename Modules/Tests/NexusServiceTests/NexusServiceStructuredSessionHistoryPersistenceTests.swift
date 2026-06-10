@@ -265,7 +265,7 @@ struct NexusServiceStructuredSessionHistoryPersistenceTests {
         #expect(finalPage.nextCursor == nil)
     }
 
-    @Test func localPiDefersStructuredHistorySnapshotRewriteUntilTurnCompletionWhilePreservingOverflowRecovery() throws {
+    @Test func localPiPersistsStructuredHistoryDuringInFlightTurnWhilePreservingOverflowRecovery() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -304,14 +304,17 @@ struct NexusServiceStructuredSessionHistoryPersistenceTests {
         let activeScreen = try service.sendSessionInput(sessionID: session.id, text: "deploy")
 
         #expect(activeScreen.isAgentTurnInProgress)
-        #expect(try persistedStructuredState(at: stateURL) == initialState)
+        let activeTurnState = try persistedStructuredState(at: stateURL)
+        #expect(activeTurnState.activityItems.map(\.text).contains("You: deploy"))
 
         let streamedReplyCount = StructuredSessionLiveHistoryRetention.maxRetainedActivityItems + 5
         for index in 0..<streamedReplyCount {
             runtime.recordAssistantReply("Reply \(index)")
         }
 
-        #expect(try persistedStructuredState(at: stateURL) == initialState)
+        let midTurnState = try persistedStructuredState(at: stateURL)
+        #expect(midTurnState.activityItems.count == StructuredSessionLiveHistoryRetention.maxRetainedActivityItems)
+        #expect(midTurnState.activityItems.last?.text == "Pi: Reply \(streamedReplyCount - 1)")
 
         runtime.finishTurn(with: "Done")
 

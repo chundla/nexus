@@ -2922,34 +2922,14 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         guard screen.primarySurface == .structuredActivityFeed else {
             return
         }
-        guard session.providerID != .pi || shouldPersistPiStructuredSessionHistoryDuringActiveTurn(screen) else {
-            return
-        }
+
+        let persistenceScreen = structuredSessionScreenAugmentedForPersistence(screen)
 
         try piStructuredSessionHistoryStore.recordCurrentState(
             sessionID: session.id,
-            screen: screen,
+            screen: persistenceScreen,
             overflow: sessionRuntimeManager.consumeStructuredHistoryOverflow(for: session)
         )
-    }
-
-    private func shouldPersistPiStructuredSessionHistoryDuringActiveTurn(_ screen: SessionScreen) -> Bool {
-        guard screen.session.providerID == .pi,
-              screen.isAgentTurnInProgress else {
-            return true
-        }
-
-        guard let extensionUI = screen.extensionUI else {
-            return screen.approvalRequests.isEmpty == false
-        }
-
-        return screen.approvalRequests.isEmpty == false
-            || extensionUI.pendingDialogs.isEmpty == false
-            || extensionUI.notifications.isEmpty == false
-            || extensionUI.statuses.isEmpty == false
-            || extensionUI.widgets.isEmpty == false
-            || extensionUI.title != nil
-            || extensionUI.editorText != nil
     }
 
     private func persistPiStructuredSessionHistoryAfterRuntimeChange(sessionID: UUID) {

@@ -1654,6 +1654,70 @@ struct NexusServicePiSessionStreamTests {
         #expect(interruptedNamedScreen.activityItems.map(\.text) == ["Session stream connected", expectedMessage])
     }
 
+    @Test func localPiInFlightTurnBecomesInterruptedAfterServiceRestartWhileKeepingPartialAssistantOutputInspectable() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NexusServiceTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
+
+        let transport = PromptEventPiRPCTransport(promptEvents: [
+            ["type": "agent_start", "agent": "pi"],
+            [
+                "type": "message_update",
+                "assistantMessageEvent": [
+                    "type": "text_delta",
+                    "delta": "Partial reply"
+                ]
+            ]
+        ])
+
+        func makeService() throws -> NexusService {
+            let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in transport })
+            return try NexusService.bootstrapForTests(
+                rootURL: rootURL,
+                providerHealthEvaluator: ProviderHealthFacts(
+                    executableResolver: PiStreamStubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
+                    commandRunner: PiStreamStubCommandRunner(results: [
+                        .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
+                        .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                    ]),
+                    localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+                ),
+                sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+            )
+        }
+
+        let service = try makeService()
+        let group = try service.createWorkspaceGroup(name: "Solo Group")
+        let workspace = try service.createLocalWorkspace(
+            name: "Local Pi",
+            folderPath: workspaceFolder.path(percentEncoded: false),
+            primaryGroupID: group.id
+        )
+
+        let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+        let partialScreen = try service.sendSessionInput(sessionID: session.id, text: "first")
+
+        let restartedService = try makeService()
+        let interruptedSession = try restartedService.getSessionRecord(sessionID: session.id)
+        let interruptedScreen = try restartedService.getSessionScreen(sessionID: session.id)
+
+        let expectedFailureMessage = structuredInterruptedSessionFailureMessage(for: .pi)
+        let expectedPartialItems: [SessionActivityItem] = partialScreen.activityItems + [
+            SessionActivityItem(kind: .message, text: "Pi: Partial reply")
+        ]
+
+        #expect(partialScreen.isAgentTurnInProgress)
+        #expect(partialScreen.providerFacts.liveAssistantDraftText == "Partial reply")
+        #expect(interruptedSession.state == .interrupted)
+        #expect(interruptedSession.failureMessage == expectedFailureMessage)
+        #expect(interruptedScreen.session.state == .interrupted)
+        #expect(interruptedScreen.activityItems.dropLast().map(\.text) == expectedPartialItems.map(\.text))
+        #expect(interruptedScreen.activityItems.last?.kind == .error)
+        #expect(interruptedScreen.activityItems.last?.text == expectedFailureMessage)
+    }
+
     @Test func localPiNamedSessionCanBeStoppedRelaunchedAndDeletedWhilePreservingConversationLinkage() throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusServiceTests", isDirectory: true)

@@ -21,6 +21,14 @@ The current bootstrap path is implemented and exercised end-to-end:
 - `listWorkspaceGroups()` / `createWorkspaceGroup(name)` are live on the boundary
 - `listWorkspaces()` / `createLocalWorkspace(name?, folderPath, primaryGroupID?)` are live on the boundary
 
+### When the embedded service restarts
+
+Milestone one does **not** reattach live local session runtimes after a restart. Session Records and structured history files owned by the service survive on disk; only in-memory runtimes are lost.
+
+Expect a restart (new bootstrap instance) when the Nexus app starts again, when a debug build replaces the running app, when the process crashes, or when tests construct a fresh `NexusEmbeddedServiceBootstrap` service against the same `rootURL` to simulate reopening persistence.
+
+Structured Pi/Codex/IBM Bob sessions surface `interrupted` with relaunch-oriented copy. See `docs/architecture/session-lifecycle.md` for state transitions and persistence behavior during in-flight turns.
+
 ## Milestone one API surface
 
 ### Workspace groups

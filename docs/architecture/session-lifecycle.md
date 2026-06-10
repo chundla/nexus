@@ -45,9 +45,21 @@ The broken session remains inspectable and relaunchable.
 
 For live local sessions, service restart does not restore runtime attachment:
 
-`running -> broken` or `running -> exited/lost` (implementation-specific surfaced reason)
+`running -> interrupted` (structured Pi/Codex/IBM Bob) or `running -> broken/exited` (terminal and other surfaces; implementation-specific surfaced reason)
 
-The session remains relaunchable but not reattachable.
+The Session Record survives on disk. Structured sessions reopen on the structured activity feed with persisted history plus an error row explaining that the live runtime was lost. In-flight assistant text that had already streamed into the feed (or provider draft facts/events) is written into persisted structured history on runtime change so it remains visible after restart.
+
+The session remains relaunchable but not reattachable to the prior live runtime.
+
+#### macOS embedded Background Service restarts (milestone one)
+
+On macOS the app bootstraps an embedded Background Service in-process over local XPC (`docs/architecture/ipc.md`). A **new service process** starts when:
+
+- the Nexus app launches or relaunches (fresh bootstrap),
+- tests or tools call `NexusEmbeddedServiceBootstrap.bootstrapForTests` / `bootstrap` with a new in-memory service instance, or
+- the user explicitly invokes a future `restartService()` IPC action (planned API surface; not a milestone-one seamless reattach path).
+
+Debug rebuilds, crashes, and Instruments profiling can terminate the app or service host and produce the same outcome: Session Records persist, live runtimes do not.
 
 ## Deletion and stopping
 
