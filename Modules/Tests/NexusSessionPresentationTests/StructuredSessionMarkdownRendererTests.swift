@@ -170,4 +170,53 @@ struct StructuredSessionMarkdownRendererTests {
     @Test func structuredSessionFeedTextSelectionIsDisabledForScrollPerformance() {
         #expect(StructuredSessionFeedTextSelectionPolicy.isEnabled == false)
     }
+
+    @Test func structuredSessionMarkdownDisplayedContentDefersParseUntilAppearOnMacOS() {
+        var parseCallCount = 0
+        let renderer = StructuredSessionMarkdownRenderer(
+            cacheLimit: 4,
+            parser: { text in
+                parseCallCount += 1
+                return AttributedString("rendered: \(text)")
+            }
+        )
+        let markdown = "**bold**"
+
+        let beforeAppear = structuredSessionMarkdownDisplayedContent(
+            markdown: markdown,
+            renderer: renderer,
+            defersParseUntilAppear: true,
+            hasAppeared: false
+        )
+        #expect(beforeAppear == .plain(markdown))
+        #expect(parseCallCount == 0)
+
+        _ = structuredSessionMarkdownDisplayedContent(
+            markdown: markdown,
+            renderer: renderer,
+            defersParseUntilAppear: true,
+            hasAppeared: true
+        )
+        #expect(parseCallCount == 1)
+    }
+
+    @Test func structuredSessionMarkdownDisplayedContentDoesNotDeferPlainText() {
+        var parseCallCount = 0
+        let renderer = StructuredSessionMarkdownRenderer(
+            cacheLimit: 4,
+            parser: { text in
+                parseCallCount += 1
+                return AttributedString(text.uppercased())
+            }
+        )
+
+        let displayed = structuredSessionMarkdownDisplayedContent(
+            markdown: "plain status",
+            renderer: renderer,
+            defersParseUntilAppear: true,
+            hasAppeared: false
+        )
+        #expect(displayed == .plain("plain status"))
+        #expect(parseCallCount == 0)
+    }
 }

@@ -341,6 +341,32 @@ public final class StructuredSessionMarkdownRenderer: @unchecked Sendable {
     }
 }
 
+/// macOS structured feed startup: avoid synchronous markdown parse during first `LazyVStack` layout (#225).
+public enum StructuredSessionMarkdownTextInitialRenderPolicy {
+    public static var defersMarkdownParseUntilFirstAppear: Bool {
+        #if os(macOS)
+        true
+        #else
+        false
+        #endif
+    }
+}
+
+@available(macOS 12.0, iOS 15.0, *)
+func structuredSessionMarkdownDisplayedContent(
+    markdown: String,
+    renderer: StructuredSessionMarkdownRenderer,
+    defersParseUntilAppear: Bool,
+    hasAppeared: Bool
+) -> StructuredSessionRenderedText {
+    if defersParseUntilAppear,
+       hasAppeared == false,
+       StructuredSessionMarkdownRenderer.requiresMarkdownParsing(markdown) {
+        return .plain(markdown)
+    }
+    return renderer.renderContent(markdown)
+}
+
 enum StructuredSessionFeedTextSelectionPolicy {
     /// Feed text selection is disabled on all platforms during scroll/stream.
     /// macOS: selection overlays can thrash layout on large multiline rows.
@@ -381,7 +407,9 @@ public struct StructuredSessionMarkdownText: View {
     private let color: Color
     private let renderer: StructuredSessionMarkdownRenderer
     private let fixedVerticalSize: Bool
+    private let defersInitialMarkdownParse: Bool
 
+    @State private var hasAppeared = false
     @State private var renderedContent: StructuredSessionRenderedText
 
     public init(
@@ -389,14 +417,23 @@ public struct StructuredSessionMarkdownText: View {
         font: Font,
         color: Color,
         renderer: StructuredSessionMarkdownRenderer = .shared,
-        fixedVerticalSize: Bool = false
+        fixedVerticalSize: Bool = false,
+        defersInitialMarkdownParse: Bool = StructuredSessionMarkdownTextInitialRenderPolicy.defersMarkdownParseUntilFirstAppear
     ) {
         self.markdown = markdown
         self.font = font
         self.color = color
         self.renderer = renderer
         self.fixedVerticalSize = fixedVerticalSize
-        _renderedContent = State(initialValue: renderer.renderContent(markdown))
+        self.defersInitialMarkdownParse = defersInitialMarkdownParse
+        _renderedContent = State(
+            initialValue: structuredSessionMarkdownDisplayedContent(
+                markdown: markdown,
+                renderer: renderer,
+                defersParseUntilAppear: defersInitialMarkdownParse,
+                hasAppeared: false
+            )
+        )
     }
 
     public var body: some View {
@@ -412,8 +449,25 @@ public struct StructuredSessionMarkdownText: View {
         .foregroundColor(color)
         .structuredSessionFeedTextSelection()
         .modifier(StructuredSessionMarkdownVerticalSizingModifier(fixedVerticalSize: fixedVerticalSize))
+        .onAppear {
+            guard hasAppeared == false else { return }
+            hasAppeared = true
+            let next = structuredSessionMarkdownDisplayedContent(
+                markdown: markdown,
+                renderer: renderer,
+                defersParseUntilAppear: false,
+                hasAppeared: true
+            )
+            guard next != renderedContent else { return }
+            renderedContent = next
+        }
         .onChange(of: markdown) { newValue in
-            let next = renderer.renderContent(newValue)
+            let next = structuredSessionMarkdownDisplayedContent(
+                markdown: newValue,
+                renderer: renderer,
+                defersParseUntilAppear: defersInitialMarkdownParse,
+                hasAppeared: hasAppeared
+            )
             guard next != renderedContent else { return }
             renderedContent = next
         }
