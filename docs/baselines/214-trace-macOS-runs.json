@@ -234,6 +234,28 @@
         "225_startup_red": "PASS (analyze_trace) — 0–30 s worst animation hitch 50 ms; no ≥333 ms cluster @ ~1 s. Export red_marked anomalous (3.71 ms); confirm Red row in Instruments."
       },
       "window_analysis": "224-225.trace bundle run 7; 1/flush markdown (6830de7). Startup hitch cluster gone; sustained frame rate regressed vs run 12 (144→274/min). Tradeoff vs #225 AC coupled #224 gate."
+    },
+    {
+      "run": 14,
+      "label": "post-4febb5b (224-225.trace run 8, maintainer 2026-06-10)",
+      "trace_file": "224-225.trace",
+      "trace_bundle_run": 8,
+      "duration_seconds": 360.88,
+      "hitches": {
+        "worst_red_marked_ms": 22.17,
+        "worst_red_marked_start": "export anomaly (verify Instruments)",
+        "red_marked_count": 1,
+        "frame_lifetime_over_33ms_count": 2185,
+        "frame_lifetime_over_16_67ms_count": 6113,
+        "worst_frame_lifetime_ms": 123.6,
+        "frames_over_33ms_per_minute": 363.3,
+        "frames_over_16_67ms_per_minute": 1016.4
+      },
+      "signoff": {
+        "224_sustained": "FAIL — 363.3/min (>>260); steady window 120–400 s animation hitches 351 (≤814 PASS)",
+        "225_startup_red": "PASS (analyze_trace) — 0–30 s worst animation hitch 33 ms; no ~1 s cluster. Phased cap holds startup; sustained regressed vs run 12/13."
+      },
+      "window_analysis": "224-225.trace bundle run 8; phased markdown cap (4febb5b). #225 startup OK; #224 worse than run 13 (274/min). Investigate post-reveal cap relaxation / steady hydration."
     }
   ]
 }
