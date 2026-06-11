@@ -416,7 +416,7 @@ public enum StructuredSessionMarkdownRowHydrationScheduler {
     /// Limits SwiftUI row state updates per main-actor turn during bottom-edge first paint (#225).
     private static var maxDeliveriesPerMainActorFlush: Int {
         #if os(macOS)
-        2
+        1
         #else
         Int.max
         #endif

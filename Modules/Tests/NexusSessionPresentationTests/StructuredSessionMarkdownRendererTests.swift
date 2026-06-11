@@ -286,8 +286,7 @@ struct StructuredSessionMarkdownRendererTests {
         #expect(deliveryCounter.count == 4)
         let flushCount = await StructuredSessionMarkdownRowHydrationScheduler.deliveryFlushCountForTesting()
         #if os(macOS)
-        #expect(flushCount >= 2)
-        #expect(flushCount < 4)
+        #expect(flushCount == 4)
         #else
         #expect(flushCount == 1)
         #endif
@@ -322,8 +321,7 @@ struct StructuredSessionMarkdownRendererTests {
         #expect(deliveryCounter.count == jobCount)
         let flushCount = await StructuredSessionMarkdownRowHydrationScheduler.deliveryFlushCountForTesting()
         #if os(macOS)
-        #expect(flushCount >= 6)
-        #expect(flushCount < jobCount)
+        #expect(flushCount == jobCount)
         #else
         #expect(flushCount == 1)
         #endif
