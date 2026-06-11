@@ -56,18 +56,19 @@ struct StructuredSessionFeedMacOSStartupPolicyTests {
         #expect(StructuredSessionFeedMacOSStartupPolicy.shouldShowThinkingIndicator(in: feed, visibleTailRowCount: 1) == true)
     }
 
-    @Test func markdownHydrationBlockedUntilFullReveal() {
+    @Test func markdownHydrationAllowedDuringProgressiveReveal() {
+        #expect(StructuredSessionFeedMacOSStartupPolicy.allowsMarkdownHydrationDuringProgressiveReveal)
         #expect(
             StructuredSessionFeedMacOSStartupPolicy.isFeedMarkdownHydrationAllowed(
                 visibleTailRowCount: 4,
                 totalActivityRowCount: 20
-            ) == false
+            )
         )
         #expect(
             StructuredSessionFeedMacOSStartupPolicy.isFeedMarkdownHydrationAllowed(
                 visibleTailRowCount: 20,
                 totalActivityRowCount: 20
-            ) == true
+            )
         )
     }
 }

@@ -19,9 +19,9 @@ enum StructuredSessionFeedMacOSStartupPolicy {
         4
     }
 
-    /// When false, row `StructuredSessionMarkdownText` stays plain until full reveal (#225).
+    /// When true, each revealed row hydrates on `onAppear` (3/flush cap) instead of one env flip at full reveal (#225 run 8 cliff).
     static var allowsMarkdownHydrationDuringProgressiveReveal: Bool {
-        false
+        true
     }
 
     static func visibleActivityRows(
@@ -55,10 +55,10 @@ enum StructuredSessionFeedMacOSStartupPolicy {
         guard usesProgressiveActivityRowReveal else {
             return true
         }
-        guard allowsMarkdownHydrationDuringProgressiveReveal else {
-            return visibleTailRowCount >= totalActivityRowCount
+        if allowsMarkdownHydrationDuringProgressiveReveal {
+            return true
         }
-        return true
+        return visibleTailRowCount >= totalActivityRowCount
     }
 }
 #endif
