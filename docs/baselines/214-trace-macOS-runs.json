@@ -124,6 +124,28 @@
         "225_startup_red": "FAIL — red 366.44 ms @ ~1.29 s (need <296); analyze_trace 0–30 s worst animation hitch 450 ms @ ~1.29 s (need <333)"
       },
       "window_analysis": "224-225.trace bundle run 2; markdown hydration gate + 4+4 reveal (a7bb27d). Startup worse than run 7; post-reveal hydration cliff likely ~1.29 s."
+    },
+    {
+      "run": 9,
+      "label": "post-82b53e9 (224-225.trace run 3, maintainer 2026-06-10)",
+      "trace_file": "224-225.trace",
+      "trace_bundle_run": 3,
+      "duration_seconds": 360.962,
+      "hitches": {
+        "worst_red_marked_ms": 315.67,
+        "worst_red_marked_start": "~00:01.09",
+        "red_marked_count": 1,
+        "frame_lifetime_over_33ms_count": 955,
+        "frame_lifetime_over_16_67ms_count": 4415,
+        "worst_frame_lifetime_ms": 383.68,
+        "frames_over_33ms_per_minute": 158.7,
+        "frames_over_16_67ms_per_minute": 734.2
+      },
+      "signoff": {
+        "224_sustained": "PASS — 158.7/min (≤260); steady window 120–400 s animation hitches 707 (≤814)",
+        "225_startup_red": "FAIL — red 315.67 ms @ ~1.09 s (need <296); analyze_trace 0–30 s worst animation hitch 358 ms @ ~1.09 s (need <333)"
+      },
+      "window_analysis": "224-225.trace bundle run 3; per-row staggered hydration (82b53e9). Startup improved vs run 8; still above run 4 baseline."
     }
   ]
 }
