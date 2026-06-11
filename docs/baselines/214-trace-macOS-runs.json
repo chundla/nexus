@@ -168,6 +168,28 @@
         "225_startup_red": "FAIL — red 310.57 ms @ ~1.01 s (need <296); analyze_trace 0–30 s worst animation hitch 358 ms @ ~1.01 s (need <333)"
       },
       "window_analysis": "224-225.trace bundle run 4; 3+3 reveal (b777a41). Red ~5 ms better than run 9; animation unchanged at 358 ms."
+    },
+    {
+      "run": 11,
+      "label": "post-e90c340 (224-225.trace run 5, maintainer 2026-06-10)",
+      "trace_file": "224-225.trace",
+      "trace_bundle_run": 5,
+      "duration_seconds": 361.011,
+      "hitches": {
+        "worst_red_marked_ms": 311.7,
+        "worst_red_marked_start": "~00:01.12",
+        "red_marked_count": 1,
+        "frame_lifetime_over_33ms_count": 367,
+        "frame_lifetime_over_16_67ms_count": 2880,
+        "worst_frame_lifetime_ms": 537.3,
+        "frames_over_33ms_per_minute": 61.0,
+        "frames_over_16_67ms_per_minute": 478.4
+      },
+      "signoff": {
+        "224_sustained": "PASS — 61.0/min (≤260); steady window 120–400 s animation hitches 41 (≤814)",
+        "225_startup_red": "FAIL — red 311.7 ms @ ~1.12 s (need <296); analyze_trace 0–30 s worst animation hitch 367 ms @ ~1.12 s (need <333); slight regression vs run 10 (3+3)"
+      },
+      "window_analysis": "224-225.trace bundle run 5; 2+2 reveal (e90c340). Best red in 224-225 series still run 10 (310.57 ms); 2+2 did not beat 3+3."
     }
   ]
 }
