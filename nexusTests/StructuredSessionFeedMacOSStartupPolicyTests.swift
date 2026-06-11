@@ -26,8 +26,8 @@ struct StructuredSessionFeedMacOSStartupPolicyTests {
             thinkingIndicator: StructuredSessionThinkingIndicator(text: "Thinking…")
         )
 
-        #expect(StructuredSessionFeedMacOSStartupPolicy.initialVisibleTailRowCount == 2)
-        #expect(StructuredSessionFeedMacOSStartupPolicy.visibleTailRowsPerRevealBatch == 2)
+        #expect(StructuredSessionFeedMacOSStartupPolicy.initialVisibleTailRowCount == 3)
+        #expect(StructuredSessionFeedMacOSStartupPolicy.visibleTailRowsPerRevealBatch == 3)
         #expect(StructuredSessionFeedMacOSStartupPolicy.visibleActivityRows(in: feed, visibleTailRowCount: 0).isEmpty)
         let four = StructuredSessionFeedMacOSStartupPolicy.visibleActivityRows(in: feed, visibleTailRowCount: 4)
         #expect(four.count == 4)

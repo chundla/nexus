@@ -7,6 +7,7 @@ private final class StructuredSessionMarkdownHydrationDeliveryCounter {
     var count = 0
 }
 
+@Suite(.serialized)
 struct StructuredSessionMarkdownRendererTests {
     @Test func rendererSkipsMarkdownParsingForPlainText() {
         var parseCallCount = 0
@@ -258,6 +259,7 @@ struct StructuredSessionMarkdownRendererTests {
     }
 
     @Test @MainActor func structuredSessionMarkdownRowHydrationSchedulerDeliversAllScheduledRows() async {
+        await StructuredSessionMarkdownRowHydrationScheduler.resetDeliveryFlushCountForTesting()
         var parseCallCount = 0
         let renderer = StructuredSessionMarkdownRenderer(
             cacheLimit: 8,
@@ -283,11 +285,16 @@ struct StructuredSessionMarkdownRendererTests {
         #expect(parseCallCount == 4)
         #expect(deliveryCounter.count == 4)
         let flushCount = await StructuredSessionMarkdownRowHydrationScheduler.deliveryFlushCountForTesting()
-        #expect(flushCount >= 1)
+        #if os(macOS)
+        #expect(flushCount >= 2)
         #expect(flushCount < 4)
+        #else
+        #expect(flushCount == 1)
+        #endif
     }
 
     @Test @MainActor func structuredSessionMarkdownRowHydrationSchedulerCapsMainActorDeliveriesPerFlush() async {
+        await StructuredSessionMarkdownRowHydrationScheduler.resetDeliveryFlushCountForTesting()
         var parseCallCount = 0
         let renderer = StructuredSessionMarkdownRenderer(
             cacheLimit: 16,
@@ -315,7 +322,7 @@ struct StructuredSessionMarkdownRendererTests {
         #expect(deliveryCounter.count == jobCount)
         let flushCount = await StructuredSessionMarkdownRowHydrationScheduler.deliveryFlushCountForTesting()
         #if os(macOS)
-        #expect(flushCount >= 2)
+        #expect(flushCount >= 6)
         #expect(flushCount < jobCount)
         #else
         #expect(flushCount == 1)

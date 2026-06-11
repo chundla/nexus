@@ -11,15 +11,15 @@ enum StructuredSessionFeedMacOSStartupPolicy {
 
     /// First batch after the defer turn: only the last N rows (bottom-edge follow stays near the tail).
     static var initialVisibleTailRowCount: Int {
-        2
+        3
     }
 
     /// Additional rows revealed per main-actor turn (`Task.yield` between batches).
     static var visibleTailRowsPerRevealBatch: Int {
-        2
+        3
     }
 
-    /// When true, each revealed row hydrates on `onAppear` (3/flush cap) instead of one env flip at full reveal (#225 run 8 cliff).
+    /// When true, each revealed row hydrates on `onAppear` (2/flush cap) instead of one env flip at full reveal (#225 run 8 cliff).
     static var allowsMarkdownHydrationDuringProgressiveReveal: Bool {
         true
     }
