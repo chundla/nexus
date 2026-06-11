@@ -1577,6 +1577,8 @@ struct ContentView: View {
                         structuredSessionFeedScrollSnapshot = nil
                         expandedStructuredSessionAssistantResponseRowIDs = []
                         structuredSessionMacOSFeedVisibleTailRowCount = 0
+                        StructuredSessionMarkdownRowHydrationSchedulerMacOSDeliveryCapPolicy
+                            .usesTightDeliveryCapDuringProgressiveReveal = false
                         structuredSessionScheduleMacOSFeedActivityRowsIfNeeded()
                     }
                     .onChange(of: structuredPresentation.structuredSessionFeedScrollSnapshot) { _, current in
@@ -1627,6 +1629,8 @@ struct ContentView: View {
     private func structuredSessionScheduleMacOSFeedActivityRowsIfNeeded() {
         guard StructuredSessionFeedMacOSStartupPolicy.usesProgressiveActivityRowReveal else {
             structuredSessionMacOSFeedVisibleTailRowCount = Int.max
+            StructuredSessionMarkdownRowHydrationSchedulerMacOSDeliveryCapPolicy
+                .usesTightDeliveryCapDuringProgressiveReveal = false
             return
         }
         guard structuredSessionMacOSFeedVisibleTailRowCount == 0 else {
@@ -1649,6 +1653,8 @@ struct ContentView: View {
         }
         let initial = min(StructuredSessionFeedMacOSStartupPolicy.initialVisibleTailRowCount, total)
         structuredSessionMacOSFeedVisibleTailRowCount = initial
+        StructuredSessionMarkdownRowHydrationSchedulerMacOSDeliveryCapPolicy
+            .usesTightDeliveryCapDuringProgressiveReveal = initial < total
         guard initial < total else {
             return
         }
@@ -1660,6 +1666,8 @@ struct ContentView: View {
                 visible = min(visible + batch, total)
                 structuredSessionMacOSFeedVisibleTailRowCount = visible
             }
+            StructuredSessionMarkdownRowHydrationSchedulerMacOSDeliveryCapPolicy
+                .usesTightDeliveryCapDuringProgressiveReveal = false
         }
     }
 

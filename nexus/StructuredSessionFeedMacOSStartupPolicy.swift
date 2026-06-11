@@ -19,7 +19,7 @@ enum StructuredSessionFeedMacOSStartupPolicy {
         3
     }
 
-    /// When true, each revealed row hydrates on `onAppear` (1/flush cap) instead of one env flip at full reveal (#225 run 8 cliff).
+    /// When true, each revealed row hydrates on `onAppear` (1/flush during reveal, 2/flush after) instead of one env flip at full reveal (#225 run 8 cliff).
     static var allowsMarkdownHydrationDuringProgressiveReveal: Bool {
         true
     }

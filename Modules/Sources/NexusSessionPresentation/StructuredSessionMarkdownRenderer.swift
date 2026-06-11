@@ -341,6 +341,23 @@ public final class StructuredSessionMarkdownRenderer: @unchecked Sendable {
     }
 }
 
+#if os(macOS)
+/// macOS: 1/flush while progressive row reveal is active (#225); 2/flush after (#224).
+@MainActor
+public enum StructuredSessionMarkdownRowHydrationSchedulerMacOSDeliveryCapPolicy {
+    public static var usesTightDeliveryCapDuringProgressiveReveal = false
+
+    public static var maxDeliveriesPerMainActorFlush: Int {
+        usesTightDeliveryCapDuringProgressiveReveal ? 1 : 2
+    }
+}
+
+@MainActor
+enum StructuredSessionMarkdownRowHydrationSchedulerMacOSDeliveryCapOverride {
+    static var maxDeliveriesPerMainActorFlushForTesting: Int?
+}
+#endif
+
 /// Parses deferred row markdown off the main thread, then delivers on the main actor (#225).
 @available(macOS 12.0, iOS 15.0, *)
 public enum StructuredSessionMarkdownRowHydrationScheduler {
@@ -413,12 +430,17 @@ public enum StructuredSessionMarkdownRowHydrationScheduler {
 
     private static let queue = Queue()
 
-    /// Limits SwiftUI row state updates per main-actor turn during bottom-edge first paint (#225).
-    private static var maxDeliveriesPerMainActorFlush: Int {
+    @MainActor
+    private static func maxDeliveriesPerMainActorFlush() -> Int {
         #if os(macOS)
-        1
+        if let cap = StructuredSessionMarkdownRowHydrationSchedulerMacOSDeliveryCapOverride
+            .maxDeliveriesPerMainActorFlushForTesting {
+            return cap
+        }
+        return StructuredSessionMarkdownRowHydrationSchedulerMacOSDeliveryCapPolicy
+            .maxDeliveriesPerMainActorFlush
         #else
-        Int.max
+        return Int.max
         #endif
     }
 
@@ -439,7 +461,8 @@ public enum StructuredSessionMarkdownRowHydrationScheduler {
 
     private static func drainUntilIdle() async {
         while true {
-            let batch = await queue.dequeueUpTo(maxDeliveriesPerMainActorFlush)
+            let deliveryCap = await maxDeliveriesPerMainActorFlush()
+            let batch = await queue.dequeueUpTo(deliveryCap)
             guard batch.isEmpty == false else {
                 _ = await queue.markIdleIfEmpty()
                 return

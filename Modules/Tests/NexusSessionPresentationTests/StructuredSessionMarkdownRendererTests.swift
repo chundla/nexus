@@ -286,11 +286,30 @@ struct StructuredSessionMarkdownRendererTests {
         #expect(deliveryCounter.count == 4)
         let flushCount = await StructuredSessionMarkdownRowHydrationScheduler.deliveryFlushCountForTesting()
         #if os(macOS)
-        #expect(flushCount == 4)
+        #expect(flushCount == 2)
         #else
         #expect(flushCount == 1)
         #endif
     }
+
+    #if os(macOS)
+    @Test @MainActor func structuredSessionMarkdownRowHydrationSchedulerMacOSDeliveryCapPolicy() {
+        StructuredSessionMarkdownRowHydrationSchedulerMacOSDeliveryCapPolicy
+            .usesTightDeliveryCapDuringProgressiveReveal = false
+        #expect(
+            StructuredSessionMarkdownRowHydrationSchedulerMacOSDeliveryCapPolicy
+                .maxDeliveriesPerMainActorFlush == 2
+        )
+        StructuredSessionMarkdownRowHydrationSchedulerMacOSDeliveryCapPolicy
+            .usesTightDeliveryCapDuringProgressiveReveal = true
+        #expect(
+            StructuredSessionMarkdownRowHydrationSchedulerMacOSDeliveryCapPolicy
+                .maxDeliveriesPerMainActorFlush == 1
+        )
+        StructuredSessionMarkdownRowHydrationSchedulerMacOSDeliveryCapPolicy
+            .usesTightDeliveryCapDuringProgressiveReveal = false
+    }
+    #endif
 
     @Test @MainActor func structuredSessionMarkdownRowHydrationSchedulerCapsMainActorDeliveriesPerFlush() async {
         await StructuredSessionMarkdownRowHydrationScheduler.resetDeliveryFlushCountForTesting()
@@ -321,7 +340,7 @@ struct StructuredSessionMarkdownRendererTests {
         #expect(deliveryCounter.count == jobCount)
         let flushCount = await StructuredSessionMarkdownRowHydrationScheduler.deliveryFlushCountForTesting()
         #if os(macOS)
-        #expect(flushCount == jobCount)
+        #expect(flushCount == (jobCount + 1) / 2)
         #else
         #expect(flushCount == 1)
         #endif
