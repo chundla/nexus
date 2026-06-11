@@ -190,6 +190,28 @@
         "225_startup_red": "FAIL — red 311.7 ms @ ~1.12 s (need <296); analyze_trace 0–30 s worst animation hitch 367 ms @ ~1.12 s (need <333); slight regression vs run 10 (3+3)"
       },
       "window_analysis": "224-225.trace bundle run 5; 2+2 reveal (e90c340). Best red in 224-225 series still run 10 (310.57 ms); 2+2 did not beat 3+3."
+    },
+    {
+      "run": 12,
+      "label": "post-a756f22 (224-225.trace run 6, maintainer 2026-06-10)",
+      "trace_file": "224-225.trace",
+      "trace_bundle_run": 6,
+      "duration_seconds": 360.94,
+      "hitches": {
+        "worst_red_marked_ms": 306.34,
+        "worst_red_marked_start": "~00:01.26",
+        "red_marked_count": 1,
+        "frame_lifetime_over_33ms_count": 868,
+        "frame_lifetime_over_16_67ms_count": 4818,
+        "worst_frame_lifetime_ms": 403.63,
+        "frames_over_33ms_per_minute": 144.3,
+        "frames_over_16_67ms_per_minute": 801.0
+      },
+      "signoff": {
+        "224_sustained": "PASS — 144.3/min (≤260); steady window 120–400 s animation hitches 790 (≤814)",
+        "225_startup_red": "FAIL — red 306.34 ms @ ~1.26 s (need <296, ~10 ms gap); analyze_trace 0–30 s worst animation hitch 350 ms @ ~1.26 s (need <333, ~17 ms gap); best red in 224-225 series"
+      },
+      "window_analysis": "224-225.trace bundle run 6; 3+3 reveal + 2/flush markdown (a756f22). Red 306 vs run 10 311; animation 350 vs 358."
     }
   ]
 }
