@@ -212,6 +212,28 @@
         "225_startup_red": "FAIL — red 306.34 ms @ ~1.26 s (need <296, ~10 ms gap); analyze_trace 0–30 s worst animation hitch 350 ms @ ~1.26 s (need <333, ~17 ms gap); best red in 224-225 series"
       },
       "window_analysis": "224-225.trace bundle run 6; 3+3 reveal + 2/flush markdown (a756f22). Red 306 vs run 10 311; animation 350 vs 358."
+    },
+    {
+      "run": 13,
+      "label": "post-6830de7 (224-225.trace run 7, maintainer 2026-06-10)",
+      "trace_file": "224-225.trace",
+      "trace_bundle_run": 7,
+      "duration_seconds": 360.978,
+      "hitches": {
+        "worst_red_marked_ms": 3.71,
+        "worst_red_marked_start": "n/a (export: no Red containment-1 row; verify in Instruments)",
+        "red_marked_count": 0,
+        "frame_lifetime_over_33ms_count": 1651,
+        "frame_lifetime_over_16_67ms_count": 4806,
+        "worst_frame_lifetime_ms": 322.91,
+        "frames_over_33ms_per_minute": 274.4,
+        "frames_over_16_67ms_per_minute": 798.8
+      },
+      "signoff": {
+        "224_sustained": "FAIL — 274.4/min (>260); steady window 120–400 s animation hitches 339 (≤814 PASS)",
+        "225_startup_red": "PASS (analyze_trace) — 0–30 s worst animation hitch 50 ms; no ≥333 ms cluster @ ~1 s. Export red_marked anomalous (3.71 ms); confirm Red row in Instruments."
+      },
+      "window_analysis": "224-225.trace bundle run 7; 1/flush markdown (6830de7). Startup hitch cluster gone; sustained frame rate regressed vs run 12 (144→274/min). Tradeoff vs #225 AC coupled #224 gate."
     }
   ]
 }
