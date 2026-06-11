@@ -342,14 +342,10 @@ public final class StructuredSessionMarkdownRenderer: @unchecked Sendable {
 }
 
 #if os(macOS)
-/// macOS: 1/flush while progressive row reveal is active (#225); 2/flush after (#224).
+/// macOS: cap attributed markdown deliveries per main-actor flush (#224 run 12 baseline).
 @MainActor
 public enum StructuredSessionMarkdownRowHydrationSchedulerMacOSDeliveryCapPolicy {
-    public static var usesTightDeliveryCapDuringProgressiveReveal = false
-
-    public static var maxDeliveriesPerMainActorFlush: Int {
-        usesTightDeliveryCapDuringProgressiveReveal ? 1 : 2
-    }
+    public static let maxDeliveriesPerMainActorFlush = 2
 }
 
 @MainActor
@@ -437,8 +433,7 @@ public enum StructuredSessionMarkdownRowHydrationScheduler {
             .maxDeliveriesPerMainActorFlushForTesting {
             return cap
         }
-        return StructuredSessionMarkdownRowHydrationSchedulerMacOSDeliveryCapPolicy
-            .maxDeliveriesPerMainActorFlush
+        return StructuredSessionMarkdownRowHydrationSchedulerMacOSDeliveryCapPolicy.maxDeliveriesPerMainActorFlush
         #else
         return Int.max
         #endif

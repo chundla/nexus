@@ -73,5 +73,10 @@ struct StructuredSessionFeedMacOSStartupPolicyTests {
             )
         )
     }
+
+    @Test func progressiveRevealUsesThreePlusThreeBatches() {
+        #expect(StructuredSessionFeedMacOSStartupPolicy.initialVisibleTailRowCount == 3)
+        #expect(StructuredSessionFeedMacOSStartupPolicy.visibleTailRowsPerRevealBatch == 3)
+    }
 }
 #endif

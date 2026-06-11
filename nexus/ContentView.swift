@@ -1577,8 +1577,6 @@ struct ContentView: View {
                         structuredSessionFeedScrollSnapshot = nil
                         expandedStructuredSessionAssistantResponseRowIDs = []
                         structuredSessionMacOSFeedVisibleTailRowCount = 0
-                        StructuredSessionMarkdownRowHydrationSchedulerMacOSDeliveryCapPolicy
-                            .usesTightDeliveryCapDuringProgressiveReveal = false
                         structuredSessionScheduleMacOSFeedActivityRowsIfNeeded()
                     }
                     .onChange(of: structuredPresentation.structuredSessionFeedScrollSnapshot) { _, current in
@@ -1629,8 +1627,6 @@ struct ContentView: View {
     private func structuredSessionScheduleMacOSFeedActivityRowsIfNeeded() {
         guard StructuredSessionFeedMacOSStartupPolicy.usesProgressiveActivityRowReveal else {
             structuredSessionMacOSFeedVisibleTailRowCount = Int.max
-            StructuredSessionMarkdownRowHydrationSchedulerMacOSDeliveryCapPolicy
-                .usesTightDeliveryCapDuringProgressiveReveal = false
             return
         }
         guard structuredSessionMacOSFeedVisibleTailRowCount == 0 else {
@@ -1653,21 +1649,22 @@ struct ContentView: View {
         }
         let initial = min(StructuredSessionFeedMacOSStartupPolicy.initialVisibleTailRowCount, total)
         structuredSessionMacOSFeedVisibleTailRowCount = initial
-        StructuredSessionMarkdownRowHydrationSchedulerMacOSDeliveryCapPolicy
-            .usesTightDeliveryCapDuringProgressiveReveal = initial < total
         guard initial < total else {
             return
         }
         let batch = StructuredSessionFeedMacOSStartupPolicy.visibleTailRowsPerRevealBatch
         Task { @MainActor in
             var visible = initial
+            var revealBatchIndex = 0
             while visible < total {
                 await Task.yield()
+                if revealBatchIndex == 1 {
+                    await Task.yield()
+                }
                 visible = min(visible + batch, total)
                 structuredSessionMacOSFeedVisibleTailRowCount = visible
+                revealBatchIndex += 1
             }
-            StructuredSessionMarkdownRowHydrationSchedulerMacOSDeliveryCapPolicy
-                .usesTightDeliveryCapDuringProgressiveReveal = false
         }
     }
 

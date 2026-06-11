@@ -294,20 +294,10 @@ struct StructuredSessionMarkdownRendererTests {
 
     #if os(macOS)
     @Test @MainActor func structuredSessionMarkdownRowHydrationSchedulerMacOSDeliveryCapPolicy() {
-        StructuredSessionMarkdownRowHydrationSchedulerMacOSDeliveryCapPolicy
-            .usesTightDeliveryCapDuringProgressiveReveal = false
         #expect(
             StructuredSessionMarkdownRowHydrationSchedulerMacOSDeliveryCapPolicy
                 .maxDeliveriesPerMainActorFlush == 2
         )
-        StructuredSessionMarkdownRowHydrationSchedulerMacOSDeliveryCapPolicy
-            .usesTightDeliveryCapDuringProgressiveReveal = true
-        #expect(
-            StructuredSessionMarkdownRowHydrationSchedulerMacOSDeliveryCapPolicy
-                .maxDeliveriesPerMainActorFlush == 1
-        )
-        StructuredSessionMarkdownRowHydrationSchedulerMacOSDeliveryCapPolicy
-            .usesTightDeliveryCapDuringProgressiveReveal = false
     }
     #endif
 
