@@ -256,6 +256,28 @@
         "225_startup_red": "PASS (analyze_trace) — 0–30 s worst animation hitch 33 ms; no ~1 s cluster. Phased cap holds startup; sustained regressed vs run 12/13."
       },
       "window_analysis": "224-225.trace bundle run 8; phased markdown cap (4febb5b). #225 startup OK; #224 worse than run 13 (274/min). Investigate post-reveal cap relaxation / steady hydration."
+    },
+    {
+      "run": 15,
+      "label": "post-c1d0e8a (224-225.trace run 9, maintainer 2026-06-11)",
+      "trace_file": "224-225.trace",
+      "trace_bundle_run": 9,
+      "duration_seconds": 360.983,
+      "hitches": {
+        "worst_red_marked_ms": 4.55,
+        "worst_red_marked_start": "export anomaly",
+        "red_marked_count": 1,
+        "frame_lifetime_over_33ms_count": 2240,
+        "frame_lifetime_over_16_67ms_count": 6427,
+        "worst_frame_lifetime_ms": 104.5,
+        "frames_over_33ms_per_minute": 372.3,
+        "frames_over_16_67ms_per_minute": 1068.2
+      },
+      "signoff": {
+        "224_sustained": "FAIL — 372.3/min (>>260); steady window 120–400 s animation hitches 240 (≤814 PASS)",
+        "225_startup_red": "PASS — 0–30 s worst animation hitch 67 ms @ ~1.8 s; no ~350 ms @ ~1 s cluster"
+      },
+      "window_analysis": "224-225.trace bundle run 9; 2/flush steady + yield before 2nd reveal (c1d0e8a). #225 startup OK; #224 sustained still failing (worse than run 14)."
     }
   ]
 }
