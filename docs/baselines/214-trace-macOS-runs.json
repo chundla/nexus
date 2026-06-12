@@ -278,6 +278,28 @@
         "225_startup_red": "PASS — 0–30 s worst animation hitch 67 ms @ ~1.8 s; no ~350 ms @ ~1 s cluster"
       },
       "window_analysis": "224-225.trace bundle run 9; 2/flush steady + yield before 2nd reveal (c1d0e8a). #225 startup OK; #224 sustained still failing (worse than run 14)."
+    },
+    {
+      "run": 16,
+      "label": "post-da4f804 (224-225.trace run 10, maintainer 2026-06-11)",
+      "trace_file": "224-225.trace",
+      "trace_bundle_run": 10,
+      "duration_seconds": 360.995,
+      "hitches": {
+        "worst_red_marked_ms": 10.84,
+        "worst_red_marked_start": "export anomaly",
+        "red_marked_count": 1,
+        "frame_lifetime_over_33ms_count": 2344,
+        "frame_lifetime_over_16_67ms_count": 4160,
+        "worst_frame_lifetime_ms": 70.91,
+        "frames_over_33ms_per_minute": 389.6,
+        "frames_over_16_67ms_per_minute": 691.4
+      },
+      "signoff": {
+        "224_sustained": "FAIL — 389.6/min (>>260); steady window 120–400 s animation hitches 420 (≤814 PASS). Trace template **form** — re-record with **SwiftUI** for harness parity.",
+        "225_startup_red": "PASS (analyze_trace) — 0–30 s worst animation hitch 33 ms; no ~1 s cluster. Not comparable to 214/224-225 SwiftUI runs until template fixed."
+      },
+      "window_analysis": "224-225.trace bundle run 10; revert extra yield (da4f804). Sustained still bad; Instruments template was form not SwiftUI."
     }
   ]
 }
