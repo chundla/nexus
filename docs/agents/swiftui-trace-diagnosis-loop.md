@@ -23,7 +23,7 @@ Optional trace: 214.trace run 6 for differential only; new trace required for si
 ## Nested skills (mandatory)
 
 1. **`diagnose`** — perf feedback loop, ranked hypotheses, one change per trace, verify on original repro.
-2. **`swiftui-expert-skill`** — `analyze_trace.py`, `record_trace.py` (launch/attach/stop-file — documented in the generic skill).
+2. **`swiftui-expert-skill`** — `analyze_trace.py`, `record_trace.py`; flags and large-trace RAM → skill `references/trace-analysis.md` (not duplicated here).
 3. **`swiftui-performance-audit`** — code-first review **after** trace narrows files, **before** edit.
 
 **Not** **`tdd`** as the lead loop unless the slice is an explicit policy test (e.g. scroll growth bucket).
@@ -37,7 +37,7 @@ Full steps: [structured-session-instruments-harness.md](../structured-session-in
 | Pre-flight | `NexusAppProfilingFixtureTests/bootstrapStreamsDeterministicStructuredFeedProfilingBurstsOnMacOS` |
 | Env | `NEXUS_MAC_PROFILE_FIXTURE=structured-feed-profile` |
 | Aggregate metrics | `scripts/export_structured_session_trace_metrics.py` |
-| Windowed sign-off | `swiftui-expert-skill/scripts/analyze_trace.py` windows `0:30000` (#225), `120000:400000` (#224) |
+| Windowed sign-off | Harness: `analyze_trace.py` + `--window 0:30000` (#225), `120000:400000` (#224); lanes/CLI → swiftui-expert skill |
 | Baselines | `docs/baselines/214-trace-macOS-runs.json`, `docs/baselines/214-trace-window-analysis.md` |
 
 Acceptance thresholds are on GitHub **#224** / **#225** bodies (run **4** baseline, not run 1 ~27/min).

@@ -97,30 +97,29 @@ In Instruments UI, open **Hitches** / **SwiftUI** tracks and note **Potentially 
 
 Aggregate JSON above is not enough: `swiftui-update-groups` is often empty in repo export, and full-session rates mix startup with steady streaming. After every macOS post-fix trace, run **`swiftui-expert-skill`** `analyze_trace.py` on the **same run** you append to [baselines/214-trace-macOS-runs.json](./baselines/214-trace-macOS-runs.json).
 
+**Deep parse:** CLI flags, phased lanes, and RAM on large traces live in **`swiftui-expert-skill`** (`references/trace-analysis.md`). Nexus only defines **which windows** and **pass thresholds** below. Sign-off uses `--lanes hitches,hangs,swiftui,swiftui-causes --no-correlate` (skip default all-five-lane + Time Profiler unless you need `correlations[]` / `main_running_coverage_pct`).
+
 ```bash
-# Path on maintainer machine (pi agent skill); adjust if you vendor a copy into scripts/
 SWIFTUI_TRACE_SKILL="${SWIFTUI_TRACE_SKILL:-$HOME/.pi/agent/skills/swiftui-expert-skill}"
+LANES="hitches,hangs,swiftui,swiftui-causes"
 
 TRACE="/path/to/your.trace"
-RUN=1   # multi-run bundle: xctrace --toc or export script --run N
+RUN=1   # multi-run bundle: analyze_trace --list-runs or export script --run N
 
-# Full-session table row (repo exporter)
 python3 scripts/export_structured_session_trace_metrics.py \
   --input "$TRACE" --run "$RUN" \
   --output "/tmp/structured-session-run${RUN}.json"
 
-# #225 startup window (0–30 s)
 python3 "$SWIFTUI_TRACE_SKILL/scripts/analyze_trace.py" \
-  --trace "$TRACE" --run "$RUN" \
+  --trace "$TRACE" --run "$RUN" --lanes "$LANES" --no-correlate \
   --window 0:30000 --output "/tmp/signoff-225-run${RUN}"
 
-# #224 steady window (skip first 2 min; use same end as long captures ~7 min)
 python3 "$SWIFTUI_TRACE_SKILL/scripts/analyze_trace.py" \
-  --trace "$TRACE" --run "$RUN" \
+  --trace "$TRACE" --run "$RUN" --lanes "$LANES" --no-correlate \
   --window 120000:400000 --output "/tmp/signoff-224-run${RUN}"
 ```
 
-Read `/tmp/signoff-225-run${RUN}.md` and `/tmp/signoff-224-run${RUN}.md` for Time Profiler + animation hitch counts. Compare to [baselines/214-trace-window-analysis.md](./baselines/214-trace-window-analysis.md) sign-off table.
+Read `/tmp/signoff-225-run${RUN}.md` and `/tmp/signoff-224-run${RUN}.md` (animation hitches, SwiftUI lanes). Compare to [baselines/214-trace-window-analysis.md](./baselines/214-trace-window-analysis.md).
 
 **Pass/fail on one ~5–7 min capture** (baseline = `214.trace` **run 4**):
 

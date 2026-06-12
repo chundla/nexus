@@ -2,16 +2,7 @@
 
 Maintainer workflow (record → export → windows → baseline JSON): [structured-session-instruments-harness.md](../structured-session-instruments-harness.md) — **Windowed analysis**.
 
-This file is example output for runs 4 and 6. Commands:
-
-```bash
-# Canonical copy-paste block lives in the harness doc (SWIFTUI_TRACE_SKILL + both windows).
-SKILL="${SWIFTUI_TRACE_SKILL:-$HOME/.pi/agent/skills/swiftui-expert-skill}"
-TRACE="214.trace"
-python3 scripts/export_structured_session_trace_metrics.py --input "$TRACE" --run 6
-python3 "$SKILL/scripts/analyze_trace.py" --trace "$TRACE" --run 6 --window 0:30000 --output /tmp/225-run6
-python3 "$SKILL/scripts/analyze_trace.py" --trace "$TRACE" --run 6 --window 120000:400000 --output /tmp/224-run6
-```
+This file is **example sign-off output** for runs 4 and 6. Copy-paste commands: [structured-session-instruments-harness.md](../structured-session-instruments-harness.md) (**Windowed analysis**). `analyze_trace` usage: **swiftui-expert-skill** `references/trace-analysis.md`.
 
 ## #225 startup window (`0:30000` ms)
 
