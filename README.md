@@ -10,6 +10,17 @@ Nexus is a workspace-first control center for coding agent CLIs across local and
 - `docs/architecture/milestone-14.md` is the latest rollout-planning document (remote IBM Bob structured **Provider** on **Remote Workspaces**).
 - Older milestone docs and the PRD are historical snapshots; use them for rollout history, not as the sole source of current truth.
 
+### Provider matrix (current checkout)
+
+| **Provider** | Primary **Session Surface** | Local **Workspace** | **Remote Workspace** | iPhone structured **Remote Client** |
+|--------------|----------------------------|---------------------|----------------------|-------------------------------------|
+| Claude | Terminal | Launchable | Launchable | Terminal when launchable |
+| Codex | Structured | Launchable | Launchable | Supported when launchable |
+| Pi | Structured | Launchable | Launchable | Supported when launchable |
+| IBM Bob | Structured (on-demand turns) | Launchable | Launchable | Supported when launchable |
+
+Shared app-native **Approval Requests**: Codex and Pi. IBM Bob does not use them. Claude is terminal-backed on all targets.
+
 ## Start here
 
 1. `CONTEXT.md` — canonical product language
@@ -34,7 +45,7 @@ swift test --package-path Modules
 
 ## Repo layout
 
-- `nexus/` — macOS app target
+- `nexus/` — multiplatform app (macOS UI + iOS **Remote Client**)
 - `Modules/Sources/NexusDomain` — shared domain types and vocabulary
 - `Modules/Sources/NexusIPC` — local IPC contracts and client
 - `Modules/Sources/NexusService` — service-owned orchestration, persistence, provider modules, session runtime logic

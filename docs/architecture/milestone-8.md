@@ -9,6 +9,8 @@ Prove that protocol-native integrations make Nexus materially better by shipping
 
 ## Rollout status
 
+> **Checkout status:** **Implemented** in this repo. Remote Pi, remote Bob, and full structured iPhone parity for all structured paths arrived in later milestones.
+
 Milestone Eight introduces the provider-general protocol-native Session seam. Pi becomes a local **Launchable Provider** on local **Workspaces** only. Claude and current Codex remain launchable through their existing terminal-backed runtimes during this milestone. **Remote Workspaces** and **Remote Clients** do not use protocol-native Session runtimes yet.
 
 ## Success criteria

@@ -2,9 +2,14 @@
 
 ## Goal
 
+> **Historical note**
+> This document captures the intended scope and decisions for Milestone Nine at the time it was written. For current terminology and rollout status, prefer `README.md` (provider matrix), `ARCHITECTURE.md`, and `docs/architecture/milestone-14.md`.
+
 Prove that Nexus now has a reusable protocol-native **Session** architecture by making Codex the second local protocol-native **Launchable Provider**, generalizing the shared structured **Session Surface**, and keeping existing terminal-backed remote and iPhone Codex flows stable.
 
 ## Rollout status
+
+> **Checkout status:** **Implemented** in this repo. Remote Codex is structured now (Milestone Ten); IBM Bob is launchable locally and remotely (Milestones Thirteen–Fourteen).
 
 Milestone Nine turns local Codex on local **Workspaces** into a protocol-native **Provider** path with a structured primary **Session Surface**. Remote Codex on **Remote Workspaces** and current iPhone Codex flows remain terminal-backed in this milestone. Claude stays on its existing terminal-backed path, and IBM Bob remains visible but non-launchable.
 

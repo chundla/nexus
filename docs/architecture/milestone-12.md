@@ -2,9 +2,14 @@
 
 ## Goal
 
+> **Historical note**
+> This document captures the intended scope and decisions for Milestone Twelve at the time it was written. For current terminology and rollout status, prefer `README.md` (provider matrix), `ARCHITECTURE.md`, and `docs/architecture/milestone-14.md`.
+
 Prove that Nexus can make Pi a fully launchable protocol-native **Provider** on **Remote Workspaces** by reusing the existing service-owned remote structured **Session** architecture, keeping **tmux** as the **Remote Session Strategy** for durability, and extending the supported iPhone structured **Remote Client** experience to remote Pi without introducing any Pi-specific terminal fallback or iPhone-specific auth flow.
 
 ## Rollout status
+
+> **Checkout status:** **Implemented** in this repo. IBM Bob is launchable locally and remotely now (Milestones Thirteen–Fourteen); the multiplatform `nexus` target includes the iOS **Remote Client**.
 
 Milestone Twelve turns Pi on **Remote Workspaces** into a protocol-native structured **Provider** path with full **Session Record** lifecycle parity on macOS and supported structured **Remote Client** parity on iPhone. Local Pi, local Codex, and remote Codex remain structured. Remote Claude remains terminal-backed, IBM Bob remains non-launchable, and this milestone does not broaden into top-level iOS app-target productization.
 

@@ -2,9 +2,14 @@
 
 ## Goal
 
+> **Historical note**
+> This document captures the intended scope and decisions for Milestone Thirteen at the time it was written. For current terminology and rollout status, prefer `README.md` (provider matrix), `ARCHITECTURE.md`, and `docs/architecture/milestone-14.md`.
+
 Prove that Nexus can make IBM Bob a fully launchable structured **Provider** on local **Workspaces** by projecting Bob `stream-json` output into the shared structured **Session Surface**, preserving Bob-native continuity on the **Session Record**, and allowing local structured **Sessions** to remain **ready** without a continuously attached provider runtime.
 
 ## Rollout status
+
+> **Checkout status:** **Implemented** in this repo. Remote IBM Bob on **Remote Workspaces** shipped in Milestone Fourteen.
 
 Milestone Thirteen turns IBM Bob on local **Workspaces** into a structured **Provider** path with local macOS support and shared iPhone structured **Remote Client** support on a **Paired Mac**. Pi and Codex keep their existing structured behavior, Claude remains terminal-backed, and remote IBM Bob execution remains unsupported in this milestone.
 

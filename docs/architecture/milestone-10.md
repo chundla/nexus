@@ -2,9 +2,14 @@
 
 ## Goal
 
+> **Historical note**
+> This document captures the intended scope and decisions for Milestone Ten at the time it was written. For current terminology and rollout status, prefer `README.md` (provider matrix), `ARCHITECTURE.md`, and `docs/architecture/milestone-14.md`.
+
 Prove that Nexus can run a protocol-native **Codex Session** on a **Remote Workspace** by extending the shared **Session** architecture to remote execution, keeping **tmux** as the **Remote Session Strategy** for durability, and presenting remote Codex through the same structured primary **Session Surface** on macOS as local Codex.
 
 ## Rollout status
+
+> **Checkout status:** **Implemented** in this repo. iPhone can launch and operate remote structured Codex now (Milestone Eleven and later).
 
 Milestone Ten turns Codex on **Remote Workspaces** into a protocol-native **Provider** path with a structured primary **Session Surface** on macOS. Local Codex stays protocol-native and structured from Milestone Nine. Remote Claude stays terminal-backed, remote Pi remains unsupported, and iPhone can inspect remote structured Codex **Sessions** on a **Paired Mac** but cannot launch, create, or control them in this milestone.
 

@@ -9,6 +9,8 @@ Prove that Nexus is truly provider-general by making Codex a fully launchable Pr
 
 ## Rollout status
 
+> **Checkout status:** **Implemented** in this repo. Pi and IBM Bob are launchable now via later milestones; see the provider matrix in `README.md`.
+
 Milestone Seven is the point where Codex becomes a real **Launchable Provider** across local **Workspaces**, **Remote Workspaces**, and supported iPhone **Remote Client** flows alongside Claude. Pi and IBM Bob remain visible **Providers** but are not launchable in this milestone, and the service-owned provider-adapter seam is intended to reduce the future cost of enabling them later.
 
 ## Success criteria

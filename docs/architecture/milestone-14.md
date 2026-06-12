@@ -2,9 +2,14 @@
 
 ## Goal
 
+> **Historical note**
+> This document is the newest rollout-planning milestone. For canonical product language use `CONTEXT.md`; for stable architecture use `ARCHITECTURE.md`. The provider matrix in `README.md` summarizes the current checkout.
+
 Prove that Nexus can make IBM Bob a fully launchable structured **Provider** on **Remote Workspaces** by reusing the existing service-owned remote structured **Session** architecture, keeping **tmux** as the **Remote Session Strategy** only while a remote Bob turn is active, and preserving IBM Bob’s on-demand ready-without-runtime lifecycle across macOS and supported iPhone structured **Remote Clients**.
 
 ## Rollout status
+
+> **Checkout status:** **Implemented** in this repo — latest milestone in the rollout series.
 
 Milestone Fourteen turns IBM Bob on **Remote Workspaces** into a structured **Provider** path with full **Session Record** lifecycle parity on macOS and supported structured **Remote Client** parity on iPhone. Local IBM Bob keeps its on-demand structured behavior from Milestone Thirteen. Remote Pi and remote Codex remain structured. Claude remains terminal-backed. This milestone does not broaden into Bob-specific approval-product work, terminal fallback, or Host helper installation.
 

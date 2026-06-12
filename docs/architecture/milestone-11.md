@@ -2,9 +2,14 @@
 
 ## Goal
 
+> **Historical note**
+> This document captures the intended scope and decisions for Milestone Eleven at the time it was written. For current terminology and rollout status, prefer `README.md` (provider matrix), `ARCHITECTURE.md`, and `docs/architecture/milestone-14.md`.
+
 Prove that a trusted iPhone **Remote Client** can fully render and operate structured **Sessions** on a **Paired Mac** by extending the shared structured **Session Surface** across the dedicated remote API, keeping the existing **Controller** and **Pairing** model intact, and avoiding any user-facing terminal fallback for structured **Sessions**.
 
 ## Rollout status
+
+> **Checkout status:** **Implemented** in this repo for the paths named in this milestone (local Pi, local Codex, remote Codex). Remote Pi and IBM Bob (local and remote) gained the same structured iPhone treatment in Milestones Twelve–Fourteen.
 
 Milestone Eleven turns the structured **Session Surface** on iPhone from inspect-only to supported and operable for every currently launchable structured path on a **Paired Mac**. That includes local Pi, local Codex, and remote Codex. Terminal-backed **Sessions** remain terminal-backed on iPhone, remote Pi remains unsupported, and provider-native authentication remains provider-native rather than becoming a new iPhone-specific flow in this milestone.
 
