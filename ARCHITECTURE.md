@@ -8,27 +8,28 @@ Nexus is the workspace-first control center for coding agent CLIs across local a
 - Read `CONTEXT.md` for canonical product language.
 - Use this document for the stable high-level architecture.
 - Use `docs/architecture/milestone-*.md` for rollout slices; older milestone docs are historical snapshots.
-- `docs/architecture/milestone-12.md` is the latest rollout-planning document.
+- `docs/architecture/milestone-14.md` is the latest rollout-planning document.
 - `docs/prd/nexus-workspace-first-control-center.md` is historical milestone-one product framing, not the source of truth for current rollout details.
 
 ## Current documented rollout snapshot
 
-- The macOS app and **Background Service** are the primary build targets in this repo.
-- Nexus supports both terminal-backed and protocol-native **Sessions** behind one shared **Session** model.
-- The service now has an explicit `ProviderModule` seam; Pi is the first provider routing catalog and **Session** open/recovery behavior through that seam.
-- Milestone Eight established local Pi as the first documented protocol-native **Provider** path.
-- Milestone Nine generalized the protocol-native structured **Session** path to local Codex.
-- Milestone Ten expanded the protocol-native structured **Session** path to remote Codex.
-- Milestone Eleven expanded full structured iPhone **Remote Client** parity across the previously launchable structured **Sessions** on a **Paired Mac**.
-- Milestone Twelve is the latest documented next-step plan and expands Pi into a fully launchable remote structured **Provider** path with iPhone parity.
-- iPhone **Remote Client** behavior is documented in architecture and tested at shared-model/API boundaries, but this checkout does not contain a top-level iOS app target.
+- The multiplatform `nexus` app (macOS + iOS **Remote Client**) and embedded **Background Service** are the primary build targets in this repo.
+- Nexus supports terminal-backed and structured (protocol-native and stream-json) **Sessions** behind one shared **Session** model.
+- Provider-specific behavior routes through the `ProviderModule` seam (ADR 0034); Claude, Codex, IBM Bob, and Pi each have a dedicated module.
+- Milestone Eight established local Pi as the first documented protocol-native structured **Provider** path.
+- Milestone Nine generalized structured **Sessions** to local Codex; Milestone Ten to remote Codex.
+- Milestone Eleven expanded full structured iPhone **Remote Client** parity for launchable structured **Sessions** on a **Paired Mac**.
+- Milestone Twelve added remote Pi as a launchable structured **Provider** with iPhone parity.
+- Milestone Thirteen added local IBM Bob as a launchable structured **Provider** (on-demand ready-without-runtime lifecycle).
+- Milestone Fourteen is the latest documented plan and adds remote IBM Bob on **Remote Workspaces** with the same on-demand structured lifecycle and iPhone parity.
+- Claude remains terminal-backed on all targets; IBM Bob does not use shared app-native **Approval Requests**.
 
 ## Product shape
 
 - **Workspace-first**: Workspace is the primary object in the product and domain model.
 - **Provider-aware**: Codex, Claude, IBM Bob, and Pi are first-class providers.
 - **Session-oriented**: Sessions are provider-managed workstreams within a workspace and provider.
-- **Mac-centric execution**: macOS runs the UI and the Background Service; iOS later acts as a remote client.
+- **Mac-centric execution**: macOS runs the main UI and the **Background Service**; the iOS build is a **Remote Client** to a **Paired Mac** (no independent CLI execution on device).
 - **Service-owned orchestration**: The Background Service is the source of truth for state, persistence, provider adapters, and session lifecycle.
 
 ## Core domain
@@ -54,9 +55,8 @@ Nexus is the workspace-first control center for coding agent CLIs across local a
 
 ### iOS
 
-- Not part of milestone one.
-- Will act as a remote client to the macOS Background Service.
-- Will not independently execute local coding CLIs.
+- Ships as the **Remote Client** entry point in the multiplatform `nexus` target (`RemoteClientHomeView`, pairing, structured session UI).
+- Attaches to a **Paired Mac** over the dedicated remote network API (ADR 0027); does not run the **Background Service** or local provider CLIs on device.
 
 ## System decomposition
 
@@ -86,7 +86,8 @@ Owns:
 
 - **NexusDomain**: domain entities, identifiers, enums, lifecycle vocabulary.
 - **NexusIPC**: local IPC request/response and stream message types.
-- Later: **NexusProviders**, **NexusTerminal**.
+- **NexusSessionPresentation**: shared structured **Session Presentation** projection consumed by macOS and iOS UI adapters.
+- Likely later: **NexusProviders**, **NexusTerminal** (see `docs/architecture/modules.md`).
 
 ## Session model
 
@@ -134,7 +135,7 @@ A Provider may additionally expose presentation-specific surfaces such as:
 Renderers are platform-specific:
 
 - macOS: native Session UI, with terminal rendering when a Provider exposes a terminal surface
-- iOS: later remote Session renderer, with terminal rendering when a Provider exposes a terminal surface
+- iOS: structured **Session Surface** adapter today (`RemoteClientHomeView`); terminal rendering when a Provider exposes a terminal surface
 
 ## Persistence model
 
@@ -198,10 +199,10 @@ Milestone one proves the service-centered architecture with local-only execution
 - minimal Background Service status area
 - minimal diagnostics/log viewer
 
-### Out of scope
+### Out of scope (milestone one only)
 
-- iOS app target and implementation
-- remote SSH/tmux execution
+- iOS **Remote Client** product (later milestones; now implemented in the multiplatform app target)
+- remote SSH/tmux execution (later milestones; now implemented for structured remote Providers)
 - provider installation management
 - user-configurable transcript/history retention policy management UI
 - multi-client terminal control implementation
@@ -226,4 +227,6 @@ Milestone one proves the service-centered architecture with local-only execution
 - `docs/architecture/milestone-10.md`
 - `docs/architecture/milestone-11.md`
 - `docs/architecture/milestone-12.md`
+- `docs/architecture/milestone-13.md`
+- `docs/architecture/milestone-14.md`
 - `docs/adr/`

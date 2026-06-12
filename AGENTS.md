@@ -21,7 +21,7 @@ Nexus is a **workspace-first** macOS control center for coding agent CLIs (local
 **Where truth lives:**
 - Product language: `CONTEXT.md`
 - Stable architecture: `ARCHITECTURE.md`, `docs/architecture/domain-model.md`
-- Rollout slices: `docs/architecture/milestone-*.md` — prefer the **newest** milestone over older future-tense text
+- Rollout slices: `docs/architecture/milestone-*.md` — prefer **`milestone-14.md`** (newest) over older future-tense text
 - Durable decisions: `docs/adr/`
 - Quick orientation: `README.md`
 
