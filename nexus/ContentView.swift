@@ -1655,15 +1655,10 @@ struct ContentView: View {
         let batch = StructuredSessionFeedMacOSStartupPolicy.visibleTailRowsPerRevealBatch
         Task { @MainActor in
             var visible = initial
-            var revealBatchIndex = 0
             while visible < total {
                 await Task.yield()
-                if revealBatchIndex == 1 {
-                    await Task.yield()
-                }
                 visible = min(visible + batch, total)
                 structuredSessionMacOSFeedVisibleTailRowCount = visible
-                revealBatchIndex += 1
             }
         }
     }
