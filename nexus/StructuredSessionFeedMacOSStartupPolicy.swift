@@ -2,63 +2,49 @@
 import Foundation
 import NexusSessionPresentation
 
-/// macOS structured feed startup: split first `ScrollView` layout from bulk `LazyVStack` row mount (#225).
+/// macOS structured feed startup (#225); implementation shared with iOS via `StructuredSessionFeedProgressiveRevealPolicy`.
 enum StructuredSessionFeedMacOSStartupPolicy {
-    /// When true, activity rows are not mounted on the first feed `onAppear` turn; tail rows appear in batches.
     static var usesProgressiveActivityRowReveal: Bool {
-        true
+        StructuredSessionFeedProgressiveRevealPolicy.usesProgressiveActivityRowReveal
     }
 
-    /// First batch after the defer turn: only the last N rows (bottom-edge follow stays near the tail).
     static var initialVisibleTailRowCount: Int {
-        3
+        StructuredSessionFeedProgressiveRevealPolicy.initialVisibleTailRowCount
     }
 
-    /// Additional rows revealed per main-actor turn (`Task.yield` between batches).
     static var visibleTailRowsPerRevealBatch: Int {
-        3
+        StructuredSessionFeedProgressiveRevealPolicy.visibleTailRowsPerRevealBatch
     }
 
-    /// When true, each revealed row hydrates on `onAppear` (2/flush cap) instead of one env flip at full reveal (#225 run 8 cliff).
     static var allowsMarkdownHydrationDuringProgressiveReveal: Bool {
-        true
+        StructuredSessionFeedProgressiveRevealPolicy.allowsMarkdownHydrationDuringProgressiveReveal
     }
 
     static func visibleActivityRows(
         in feed: StructuredSessionFeedPresentation,
         visibleTailRowCount: Int
     ) -> [StructuredSessionActivityRow] {
-        let rows = feed.activityRows
-        guard usesProgressiveActivityRowReveal, visibleTailRowCount < rows.count else {
-            return rows
-        }
-        guard visibleTailRowCount > 0 else {
-            return []
-        }
-        return Array(rows.suffix(visibleTailRowCount))
+        StructuredSessionFeedProgressiveRevealPolicy.visibleActivityRows(
+            in: feed,
+            visibleTailRowCount: visibleTailRowCount
+        )
     }
 
     static func shouldShowThinkingIndicator(
         in feed: StructuredSessionFeedPresentation,
         visibleTailRowCount: Int
     ) -> Bool {
-        guard usesProgressiveActivityRowReveal else {
-            return feed.thinkingIndicator != nil
-        }
-        guard visibleTailRowCount >= feed.activityRows.count else {
-            return false
-        }
-        return feed.thinkingIndicator != nil
+        StructuredSessionFeedProgressiveRevealPolicy.shouldShowThinkingIndicator(
+            in: feed,
+            visibleTailRowCount: visibleTailRowCount
+        )
     }
 
     static func isFeedMarkdownHydrationAllowed(visibleTailRowCount: Int, totalActivityRowCount: Int) -> Bool {
-        guard usesProgressiveActivityRowReveal else {
-            return true
-        }
-        if allowsMarkdownHydrationDuringProgressiveReveal {
-            return true
-        }
-        return visibleTailRowCount >= totalActivityRowCount
+        StructuredSessionFeedProgressiveRevealPolicy.isFeedMarkdownHydrationAllowed(
+            visibleTailRowCount: visibleTailRowCount,
+            totalActivityRowCount: totalActivityRowCount
+        )
     }
 }
 #endif

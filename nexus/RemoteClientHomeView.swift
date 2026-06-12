@@ -1439,6 +1439,7 @@ private struct RemoteSessionScreenView: View {
     @State private var structuredSessionPinState = StructuredSessionFeedPinState()
     @State private var structuredSessionFeedScrollSnapshot: StructuredSessionFeedScrollSnapshot?
     @State private var structuredSessionFeedScrollPosition = ScrollPosition(edge: .bottom)
+    @State private var structuredSessionFeedVisibleTailRowCount = 0
     @State private var expandedStructuredSessionAssistantResponseRowIDs: Set<UUID> = []
     @FocusState private var isStructuredPromptFocused: Bool
     @FocusState private var isTerminalInputFocused: Bool
@@ -2136,6 +2137,7 @@ private struct RemoteSessionScreenView: View {
                 }
                 .onAppear {
                     structuredSessionPinState = StructuredSessionFeedPinState()
+                    structuredSessionScheduleFeedActivityRowsIfNeeded()
                     structuredSessionFeedScrollSnapshot = StructuredSessionFeedScrollSupport
                         .applyStructuredSessionFeedScrollSnapshotTransition(
                             previous: nil,
@@ -2143,13 +2145,16 @@ private struct RemoteSessionScreenView: View {
                             isFollowingBottom: structuredSessionPinState.isFollowingBottom,
                             coordinator: structuredSessionAutoScrollCoordinator,
                             draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
-                            scrollPosition: $structuredSessionFeedScrollPosition
+                            scrollPosition: $structuredSessionFeedScrollPosition,
+                            scrollPositionUsesBottomEdge: true
                         )
                 }
                 .onChange(of: presentation.session.id) { _, _ in
                     structuredSessionPinState = StructuredSessionFeedPinState()
                     structuredSessionFeedScrollSnapshot = nil
                     expandedStructuredSessionAssistantResponseRowIDs = []
+                    structuredSessionFeedVisibleTailRowCount = 0
+                    structuredSessionScheduleFeedActivityRowsIfNeeded()
                 }
                 .onChange(of: presentation.structuredSessionFeedScrollSnapshot) { _, current in
                     guard structuredSessionFeedScrollSnapshotIfScrollPolicyChanged(
@@ -2165,7 +2170,8 @@ private struct RemoteSessionScreenView: View {
                             isFollowingBottom: structuredSessionPinState.isFollowingBottom,
                             coordinator: structuredSessionAutoScrollCoordinator,
                             draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
-                            scrollPosition: $structuredSessionFeedScrollPosition
+                            scrollPosition: $structuredSessionFeedScrollPosition,
+                            scrollPositionUsesBottomEdge: true
                         )
                 }
         }
@@ -2230,6 +2236,45 @@ private struct RemoteSessionScreenView: View {
         }
     }
 
+    private func structuredSessionScheduleFeedActivityRowsIfNeeded() {
+        guard StructuredSessionFeedProgressiveRevealPolicy.usesProgressiveActivityRowReveal else {
+            structuredSessionFeedVisibleTailRowCount = Int.max
+            return
+        }
+        guard structuredSessionFeedVisibleTailRowCount == 0 else {
+            return
+        }
+        Task { @MainActor in
+            await Task.yield()
+            structuredSessionRevealFeedActivityRowsProgressively()
+        }
+    }
+
+    private func structuredSessionRevealFeedActivityRowsProgressively() {
+        guard let feed = structuredFeedPresentation else {
+            return
+        }
+        let total = feed.activityRows.count
+        guard total > 0 else {
+            structuredSessionFeedVisibleTailRowCount = 0
+            return
+        }
+        let initial = min(StructuredSessionFeedProgressiveRevealPolicy.initialVisibleTailRowCount, total)
+        structuredSessionFeedVisibleTailRowCount = initial
+        guard initial < total else {
+            return
+        }
+        let batch = StructuredSessionFeedProgressiveRevealPolicy.visibleTailRowsPerRevealBatch
+        Task { @MainActor in
+            var visible = initial
+            while visible < total {
+                await Task.yield()
+                visible = min(visible + batch, total)
+                structuredSessionFeedVisibleTailRowCount = visible
+            }
+        }
+    }
+
     @ViewBuilder
     private func structuredSessionActivityFeed(
         feedPresentation: StructuredSessionFeedPresentation
@@ -2240,21 +2285,26 @@ private struct RemoteSessionScreenView: View {
                 detail: feedPresentation.copy.emptyStateDescription,
                 accent: NexusIOSTheme.gold
             )
+        } else if feedPresentation.activityRows.isEmpty {
+            EmptyView()
         } else {
-            LazyVStack(spacing: 10) {
-                ForEach(feedPresentation.activityRowChunks) { chunk in
-                    ForEach(chunk.rows) { row in
-                        IOSEquatableStructuredSessionActivityRow(row: row) {
-                            structuredSessionActivityRowView(row)
-                        }
-                        .equatable()
-                        .id(row.id)
-                    }
+            let visibleRows = StructuredSessionFeedProgressiveRevealPolicy.visibleActivityRows(
+                in: feedPresentation,
+                visibleTailRowCount: structuredSessionFeedVisibleTailRowCount
+            )
+            ForEach(visibleRows) { row in
+                IOSEquatableStructuredSessionActivityRow(row: row) {
+                    structuredSessionActivityRowView(row)
                 }
+                .equatable()
+                .id(row.id)
+            }
 
-                if let thinkingIndicator = feedPresentation.thinkingIndicator {
-                    structuredSessionThinkingIndicatorView(thinkingIndicator)
-                }
+            if StructuredSessionFeedProgressiveRevealPolicy.shouldShowThinkingIndicator(
+                in: feedPresentation,
+                visibleTailRowCount: structuredSessionFeedVisibleTailRowCount
+            ), let thinkingIndicator = feedPresentation.thinkingIndicator {
+                structuredSessionThinkingIndicatorView(thinkingIndicator)
             }
         }
     }

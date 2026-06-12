@@ -58,6 +58,8 @@ xcodebuildmcp macos test --project-path nexus.xcodeproj --scheme nexus \
 
 Simulator can rehearse navigation with the same env var, but **`xctrace` SwiftUI is not supported on Simulator** for this app—use a device for exported hitch tables.
 
+**iOS Remote Client feed startup (#225 parity):** `RemoteSessionScreenView` uses `StructuredSessionFeedProgressiveRevealPolicy` (3+3 tail-first row reveal), a flat `ForEach` over visible tail rows (no nested chunk `ForEach`), and `scrollPositionUsesBottomEdge: true` so `ScrollPosition(edge: .bottom)` does not redundantly `scrollToBottom` on appear or scroll-snapshot transitions.
+
 ## Export hitch metrics (`hitches` schemas)
 
 From a saved `.trace`:
