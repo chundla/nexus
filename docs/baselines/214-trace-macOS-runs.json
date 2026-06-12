@@ -1,5 +1,5 @@
 {
-  "note": "214.trace macOS SwiftUI profiling. Rates are frames/min from hitches-frame-lifetimes. Fixture: NEXUS_MAC_PROFILE_FIXTURE=structured-feed-profile. Post-capture workflow: docs/structured-session-instruments-harness.md (export_structured_session_trace_metrics.py + analyze_trace.py windows 0:30000 and 120000:400000). Sign-off: #224/#225 on GitHub. Full-bundle --toc may SIGSEGV; per-run --run is fine.",
+  "note": "214.trace macOS SwiftUI profiling. Rates are frames/min from hitches-frame-lifetimes. Fixture: NEXUS_MAC_PROFILE_FIXTURE=structured-feed-profile. Post-capture workflow: docs/structured-session-instruments-harness.md. Coupled macOS sign-off frozen at 224-225.trace run 12 (a756f22): #224 pass, #225 best-effort (~306/350 ms vs 296/333 run 4). Runs 13–16 documented for history. Full-bundle --toc may SIGSEGV; per-run --run is fine.",
   "trace": "214.trace",
   "runs": [
     {

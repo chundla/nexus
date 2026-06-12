@@ -341,19 +341,6 @@ public final class StructuredSessionMarkdownRenderer: @unchecked Sendable {
     }
 }
 
-#if os(macOS)
-/// macOS: cap attributed markdown deliveries per main-actor flush (#224 run 12 baseline).
-@MainActor
-public enum StructuredSessionMarkdownRowHydrationSchedulerMacOSDeliveryCapPolicy {
-    public static let maxDeliveriesPerMainActorFlush = 2
-}
-
-@MainActor
-enum StructuredSessionMarkdownRowHydrationSchedulerMacOSDeliveryCapOverride {
-    static var maxDeliveriesPerMainActorFlushForTesting: Int?
-}
-#endif
-
 /// Parses deferred row markdown off the main thread, then delivers on the main actor (#225).
 @available(macOS 12.0, iOS 15.0, *)
 public enum StructuredSessionMarkdownRowHydrationScheduler {
@@ -426,16 +413,12 @@ public enum StructuredSessionMarkdownRowHydrationScheduler {
 
     private static let queue = Queue()
 
-    @MainActor
-    private static func maxDeliveriesPerMainActorFlush() -> Int {
+    /// Limits SwiftUI row state updates per main-actor turn during bottom-edge first paint (#225).
+    private static var maxDeliveriesPerMainActorFlush: Int {
         #if os(macOS)
-        if let cap = StructuredSessionMarkdownRowHydrationSchedulerMacOSDeliveryCapOverride
-            .maxDeliveriesPerMainActorFlushForTesting {
-            return cap
-        }
-        return StructuredSessionMarkdownRowHydrationSchedulerMacOSDeliveryCapPolicy.maxDeliveriesPerMainActorFlush
+        2
         #else
-        return Int.max
+        Int.max
         #endif
     }
 
@@ -456,8 +439,7 @@ public enum StructuredSessionMarkdownRowHydrationScheduler {
 
     private static func drainUntilIdle() async {
         while true {
-            let deliveryCap = await maxDeliveriesPerMainActorFlush()
-            let batch = await queue.dequeueUpTo(deliveryCap)
+            let batch = await queue.dequeueUpTo(maxDeliveriesPerMainActorFlush)
             guard batch.isEmpty == false else {
                 _ = await queue.markIdleIfEmpty()
                 return
