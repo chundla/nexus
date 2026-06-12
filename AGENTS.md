@@ -127,3 +127,42 @@ Before exploring unfamiliar areas: read `CONTEXT.md` and relevant `docs/adr/` en
 - Concurrency fixes and reviews: `/skill:swift-concurrency-expert`
 - SwiftUI performance or Liquid Glass: relevant skills under `swiftui-*` when the task is UI-heavy
 - **Trace-gated SwiftUI perf** (Instruments / hitch acceptance): `docs/agents/swiftui-trace-diagnosis-loop.md` — not the default **tdd** subagent
+
+### iOS device: structured-feed trace + mirroir (gotchas)
+
+Full harness: `docs/structured-session-instruments-harness.md`. Parser RAM / lanes: **swiftui-expert-skill** `references/trace-analysis.md`.
+
+**Fixture on device** — `NEXUS_REMOTE_CLIENT_FIXTURE=streaming-feed-profile` must be set when the app **starts** (not mid-attach):
+
+```bash
+xcodebuildmcp device build-and-run --project-path nexus.xcodeproj --scheme nexus \
+  --device-id <UDID> --json '{"env":{"NEXUS_REMOTE_CLIENT_FIXTURE":"streaming-feed-profile"}}'
+```
+
+`xctrace --env` applies only to **`--launch`**, not **`--attach`**. Relaunch with env if the feed looks like production, not profiling fixture.
+
+**Recording (physical iPhone, SwiftUI template)**
+
+- **Do not** `xctrace --launch` a Mac-path `.app` from XcodeBuildMCP DerivedData for device — launch fails (`FBSApplicationLibrary` nil). Use **attach** to an already-installed app.
+- **One** `xctrace record` at a time: `pkill -f 'xctrace record'` (and close Xcode Instruments) before starting; otherwise **`_lockKPerf`** → ~1s or empty traces (“Missing Template”, not analyzable).
+- Do **not** start a second `record_trace.py` in the background while another attach is running.
+- Attach target name on device is typically **`Nexus`**; device **`IBMiPhoneski`** (or UDID from `record_trace.py --list-devices` / `xcodebuildmcp device list`).
+
+```bash
+pkill -f 'xctrace record'; sleep 3
+python3 "$HOME/.pi/agent/skills/swiftui-expert-skill/scripts/record_trace.py" \
+  --device IBMiPhoneski --attach Nexus --time-limit 60s \
+  --output traces/ios-post-fix.trace
+```
+
+**During record:** mirroir — Baseline API → Pi → Open conversation → ~8s settle → scroll up → scroll back to bottom (scroll hitch repro). **`~/.mirroir-mcp/permissions.json`** must allow `tap`/`swipe`; restart mirroir MCP after creating/editing it (default is fail-closed, read-only tools only).
+
+**Analyze** — reject traces with `duration_s` ≪ 60 or export “Missing Template”. Prefer phased parse:
+
+```bash
+python3 "$HOME/.pi/agent/skills/swiftui-expert-skill/scripts/analyze_trace.py" \
+  --trace traces/ios-post-fix.trace \
+  --lanes hitches,hangs,swiftui,swiftui-causes --no-correlate --json-only
+```
+
+**Window intent:** **0–30s** = startup (#225); **~45–60s** with nav ending in scroll-to-bottom = scroll hitch repro; **5–7 min** = harness sign-off (#224 steady window).
