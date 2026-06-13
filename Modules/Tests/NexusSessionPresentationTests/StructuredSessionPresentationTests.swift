@@ -1925,6 +1925,14 @@ struct StructuredSessionPresentationTests {
         #expect(policy.showFullResponseTitle == structuredSessionFeedAssistantMarkdownShowFullResponseTitle)
     }
 
+    @Test func structuredSessionAssistantFullResponsePresentationCarriesRowIDAndMarkdown() {
+        let rowID = UUID()
+        let markdown = "## Heading\n\n- one\n- two\n\n```swift\nlet x = 1\n```"
+        let presentation = structuredSessionAssistantFullResponsePresentation(rowID: rowID, markdown: markdown)
+        #expect(presentation.id == rowID)
+        #expect(presentation.markdown == markdown)
+    }
+
     @Test func structuredSessionFeedAssistantMarkdownBoundedPreviewTextTruncatesBeforeMarkdownParse() {
         let short = structuredSessionFeedAssistantMarkdownBoundedPreviewText(for: "Done.")
         #expect(short == "Done.")

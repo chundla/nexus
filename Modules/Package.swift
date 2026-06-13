@@ -4,8 +4,8 @@ import PackageDescription
 let package = Package(
     name: "Modules",
     platforms: [
-        .macOS(.v10_15),
-        .iOS(.v13)
+        .macOS(.v12),
+        .iOS(.v15)
     ],
     products: [
         .library(
@@ -29,6 +29,9 @@ let package = Package(
             targets: ["NexusService"]
         )
     ],
+    dependencies: [
+        .package(url: "https://github.com/gonzalezreal/swift-markdown-ui", from: "2.4.1")
+    ],
     targets: [
         .target(
             name: "NexusDomain"
@@ -39,7 +42,10 @@ let package = Package(
         ),
         .target(
             name: "NexusSessionPresentation",
-            dependencies: ["NexusDomain"]
+            dependencies: [
+                "NexusDomain",
+                .product(name: "MarkdownUI", package: "swift-markdown-ui")
+            ]
         ),
         .target(
             name: "NexusService",

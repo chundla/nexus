@@ -1440,7 +1440,7 @@ private struct RemoteSessionScreenView: View {
     @State private var structuredSessionFeedScrollSnapshot: StructuredSessionFeedScrollSnapshot?
     @State private var structuredSessionFeedScrollPosition = ScrollPosition(edge: .bottom)
     @State private var structuredSessionFeedVisibleTailRowCount = 0
-    @State private var expandedStructuredSessionAssistantResponseRowIDs: Set<UUID> = []
+    @State private var presentedStructuredSessionAssistantFullResponse: StructuredSessionAssistantFullResponsePresentation?
     @FocusState private var isStructuredPromptFocused: Bool
     @FocusState private var isTerminalInputFocused: Bool
 
@@ -1496,13 +1496,6 @@ private struct RemoteSessionScreenView: View {
             for: structuredChromePresentation,
             hasWriterAuthority: model.focusedSessionIsController
         )
-    }
-
-    private var latestFinalizedAssistantRowID: UUID? {
-        guard let structuredFeedPresentation else {
-            return nil
-        }
-        return structuredSessionLatestFinalizedAssistantActivityRowID(in: structuredFeedPresentation.activityRows)
     }
 
     private var structuredSendAffordance: StructuredSessionComposerSendAffordance? {
@@ -2159,7 +2152,7 @@ private struct RemoteSessionScreenView: View {
                 .onChange(of: presentation.session.id) { _, _ in
                     structuredSessionPinState = StructuredSessionFeedPinState()
                     structuredSessionFeedScrollSnapshot = nil
-                    expandedStructuredSessionAssistantResponseRowIDs = []
+                    presentedStructuredSessionAssistantFullResponse = nil
                     structuredSessionFeedVisibleTailRowCount = 0
                     structuredSessionScheduleFeedActivityRowsIfNeeded()
                 }
@@ -2181,6 +2174,20 @@ private struct RemoteSessionScreenView: View {
                             scrollPositionUsesBottomEdge: true
                         )
                 }
+        }
+        .sheet(item: $presentedStructuredSessionAssistantFullResponse) { presentation in
+            NavigationStack {
+                StructuredSessionAssistantFullResponseReader(markdown: presentation.markdown)
+                    .navigationTitle("Assistant response")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Done") {
+                                presentedStructuredSessionAssistantFullResponse = nil
+                            }
+                        }
+                    }
+            }
         }
     }
 
@@ -2526,15 +2533,7 @@ private struct RemoteSessionScreenView: View {
                 for: conversation.text,
                 charactersPerLine: 56
             )
-            let isExplicitlyExpanded = expandedStructuredSessionAssistantResponseRowIDs.contains(rowID)
-            let isLatestFinalizedAssistantRow = latestFinalizedAssistantRowID == rowID
-            let showsFullResponse = isExplicitlyExpanded || isLatestFinalizedAssistantRow
-            let prefersPlainText = structuredSessionFeedAssistantAutoExpandedLatestResponsePrefersPlainText(
-                policy: policy,
-                isLatestFinalizedAssistantRow: isLatestFinalizedAssistantRow,
-                isExplicitlyExpanded: isExplicitlyExpanded
-            )
-            if policy.showsCollapsedPreview, showsFullResponse == false {
+            if policy.showsCollapsedPreview {
                 let previewMarkdown = structuredSessionFeedAssistantMarkdownBoundedPreviewText(for: conversation.text)
                 VStack(alignment: .leading, spacing: 8) {
                     structuredSessionMarkdownText(previewMarkdown, font: font, color: color)
@@ -2551,17 +2550,15 @@ private struct RemoteSessionScreenView: View {
                         .foregroundStyle(NexusIOSTheme.mutedText)
 
                     Button(policy.showFullResponseTitle) {
-                        expandedStructuredSessionAssistantResponseRowIDs.insert(rowID)
+                        presentedStructuredSessionAssistantFullResponse = structuredSessionAssistantFullResponsePresentation(
+                            rowID: rowID,
+                            markdown: conversation.text
+                        )
                     }
                     .buttonStyle(.plain)
                     .font(NexusIOSTheme.bodyFont(11, relativeTo: .caption, weight: .medium))
                     .foregroundStyle(NexusIOSTheme.gold)
                 }
-            } else if prefersPlainText {
-                Text(verbatim: conversation.text)
-                    .font(font)
-                    .foregroundStyle(color)
-                    .structuredSessionFeedTextSelection()
             } else {
                 structuredSessionMarkdownText(conversation.text, font: font, color: color)
             }

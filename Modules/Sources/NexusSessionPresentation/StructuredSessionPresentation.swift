@@ -2529,8 +2529,26 @@ public let structuredSessionFeedAssistantMarkdownPreviewLineLimit = 18
 /// Footnote shown under bounded finalized assistant markdown in the structured feed.
 public let structuredSessionFeedAssistantMarkdownCollapsedFootnote = "Long response preview truncated for smooth scrolling."
 
-/// Action label that expands a bounded finalized assistant response to full markdown in the feed.
+/// Action label that opens the dedicated full-response reader for a bounded finalized assistant row.
 public let structuredSessionFeedAssistantMarkdownShowFullResponseTitle = "Show full response"
+
+/// Payload for presenting the MarkdownUI-backed assistant full-response reader (#226).
+public struct StructuredSessionAssistantFullResponsePresentation: Equatable, Identifiable, Sendable {
+    public let id: UUID
+    public let markdown: String
+
+    public init(id: UUID, markdown: String) {
+        self.id = id
+        self.markdown = markdown
+    }
+}
+
+public func structuredSessionAssistantFullResponsePresentation(
+    rowID: UUID,
+    markdown: String
+) -> StructuredSessionAssistantFullResponsePresentation {
+    StructuredSessionAssistantFullResponsePresentation(id: rowID, markdown: markdown)
+}
 
 public struct StructuredSessionFeedAssistantMarkdownDisplayPolicy: Equatable {
     public let showsCollapsedPreview: Bool

@@ -44,16 +44,9 @@ struct ContentView: View {
     @State private var structuredSessionFeedScrollSnapshot: StructuredSessionFeedScrollSnapshot?
     @State private var structuredSessionFeedScrollPosition = ScrollPosition(edge: .bottom)
     @State private var structuredSessionMacOSFeedVisibleTailRowCount = 0
-    @State private var expandedStructuredSessionAssistantResponseRowIDs: Set<UUID> = []
+    @State private var presentedStructuredSessionAssistantFullResponse: StructuredSessionAssistantFullResponsePresentation?
 
     private let terminalLayout = TerminalViewportLayout.live
-
-    private var latestFinalizedAssistantRowID: UUID? {
-        guard let feedPresentation = appModel.focusedStructuredSessionPresentation?.feed else {
-            return nil
-        }
-        return structuredSessionLatestFinalizedAssistantActivityRowID(in: feedPresentation.activityRows)
-    }
 
     var body: some View {
         ZStack {
@@ -1582,7 +1575,7 @@ struct ContentView: View {
                     .onChange(of: structuredPresentation.session.id) { _, _ in
                         structuredSessionPinState = StructuredSessionFeedPinState()
                         structuredSessionFeedScrollSnapshot = nil
-                        expandedStructuredSessionAssistantResponseRowIDs = []
+                        presentedStructuredSessionAssistantFullResponse = nil
                         structuredSessionMacOSFeedVisibleTailRowCount = 0
                         structuredSessionScheduleMacOSFeedActivityRowsIfNeeded()
                     }
@@ -1620,6 +1613,20 @@ struct ContentView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .nexusPanel(tint: NexusMacTheme.teal, radius: 22)
+            .sheet(item: $presentedStructuredSessionAssistantFullResponse) { presentation in
+                NavigationStack {
+                    StructuredSessionAssistantFullResponseReader(markdown: presentation.markdown)
+                        .navigationTitle("Assistant response")
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button("Done") {
+                                    presentedStructuredSessionAssistantFullResponse = nil
+                                }
+                            }
+                        }
+                }
+                .frame(minWidth: 520, minHeight: 420)
+            }
         } else {
             ContentUnavailableView(
                 "Session unavailable",
@@ -1910,9 +1917,7 @@ struct ContentView: View {
                 for: conversation.text,
                 charactersPerLine: 72
             )
-            let showsFullResponse = expandedStructuredSessionAssistantResponseRowIDs.contains(rowID)
-                || latestFinalizedAssistantRowID == rowID
-            if policy.showsCollapsedPreview, showsFullResponse == false {
+            if policy.showsCollapsedPreview {
                 let previewMarkdown = structuredSessionFeedAssistantMarkdownBoundedPreviewText(for: conversation.text)
                 VStack(alignment: .leading, spacing: 8) {
                     structuredSessionMarkdownText(previewMarkdown, font: font, color: color)
@@ -1929,7 +1934,10 @@ struct ContentView: View {
                         .foregroundStyle(NexusMacTheme.mutedText)
 
                     Button(policy.showFullResponseTitle) {
-                        expandedStructuredSessionAssistantResponseRowIDs.insert(rowID)
+                        presentedStructuredSessionAssistantFullResponse = structuredSessionAssistantFullResponsePresentation(
+                            rowID: rowID,
+                            markdown: conversation.text
+                        )
                     }
                     .buttonStyle(.plain)
                     .font(NexusMacTheme.bodyFont(11, relativeTo: .caption).weight(.medium))
