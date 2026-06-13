@@ -1498,7 +1498,7 @@ private struct RemoteSessionScreenView: View {
         return structuredSessionLatestFinalizedAssistantActivityRowID(in: structuredFeedPresentation.activityRows)
     }
 
-    private var structuredSessionFeedTailIsStableForInlineMarkdown: Bool {
+    private var isStructuredSessionFeedTailStableForInlineMarkdown: Bool {
         guard let structuredPresentation else {
             return false
         }
@@ -2576,7 +2576,7 @@ private struct RemoteSessionScreenView: View {
             let allowsInlineMarkdownHydration = structuredSessionFeedAllowsLatestAssistantInlineMarkdownHydration(
                 prefersPlainTextInitialRender: prefersPlainText,
                 feedReaderIsScrollIdle: structuredSessionFeedScrollIsIdle,
-                feedTailIsStableForInlineMarkdown: structuredSessionFeedTailIsStableForInlineMarkdown
+                feedTailIsStableForInlineMarkdown: isStructuredSessionFeedTailStableForInlineMarkdown
             )
             if policy.showsCollapsedPreview, isLatestFinalizedAssistantRow == false {
                 let previewMarkdown = structuredSessionFeedAssistantMarkdownBoundedPreviewText(for: conversation.text)
