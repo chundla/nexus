@@ -193,7 +193,7 @@ Re-profile with the full harness (~5–7 min), then complete **Windowed analysis
 Code-side mitigations (automated guardrails + macOS `ContentView`):
 
 - `structuredSessionDetailTextPreview` still bounds row `detailText` at build time (12 lines / 4k chars).
-- The latest finalized assistant response renders in full by default; older long finalized assistant rows use `structuredSessionFeedAssistantMarkdownDisplayPolicy` with a fixed **200 pt** viewport unless expanded.
+- The latest finalized assistant response renders in full by default; on iPhone, long auto-expanded latest responses stay full plain text to avoid full markdown layout on the hot path. Older long finalized assistant rows use `structuredSessionFeedAssistantMarkdownDisplayPolicy` with a fixed **200 pt** viewport unless expanded.
 - System-card markdown `detailText` uses the same bounded viewport as command detail previews.
 - Presentation tests: `structuredSessionFeedAssistantMarkdownDisplayPolicyBoundsLongFinalizedResponses` plus existing collapse/detail-preview tests.
 

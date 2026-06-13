@@ -2018,6 +2018,45 @@ struct StructuredSessionPresentationTests {
         #expect(structuredSessionLatestFinalizedAssistantActivityRowID(in: rows) == latestAssistantID)
     }
 
+    @Test func structuredSessionFeedAssistantAutoExpandedLatestResponsePrefersPlainTextOnlyForImplicitLatestExpansion() {
+        let longResponsePolicy = StructuredSessionFeedAssistantMarkdownDisplayPolicy(
+            showsCollapsedPreview: true,
+            previewLineLimit: structuredSessionFeedAssistantMarkdownPreviewLineLimit
+        )
+
+        #expect(
+            structuredSessionFeedAssistantAutoExpandedLatestResponsePrefersPlainText(
+                policy: longResponsePolicy,
+                isLatestFinalizedAssistantRow: true,
+                isExplicitlyExpanded: false
+            )
+        )
+        #expect(
+            structuredSessionFeedAssistantAutoExpandedLatestResponsePrefersPlainText(
+                policy: longResponsePolicy,
+                isLatestFinalizedAssistantRow: true,
+                isExplicitlyExpanded: true
+            ) == false
+        )
+        #expect(
+            structuredSessionFeedAssistantAutoExpandedLatestResponsePrefersPlainText(
+                policy: longResponsePolicy,
+                isLatestFinalizedAssistantRow: false,
+                isExplicitlyExpanded: false
+            ) == false
+        )
+        #expect(
+            structuredSessionFeedAssistantAutoExpandedLatestResponsePrefersPlainText(
+                policy: StructuredSessionFeedAssistantMarkdownDisplayPolicy(
+                    showsCollapsedPreview: false,
+                    previewLineLimit: structuredSessionFeedAssistantMarkdownPreviewLineLimit
+                ),
+                isLatestFinalizedAssistantRow: true,
+                isExplicitlyExpanded: false
+            ) == false
+        )
+    }
+
     // MARK: - Feed scroll policy (#211)
 
     @Test func structuredSessionFeedScrollTargetUsesLiveDraftRowWhileStreaming() throws {

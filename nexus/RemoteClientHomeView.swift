@@ -2526,8 +2526,14 @@ private struct RemoteSessionScreenView: View {
                 for: conversation.text,
                 charactersPerLine: 56
             )
-            let showsFullResponse = expandedStructuredSessionAssistantResponseRowIDs.contains(rowID)
-                || latestFinalizedAssistantRowID == rowID
+            let isExplicitlyExpanded = expandedStructuredSessionAssistantResponseRowIDs.contains(rowID)
+            let isLatestFinalizedAssistantRow = latestFinalizedAssistantRowID == rowID
+            let showsFullResponse = isExplicitlyExpanded || isLatestFinalizedAssistantRow
+            let prefersPlainText = structuredSessionFeedAssistantAutoExpandedLatestResponsePrefersPlainText(
+                policy: policy,
+                isLatestFinalizedAssistantRow: isLatestFinalizedAssistantRow,
+                isExplicitlyExpanded: isExplicitlyExpanded
+            )
             if policy.showsCollapsedPreview, showsFullResponse == false {
                 let previewMarkdown = structuredSessionFeedAssistantMarkdownBoundedPreviewText(for: conversation.text)
                 VStack(alignment: .leading, spacing: 8) {
@@ -2551,6 +2557,11 @@ private struct RemoteSessionScreenView: View {
                     .font(NexusIOSTheme.bodyFont(11, relativeTo: .caption, weight: .medium))
                     .foregroundStyle(NexusIOSTheme.gold)
                 }
+            } else if prefersPlainText {
+                Text(verbatim: conversation.text)
+                    .font(font)
+                    .foregroundStyle(color)
+                    .structuredSessionFeedTextSelection()
             } else {
                 structuredSessionMarkdownText(conversation.text, font: font, color: color)
             }

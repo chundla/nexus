@@ -2581,6 +2581,15 @@ public func structuredSessionLatestFinalizedAssistantActivityRowID(
     return nil
 }
 
+/// Keeps the latest long finalized assistant response fully readable without immediately paying full markdown layout cost.
+public func structuredSessionFeedAssistantAutoExpandedLatestResponsePrefersPlainText(
+    policy: StructuredSessionFeedAssistantMarkdownDisplayPolicy,
+    isLatestFinalizedAssistantRow: Bool,
+    isExplicitlyExpanded: Bool
+) -> Bool {
+    policy.showsCollapsedPreview && isLatestFinalizedAssistantRow && isExplicitlyExpanded == false
+}
+
 /// Trims assistant markdown before bounded preview layout so first paint does not parse or typeset the full body (#225).
 public func structuredSessionFeedAssistantMarkdownBoundedPreviewText(
     for text: String,
