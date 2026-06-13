@@ -108,7 +108,6 @@ extension SessionRecordAdapterMetadata {
 
 private enum PiMetadataActivityItemCompaction {
     static let maxEncodedJSONCharacters = 20_000
-    static let maxPerItemTextCharacters = 4_096
     static let maxPerPromptTextCharacters = 2_048
 }
 
@@ -137,7 +136,7 @@ private func compactedPiMetadataActivityItem(_ item: SessionActivityItem) -> Ses
     return SessionActivityItem(
         id: item.id,
         kind: item.kind,
-        text: truncatedPiMetadataText(item.text, limit: PiMetadataActivityItemCompaction.maxPerItemTextCharacters),
+        text: item.text,
         detailText: nil,
         prompt: prompt
     )
@@ -147,7 +146,7 @@ private func truncatedPiMetadataActivityItem(_ item: SessionActivityItem) -> Ses
     SessionActivityItem(
         id: item.id,
         kind: item.kind,
-        text: truncatedPiMetadataText(item.text, limit: PiMetadataActivityItemCompaction.maxEncodedJSONCharacters / 2),
+        text: item.text,
         detailText: nil,
         prompt: compactedPiMetadataPrompt(item.prompt, limit: PiMetadataActivityItemCompaction.maxEncodedJSONCharacters / 4)
     )

@@ -130,6 +130,8 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     private var isStreaming = false
     private var assistantTranscriptIndex: Int?
     private var currentAssistantText = ""
+    /// Full assistant body accumulated from `text_delta` for the active turn (not subject to transcript trimming).
+    private var liveStreamedAssistantText = ""
     private var lastAssistantStopReason: String?
     private var toolOutputByCallID: [String: String] = [:]
     private var toolNamesByCallID: [String: String] = [:]
@@ -613,6 +615,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             isStreaming = true
             assistantTranscriptIndex = nil
             currentAssistantText = ""
+            liveStreamedAssistantText = ""
             lastAssistantStopReason = nil
         }
         draft = ""
@@ -1711,6 +1714,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
 
             lock.lock()
             currentAssistantText += delta
+            liveStreamedAssistantText += delta
             ensureAssistantTranscriptEntryLocked()
             if let assistantTranscriptIndex {
                 transcriptEntries[assistantTranscriptIndex] = currentAssistantText
@@ -1745,7 +1749,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             return
         }
 
-        let finalText = assistantText(from: message)
+        let finalText = resolvedPiAssistantFinalText(from: message)
         let errorText = trimmedString(for: "errorMessage", in: message)
             ?? (stopReason == "aborted" ? "Operation aborted" : "Error")
 
@@ -1759,6 +1763,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             appendActivityItemLocked(SessionActivityItem(kind: .message, text: "Pi: \(finalText)"))
         }
         currentAssistantText = ""
+        liveStreamedAssistantText = ""
         assistantTranscriptIndex = nil
         toolOutputByCallID.removeAll()
         toolNamesByCallID.removeAll()
@@ -1867,10 +1872,10 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
 
     private func handleTurnEnd(_ object: [String: Any]) {
         let startedAt = DispatchTime.now().uptimeNanoseconds
-        let resolvedText = assistantText(from: object["message"] as? [String: Any])
+        let message = object["message"] as? [String: Any]
 
         lock.lock()
-        let finalText = resolvedText.isEmpty ? currentAssistantText : resolvedText
+        let finalText = resolvedPiAssistantFinalText(from: message)
         if finalText.isEmpty == false {
             ensureAssistantTranscriptEntryLocked()
             if let assistantTranscriptIndex {
@@ -1887,6 +1892,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             )
         }
         currentAssistantText = ""
+        liveStreamedAssistantText = ""
         assistantTranscriptIndex = nil
         toolOutputByCallID.removeAll()
         toolNamesByCallID.removeAll()
@@ -3348,6 +3354,24 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
                 return string(for: "text", in: block)
             }
             .joined()
+    }
+
+    /// Pi `turn_end` / `message_end` payloads are sometimes shorter than streamed `text_delta` text.
+    /// Prefer the longest non-empty body so the structured feed activity row matches what the user saw stream.
+    private func resolvedPiAssistantFinalText(from message: [String: Any]?) -> String {
+        let fromMessage = assistantText(from: message).trimmingCharacters(in: .whitespacesAndNewlines)
+        var candidates = [
+            fromMessage,
+            liveStreamedAssistantText.trimmingCharacters(in: .whitespacesAndNewlines),
+            currentAssistantText.trimmingCharacters(in: .whitespacesAndNewlines)
+        ]
+        if let assistantTranscriptIndex,
+           transcriptEntries.indices.contains(assistantTranscriptIndex) {
+            candidates.append(
+                transcriptEntries[assistantTranscriptIndex].trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+        }
+        return candidates.max(by: { $0.count < $1.count }) ?? ""
     }
 
     private func sessionMessageSummary(_ message: [String: Any], index: Int) -> String {

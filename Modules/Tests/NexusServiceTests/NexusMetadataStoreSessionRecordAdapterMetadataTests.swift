@@ -85,6 +85,22 @@ struct NexusMetadataStoreSessionRecordAdapterMetadataTests {
         #expect(storedMetadata.piPersistedProviderEvents?.map(\.type) == ["extension_ui_request"])
     }
 
+    @Test func longPiAssistantMessageTextIsNotTruncatedAtFourKWhenMetadataFitsBudget() throws {
+        let longAnswer = "Pi: " + String(repeating: "x", count: 5_000)
+        let activityItems = [SessionActivityItem(kind: .message, text: longAnswer)]
+        let metadata = try #require(
+            SessionRecordAdapterMetadata.pi(
+                linkage: PiSessionLinkage(piSessionID: "pi-session-1", sessionFile: "/tmp/pi-session-1.jsonl"),
+                activityItems: activityItems
+            )
+        )
+        let persisted = try #require(metadata.piPersistedActivityItems)
+
+        #expect(persisted.count == 1)
+        #expect(persisted[0].text == longAnswer)
+        #expect(persisted[0].text.hasSuffix("…") == false)
+    }
+
     @Test func oversizedPiActivityItemsAreCompactedBeforeMetadataPersistence() throws {
         let oversizedDetail = String(repeating: "oversized-command-output-", count: 1_024)
         let oversizedImageData = Data(repeating: 0xAB, count: 8_192)

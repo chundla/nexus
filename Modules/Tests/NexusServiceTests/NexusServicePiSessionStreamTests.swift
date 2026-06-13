@@ -1208,6 +1208,50 @@ struct NexusServicePiSessionStreamTests {
         #expect(screen.activityItems.allSatisfy { $0.text.contains("Session stats —") == false && $0.text.contains("Context usage —") == false })
     }
 
+    @Test func localPiRuntimeTurnEndPrefersLongerStreamedAssistantTextOverShorterTurnEndMessage() throws {
+        let transport = PromptEventPiRPCTransport(promptEvents: [
+            ["type": "agent_start", "agent": "pi"],
+            [
+                "type": "message_update",
+                "assistantMessageEvent": [
+                    "type": "text_delta",
+                    "delta": "ABCDEFGHIJ"
+                ]
+            ],
+            [
+                "type": "turn_end",
+                "message": [
+                    "content": [
+                        [
+                            "type": "text",
+                            "text": "ABC"
+                        ]
+                    ]
+                ]
+            ]
+        ])
+        let runtime = try PiRPCSessionRuntime(
+            executable: "/tmp/fake-pi",
+            workingDirectory: "/tmp",
+            terminationStatusMessageBuilder: { _ in "" },
+            transportFactory: { _, _, _ in transport }
+        )
+
+        let session = Session(
+            id: UUID(),
+            workspaceID: UUID(),
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+
+        try runtime.sendInput("hello")
+        let screen = runtime.sessionScreen(for: session)
+        let piMessage = try #require(screen.activityItems.last(where: { $0.text.hasPrefix("Pi:") }))
+
+        #expect(piMessage.text == "Pi: ABCDEFGHIJ")
+    }
+
     @Test func localPiRuntimePublishesLiveAssistantDraftProviderFactsDuringStreamingTurns() throws {
         let transport = PromptEventPiRPCTransport(promptEvents: [
             ["type": "agent_start", "agent": "pi"],
