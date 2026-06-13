@@ -147,6 +147,7 @@ xcodebuildmcp device build-and-run --project-path nexus.xcodeproj --scheme nexus
 - **One** `xctrace record` at a time: `pkill -f 'xctrace record'` (and close Xcode Instruments) before starting; otherwise **`_lockKPerf`** → ~1s or empty traces (“Missing Template”, not analyzable).
 - Do **not** start a second `record_trace.py` in the background while another attach is running.
 - Attach target name on device is typically **`Nexus`**; device **`IBMiPhoneski`** (or UDID from `record_trace.py --list-devices` / `xcodebuildmcp device list`).
+- After a **`--time-limit`** capture ends, **do not kill `xctrace` early**. Finalisation can take **~2 minutes** on device SwiftUI traces. Wait for `record_trace.py` to print `done. trace written:` and verify `xcrun xctrace export --toc` works before assuming the trace is usable.
 
 ```bash
 pkill -f 'xctrace record'; sleep 3
