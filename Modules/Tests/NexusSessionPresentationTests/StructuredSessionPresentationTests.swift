@@ -1911,7 +1911,7 @@ struct StructuredSessionPresentationTests {
         #expect(structuredSessionShouldCollapseDetailPreview(detailLong, charactersPerLine: 60) == true)
     }
 
-    @Test func structuredSessionFeedAssistantMarkdownDisplayPolicyNeverBoundsFinalizedResponses() {
+    @Test func structuredSessionFeedAssistantMarkdownDisplayPolicyBoundsLongFinalizedResponses() {
         let short = structuredSessionFeedAssistantMarkdownDisplayPolicy(for: "Done.", charactersPerLine: 72)
         #expect(short == StructuredSessionFeedAssistantMarkdownDisplayPolicy(
             showsCollapsedPreview: false,
@@ -1920,8 +1920,9 @@ struct StructuredSessionPresentationTests {
 
         let long = (0 ..< 20).map { _ in String(repeating: "a", count: 70) }.joined(separator: "\n")
         let policy = structuredSessionFeedAssistantMarkdownDisplayPolicy(for: long, charactersPerLine: 72)
-        #expect(policy.showsCollapsedPreview == false)
-        #expect(policy.previewLineLimit == structuredSessionFeedAssistantMarkdownPreviewLineLimit)
+        #expect(policy.showsCollapsedPreview)
+        #expect(policy.previewLineLimit == 18)
+        #expect(policy.showFullResponseTitle == structuredSessionFeedAssistantMarkdownShowFullResponseTitle)
     }
 
     @Test func structuredSessionFeedAssistantMarkdownBoundedPreviewTextTruncatesBeforeMarkdownParse() {
@@ -1934,7 +1935,7 @@ struct StructuredSessionPresentationTests {
         #expect(bounded.count < long.count)
     }
 
-    @Test func structuredSessionFeedPresenterFinalizeKeepsNonEmptyAssistantBodyForLongResponses() throws {
+    @Test func structuredSessionFeedPresenterFinalizeKeepsNonEmptyAssistantBodyWhenLongResponseUsesBoundedPreview() throws {
         let session = Session(
             id: UUID(),
             workspaceID: UUID(),
@@ -1969,12 +1970,11 @@ struct StructuredSessionPresentationTests {
         let conversation = try #require(finalizedRow.conversationPresentation)
         #expect(conversation.isStreaming == false)
         #expect(conversation.text.isEmpty == false)
-        #expect(conversation.text == longBody)
         let policy = structuredSessionFeedAssistantMarkdownDisplayPolicy(for: conversation.text, charactersPerLine: 72)
-        #expect(policy.showsCollapsedPreview == false)
+        #expect(policy.showsCollapsedPreview)
 
         let iosPolicy = structuredSessionFeedAssistantMarkdownDisplayPolicy(for: conversation.text, charactersPerLine: 56)
-        #expect(iosPolicy.showsCollapsedPreview == false)
+        #expect(iosPolicy.showsCollapsedPreview)
     }
 
     // MARK: - Feed scroll policy (#211)
