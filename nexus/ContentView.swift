@@ -1798,12 +1798,10 @@ struct ContentView: View {
                             .structuredSessionFeedTextSelection()
                             .fixedSize(horizontal: false, vertical: true)
                         if let detailText = row.detailText {
-                            structuredSessionSystemDetailMarkdownView(
+                            structuredSessionDetailTextView(
                                 detailText,
                                 isTruncated: row.isDetailTextTruncated,
-                                font: NexusMacTheme.bodyFont(13),
-                                color: .white.opacity(0.92),
-                                charactersPerLine: 84
+                                font: NexusMacTheme.monoFont(11, relativeTo: .callout)
                             )
                         }
                     }
@@ -1825,45 +1823,6 @@ struct ContentView: View {
 
     private func structuredSessionMarkdownText(_ text: String, font: Font, color: Color) -> some View {
         StructuredSessionMarkdownText(markdown: text, font: font, color: color)
-    }
-
-    @ViewBuilder
-    private func structuredSessionSystemDetailMarkdownView(
-        _ text: String,
-        isTruncated: Bool,
-        font: Font,
-        color: Color,
-        charactersPerLine: Int
-    ) -> some View {
-        let showsCollapsedPreview = structuredSessionShouldCollapseDetailPreview(
-            text,
-            charactersPerLine: charactersPerLine
-        )
-
-        VStack(alignment: .leading, spacing: 8) {
-            Group {
-                if showsCollapsedPreview {
-                    structuredSessionMarkdownText(text, font: font, color: color)
-                        .frame(
-                            height: structuredSessionFeedCollapsedDetailViewportHeight,
-                            alignment: .top
-                        )
-                        .clipped()
-                } else {
-                    structuredSessionMarkdownText(text, font: font, color: color)
-                }
-            }
-
-            if isTruncated {
-                Text("Output preview truncated for smooth scrolling.")
-                    .font(NexusMacTheme.bodyFont(10, relativeTo: .caption))
-                    .foregroundStyle(NexusMacTheme.mutedText)
-            } else if showsCollapsedPreview {
-                Text("Long output preview truncated for smooth scrolling.")
-                    .font(NexusMacTheme.bodyFont(10, relativeTo: .caption))
-                    .foregroundStyle(NexusMacTheme.mutedText)
-            }
-        }
     }
 
     @ViewBuilder

@@ -2446,17 +2446,11 @@ private struct RemoteSessionScreenView: View {
                             .structuredSessionFeedTextSelection()
                             .fixedSize(horizontal: false, vertical: true)
                         if let detailText = row.detailText {
-                            structuredSessionMarkdownText(
+                            structuredSessionDetailTextView(
                                 detailText,
-                                font: NexusIOSTheme.bodyFont(14),
-                                color: .white.opacity(0.92)
+                                isTruncated: row.isDetailTextTruncated,
+                                font: NexusIOSTheme.monoFont(12, relativeTo: .callout)
                             )
-
-                            if row.isDetailTextTruncated {
-                                Text("Output preview truncated for smoother scrolling.")
-                                    .font(NexusIOSTheme.bodyFont(11, relativeTo: .caption))
-                                    .foregroundStyle(NexusIOSTheme.mutedText)
-                            }
                         }
                     }
                     .padding(14)

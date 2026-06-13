@@ -1933,6 +1933,61 @@ struct StructuredSessionPresentationTests {
         #expect(presentation.markdown == markdown)
     }
 
+    @Test func structuredSessionFeedMarkdownParsingIsAssistantOnly() {
+        let assistant = StructuredSessionConversationPresentation(
+            role: .assistant(label: "Pi"),
+            text: "**bold**"
+        )
+        let user = StructuredSessionConversationPresentation(role: .user, text: "**bold**")
+        let command = StructuredSessionConversationPresentation(role: .command, text: "**bold**")
+        let error = StructuredSessionConversationPresentation(role: .error, text: "**bold**")
+        let system = StructuredSessionConversationPresentation(role: .system, text: "**bold**")
+
+        #expect(structuredSessionFeedConversationTextUsesMarkdownParsing(for: assistant))
+        #expect(structuredSessionFeedConversationTextUsesMarkdownParsing(for: user) == false)
+        #expect(structuredSessionFeedConversationTextUsesMarkdownParsing(for: command) == false)
+        #expect(structuredSessionFeedConversationTextUsesMarkdownParsing(for: error) == false)
+        #expect(structuredSessionFeedConversationTextUsesMarkdownParsing(for: system) == false)
+    }
+
+    @Test func structuredSessionConversationPresentationMarksCommandAndSystemRowsAsNonMarkdown() {
+        let screen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            ),
+            primarySurface: .structuredActivityFeed,
+            transcript: ""
+        )
+        let commandRow = StructuredSessionActivityRow(
+            id: UUID(),
+            title: "Command",
+            systemImage: "terminal",
+            text: "git status",
+            detailText: "**modified** file.swift",
+            emphasis: .neutral
+        )
+        let statusRow = StructuredSessionActivityRow(
+            id: UUID(),
+            title: "Status",
+            systemImage: "dot.radiowaves.left.and.right",
+            text: "Connected",
+            detailText: "# heading",
+            emphasis: .neutral
+        )
+
+        let commandConversation = structuredSessionConversationPresentation(for: commandRow, screen: screen)
+        let statusConversation = structuredSessionConversationPresentation(for: statusRow, screen: screen)
+
+        #expect(commandConversation.role == .command)
+        #expect(statusConversation.role == .system)
+        #expect(structuredSessionFeedConversationTextUsesMarkdownParsing(for: commandConversation) == false)
+        #expect(structuredSessionFeedConversationTextUsesMarkdownParsing(for: statusConversation) == false)
+    }
+
     @Test func structuredSessionFeedAssistantMarkdownBoundedPreviewTextTruncatesBeforeMarkdownParse() {
         let short = structuredSessionFeedAssistantMarkdownBoundedPreviewText(for: "Done.")
         #expect(short == "Done.")

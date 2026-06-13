@@ -206,6 +206,25 @@ public struct StructuredSessionConversationPresentation: Equatable {
     }
 }
 
+/// Feed markdown is limited to assistant message bodies (including live drafts and finalized output).
+/// Command rows, command/detail output, and system rows stay plain or monospaced in the UI (#227).
+public func structuredSessionConversationRoleUsesFeedMarkdownParsing(
+    _ role: StructuredSessionConversationRole
+) -> Bool {
+    switch role {
+    case .assistant:
+        true
+    case .user, .command, .error, .system:
+        false
+    }
+}
+
+public func structuredSessionFeedConversationTextUsesMarkdownParsing(
+    for conversation: StructuredSessionConversationPresentation
+) -> Bool {
+    structuredSessionConversationRoleUsesFeedMarkdownParsing(conversation.role)
+}
+
 public struct StructuredSessionSlashCommand: Identifiable, Equatable {
     public let matchText: String
     public let displayText: String
