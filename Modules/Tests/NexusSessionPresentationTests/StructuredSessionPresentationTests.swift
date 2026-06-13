@@ -995,7 +995,7 @@ struct StructuredSessionPresentationTests {
         #endif
     }
 
-    @Test func structuredSessionFeedPresenterPrewarmsBoundedAssistantMarkdownForLongFinalizedResponses() async {
+    @Test func structuredSessionFeedPresenterPrewarmsFullAssistantMarkdownForLongFinalizedResponses() async {
         let longBody = (0 ..< 20).map { _ in "- " + String(repeating: "a", count: 68) }.joined(separator: "\n")
         let session = Session(
             id: UUID(),
@@ -1017,14 +1017,13 @@ struct StructuredSessionPresentationTests {
         _ = presenter.presentation(for: screen)
         await StructuredSessionAssistantMarkdownPrewarmScheduler.drainForTesting()
 
-        let bounded = structuredSessionFeedAssistantMarkdownBoundedPreviewText(for: longBody)
         let metricsAfterRebuild = StructuredSessionMarkdownRenderer.shared.metricsSnapshot()
         #if os(macOS)
         #expect(metricsAfterRebuild.parseCount == 0)
         #else
         #expect(metricsAfterRebuild.cacheMissCount >= 1)
         #endif
-        _ = StructuredSessionMarkdownRenderer.shared.renderContent(bounded)
+        _ = StructuredSessionMarkdownRenderer.shared.renderContent(longBody)
         let metricsAfterSecondRender = StructuredSessionMarkdownRenderer.shared.metricsSnapshot()
         #if os(macOS)
         #expect(metricsAfterSecondRender.cacheMissCount == 1)
@@ -1912,7 +1911,7 @@ struct StructuredSessionPresentationTests {
         #expect(structuredSessionShouldCollapseDetailPreview(detailLong, charactersPerLine: 60) == true)
     }
 
-    @Test func structuredSessionFeedAssistantMarkdownDisplayPolicyBoundsLongFinalizedResponses() {
+    @Test func structuredSessionFeedAssistantMarkdownDisplayPolicyNeverBoundsFinalizedResponses() {
         let short = structuredSessionFeedAssistantMarkdownDisplayPolicy(for: "Done.", charactersPerLine: 72)
         #expect(short == StructuredSessionFeedAssistantMarkdownDisplayPolicy(
             showsCollapsedPreview: false,
@@ -1921,9 +1920,8 @@ struct StructuredSessionPresentationTests {
 
         let long = (0 ..< 20).map { _ in String(repeating: "a", count: 70) }.joined(separator: "\n")
         let policy = structuredSessionFeedAssistantMarkdownDisplayPolicy(for: long, charactersPerLine: 72)
-        #expect(policy.showsCollapsedPreview)
-        #expect(policy.previewLineLimit == 18)
-        #expect(policy.showFullResponseTitle == structuredSessionFeedAssistantMarkdownShowFullResponseTitle)
+        #expect(policy.showsCollapsedPreview == false)
+        #expect(policy.previewLineLimit == structuredSessionFeedAssistantMarkdownPreviewLineLimit)
     }
 
     @Test func structuredSessionFeedAssistantMarkdownBoundedPreviewTextTruncatesBeforeMarkdownParse() {
@@ -1936,7 +1934,7 @@ struct StructuredSessionPresentationTests {
         #expect(bounded.count < long.count)
     }
 
-    @Test func structuredSessionFeedPresenterFinalizeKeepsNonEmptyAssistantBodyWhenLongResponseUsesBoundedPreview() throws {
+    @Test func structuredSessionFeedPresenterFinalizeKeepsNonEmptyAssistantBodyForLongResponses() throws {
         let session = Session(
             id: UUID(),
             workspaceID: UUID(),
@@ -1971,11 +1969,12 @@ struct StructuredSessionPresentationTests {
         let conversation = try #require(finalizedRow.conversationPresentation)
         #expect(conversation.isStreaming == false)
         #expect(conversation.text.isEmpty == false)
+        #expect(conversation.text == longBody)
         let policy = structuredSessionFeedAssistantMarkdownDisplayPolicy(for: conversation.text, charactersPerLine: 72)
-        #expect(policy.showsCollapsedPreview)
+        #expect(policy.showsCollapsedPreview == false)
 
         let iosPolicy = structuredSessionFeedAssistantMarkdownDisplayPolicy(for: conversation.text, charactersPerLine: 56)
-        #expect(iosPolicy.showsCollapsedPreview)
+        #expect(iosPolicy.showsCollapsedPreview == false)
     }
 
     // MARK: - Feed scroll policy (#211)

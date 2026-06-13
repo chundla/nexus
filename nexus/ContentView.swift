@@ -44,7 +44,6 @@ struct ContentView: View {
     @State private var structuredSessionFeedScrollSnapshot: StructuredSessionFeedScrollSnapshot?
     @State private var structuredSessionFeedScrollPosition = ScrollPosition(edge: .bottom)
     @State private var structuredSessionMacOSFeedVisibleTailRowCount = 0
-    @State private var expandedStructuredSessionAssistantResponseRowIDs: Set<UUID> = []
 
     private let terminalLayout = TerminalViewportLayout.live
 
@@ -1575,7 +1574,6 @@ struct ContentView: View {
                     .onChange(of: structuredPresentation.session.id) { _, _ in
                         structuredSessionPinState = StructuredSessionFeedPinState()
                         structuredSessionFeedScrollSnapshot = nil
-                        expandedStructuredSessionAssistantResponseRowIDs = []
                         structuredSessionMacOSFeedVisibleTailRowCount = 0
                         structuredSessionScheduleMacOSFeedActivityRowsIfNeeded()
                     }
@@ -1727,7 +1725,6 @@ struct ContentView: View {
 
                 structuredSessionAssistantResponseView(
                     conversation,
-                    rowID: row.id,
                     font: NexusMacTheme.bodyFont(13),
                     color: .white.opacity(0.94)
                 )
@@ -1855,7 +1852,6 @@ struct ContentView: View {
     @ViewBuilder
     private func structuredSessionAssistantResponseView(
         _ conversation: StructuredSessionConversationPresentation,
-        rowID: UUID,
         font: Font,
         color: Color
     ) -> some View {
@@ -1899,37 +1895,7 @@ struct ContentView: View {
                 }
             }
         } else {
-            let policy = structuredSessionFeedAssistantMarkdownDisplayPolicy(
-                for: conversation.text,
-                charactersPerLine: 72
-            )
-            let showsFullResponse = expandedStructuredSessionAssistantResponseRowIDs.contains(rowID)
-            if policy.showsCollapsedPreview, showsFullResponse == false {
-                let previewMarkdown = structuredSessionFeedAssistantMarkdownBoundedPreviewText(for: conversation.text)
-                VStack(alignment: .leading, spacing: 8) {
-                    structuredSessionMarkdownText(previewMarkdown, font: font, color: color)
-                        .lineLimit(policy.previewLineLimit)
-                        .truncationMode(.tail)
-                        .frame(
-                            height: structuredSessionFeedCollapsedDetailViewportHeight,
-                            alignment: .top
-                        )
-                        .clipped()
-
-                    Text(policy.collapsedFootnote)
-                        .font(NexusMacTheme.bodyFont(10, relativeTo: .caption))
-                        .foregroundStyle(NexusMacTheme.mutedText)
-
-                    Button(policy.showFullResponseTitle) {
-                        expandedStructuredSessionAssistantResponseRowIDs.insert(rowID)
-                    }
-                    .buttonStyle(.plain)
-                    .font(NexusMacTheme.bodyFont(11, relativeTo: .caption).weight(.medium))
-                    .foregroundStyle(NexusMacTheme.gold)
-                }
-            } else {
-                structuredSessionMarkdownText(conversation.text, font: font, color: color)
-            }
+            structuredSessionMarkdownText(conversation.text, font: font, color: color)
         }
     }
 

@@ -1635,12 +1635,7 @@ private func structuredSessionAssistantMarkdownRenderTexts(
         guard case .assistant = conversation.role else {
             continue
         }
-        let body = conversation.text
-        if structuredSessionShouldCollapseStreamingMarkdownPreview(body, charactersPerLine: 72) {
-            texts.append(structuredSessionFeedAssistantMarkdownBoundedPreviewText(for: body))
-        } else {
-            texts.append(body)
-        }
+        texts.append(conversation.text)
     }
 
     return texts
@@ -2510,7 +2505,7 @@ private func structuredSessionActivityEmphasis(for kind: SessionActivityItem.Kin
 /// do not feed unbounded `ViewLayoutEngine` / `explicitAlignment` work.
 /// The `charactersPerLine` is platform-tuned (higher on macOS for wider rendering,
 /// lower on iOS). Thresholds and behavior are the locked contract for row geometry stability.
-/// Full finalized content is never collapsed by these paths; only live drafts and long details.
+/// Finalized assistant markdown is never collapsed; only live drafts and long command/detail output use these thresholds.
 public func structuredSessionShouldCollapseStreamingMarkdownPreview(_ text: String, charactersPerLine: Int) -> Bool {
     structuredSessionEstimatedWrappedLineCount(for: text, charactersPerLine: charactersPerLine) > 18 || text.count > 6_000
 }
@@ -2526,10 +2521,10 @@ public let structuredSessionFeedCollapsedDetailViewportHeight: CGFloat = 200
 /// Line cap for bounded assistant markdown previews (streaming and finalized) in feed rows.
 public let structuredSessionFeedAssistantMarkdownPreviewLineLimit = 18
 
-/// Footnote shown under bounded finalized assistant markdown in the structured feed.
+/// Footnote shown under bounded streaming assistant drafts in the structured feed.
 public let structuredSessionFeedAssistantMarkdownCollapsedFootnote = "Long response preview truncated for smooth scrolling."
 
-/// Action label that expands a bounded finalized assistant response to full markdown in the feed.
+/// Legacy expand affordance label (finalized responses always render in full).
 public let structuredSessionFeedAssistantMarkdownShowFullResponseTitle = "Show full response"
 
 public struct StructuredSessionFeedAssistantMarkdownDisplayPolicy: Equatable {
@@ -2551,15 +2546,15 @@ public struct StructuredSessionFeedAssistantMarkdownDisplayPolicy: Equatable {
     }
 }
 
-/// Decides when finalized (non-streaming) assistant responses should use bounded preview layout
-/// instead of full multiline markdown layout during scroll.
+/// Finalized (non-streaming) assistant responses always use full markdown layout in the feed.
 public func structuredSessionFeedAssistantMarkdownDisplayPolicy(
     for text: String,
     charactersPerLine: Int
 ) -> StructuredSessionFeedAssistantMarkdownDisplayPolicy {
-    let collapse = structuredSessionShouldCollapseStreamingMarkdownPreview(text, charactersPerLine: charactersPerLine)
+    _ = text
+    _ = charactersPerLine
     return StructuredSessionFeedAssistantMarkdownDisplayPolicy(
-        showsCollapsedPreview: collapse,
+        showsCollapsedPreview: false,
         previewLineLimit: structuredSessionFeedAssistantMarkdownPreviewLineLimit
     )
 }

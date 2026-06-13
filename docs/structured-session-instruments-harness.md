@@ -193,9 +193,9 @@ Re-profile with the full harness (~5–7 min), then complete **Windowed analysis
 Code-side mitigations (automated guardrails + macOS `ContentView`):
 
 - `structuredSessionDetailTextPreview` still bounds row `detailText` at build time (12 lines / 4k chars).
-- Finalized assistant markdown uses `structuredSessionFeedAssistantMarkdownDisplayPolicy` (same thresholds as streaming collapse) with a fixed **200 pt** viewport when long.
+- Finalized assistant markdown always renders in full; live streaming drafts may still use bounded preview until the turn completes.
 - System-card markdown `detailText` uses the same bounded viewport as command detail previews.
-- Presentation tests: `structuredSessionFeedAssistantMarkdownDisplayPolicyBoundsLongFinalizedResponses` plus existing collapse/detail-preview tests.
+- Presentation tests: `structuredSessionFeedAssistantMarkdownDisplayPolicyNeverBoundsFinalizedResponses` plus existing streaming collapse/detail-preview tests.
 
 After rebuilding macOS Debug from HEAD, re-profile with `NEXUS_MAC_PROFILE_FIXTURE=structured-feed-profile` and export metrics; compare worst hitch / hitch count to the 09-06 baseline above.
 
