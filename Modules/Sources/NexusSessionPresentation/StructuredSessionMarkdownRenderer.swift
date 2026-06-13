@@ -559,6 +559,51 @@ public extension View {
 }
 
 @available(macOS 12.0, iOS 15.0, *)
+public struct StructuredSessionIdleGatedAssistantFeedMarkdownText: View {
+    private let markdown: String
+    private let font: Font
+    private let color: Color
+    private let prefersPlainTextUntilIdle: Bool
+    private let allowsInlineMarkdownHydration: Bool
+    private let renderer: StructuredSessionMarkdownRenderer
+
+    public init(
+        markdown: String,
+        font: Font,
+        color: Color,
+        prefersPlainTextUntilIdle: Bool,
+        allowsInlineMarkdownHydration: Bool,
+        renderer: StructuredSessionMarkdownRenderer = .shared
+    ) {
+        self.markdown = markdown
+        self.font = font
+        self.color = color
+        self.prefersPlainTextUntilIdle = prefersPlainTextUntilIdle
+        self.allowsInlineMarkdownHydration = allowsInlineMarkdownHydration
+        self.renderer = renderer
+    }
+
+    public var body: some View {
+        Group {
+            if prefersPlainTextUntilIdle,
+               allowsInlineMarkdownHydration == false {
+                Text(verbatim: markdown)
+                    .font(font)
+                    .foregroundColor(color)
+                    .structuredSessionFeedTextSelection()
+            } else {
+                StructuredSessionMarkdownText(
+                    markdown: markdown,
+                    font: font,
+                    color: color,
+                    renderer: renderer
+                )
+            }
+        }
+    }
+}
+
+@available(macOS 12.0, iOS 15.0, *)
 public struct StructuredSessionMarkdownText: View {
     private let markdown: String
     private let font: Font

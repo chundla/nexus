@@ -2120,6 +2120,85 @@ struct StructuredSessionPresentationTests {
         )
     }
 
+    @Test func structuredSessionFeedAllowsLatestAssistantInlineMarkdownHydrationWhenIdleOnIOS() {
+        let longResponsePolicy = StructuredSessionFeedAssistantMarkdownDisplayPolicy(
+            showsCollapsedPreview: true,
+            previewLineLimit: structuredSessionFeedAssistantMarkdownPreviewLineLimit
+        )
+        let prefersPlain = structuredSessionFeedAssistantAutoExpandedLatestResponsePrefersPlainText(
+            policy: longResponsePolicy,
+            isLatestFinalizedAssistantRow: true,
+            isExplicitlyExpanded: false
+        )
+        #expect(prefersPlain)
+
+        #if os(iOS)
+        #expect(
+            structuredSessionFeedAllowsLatestAssistantInlineMarkdownHydration(
+                prefersPlainTextInitialRender: prefersPlain,
+                feedReaderIsScrollIdle: false,
+                feedTailIsStableForInlineMarkdown: true
+            ) == false
+        )
+        #expect(
+            structuredSessionFeedAllowsLatestAssistantInlineMarkdownHydration(
+                prefersPlainTextInitialRender: prefersPlain,
+                feedReaderIsScrollIdle: true,
+                feedTailIsStableForInlineMarkdown: false
+            ) == false
+        )
+        #expect(
+            structuredSessionFeedAllowsLatestAssistantInlineMarkdownHydration(
+                prefersPlainTextInitialRender: prefersPlain,
+                feedReaderIsScrollIdle: true,
+                feedTailIsStableForInlineMarkdown: true
+            )
+        )
+        #else
+        #expect(
+            structuredSessionFeedAllowsLatestAssistantInlineMarkdownHydration(
+                prefersPlainTextInitialRender: prefersPlain,
+                feedReaderIsScrollIdle: false,
+                feedTailIsStableForInlineMarkdown: false
+            )
+        )
+        #endif
+    }
+
+    @Test func structuredSessionFeedScrollReaderIdleStateRequiresQuietInterval() {
+        let idleInterval = 0.15
+        let t0 = Date(timeIntervalSinceReferenceDate: 1_000)
+        let sample = StructuredSessionScrollGeometrySample(distanceFromBottom: 0, contentOffsetY: 100)
+        let moving = structuredSessionFeedScrollReaderIdleState(
+            previousSample: sample,
+            currentSample: StructuredSessionScrollGeometrySample(distanceFromBottom: 0, contentOffsetY: 140),
+            now: t0,
+            lastMovementAt: t0.addingTimeInterval(-1),
+            idleInterval: idleInterval
+        )
+        #expect(moving.isScrollIdle == false)
+
+        let quiet = structuredSessionFeedScrollReaderIdleState(
+            previousSample: sample,
+            currentSample: sample,
+            now: t0.addingTimeInterval(0.2),
+            lastMovementAt: t0,
+            idleInterval: idleInterval
+        )
+        #expect(quiet.isScrollIdle)
+    }
+
+    @Test func structuredSessionFeedTailIsStableForInlineMarkdownWhenFollowTokenMatches() {
+        #expect(structuredSessionFeedTailIsStableForInlineMarkdown(
+            feedFollowScrollToken: "12-abc",
+            lastStableFeedFollowScrollToken: "12-abc"
+        ))
+        #expect(structuredSessionFeedTailIsStableForInlineMarkdown(
+            feedFollowScrollToken: "13-abc",
+            lastStableFeedFollowScrollToken: "12-abc"
+        ) == false)
+    }
+
     // MARK: - Feed scroll policy (#211)
 
     @Test func structuredSessionFeedScrollTargetUsesLiveDraftRowWhileStreaming() throws {

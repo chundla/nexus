@@ -1440,6 +1440,10 @@ private struct RemoteSessionScreenView: View {
     @State private var structuredSessionFeedScrollSnapshot: StructuredSessionFeedScrollSnapshot?
     @State private var structuredSessionFeedScrollPosition = ScrollPosition(edge: .bottom)
     @State private var structuredSessionFeedVisibleTailRowCount = 0
+    @State private var structuredSessionFeedScrollGeometrySample: StructuredSessionScrollGeometrySample?
+    @State private var structuredSessionFeedScrollLastMovementAt = Date()
+    @State private var structuredSessionFeedScrollIsIdle = false
+    @State private var structuredSessionFeedStableFollowScrollToken = ""
     @State private var presentedStructuredSessionAssistantFullResponse: StructuredSessionAssistantFullResponsePresentation?
     @FocusState private var isStructuredPromptFocused: Bool
     @FocusState private var isTerminalInputFocused: Bool
@@ -1485,6 +1489,24 @@ private struct RemoteSessionScreenView: View {
 
     private var structuredFeedPresentation: StructuredSessionFeedPresentation? {
         structuredPresentation?.feed
+    }
+
+    private var latestFinalizedAssistantRowID: UUID? {
+        guard let structuredFeedPresentation else {
+            return nil
+        }
+        return structuredSessionLatestFinalizedAssistantActivityRowID(in: structuredFeedPresentation.activityRows)
+    }
+
+    private var structuredSessionFeedTailIsStableForInlineMarkdown: Bool {
+        guard let structuredPresentation else {
+            return false
+        }
+        let token = structuredSessionFeedFollowScrollToken(for: structuredPresentation)
+        return structuredSessionFeedTailIsStableForInlineMarkdown(
+            feedFollowScrollToken: token,
+            lastStableFeedFollowScrollToken: structuredSessionFeedStableFollowScrollToken
+        )
     }
 
     private var structuredComposerPresentation: StructuredSessionComposerPresentation? {
@@ -2128,6 +2150,20 @@ private struct RemoteSessionScreenView: View {
                         contentOffsetY: geometry.contentOffset.y
                     )
                 } action: { _, sample in
+                    let idleState = structuredSessionFeedScrollReaderIdleState(
+                        previousSample: structuredSessionFeedScrollGeometrySample,
+                        currentSample: sample,
+                        now: Date(),
+                        lastMovementAt: structuredSessionFeedScrollLastMovementAt
+                    )
+                    structuredSessionFeedScrollGeometrySample = sample
+                    structuredSessionFeedScrollLastMovementAt = idleState.lastMovementAt
+                    structuredSessionFeedScrollIsIdle = idleState.isScrollIdle
+                    if idleState.isScrollIdle, let structuredPresentation {
+                        structuredSessionFeedStableFollowScrollToken = structuredSessionFeedFollowScrollToken(
+                            for: structuredPresentation
+                        )
+                    }
                     if let next = structuredSessionFeedPinStateIfChanged(
                         previous: structuredSessionPinState,
                         sample: sample
@@ -2152,6 +2188,10 @@ private struct RemoteSessionScreenView: View {
                 .onChange(of: presentation.session.id) { _, _ in
                     structuredSessionPinState = StructuredSessionFeedPinState()
                     structuredSessionFeedScrollSnapshot = nil
+                    structuredSessionFeedScrollGeometrySample = nil
+                    structuredSessionFeedScrollLastMovementAt = Date()
+                    structuredSessionFeedScrollIsIdle = false
+                    structuredSessionFeedStableFollowScrollToken = ""
                     presentedStructuredSessionAssistantFullResponse = nil
                     structuredSessionFeedVisibleTailRowCount = 0
                     structuredSessionScheduleFeedActivityRowsIfNeeded()
@@ -2527,7 +2567,18 @@ private struct RemoteSessionScreenView: View {
                 for: conversation.text,
                 charactersPerLine: 56
             )
-            if policy.showsCollapsedPreview {
+            let isLatestFinalizedAssistantRow = latestFinalizedAssistantRowID == rowID
+            let prefersPlainText = structuredSessionFeedAssistantAutoExpandedLatestResponsePrefersPlainText(
+                policy: policy,
+                isLatestFinalizedAssistantRow: isLatestFinalizedAssistantRow,
+                isExplicitlyExpanded: false
+            )
+            let allowsInlineMarkdownHydration = structuredSessionFeedAllowsLatestAssistantInlineMarkdownHydration(
+                prefersPlainTextInitialRender: prefersPlainText,
+                feedReaderIsScrollIdle: structuredSessionFeedScrollIsIdle,
+                feedTailIsStableForInlineMarkdown: structuredSessionFeedTailIsStableForInlineMarkdown
+            )
+            if policy.showsCollapsedPreview, isLatestFinalizedAssistantRow == false {
                 let previewMarkdown = structuredSessionFeedAssistantMarkdownBoundedPreviewText(for: conversation.text)
                 VStack(alignment: .leading, spacing: 8) {
                     structuredSessionMarkdownText(previewMarkdown, font: font, color: color)
@@ -2553,6 +2604,14 @@ private struct RemoteSessionScreenView: View {
                     .font(NexusIOSTheme.bodyFont(11, relativeTo: .caption, weight: .medium))
                     .foregroundStyle(NexusIOSTheme.gold)
                 }
+            } else if prefersPlainText {
+                StructuredSessionIdleGatedAssistantFeedMarkdownText(
+                    markdown: conversation.text,
+                    font: font,
+                    color: color,
+                    prefersPlainTextUntilIdle: true,
+                    allowsInlineMarkdownHydration: allowsInlineMarkdownHydration
+                )
             } else {
                 structuredSessionMarkdownText(conversation.text, font: font, color: color)
             }

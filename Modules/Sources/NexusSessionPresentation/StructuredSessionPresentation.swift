@@ -2627,6 +2627,54 @@ public func structuredSessionFeedAssistantAutoExpandedLatestResponsePrefersPlain
     policy.showsCollapsedPreview && isLatestFinalizedAssistantRow && isExplicitlyExpanded == false
 }
 
+/// Idle-gated inline markdown for the latest visible assistant response (#229).
+public enum StructuredSessionLatestAssistantInlineMarkdownIdleGatePolicy {
+    #if os(iOS)
+    public static var usesIdleGatedInlineMarkdownHydration: Bool { true }
+    public static var scrollIdleInterval: TimeInterval { 0.15 }
+    #else
+    public static var usesIdleGatedInlineMarkdownHydration: Bool { false }
+    public static var scrollIdleInterval: TimeInterval { 0 }
+    #endif
+}
+
+/// Whether the latest assistant row may upgrade from plain text to formatted inline markdown.
+public func structuredSessionFeedAllowsLatestAssistantInlineMarkdownHydration(
+    prefersPlainTextInitialRender: Bool,
+    feedReaderIsScrollIdle: Bool,
+    feedTailIsStableForInlineMarkdown: Bool
+) -> Bool {
+    guard prefersPlainTextInitialRender else { return true }
+    guard StructuredSessionLatestAssistantInlineMarkdownIdleGatePolicy.usesIdleGatedInlineMarkdownHydration else {
+        return true
+    }
+    return feedReaderIsScrollIdle && feedTailIsStableForInlineMarkdown
+}
+
+/// Updates scroll-idle tracking from successive `ScrollView` geometry samples.
+public func structuredSessionFeedScrollReaderIdleState(
+    previousSample: StructuredSessionScrollGeometrySample?,
+    currentSample: StructuredSessionScrollGeometrySample,
+    now: Date,
+    lastMovementAt: Date,
+    idleInterval: TimeInterval = StructuredSessionLatestAssistantInlineMarkdownIdleGatePolicy.scrollIdleInterval
+) -> (lastMovementAt: Date, isScrollIdle: Bool) {
+    let offsetDelta = previousSample.map { abs($0.contentOffsetY - currentSample.contentOffsetY) } ?? 0
+    let distanceDelta = previousSample.map { abs($0.distanceFromBottom - currentSample.distanceFromBottom) } ?? 0
+    let contentMoved = previousSample == nil || offsetDelta > 0.5 || distanceDelta > 0.5
+    let updatedLastMovement = contentMoved ? now : lastMovementAt
+    let isScrollIdle = now.timeIntervalSince(updatedLastMovement) >= idleInterval
+    return (updatedLastMovement, isScrollIdle)
+}
+
+/// Feed tail churn defers inline markdown until the follow scroll token stabilizes (#229).
+public func structuredSessionFeedTailIsStableForInlineMarkdown(
+    feedFollowScrollToken: String,
+    lastStableFeedFollowScrollToken: String
+) -> Bool {
+    feedFollowScrollToken == lastStableFeedFollowScrollToken
+}
+
 /// Trims assistant markdown before bounded preview layout so first paint does not parse or typeset the full body (#225).
 public func structuredSessionFeedAssistantMarkdownBoundedPreviewText(
     for text: String,
