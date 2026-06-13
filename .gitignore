@@ -2,6 +2,11 @@
 *.xcuserdatad/
 *.xcuserstate
 nexus.xcodeproj/xcuserdata/
+nexus.xcodeproj
+xcuserdata/
+*.xcuserstate
+*.xcuserdata
+*.xcodeproj
 DerivedData/
 
 # SwiftPM / local build products
@@ -19,3 +24,12 @@ DerivedData/
 
 # Screenshots for debugging
 screenshots/
+
+# MCP settings
+.mcp.json
+
+# xcodebuildmcp
+.xcodebuildmcp/
+
+# Traces
+traces/
