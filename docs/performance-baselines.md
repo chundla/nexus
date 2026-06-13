@@ -58,6 +58,25 @@ swift test --package-path Modules --filter StructuredSessionObservationDiagnosti
 swift test --package-path Modules --filter NexusServicePerformanceBaselineTests/testStructuredSessionActivityAppendBaseline
 ```
 
+### Structured Session markdown + feed responsiveness guardrails (#230)
+
+Narrowest automated slice after touching assistant markdown in the structured **Session** feed (#227–#229): assistant-only parsing policy, bounded long-response previews, full-response reader code-block policy, iOS idle-gated latest-assistant inline hydration, and structured-feed profiling fixture pre-flight.
+
+```bash
+./scripts/run_structured_session_markdown_feed_guardrails.sh
+```
+
+Equivalent focused SwiftPM filters (same tests as the script’s presentation slice):
+
+```bash
+swift test --package-path Modules --filter StructuredSessionMarkdownRendererTests
+swift test --package-path Modules --filter StructuredSessionAssistantFullResponseReaderTests
+swift test --package-path Modules --filter 'StructuredSessionPresentationTests/structuredSessionFeedMarkdownParsingIsAssistantOnly'
+swift test --package-path Modules --filter 'StructuredSessionPresentationTests/structuredSessionFeedAllowsLatestAssistantInlineMarkdownHydrationWhenIdleOnIOS'
+```
+
+Manual iPhone SwiftUI validation for long assistant markdown and scroll hitches remains in [structured-session-instruments-harness.md](./structured-session-instruments-harness.md) — *Markdown-heavy assistant responses (#230)*.
+
 ### Coverage map and intentional human-only gaps
 
 | Slice | Automated regression coverage | Remaining human-only step |
@@ -69,6 +88,7 @@ swift test --package-path Modules --filter NexusServicePerformanceBaselineTests/
 | #192 long structured Session stall attribution | `StructuredSessionThinkingStallAttributionTests`, `StructuredSessionThinkingStallDiagnosisTests`, and `RemoteClientProfilingFixtureTests/bootstrapStreamsThinkingDiagnosticSnapshotsForLongObservationProfiling` | Final side-by-side memory capture still runs manually on macOS and a physical iPhone when you need Instruments evidence |
 | #199 structured Session final-output latency delivery | `StructuredSessionObservationDiagnosticsTests/structuredObservationDeltaRecordsFinalOutputLatencyMetrics`, `StructuredSessionFinalOutputLatencyTrackerTests`, `NexusServicePiSessionStreamTests/localPiRuntimeAttachesFinalOutputLatencyDiagnosticToTurnCompletion`, and `RemoteClientProfilingFixtureTests/bootstrapCapturesFinalOutputLatencyDiagnosticSnapshotsForRemoteClientProfiling` | Final visual trace pairing still runs manually when you need Instruments evidence for the last visible feed update |
 | #207 structured feed profiling fixture "evil mode" (real Pi mutation churn) | `NexusAppProfilingFixtureTests/bootstrapStreamsDeterministicStructuredFeedProfilingBurstsOnMacOS`, `RemoteClientProfilingFixtureTests/bootstrapStreamsDeterministicStructuredFeedProfilingBursts` (both already cover diagnostics + turn progress) | Instruments SwiftUI trace on macOS or physical iPhone to confirm Severe Hang + ScrollViewAdjustedState / ViewLayoutEngine dominance when the fixture now reproduces the full `finalOutputDiagnostic` + `isAgentTurnInProgress` + `providerFacts` (liveAssistantDraftText + tokenUsage) + thinking indicator + `StructuredSessionAutoScrollTrigger` churn on every 200 ms tick (including post-turn_end dwell with continuing seq + notification churn while rows are stable) |
+| #230 structured Session assistant markdown + feed responsiveness | `./scripts/run_structured_session_markdown_feed_guardrails.sh` (presentation policy, hydration scheduler, idle-gated iOS inline markdown, profiling fixture pre-flight) | Physical iPhone SwiftUI trace with `streaming-feed-profile` while scrolling history and exercising long finalized assistant markdown (#229 idle upgrade); see harness *Markdown-heavy assistant responses* |
 
 ## Diagnostic fields to compare
 

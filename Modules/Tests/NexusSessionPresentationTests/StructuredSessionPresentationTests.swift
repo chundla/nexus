@@ -2120,6 +2120,16 @@ struct StructuredSessionPresentationTests {
         )
     }
 
+    @Test func structuredSessionLatestAssistantInlineMarkdownIdleGatePolicyMatchesPlatformExpectations() {
+        #if os(iOS)
+        #expect(StructuredSessionLatestAssistantInlineMarkdownIdleGatePolicy.usesIdleGatedInlineMarkdownHydration)
+        #expect(StructuredSessionLatestAssistantInlineMarkdownIdleGatePolicy.scrollIdleInterval == 0.15)
+        #else
+        #expect(StructuredSessionLatestAssistantInlineMarkdownIdleGatePolicy.usesIdleGatedInlineMarkdownHydration == false)
+        #expect(StructuredSessionLatestAssistantInlineMarkdownIdleGatePolicy.scrollIdleInterval == 0)
+        #endif
+    }
+
     @Test func structuredSessionFeedAllowsLatestAssistantInlineMarkdownHydrationWhenIdleOnIOS() {
         let longResponsePolicy = StructuredSessionFeedAssistantMarkdownDisplayPolicy(
             showsCollapsedPreview: true,

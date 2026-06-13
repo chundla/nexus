@@ -60,6 +60,20 @@ Simulator can rehearse navigation with the same env var, but **`xctrace` SwiftUI
 
 **iOS Remote Client feed startup (#225 parity):** `RemoteSessionScreenView` uses `StructuredSessionFeedProgressiveRevealPolicy` (3+3 tail-first row reveal), a flat `ForEach` over visible tail rows (no nested chunk `ForEach`), and `scrollPositionUsesBottomEdge: true` so `ScrollPosition(edge: .bottom)` does not redundantly `scrollToBottom` on appear or scroll-snapshot transitions.
 
+### Markdown-heavy assistant responses (#230)
+
+Use the same fixtures when validating **#227–#229** (assistant-only feed markdown, full-response reader, iOS idle-gated latest-assistant inline hydration):
+
+1. **Automated guardrails** (no device): `./scripts/run_structured_session_markdown_feed_guardrails.sh` — see [performance-baselines.md](./performance-baselines.md).
+2. **iPhone trace workload** (physical device, `NEXUS_REMOTE_CLIENT_FIXTURE=streaming-feed-profile`):
+   - After the feed settles, scroll **up** through preseeded history that includes long assistant bodies and fenced code.
+   - Return to **follow bottom** and wait **≥150 ms** without scrolling so the latest long finalized assistant row can upgrade from plain text to inline markdown (#229).
+   - Open **Show full response** on a collapsed long assistant row and scroll horizontally inside a fenced code block (full-response reader #228).
+   - Leave the trace running through **draft expand → finalize** so streaming + bounded preview + idle hydration all occur in one capture.
+3. **Compare** worst animation hitch during scroll-return and during post-idle markdown upgrade against your prior `214.trace` / `224-225.trace` steady-window notes in [baselines/214-trace-window-analysis.md](./baselines/214-trace-window-analysis.md).
+
+**macOS** (`NEXUS_MAC_PROFILE_FIXTURE=structured-feed-profile`): same scroll + long-response workload; macOS does not idle-gate inline markdown but still uses bounded previews and deferred row hydration — watch first paint after progressive tail reveal (#225).
+
 ## Export hitch metrics (`hitches` schemas)
 
 From a saved `.trace`:
