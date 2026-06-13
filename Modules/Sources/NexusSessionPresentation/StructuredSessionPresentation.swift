@@ -2564,6 +2564,23 @@ public func structuredSessionFeedAssistantMarkdownDisplayPolicy(
     )
 }
 
+public func structuredSessionLatestFinalizedAssistantActivityRowID(
+    in rows: [StructuredSessionActivityRow]
+) -> UUID? {
+    for row in rows.reversed() {
+        guard let conversation = row.conversationPresentation,
+              conversation.isStreaming == false else {
+            continue
+        }
+        guard case .assistant = conversation.role else {
+            continue
+        }
+        return row.id
+    }
+
+    return nil
+}
+
 /// Trims assistant markdown before bounded preview layout so first paint does not parse or typeset the full body (#225).
 public func structuredSessionFeedAssistantMarkdownBoundedPreviewText(
     for text: String,

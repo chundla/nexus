@@ -1977,6 +1977,47 @@ struct StructuredSessionPresentationTests {
         #expect(iosPolicy.showsCollapsedPreview)
     }
 
+    @Test func structuredSessionLatestFinalizedAssistantActivityRowIDTargetsNewestFinalizedAssistantRow() {
+        let olderAssistantID = UUID()
+        let latestAssistantID = UUID()
+        let rows = [
+            StructuredSessionActivityRow(
+                id: UUID(),
+                title: "Message",
+                systemImage: "message",
+                text: "You: hi",
+                emphasis: .accent,
+                conversationPresentation: StructuredSessionConversationPresentation(role: .user, text: "hi")
+            ),
+            StructuredSessionActivityRow(
+                id: olderAssistantID,
+                title: "Message",
+                systemImage: "message",
+                text: "Pi: old",
+                emphasis: .accent,
+                conversationPresentation: StructuredSessionConversationPresentation(role: .assistant(label: "Pi"), text: "old")
+            ),
+            StructuredSessionActivityRow(
+                id: UUID(),
+                title: "Message",
+                systemImage: "message",
+                text: "Pi: streaming",
+                emphasis: .accent,
+                conversationPresentation: StructuredSessionConversationPresentation(role: .assistant(label: "Pi"), text: "streaming", isStreaming: true)
+            ),
+            StructuredSessionActivityRow(
+                id: latestAssistantID,
+                title: "Message",
+                systemImage: "message",
+                text: "Pi: latest",
+                emphasis: .accent,
+                conversationPresentation: StructuredSessionConversationPresentation(role: .assistant(label: "Pi"), text: "latest")
+            )
+        ]
+
+        #expect(structuredSessionLatestFinalizedAssistantActivityRowID(in: rows) == latestAssistantID)
+    }
+
     // MARK: - Feed scroll policy (#211)
 
     @Test func structuredSessionFeedScrollTargetUsesLiveDraftRowWhileStreaming() throws {

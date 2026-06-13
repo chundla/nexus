@@ -48,6 +48,13 @@ struct ContentView: View {
 
     private let terminalLayout = TerminalViewportLayout.live
 
+    private var latestFinalizedAssistantRowID: UUID? {
+        guard let feedPresentation = appModel.focusedStructuredSessionPresentation?.feed else {
+            return nil
+        }
+        return structuredSessionLatestFinalizedAssistantActivityRowID(in: feedPresentation.activityRows)
+    }
+
     var body: some View {
         ZStack {
             NexusBackdrop()
@@ -1904,6 +1911,7 @@ struct ContentView: View {
                 charactersPerLine: 72
             )
             let showsFullResponse = expandedStructuredSessionAssistantResponseRowIDs.contains(rowID)
+                || latestFinalizedAssistantRowID == rowID
             if policy.showsCollapsedPreview, showsFullResponse == false {
                 let previewMarkdown = structuredSessionFeedAssistantMarkdownBoundedPreviewText(for: conversation.text)
                 VStack(alignment: .leading, spacing: 8) {

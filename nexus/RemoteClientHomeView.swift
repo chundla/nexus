@@ -1498,6 +1498,13 @@ private struct RemoteSessionScreenView: View {
         )
     }
 
+    private var latestFinalizedAssistantRowID: UUID? {
+        guard let structuredFeedPresentation else {
+            return nil
+        }
+        return structuredSessionLatestFinalizedAssistantActivityRowID(in: structuredFeedPresentation.activityRows)
+    }
+
     private var structuredSendAffordance: StructuredSessionComposerSendAffordance? {
         guard let structuredChromePresentation, let composer = structuredComposerPresentation else {
             return nil
@@ -2520,6 +2527,7 @@ private struct RemoteSessionScreenView: View {
                 charactersPerLine: 56
             )
             let showsFullResponse = expandedStructuredSessionAssistantResponseRowIDs.contains(rowID)
+                || latestFinalizedAssistantRowID == rowID
             if policy.showsCollapsedPreview, showsFullResponse == false {
                 let previewMarkdown = structuredSessionFeedAssistantMarkdownBoundedPreviewText(for: conversation.text)
                 VStack(alignment: .leading, spacing: 8) {

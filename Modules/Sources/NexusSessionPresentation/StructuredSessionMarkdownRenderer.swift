@@ -413,12 +413,12 @@ public enum StructuredSessionMarkdownRowHydrationScheduler {
 
     private static let queue = Queue()
 
-    /// Limits SwiftUI row state updates per main-actor turn during bottom-edge first paint (#225).
+    /// Limits SwiftUI row state updates per main-actor turn during feed paint/finalization (#225).
     private static var maxDeliveriesPerMainActorFlush: Int {
-        #if os(macOS)
-        2
+        #if os(iOS)
+        1
         #else
-        Int.max
+        2
         #endif
     }
 
@@ -483,23 +483,15 @@ public enum StructuredSessionMarkdownRowHydrationScheduler {
     }
 }
 
-/// macOS structured feed startup: avoid synchronous markdown parse during first `LazyVStack` layout (#225).
+/// Structured feed markdown: avoid synchronous parse during first row layout, especially on startup/finalization (#225).
 public enum StructuredSessionMarkdownTextInitialRenderPolicy {
     public static var defersMarkdownParseUntilFirstAppear: Bool {
-        #if os(macOS)
         true
-        #else
-        false
-        #endif
     }
 
-    /// Lets the first plain-text `LazyVStack` layout finish before row hydration schedules parse work (#225).
+    /// Lets the first plain-text row layout finish before hydration schedules markdown parse work (#225).
     public static var defersMarkdownHydrationUntilAfterFirstLayoutTurn: Bool {
-        #if os(macOS)
         true
-        #else
-        false
-        #endif
     }
 }
 
