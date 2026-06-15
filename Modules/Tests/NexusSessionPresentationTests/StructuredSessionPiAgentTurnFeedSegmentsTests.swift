@@ -172,7 +172,7 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
         }
     }
 
-    @Test func nonPiSessionsDoNotEmitCompositeFeedSegments() {
+    @Test func nonPiSessionsDoNotEmitPiCompositeFeedSegments() {
         let screen = SessionScreen(
             session: Session(
                 id: UUID(),

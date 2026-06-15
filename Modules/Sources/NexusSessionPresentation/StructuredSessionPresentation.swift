@@ -962,7 +962,7 @@ private func structuredSessionFeedPresentation(
         copy: structuredSessionPresentationCopy(for: screen),
         activityRows: activityRows,
         activityRowChunks: activityRowChunks,
-        feedSegments: structuredSessionPiFeedSegments(for: screen),
+        feedSegments: structuredSessionAgentTurnFeedSegments(for: screen),
         pendingApprovalRequests: pendingApprovalRequests,
         thinkingIndicator: structuredSessionThinkingIndicator(
             for: screen,

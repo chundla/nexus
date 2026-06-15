@@ -159,7 +159,7 @@ public func structuredSessionFeedFollowScrollToken(
 
 public func structuredSessionAutoScrollTrigger(for screen: SessionScreen) -> StructuredSessionAutoScrollTrigger {
     let lastScrollItemID: UUID?
-    if let segments = structuredSessionPiFeedSegments(for: screen), let last = segments.last {
+    if let segments = structuredSessionAgentTurnFeedSegments(for: screen), let last = segments.last {
         lastScrollItemID = last.id
     } else {
         lastScrollItemID = screen.activityItems.last?.id

@@ -100,5 +100,5 @@ public func structuredSessionOpenAgentTurnHasReasoningContent(
 }
 
 public func structuredSessionOpenAgentTurnHasReasoningContent(for screen: SessionScreen) -> Bool {
-    structuredSessionOpenAgentTurnHasReasoningContent(in: structuredSessionPiFeedSegments(for: screen))
+    structuredSessionOpenAgentTurnHasReasoningContent(in: structuredSessionAgentTurnFeedSegments(for: screen))
 }
