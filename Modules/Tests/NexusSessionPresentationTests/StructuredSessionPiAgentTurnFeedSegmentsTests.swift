@@ -362,6 +362,55 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
         #expect(turn.finalAnswer?.text == "partial answer")
     }
 
+    @Test func piLastAssistantMessageStaysInTurnWithoutStandaloneRow() throws {
+        let screen = SessionScreen(
+            session: piSession(),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .message, text: "You: /last", prompt: SessionPrompt(text: "/last")),
+                SessionActivityItem(kind: .command, text: "/get-last-assistant-text"),
+                SessionActivityItem(kind: .message, text: "Last assistant message: prior reply text"),
+                SessionActivityItem(kind: .message, text: "Pi: noted")
+            ],
+            isAgentTurnInProgress: false
+        )
+
+        let segments = try #require(structuredSessionPiFeedSegments(for: screen))
+        #expect(segments.count == 2)
+        guard case .agentTurn(let turn) = segments[1] else {
+            Issue.record("Expected agent turn")
+            return
+        }
+        #expect(turn.turnNotices.contains(.progress("Last assistant message: prior reply text")))
+        #expect(turn.finalAnswer?.text == "noted")
+    }
+
+    @Test func piCompletionAndDiffRowsStayInTurnNoticesWithoutSplitting() throws {
+        let screen = SessionScreen(
+            session: piSession(),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .message, text: "You: edit", prompt: SessionPrompt(text: "edit")),
+                SessionActivityItem(kind: .diff, text: "Edited ContentView.swift"),
+                SessionActivityItem(kind: .completion, text: "Turn complete"),
+                SessionActivityItem(kind: .message, text: "Pi: saved")
+            ],
+            isAgentTurnInProgress: false
+        )
+
+        let segments = try #require(structuredSessionPiFeedSegments(for: screen))
+        #expect(segments.count == 2)
+        #expect(segments.contains { if case .standalone = $0 { return true }; return false } == false)
+        guard case .agentTurn(let turn) = segments[1] else {
+            Issue.record("Expected agent turn")
+            return
+        }
+        #expect(turn.turnNotices.contains(.progress("Edited ContentView.swift")))
+        #expect(turn.turnNotices.contains(.progress("Turn complete")))
+    }
+
     @Test func piMultipleErrorsOnSameToolMergeInChronologicalOrder() throws {
         let screen = SessionScreen(
             session: piSession(),

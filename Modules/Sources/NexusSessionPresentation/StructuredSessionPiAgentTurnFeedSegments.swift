@@ -211,6 +211,24 @@ private func structuredSessionPiAgentTurnActivitySlice(
             continue
         }
 
+        if structuredSessionPiFeedSegmentIsInTurnCompletionOrDiffRow(item) {
+            structuredSessionPiAgentTurnAppendProgressNotice(item.text, to: &turnNotices)
+            consumedAny = true
+            cursor += 1
+            continue
+        }
+
+        if item.kind == .message,
+           let lastAssistant = structuredSessionPiLastAssistantMessageBody(from: item.text) {
+            structuredSessionPiAgentTurnAppendProgressNotice(
+                "Last assistant message: \(lastAssistant)",
+                to: &turnNotices
+            )
+            consumedAny = true
+            cursor += 1
+            continue
+        }
+
         if item.kind == .message,
            let bashOutput = structuredSessionPiBashOutputBody(from: item.text) {
             structuredSessionPiAgentTurnAttachBashOutput(
@@ -322,6 +340,21 @@ private func structuredSessionPiFeedSegmentIsInTurnSessionStatusRow(_ item: Sess
         return false
     }
     return structuredSessionPiFeedSegmentIsThoughtsStatus(item) == false
+}
+
+private func structuredSessionPiFeedSegmentIsInTurnCompletionOrDiffRow(_ item: SessionActivityItem) -> Bool {
+    item.kind == .completion || item.kind == .diff
+}
+
+private func structuredSessionPiLastAssistantMessageBody(from text: String) -> String? {
+    guard let split = structuredSessionPiConversationPrefixSplit(for: text) else {
+        return nil
+    }
+    guard split.label.caseInsensitiveCompare("Last assistant message") == .orderedSame else {
+        return nil
+    }
+    let body = split.body.trimmingCharacters(in: .whitespacesAndNewlines)
+    return body.isEmpty ? nil : body
 }
 
 private func structuredSessionPiAgentTurnAppendSessionStatusNotice(
@@ -468,6 +501,9 @@ private func structuredSessionPiFeedSegmentIsOutsideStackRow(_ item: SessionActi
             return false
         }
         if structuredSessionPiBashOutputBody(from: item.text) != nil {
+            return false
+        }
+        if structuredSessionPiLastAssistantMessageBody(from: item.text) != nil {
             return false
         }
         return structuredSessionPiSubagentOutputBody(from: item.text) == nil
