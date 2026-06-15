@@ -318,9 +318,6 @@
                     return
                 }
 
-                if Self.countsAsTurnWatchdogStdoutProgress(type: type) {
-                    self.noteStdoutActivityForTurnWatchdog()
-                }
                 self.recordProviderEvent(rawPayload: line, object: object, type: type)
 
                 if type == "response" {
@@ -363,6 +360,13 @@
                 requestSessionStats()
             }
             startTurnWatchdogIfNeeded()
+            if let nexusSessionID {
+                NexusSessionRuntimeDiagnostics.logPiTurnWatchdogStarted(
+                    sessionID: nexusSessionID,
+                    stallThresholdSeconds: Int(
+                        PiRPCTurnWatchdog.configuredStallThresholdNanoseconds() / 1_000_000_000)
+                )
+            }
         }
 
         deinit {
@@ -1021,12 +1025,15 @@
             resetTurnWatchdogLocked()
         }
 
-        private static func countsAsTurnWatchdogStdoutProgress(type: String) -> Bool {
-            type != "response"
-        }
-
-        private func noteStdoutActivityForTurnWatchdog() {
+        private func noteStdoutActivityForTurnWatchdogIfCommitted(type: String, object: [String: Any]) {
+            guard PiRPCTurnWatchdog.countsAsMeaningfulStdoutProgress(type: type, object: object) else {
+                return
+            }
             lock.lock()
+            guard promptTurnCommitted else {
+                lock.unlock()
+                return
+            }
             lastStdoutActivityUptimeNanoseconds = DispatchTime.now().uptimeNanoseconds
             watchdogPollsSinceIdleThreshold = 0
             lock.unlock()
@@ -1599,6 +1606,7 @@
         }
 
         private func handleOutputEvent(_ object: [String: Any], type: String) {
+            noteStdoutActivityForTurnWatchdogIfCommitted(type: type, object: object)
             switch type {
             case "agent_start":
                 notifyChange()
@@ -1930,6 +1938,7 @@
         }
 
         private func handleMessageUpdate(_ object: [String: Any]) {
+            noteStdoutActivityForTurnWatchdogIfCommitted(type: "message_update", object: object)
             guard let assistantMessageEvent = object["assistantMessageEvent"] as? [String: Any],
                 let eventType = string(for: "type", in: assistantMessageEvent)
             else {

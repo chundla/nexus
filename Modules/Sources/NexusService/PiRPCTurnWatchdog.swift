@@ -24,6 +24,31 @@
             configuredNanoseconds(environmentKey: "NEXUS_PI_RPC_TURN_WATCHDOG_TICK_SEC", default: defaultWatchdogTickNanoseconds)
         }
 
+        /// Meaningful Pi agent progress for stall detection (see `PiRPCSessionRuntime` stdout handler).
+        static func countsAsMeaningfulStdoutProgress(type: String, object: [String: Any]) -> Bool {
+            switch type {
+            case "agent_start", "agent_end", "message_end", "turn_end",
+                "tool_execution_start", "tool_execution_update", "tool_execution_end":
+                return true
+            case "message_update":
+                guard let assistantMessageEvent = object["assistantMessageEvent"] as? [String: Any],
+                    let eventType = assistantMessageEvent["type"] as? String
+                else {
+                    return false
+                }
+                switch eventType {
+                case "text_delta":
+                    return (assistantMessageEvent["delta"] as? String)?.isEmpty == false
+                case "thinking_end", "toolcall_end", "done":
+                    return true
+                default:
+                    return false
+                }
+            default:
+                return false
+            }
+        }
+
         private static func configuredNanoseconds(environmentKey: String, default defaultValue: UInt64) -> UInt64 {
             guard let raw = ProcessInfo.processInfo.environment[environmentKey]?.trimmingCharacters(in: .whitespacesAndNewlines),
                 let seconds = Double(raw),

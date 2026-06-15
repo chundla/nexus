@@ -140,6 +140,16 @@
             )
         }
 
+        static func logPiTurnWatchdogStarted(sessionID: UUID, stallThresholdSeconds: Int) {
+            logger.notice(
+                """
+                piTurnWatchdogStarted nexusHostPID=\(nexusHostPID, privacy: .public) \
+                sessionID=\(sessionID.uuidString, privacy: .public) \
+                stallThresholdSec=\(stallThresholdSeconds, privacy: .public)
+                """
+            )
+        }
+
         static func logPiTurnWatchdogPoll(
             sessionID: UUID,
             idleThresholdSeconds: Int,

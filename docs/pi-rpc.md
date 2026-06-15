@@ -21,7 +21,7 @@ Nexus does not fork that document; treat it as the source of truth for Pi behavi
 | `agent_end` (`willRetry != true`) | Ends user prompt; final assistant from `messages[]` when needed |
 | Process exit with open prompt | Turn aborted |
 | `get_state.isStreaming == false` while prompt open | Reconciled on automatic `get_session_stats` (after `turn_end` / `agent_end` paths) |
-| No RPC stdout progress for 90s while prompt open | Turn watchdog polls `get_state` / `get_session_stats`, then surfaces a provider stall error and ends the turn |
+| No meaningful RPC stdout progress for 90s while prompt open | Turn watchdog polls `get_state` / `get_session_stats`, then surfaces a provider stall error and ends the turn. “Progress” is agent/tool/message deltas, not `queue_update` or empty `message_update`. |
 
 Watchdog tuning (macOS service / Xcode Run env): `NEXUS_PI_RPC_TURN_STALL_SEC` (default 90), `NEXUS_PI_RPC_TURN_POLL_SEC` (default 15), `NEXUS_PI_RPC_TURN_WATCHDOG_TICK_SEC` (default 5). Optional startup stats: `NEXUS_PI_RPC_STARTUP_SESSION_STATS=1`.
 
