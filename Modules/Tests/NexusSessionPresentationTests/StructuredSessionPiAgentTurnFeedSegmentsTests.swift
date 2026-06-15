@@ -220,6 +220,68 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
         #expect(structuredSessionPiFeedSegments(for: screen) == nil)
     }
 
+    @Test func piClosedTurnAbsorbsThoughtsAndToolsAfterInterimPiMessage() throws {
+        // Matches macOS hybrid feed bug: composite card from early slice, then flat thoughts/commands after turn_end.
+        let screen = SessionScreen(
+            session: piSession(),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .message, text: "You: review", prompt: SessionPrompt(text: "review")),
+                SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Early plan."),
+                SessionActivityItem(kind: .command, text: "read: A.swift"),
+                SessionActivityItem(kind: .command, text: "read: B.swift"),
+                SessionActivityItem(
+                    kind: .message,
+                    text: "Pi: Scope unclear — checking recent changes and repo state to focus the review."
+                ),
+                SessionActivityItem(
+                    kind: .status,
+                    text: "thoughts:",
+                    detailText: "The user asked for a code review on Nexus…"
+                ),
+                SessionActivityItem(kind: .command, text: "read: StructuredSessionPiFeedSegmentStyle.swift"),
+                SessionActivityItem(kind: .command, text: "read: NexusSessionPresentation/foo.swift")
+            ],
+            isAgentTurnInProgress: false
+        )
+
+        let segments = try #require(structuredSessionPiFeedSegments(for: screen))
+        #expect(segments.count == 2)
+        #expect(segments.contains { if case .standalone = $0 { return true }; return false } == false)
+        guard case .agentTurn(let turn) = segments[1] else {
+            Issue.record("Expected single composite agent turn")
+            return
+        }
+        #expect(turn.reasoning?.markdownBody == "Early plan.\n\nThe user asked for a code review on Nexus…")
+        #expect(turn.tools.count == 4)
+        #expect(turn.finalAnswer?.text == "Scope unclear — checking recent changes and repo state to focus the review.")
+    }
+
+    @Test func piClosedTurnUsesLastPiMessageAsFinalAnswerWhenMultipleAssistantLines() throws {
+        let screen = SessionScreen(
+            session: piSession(),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .message, text: "You: go", prompt: SessionPrompt(text: "go")),
+                SessionActivityItem(kind: .message, text: "Pi: interim status"),
+                SessionActivityItem(kind: .command, text: "read: x"),
+                SessionActivityItem(kind: .message, text: "Pi: final report")
+            ],
+            isAgentTurnInProgress: false
+        )
+
+        let segments = try #require(structuredSessionPiFeedSegments(for: screen))
+        guard case .agentTurn(let turn) = segments.last else {
+            Issue.record("Expected agent turn")
+            return
+        }
+        #expect(turn.tools.count == 1)
+        #expect(turn.finalAnswer?.text == "final report")
+        #expect(segments.contains { if case .standalone = $0 { return true }; return false } == false)
+    }
+
     @Test func piAgentTurnRegressionThoughtsAndCommandRowsNeverLeakAsStandaloneSegments() throws {
         let screen = SessionScreen(
             session: piSession(),

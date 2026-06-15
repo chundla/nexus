@@ -222,10 +222,7 @@ private func structuredSessionPiAgentTurnActivitySlice(
             }
             consumedAny = true
             cursor += 1
-            // Keep absorbing thoughts/tools after a provisional assistant line while the turn is still open.
-            if isAgentTurnInProgress == false {
-                break
-            }
+            // Pi may emit interim `Pi:` lines before more thoughts/tools; keep absorbing until next user prompt or outside-stack row.
             continue
         }
 
