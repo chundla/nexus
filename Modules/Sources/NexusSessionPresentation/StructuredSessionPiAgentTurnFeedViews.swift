@@ -128,148 +128,18 @@ public struct StructuredSessionPiFeedSegmentView: View {
 
     @ViewBuilder
     private func agentTurnView(_ turn: StructuredSessionFeedAgentTurnSegment) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if let reasoning = turn.reasoning {
-                DisclosureGroup(
-                    isExpanded: Binding(
-                        get: { disclosureState.reasoningIsExpanded(for: turn) },
-                        set: { disclosureState.setReasoningExpanded(turnID: turn.id, isExpanded: $0) }
-                    )
-                ) {
-                    structuredSessionFeedMarkdownContentView(
-                        markdown: reasoning.markdownBody,
-                        font: style.bodyFont(14, nil, nil),
-                        color: style.assistantBodyForeground
-                    )
-                    .fixedSize(horizontal: false, vertical: true)
-                } label: {
-                    Text("Reasoning")
-                        .font(style.bodyFont(12, .caption, .semibold))
-                        .foregroundStyle(style.mutedForeground)
-                }
-            }
-
-            if turn.tools.isEmpty == false {
-                DisclosureGroup(
-                    isExpanded: Binding(
-                        get: { disclosureState.toolsIsExpanded(for: turn) },
-                        set: { disclosureState.setToolsExpanded(turnID: turn.id, isExpanded: $0) }
-                    )
-                ) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        ForEach(turn.tools) { tool in
-                            toolRowView(turn: turn, tool: tool)
-                        }
-                    }
-                } label: {
-                    Text(structuredSessionAgentTurnToolsSummary(toolCount: turn.tools.count))
-                        .font(style.bodyFont(12, .caption, .semibold))
-                        .foregroundStyle(style.mutedForeground)
-                }
-            }
-
-            if turn.turnNotices.isEmpty == false {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(Array(turn.turnNotices.enumerated()), id: \.offset) { _, notice in
-                        switch notice {
-                        case .progress(let text):
-                            Text(text)
-                                .font(style.bodyFont(13, nil, nil))
-                                .foregroundStyle(style.mutedForeground)
-                                .structuredSessionFeedTextSelection()
-                                .fixedSize(horizontal: false, vertical: true)
-                        case .error(let text):
-                            Text(text)
-                                .font(style.bodyFont(13, nil, nil))
-                                .foregroundStyle(Color.red.opacity(0.92))
-                                .structuredSessionFeedTextSelection()
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                }
-            }
-
-            if let finalAnswer = turn.finalAnswer {
-                DisclosureGroup(
-                    isExpanded: .constant(true)
-                ) {
-                    finalAnswerBody(finalAnswer, turnID: turn.id)
-                } label: {
-                    Text("Final answer")
-                        .font(style.bodyFont(12, .caption, .semibold))
-                        .foregroundStyle(style.mutedForeground)
-                }
-            }
-        }
-        .padding(12)
-        .frame(maxWidth: 620, alignment: .leading)
-        .background(style.assistantBubbleBackground, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .structuredSessionFeedRowCompositing()
-    }
-
-    @ViewBuilder
-    private func toolRowView(
-        turn: StructuredSessionFeedAgentTurnSegment,
-        tool: StructuredSessionFeedAgentTurnToolSegment
-    ) -> some View {
-        let defaultExpanded = structuredSessionAgentTurnDisclosureExpansionDefaults(for: turn)
-            .toolRows[safe: turn.tools.firstIndex(where: { $0.id == tool.id }) ?? 0] ?? false
-        DisclosureGroup(
-            isExpanded: Binding(
-                get: { disclosureState.toolRowIsExpanded(turnID: turn.id, toolID: tool.id, defaultExpanded: defaultExpanded) },
-                set: { disclosureState.setToolRowExpanded(turnID: turn.id, toolID: tool.id, isExpanded: $0) }
-            )
-        ) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(tool.callPreview)
-                    .font(style.monoFont(12, .callout))
-                    .foregroundStyle(style.assistantBodyForeground)
-                    .structuredSessionFeedTextSelection()
-                    .fixedSize(horizontal: false, vertical: true)
-                if let detail = tool.detailText {
-                    Text(detail)
-                        .font(style.monoFont(11, .caption))
-                        .foregroundStyle(style.mutedForeground)
-                        .structuredSessionFeedTextSelection()
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                ForEach(Array(tool.subagentOutputs.enumerated()), id: \.offset) { _, output in
-                    Text(output)
-                        .font(style.bodyFont(13, nil, nil))
-                        .foregroundStyle(style.assistantBodyForeground.opacity(0.9))
-                        .structuredSessionFeedTextSelection()
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-        } label: {
-            Text(structuredSessionAgentTurnToolPreview(callPreview: tool.callPreview))
-                .font(style.monoFont(11, .caption))
-                .foregroundStyle(style.toolAccent)
-                .lineLimit(1)
-        }
-    }
-
-    @ViewBuilder
-    private func finalAnswerBody(
-        _ finalAnswer: StructuredSessionFeedAgentTurnFinalAnswerSegment,
-        turnID: UUID
-    ) -> some View {
-        let conversation = StructuredSessionConversationPresentation(
-            role: .assistant(label: "Pi"),
-            text: finalAnswer.text,
-            isStreaming: finalAnswer.isStreaming
-        )
-        StructuredSessionPiAgentTurnFinalAnswerView(
-            conversation: conversation,
-            turnID: turnID,
+        StructuredSessionAgentTurnStackView(
+            turn: turn,
+            providerDisplayName: providerDisplayName,
             style: style,
+            disclosureState: disclosureState,
             onShowFullAssistantResponse: onShowFullAssistantResponse
         )
     }
 }
 
 @available(macOS 12.0, iOS 15.0, *)
-private struct StructuredSessionPiAgentTurnFinalAnswerView: View {
+struct StructuredSessionPiAgentTurnFinalAnswerView: View {
     let conversation: StructuredSessionConversationPresentation
     let turnID: UUID
     let style: StructuredSessionPiFeedSegmentStyle
@@ -303,10 +173,6 @@ private struct StructuredSessionPiAgentTurnFinalAnswerView: View {
 
     @ViewBuilder
     private var finalizedBody: some View {
-        let policy = structuredSessionFeedAgentTurnFinalAnswerMarkdownDisplayPolicy(
-            for: conversation.text,
-            charactersPerLine: style.charactersPerLine
-        )
         let allowsHydration = structuredSessionFeedAllowsLatestAssistantInlineMarkdownHydration(
             prefersPlainTextInitialRender: false,
             feedReaderIsScrollIdle: style.feedReaderIsScrollIdle,
@@ -325,15 +191,6 @@ private struct StructuredSessionPiAgentTurnFinalAnswerView: View {
 
 public func structuredSessionAgentTurnToolsSummary(toolCount: Int) -> String {
     toolCount == 1 ? "Used 1 tool" : "Used \(toolCount) tools"
-}
-
-public func structuredSessionAgentTurnToolPreview(callPreview: String) -> String {
-    let trimmed = callPreview.trimmingCharacters(in: .whitespacesAndNewlines)
-    if trimmed.count <= 72 {
-        return trimmed
-    }
-    let end = trimmed.index(trimmed.startIndex, offsetBy: 72)
-    return String(trimmed[..<end]) + "…"
 }
 
 private func structuredSessionAnnotatedActivityRow(
@@ -358,8 +215,3 @@ private func structuredSessionAnnotatedActivityRow(
     )
 }
 
-private extension Array {
-    subscript(safe index: Int) -> Element? {
-        indices.contains(index) ? self[index] : nil
-    }
-}
