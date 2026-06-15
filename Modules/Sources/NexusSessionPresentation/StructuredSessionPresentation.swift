@@ -86,6 +86,8 @@ public struct StructuredSessionActivityRowChunk: Identifiable, Equatable {
 public struct StructuredSessionFeedPresentation: Equatable {
     public let copy: StructuredSessionPresentationCopy
     public let activityRowChunks: [StructuredSessionActivityRowChunk]
+    /// Pi v1 composite feed segments (ADR 0037). `nil` when the client should use flat `activityRows`.
+    public let feedSegments: [StructuredSessionFeedSegment]?
     public let pendingApprovalRequests: [SessionApprovalRequest]
     public let thinkingIndicator: StructuredSessionThinkingIndicator?
 
@@ -102,11 +104,13 @@ public struct StructuredSessionFeedPresentation: Equatable {
         copy: StructuredSessionPresentationCopy,
         activityRows: [StructuredSessionActivityRow],
         activityRowChunks: [StructuredSessionActivityRowChunk]? = nil,
+        feedSegments: [StructuredSessionFeedSegment]? = nil,
         pendingApprovalRequests: [SessionApprovalRequest],
         thinkingIndicator: StructuredSessionThinkingIndicator?
     ) {
         self.copy = copy
         self.activityRowChunks = activityRowChunks ?? structuredSessionActivityRowChunks(for: activityRows)
+        self.feedSegments = feedSegments
         self.pendingApprovalRequests = pendingApprovalRequests
         self.thinkingIndicator = thinkingIndicator
     }
@@ -949,6 +953,7 @@ private func structuredSessionFeedPresentation(
         copy: structuredSessionPresentationCopy(for: screen),
         activityRows: activityRows,
         activityRowChunks: activityRowChunks,
+        feedSegments: structuredSessionPiFeedSegments(for: screen),
         pendingApprovalRequests: pendingApprovalRequests,
         thinkingIndicator: structuredSessionThinkingIndicator(
             for: screen,
