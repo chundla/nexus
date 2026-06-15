@@ -2245,9 +2245,10 @@
                             for: structuredPresentation
                         )
                     }
-                    if let next = structuredSessionFeedPinStateIfChanged(
+                    if let next = structuredSessionFeedPinStateIfChangedDuringOpenAgentTurn(
                         previous: structuredSessionPinState,
-                        sample: sample
+                        sample: sample,
+                        effectiveTurnInProgress: structuredSessionEffectiveAgentTurnInProgress(for: presentation)
                     ) {
                         structuredSessionPinState = next
                     }
@@ -2275,6 +2276,10 @@
                 .onChange(of: structuredSessionEffectiveAgentTurnInProgress(for: presentation)) { _, turnOpen in
                     if turnOpen {
                         structuredSessionFeedScrollPosition = ScrollPosition()
+                        structuredSessionPinState = StructuredSessionFeedPinState(
+                            isFollowingBottom: false,
+                            userHasDetachedFromBottom: true
+                        )
                     } else {
                         structuredSessionFeedScrollPosition = ScrollPosition(edge: .bottom)
                     }

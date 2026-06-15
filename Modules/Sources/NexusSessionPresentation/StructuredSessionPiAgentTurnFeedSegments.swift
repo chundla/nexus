@@ -491,7 +491,7 @@ private func structuredSessionPiUserMessageBody(from item: SessionActivityItem) 
 
 private let structuredSessionPiThoughtsStatusLabel = "thoughts:"
 
-private func structuredSessionPiFeedSegmentIsThoughtsStatus(_ item: SessionActivityItem) -> Bool {
+func structuredSessionPiFeedSegmentIsThoughtsStatus(_ item: SessionActivityItem) -> Bool {
     guard item.kind == .status else {
         return false
     }

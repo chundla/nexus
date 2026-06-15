@@ -9,10 +9,17 @@ func structuredSessionPiFeedSegmentTurnInProgress(for screen: SessionScreen) -> 
     guard screen.session.providerID == .pi else {
         return false
     }
-    return structuredSessionPiProviderTurnAwaitingTurnEnd(
+    if structuredSessionPiProviderTurnAwaitingTurnEnd(
         activityItems: screen.activityItems,
         providerEvents: screen.providerEvents
-    )
+    ) {
+        return true
+    }
+    if let draft = screen.providerFacts.liveAssistantDraftText?.trimmingCharacters(in: .whitespacesAndNewlines),
+       draft.isEmpty == false {
+        return true
+    }
+    return false
 }
 
 /// After the last prompt-anchored user message, the turn is still open until a `turn_end` provider event arrives.

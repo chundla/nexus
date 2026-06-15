@@ -42,7 +42,11 @@
                     contentOffsetY: geometry.contentOffset.y
                 )
             } action: { _, sample in
-                if let next = structuredSessionFeedPinStateIfChanged(previous: pinState, sample: sample) {
+                if let next = structuredSessionFeedPinStateIfChangedDuringOpenAgentTurn(
+                    previous: pinState,
+                    sample: sample,
+                    effectiveTurnInProgress: effectiveTurnOpen
+                ) {
                     pinState = next
                 }
             }
@@ -53,6 +57,8 @@
             .onChange(of: effectiveTurnOpen) { _, turnOpen in
                 if turnOpen {
                     scrollPosition = ScrollPosition()
+                    pinState = StructuredSessionFeedPinState(isFollowingBottom: false, userHasDetachedFromBottom: true)
+                    reanchorScrollToOpenTurnIfNeeded()
                 } else {
                     scrollPosition = ScrollPosition(edge: .bottom)
                 }

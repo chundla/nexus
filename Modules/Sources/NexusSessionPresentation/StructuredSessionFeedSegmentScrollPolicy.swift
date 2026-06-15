@@ -170,6 +170,45 @@ public func structuredSessionFeedUsesBottomEdgeScrollPositionBinding(
     structuredSessionEffectiveAgentTurnInProgress(for: presentation) == false
 }
 
+/// While an open turn is effective, do not treat scroll geometry as “pinned to bottom” (avoids tail stickiness).
+public func structuredSessionFeedPinStateDuringOpenAgentTurn(
+    previous: StructuredSessionFeedPinState,
+    sample: StructuredSessionScrollGeometrySample,
+    effectiveTurnInProgress: Bool,
+    pinThreshold: CGFloat = 48,
+    topContentOffsetTolerance: CGFloat = 8
+) -> StructuredSessionFeedPinState {
+    guard effectiveTurnInProgress else {
+        return structuredSessionFeedPinState(
+            previous: previous,
+            sample: sample,
+            pinThreshold: pinThreshold,
+            topContentOffsetTolerance: topContentOffsetTolerance
+        )
+    }
+    return StructuredSessionFeedPinState(isFollowingBottom: false, userHasDetachedFromBottom: true)
+}
+
+public func structuredSessionFeedPinStateIfChangedDuringOpenAgentTurn(
+    previous: StructuredSessionFeedPinState,
+    sample: StructuredSessionScrollGeometrySample,
+    effectiveTurnInProgress: Bool,
+    pinThreshold: CGFloat = 48,
+    topContentOffsetTolerance: CGFloat = 8
+) -> StructuredSessionFeedPinState? {
+    let next = structuredSessionFeedPinStateDuringOpenAgentTurn(
+        previous: previous,
+        sample: sample,
+        effectiveTurnInProgress: effectiveTurnInProgress,
+        pinThreshold: pinThreshold,
+        topContentOffsetTolerance: topContentOffsetTolerance
+    )
+    guard next != previous else {
+        return nil
+    }
+    return next
+}
+
 public func structuredSessionFeedFollowScrollToken(
     for presentation: FocusedStructuredSessionPresentation
 ) -> String {
