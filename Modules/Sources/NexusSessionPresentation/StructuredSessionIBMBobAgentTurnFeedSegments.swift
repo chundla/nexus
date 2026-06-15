@@ -71,7 +71,7 @@ private func structuredSessionIBMBobAgentTurnActivitySlice(
         return StructuredSessionIBMBobAgentTurnSlice(nextIndex: startIndex, turn: nil)
     }
 
-    var reasoningParts: [String] = []
+    var stackItems: [StructuredSessionFeedAgentTurnStackItem] = []
     var tools: [StructuredSessionFeedAgentTurnToolSegment] = []
     var openToolIndex: Int?
     var finalAnswer: StructuredSessionFeedAgentTurnFinalAnswerSegment?
@@ -92,7 +92,10 @@ private func structuredSessionIBMBobAgentTurnActivitySlice(
         if structuredSessionIBMBobFeedSegmentIsThoughtsStatus(item) {
             if let detail = item.detailText?.trimmingCharacters(in: .whitespacesAndNewlines),
                detail.isEmpty == false {
-                reasoningParts.append(detail)
+                stackItems.append(.reasoning(StructuredSessionFeedAgentTurnReasoningSegment(
+                    activityItemID: item.id,
+                    markdownBody: detail
+                )))
             }
             consumedAny = true
             cursor += 1
@@ -100,18 +103,23 @@ private func structuredSessionIBMBobAgentTurnActivitySlice(
         }
 
         if let thinkingBody = structuredSessionIBMBobThinkingStreamBody(from: item) {
-            reasoningParts.append(thinkingBody)
+            stackItems.append(.reasoning(StructuredSessionFeedAgentTurnReasoningSegment(
+                activityItemID: item.id,
+                markdownBody: thinkingBody
+            )))
             consumedAny = true
             cursor += 1
             continue
         }
 
         if item.kind == .command {
-            tools.append(StructuredSessionFeedAgentTurnToolSegment(
+            let tool = StructuredSessionFeedAgentTurnToolSegment(
                 activityItemID: item.id,
                 callPreview: item.text,
                 detailText: item.detailText
-            ))
+            )
+            tools.append(tool)
+            stackItems.append(.tool(tool))
             openToolIndex = tools.count - 1
             consumedAny = true
             cursor += 1
@@ -136,6 +144,7 @@ private func structuredSessionIBMBobAgentTurnActivitySlice(
                     subagentOutputs: tool.subagentOutputs + [plainBody]
                 )
                 tools[toolIndex] = tool
+                structuredSessionAgentTurnSyncStackTool(tool, in: &stackItems)
                 consumedAny = true
                 cursor += 1
                 continue
@@ -173,21 +182,11 @@ private func structuredSessionIBMBobAgentTurnActivitySlice(
         return StructuredSessionIBMBobAgentTurnSlice(nextIndex: startIndex, turn: nil)
     }
 
-    let reasoning: StructuredSessionFeedAgentTurnReasoningSegment?
-    if reasoningParts.isEmpty {
-        reasoning = nil
-    } else {
-        reasoning = StructuredSessionFeedAgentTurnReasoningSegment(
-            markdownBody: reasoningParts.joined(separator: "\n\n")
-        )
-    }
-
     let turnID = activityItems[startIndex].id
     let turn = StructuredSessionFeedAgentTurnSegment(
         id: turnID,
         isOpen: isOpenTurn,
-        reasoning: reasoning,
-        tools: tools,
+        stackItems: stackItems,
         finalAnswer: finalAnswer
     )
 

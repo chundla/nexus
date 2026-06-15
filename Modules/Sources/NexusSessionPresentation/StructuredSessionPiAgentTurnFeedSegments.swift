@@ -15,10 +15,14 @@ public struct StructuredSessionFeedUserMessageSegment: Equatable, Identifiable, 
     }
 }
 
-public struct StructuredSessionFeedAgentTurnReasoningSegment: Equatable, Sendable {
+public struct StructuredSessionFeedAgentTurnReasoningSegment: Equatable, Identifiable, Sendable {
+    public let activityItemID: UUID
     public let markdownBody: String
 
-    public init(markdownBody: String) {
+    public var id: UUID { activityItemID }
+
+    public init(activityItemID: UUID, markdownBody: String) {
+        self.activityItemID = activityItemID
         self.markdownBody = markdownBody
     }
 }
@@ -62,8 +66,8 @@ public struct StructuredSessionFeedAgentTurnFinalAnswerSegment: Equatable, Senda
 public struct StructuredSessionFeedAgentTurnSegment: Equatable, Identifiable, Sendable {
     public let id: UUID
     public let isOpen: Bool
-    public let reasoning: StructuredSessionFeedAgentTurnReasoningSegment?
-    public let tools: [StructuredSessionFeedAgentTurnToolSegment]
+    /// Reasoning blocks and tools in **Session** activity order.
+    public let stackItems: [StructuredSessionFeedAgentTurnStackItem]
     /// Turn-level progress / errors with no open tool (e.g. `message_end` abort) — shown inside the agent-turn card.
     public let turnNotices: [StructuredSessionFeedAgentTurnNotice]
     public let finalAnswer: StructuredSessionFeedAgentTurnFinalAnswerSegment?
@@ -71,15 +75,13 @@ public struct StructuredSessionFeedAgentTurnSegment: Equatable, Identifiable, Se
     public init(
         id: UUID,
         isOpen: Bool,
-        reasoning: StructuredSessionFeedAgentTurnReasoningSegment? = nil,
-        tools: [StructuredSessionFeedAgentTurnToolSegment] = [],
+        stackItems: [StructuredSessionFeedAgentTurnStackItem] = [],
         turnNotices: [StructuredSessionFeedAgentTurnNotice] = [],
         finalAnswer: StructuredSessionFeedAgentTurnFinalAnswerSegment? = nil
     ) {
         self.id = id
         self.isOpen = isOpen
-        self.reasoning = reasoning
-        self.tools = tools
+        self.stackItems = stackItems
         self.turnNotices = turnNotices
         self.finalAnswer = finalAnswer
     }
@@ -170,7 +172,7 @@ private func structuredSessionPiAgentTurnActivitySlice(
         return StructuredSessionPiAgentTurnSlice(nextIndex: startIndex, turn: nil)
     }
 
-    var reasoningParts: [String] = []
+    var stackItems: [StructuredSessionFeedAgentTurnStackItem] = []
     var tools: [StructuredSessionFeedAgentTurnToolSegment] = []
     var openToolIndex: Int?
     var finalAnswer: StructuredSessionFeedAgentTurnFinalAnswerSegment?
@@ -197,6 +199,7 @@ private func structuredSessionPiAgentTurnActivitySlice(
                 item.text,
                 to: &tools,
                 openToolIndex: &openToolIndex,
+                stackItems: &stackItems,
                 turnNotices: &turnNotices
             )
             consumedAny = true
@@ -235,6 +238,7 @@ private func structuredSessionPiAgentTurnActivitySlice(
                 bashOutput,
                 to: &tools,
                 openToolIndex: &openToolIndex,
+                stackItems: &stackItems,
                 turnNotices: &turnNotices
             )
             consumedAny = true
@@ -249,7 +253,10 @@ private func structuredSessionPiAgentTurnActivitySlice(
         if structuredSessionPiFeedSegmentIsThoughtsStatus(item) {
             if let detail = item.detailText?.trimmingCharacters(in: .whitespacesAndNewlines),
                detail.isEmpty == false {
-                reasoningParts.append(detail)
+                stackItems.append(.reasoning(StructuredSessionFeedAgentTurnReasoningSegment(
+                    activityItemID: item.id,
+                    markdownBody: detail
+                )))
             }
             consumedAny = true
             cursor += 1
@@ -257,11 +264,13 @@ private func structuredSessionPiAgentTurnActivitySlice(
         }
 
         if item.kind == .command {
-            tools.append(StructuredSessionFeedAgentTurnToolSegment(
+            let tool = StructuredSessionFeedAgentTurnToolSegment(
                 activityItemID: item.id,
                 callPreview: item.text,
                 detailText: item.detailText
-            ))
+            )
+            tools.append(tool)
+            stackItems.append(.tool(tool))
             openToolIndex = tools.count - 1
             consumedAny = true
             cursor += 1
@@ -278,6 +287,7 @@ private func structuredSessionPiAgentTurnActivitySlice(
                 subagentOutputs: tool.subagentOutputs + [subagentOutput]
             )
             tools[toolIndex] = tool
+            structuredSessionAgentTurnSyncStackTool(tool, in: &stackItems)
             consumedAny = true
             cursor += 1
             continue
@@ -305,21 +315,11 @@ private func structuredSessionPiAgentTurnActivitySlice(
         return StructuredSessionPiAgentTurnSlice(nextIndex: startIndex, turn: nil)
     }
 
-    let reasoning: StructuredSessionFeedAgentTurnReasoningSegment?
-    if reasoningParts.isEmpty {
-        reasoning = nil
-    } else {
-        reasoning = StructuredSessionFeedAgentTurnReasoningSegment(
-            markdownBody: reasoningParts.joined(separator: "\n\n")
-        )
-    }
-
     let turnID = activityItems[startIndex].id
     let turn = StructuredSessionFeedAgentTurnSegment(
         id: turnID,
         isOpen: isOpenTurn,
-        reasoning: reasoning,
-        tools: tools,
+        stackItems: stackItems,
         turnNotices: turnNotices,
         finalAnswer: finalAnswer
     )
@@ -385,6 +385,7 @@ private func structuredSessionPiAgentTurnAttachBashOutput(
     _ output: String,
     to tools: inout [StructuredSessionFeedAgentTurnToolSegment],
     openToolIndex: inout Int?,
+    stackItems: inout [StructuredSessionFeedAgentTurnStackItem],
     turnNotices: inout [StructuredSessionFeedAgentTurnNotice]
 ) {
     guard let toolIndex = openToolIndex, tools.indices.contains(toolIndex) else {
@@ -393,6 +394,7 @@ private func structuredSessionPiAgentTurnAttachBashOutput(
     }
 
     structuredSessionPiAgentTurnMergeDetailLine(output, into: &tools[toolIndex])
+    structuredSessionAgentTurnSyncStackTool(tools[toolIndex], in: &stackItems)
 }
 
 private func structuredSessionPiAgentTurnAppendProgressNotice(
@@ -414,6 +416,7 @@ private func structuredSessionPiAgentTurnAbsorbErrorText(
     _ rawText: String,
     to tools: inout [StructuredSessionFeedAgentTurnToolSegment],
     openToolIndex: inout Int?,
+    stackItems: inout [StructuredSessionFeedAgentTurnStackItem],
     turnNotices: inout [StructuredSessionFeedAgentTurnNotice]
 ) {
     let errorText = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -427,6 +430,7 @@ private func structuredSessionPiAgentTurnAbsorbErrorText(
     }
 
     structuredSessionPiAgentTurnMergeDetailLine(errorText, into: &tools[toolIndex])
+    structuredSessionAgentTurnSyncStackTool(tools[toolIndex], in: &stackItems)
 }
 
 /// Appends tool output / errors in arrival order (newline-separated).

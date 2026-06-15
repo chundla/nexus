@@ -69,15 +69,15 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
             return
         }
         #expect(turn.isOpen == false)
-        #expect(turn.reasoning?.markdownBody == "Plan the change.")
-        #expect(turn.tools.count == 1)
-        #expect(turn.tools[0].callPreview == "subagent reviewer: Review diff")
-        #expect(turn.tools[0].subagentOutputs == ["Looks good overall."])
+        #expect(turn.reasoningStackItems.map(\.markdownBody) == ["Plan the change."])
+        #expect(turn.toolStackItems.count == 1)
+        #expect(turn.toolStackItems[0].callPreview == "subagent reviewer: Review diff")
+        #expect(turn.toolStackItems[0].subagentOutputs == ["Looks good overall."])
         #expect(turn.finalAnswer?.text == "Done")
         #expect(turn.finalAnswer?.isStreaming == false)
     }
 
-    @Test func piFeedSegmentsMergeMultipleThoughtsBlocksIntoOneReasoningAccordion() throws {
+    @Test func piFeedSegmentsEmitSeparateReasoningBlocksPerThoughtsStatus() throws {
         let screen = SessionScreen(
             session: piSession(),
             primarySurface: .structuredActivityFeed,
@@ -99,7 +99,7 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
             Issue.record("Expected agent turn")
             return
         }
-        #expect(turn.reasoning?.markdownBody == "First thought.\n\nSecond thought.")
+        #expect(turn.reasoningStackItems.map(\.markdownBody) == ["First thought.", "Second thought."])
     }
 
     @Test func piFeedSegmentsNestSubagentAssistantTextUnderParentToolCall() throws {
@@ -121,10 +121,10 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
             Issue.record("Expected agent turn")
             return
         }
-        #expect(turn.tools.count == 1)
-        #expect(turn.tools[0].activityItemID == commandID)
-        #expect(turn.tools[0].detailText == "step 1")
-        #expect(turn.tools[0].subagentOutputs == ["Summary output"])
+        #expect(turn.toolStackItems.count == 1)
+        #expect(turn.toolStackItems[0].activityItemID == commandID)
+        #expect(turn.toolStackItems[0].detailText == "step 1")
+        #expect(turn.toolStackItems[0].subagentOutputs == ["Summary output"])
         #expect(turn.finalAnswer?.text == "final")
     }
 
@@ -152,8 +152,8 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
             return
         }
         #expect(turn.isOpen == true)
-        #expect(turn.reasoning?.markdownBody == "Plan.")
-        #expect(turn.tools.count == 1)
+        #expect(turn.reasoningStackItems.map(\.markdownBody) == ["Plan."])
+        #expect(turn.toolStackItems.count == 1)
         #expect(turn.finalAnswer == nil)
         #expect(piItem.text.hasPrefix("Pi:"))
         #expect(segments.count >= 3)
@@ -254,8 +254,11 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
             Issue.record("Expected single composite agent turn")
             return
         }
-        #expect(turn.reasoning?.markdownBody == "Early plan.\n\nThe user asked for a code review on Nexus…")
-        #expect(turn.tools.count == 4)
+        #expect(turn.reasoningStackItems.map(\.markdownBody) == [
+            "Early plan.",
+            "The user asked for a code review on Nexus…"
+        ])
+        #expect(turn.toolStackItems.count == 4)
         #expect(turn.finalAnswer?.text == "Scope unclear — checking recent changes and repo state to focus the review.")
     }
 
@@ -282,7 +285,7 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
             return
         }
         #expect(turn.turnNotices == [.progress("Running bash: ls")])
-        #expect(turn.reasoning?.markdownBody == "Still working.")
+        #expect(turn.reasoningStackItems.map(\.markdownBody) == ["Still working."])
         #expect(turn.finalAnswer?.text == "done")
     }
 
@@ -308,7 +311,7 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
             return
         }
         #expect(turn.turnNotices.contains(.progress("Auto-compacting the session context")))
-        #expect(turn.tools.count == 1)
+        #expect(turn.toolStackItems.count == 1)
     }
 
     @Test func piBashOutputMergesIntoOpenBashToolWithoutStandaloneRow() throws {
@@ -333,8 +336,8 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
             Issue.record("Expected agent turn")
             return
         }
-        #expect(turn.tools.count == 1)
-        #expect(turn.tools[0].detailText?.contains("total 8") == true)
+        #expect(turn.toolStackItems.count == 1)
+        #expect(turn.toolStackItems[0].detailText?.contains("total 8") == true)
         #expect(turn.finalAnswer?.text == "listed")
     }
 
@@ -359,7 +362,7 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
             return
         }
         #expect(turn.turnNotices == [.error("Operation aborted")])
-        #expect(turn.reasoning?.markdownBody == "Recovering.")
+        #expect(turn.reasoningStackItems.map(\.markdownBody) == ["Recovering."])
         #expect(turn.finalAnswer?.text == "partial answer")
     }
 
@@ -432,8 +435,8 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
             Issue.record("Expected agent turn")
             return
         }
-        #expect(turn.tools.count == 1)
-        #expect(turn.tools[0].detailText == "partial output\nfirst failure\nsecond failure")
+        #expect(turn.toolStackItems.count == 1)
+        #expect(turn.toolStackItems[0].detailText == "partial output\nfirst failure\nsecond failure")
     }
 
     @Test func piErrorsAttachToMostRecentlyOpenedTool() throws {
@@ -457,9 +460,9 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
             Issue.record("Expected agent turn")
             return
         }
-        #expect(turn.tools.count == 2)
-        #expect(turn.tools[0].detailText == "err-a")
-        #expect(turn.tools[1].detailText == "err-b")
+        #expect(turn.toolStackItems.count == 2)
+        #expect(turn.toolStackItems[0].detailText == "err-a")
+        #expect(turn.toolStackItems[1].detailText == "err-b")
     }
 
     @Test func piErrorAfterInterimPiBeforeNextCommandUsesLastOpenTool() throws {
@@ -483,9 +486,9 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
             Issue.record("Expected agent turn")
             return
         }
-        #expect(turn.tools.count == 2)
-        #expect(turn.tools[0].detailText == "ENOENT: skill.md")
-        #expect(turn.tools[1].detailText == nil)
+        #expect(turn.toolStackItems.count == 2)
+        #expect(turn.toolStackItems[0].detailText == "ENOENT: skill.md")
+        #expect(turn.toolStackItems[1].detailText == nil)
     }
 
     @Test func piToolErrorDoesNotSplitTurnIntoLegacyRows() throws {
@@ -512,9 +515,12 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
             Issue.record("Expected single composite agent turn")
             return
         }
-        #expect(turn.reasoning?.markdownBody == "Scoping the review.\n\nLet me dive into recent Pi/agent-turn changes.")
-        #expect(turn.tools.count == 2)
-        #expect(turn.tools[0].detailText?.contains("ENOENT") == true)
+        #expect(turn.reasoningStackItems.map(\.markdownBody) == [
+            "Scoping the review.",
+            "Let me dive into recent Pi/agent-turn changes."
+        ])
+        #expect(turn.toolStackItems.count == 2)
+        #expect(turn.toolStackItems[0].detailText?.contains("ENOENT") == true)
         #expect(turn.finalAnswer?.text == "Scoping the review: repo layout, recent changes, and critical modules.")
     }
 
@@ -537,7 +543,7 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
             Issue.record("Expected agent turn")
             return
         }
-        #expect(turn.tools.count == 1)
+        #expect(turn.toolStackItems.count == 1)
         #expect(turn.finalAnswer?.text == "final report")
         #expect(segments.contains { if case .standalone = $0 { return true }; return false } == false)
     }
@@ -562,9 +568,9 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
             Issue.record("Expected composite agent turn")
             return
         }
-        #expect(turn.reasoning?.markdownBody == "Checklist.")
-        #expect(turn.tools.count == 1)
-        #expect(turn.tools[0].callPreview == "read: AGENTS.md")
+        #expect(turn.reasoningStackItems.map(\.markdownBody) == ["Checklist."])
+        #expect(turn.toolStackItems.count == 1)
+        #expect(turn.toolStackItems[0].callPreview == "read: AGENTS.md")
         #expect(turn.finalAnswer?.text == "Shipped.")
     }
 
@@ -589,8 +595,8 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
             Issue.record("Expected agent turn segment")
             return
         }
-        #expect(turn.tools.count == 2)
-        #expect(turn.tools[1].detailText == "{\"path\":\"README.md\"}")
+        #expect(turn.toolStackItems.count == 2)
+        #expect(turn.toolStackItems[1].detailText == "{\"path\":\"README.md\"}")
     }
 
     @Test func piAgentTurnRegressionOutsideStackRowsStayStandaloneNotInsideTurn() throws {
@@ -678,8 +684,8 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
             return
         }
         #expect(turn.isOpen == true)
-        #expect(turn.reasoning == nil)
-        #expect(turn.tools.count == 1)
+        #expect(turn.reasoningStackItems.isEmpty)
+        #expect(turn.toolStackItems.count == 1)
         #expect(turn.finalAnswer == nil)
     }
 }

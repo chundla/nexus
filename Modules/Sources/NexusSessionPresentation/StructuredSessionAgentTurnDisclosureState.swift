@@ -1,12 +1,12 @@
 import Combine
 import Foundation
 
-/// Per-turn sticky DisclosureGroup expansion for the attached **Session** (CONTEXT.md; not persisted).
+/// Per-turn sticky expansion for reasoning/tool rows in the attached **Session** (not persisted).
 @available(macOS 12.0, iOS 15.0, *)
 public final class StructuredSessionAgentTurnDisclosureState: ObservableObject, @unchecked Sendable {
     private struct TurnOverrides: Equatable {
-        var reasoning: Bool?
         var tools: Bool?
+        var reasoningRows: [UUID: Bool] = [:]
         var toolRows: [UUID: Bool] = [:]
     }
 
@@ -19,18 +19,18 @@ public final class StructuredSessionAgentTurnDisclosureState: ObservableObject, 
         overridesByTurnID = [:]
     }
 
-    public func reasoningIsExpanded(for turn: StructuredSessionFeedAgentTurnSegment) -> Bool {
-        if let override = overridesByTurnID[turn.id]?.reasoning {
-            return override
-        }
-        return structuredSessionAgentTurnDisclosureExpansionDefaults(for: turn).reasoning
-    }
-
     public func toolsIsExpanded(for turn: StructuredSessionFeedAgentTurnSegment) -> Bool {
         if let override = overridesByTurnID[turn.id]?.tools {
             return override
         }
         return structuredSessionAgentTurnDisclosureExpansionDefaults(for: turn).tools
+    }
+
+    public func reasoningRowIsExpanded(turnID: UUID, reasoningID: UUID, defaultExpanded: Bool) -> Bool {
+        if let override = overridesByTurnID[turnID]?.reasoningRows[reasoningID] {
+            return override
+        }
+        return defaultExpanded
     }
 
     public func toolRowIsExpanded(turnID: UUID, toolID: UUID, defaultExpanded: Bool) -> Bool {
@@ -40,10 +40,10 @@ public final class StructuredSessionAgentTurnDisclosureState: ObservableObject, 
         return defaultExpanded
     }
 
-    public func setReasoningExpanded(turnID: UUID, isExpanded: Bool) {
+    public func setReasoningRowExpanded(turnID: UUID, reasoningID: UUID, isExpanded: Bool) {
         objectWillChange.send()
         var entry = overridesByTurnID[turnID] ?? TurnOverrides()
-        entry.reasoning = isExpanded
+        entry.reasoningRows[reasoningID] = isExpanded
         overridesByTurnID[turnID] = entry
     }
 

@@ -59,10 +59,10 @@ struct StructuredSessionCodexAgentTurnFeedSegmentsTests {
             return
         }
         #expect(turn.isOpen == false)
-        #expect(turn.reasoning == nil)
-        #expect(turn.tools.count == 1)
-        #expect(turn.tools[0].activityItemID == commandID)
-        #expect(turn.tools[0].subagentOutputs == ["Looks good overall. Follow up on the retry path."])
+        #expect(turn.reasoningStackItems.isEmpty)
+        #expect(turn.toolStackItems.count == 1)
+        #expect(turn.toolStackItems[0].activityItemID == commandID)
+        #expect(turn.toolStackItems[0].subagentOutputs == ["Looks good overall. Follow up on the retry path."])
         #expect(turn.finalAnswer?.text == "Done")
     }
 
@@ -84,7 +84,7 @@ struct StructuredSessionCodexAgentTurnFeedSegmentsTests {
             Issue.record("Expected agent turn")
             return
         }
-        #expect(turn.reasoning?.markdownBody == "Outline steps.\n\nStill weighing options.")
+        #expect(turn.reasoningStackItems.map(\.markdownBody) == ["Outline steps.", "Still weighing options."])
         #expect(turn.finalAnswer?.text == "Here is the plan")
     }
 
@@ -129,7 +129,7 @@ struct StructuredSessionCodexAgentTurnFeedSegmentsTests {
             Issue.record("Expected composite agent turn")
             return
         }
-        #expect(turn.tools.count == 1)
-        #expect(turn.tools[0].subagentOutputs == ["ok"])
+        #expect(turn.toolStackItems.count == 1)
+        #expect(turn.toolStackItems[0].subagentOutputs == ["ok"])
     }
 }

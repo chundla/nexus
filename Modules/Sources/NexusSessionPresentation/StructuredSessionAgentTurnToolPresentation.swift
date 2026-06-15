@@ -65,7 +65,7 @@ private func structuredSessionAgentTurnToolDisplayVerb(_ raw: String) -> String 
     }
 }
 
-/// Last thought paragraph shown when Reasoning is collapsed after the turn completes.
+/// Collapsed one-line preview for a single reasoning block (last paragraph within that block).
 public func structuredSessionAgentTurnReasoningCollapsedPreview(markdownBody: String) -> String {
     let trimmed = markdownBody.trimmingCharacters(in: .whitespacesAndNewlines)
     guard trimmed.isEmpty == false else {

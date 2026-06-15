@@ -69,25 +69,26 @@ public enum StructuredSessionFeedSegmentRevealPolicy {
 }
 
 public struct StructuredSessionAgentTurnDisclosureExpansionDefaults: Equatable, Sendable {
-    public let reasoning: Bool
     public let tools: Bool
     public let toolRows: [Bool]
 
-    public init(reasoning: Bool, tools: Bool, toolRows: [Bool]) {
-        self.reasoning = reasoning
+    public init(tools: Bool, toolRows: [Bool]) {
         self.tools = tools
         self.toolRows = toolRows
     }
 }
 
-/// ADR 0037 / CONTEXT: Reasoning expanded while the open **Agent Turn** is in progress; Tools collapsed.
+/// ADR 0037: per-row reasoning/tool bubbles start collapsed; user expands on tap.
 public func structuredSessionAgentTurnDisclosureExpansionDefaults(
     for turn: StructuredSessionFeedAgentTurnSegment
 ) -> StructuredSessionAgentTurnDisclosureExpansionDefaults {
-    StructuredSessionAgentTurnDisclosureExpansionDefaults(
-        reasoning: turn.isOpen && turn.reasoning != nil,
+    let toolCount = turn.stackItems.filter {
+        if case .tool = $0 { return true }
+        return false
+    }.count
+    return StructuredSessionAgentTurnDisclosureExpansionDefaults(
         tools: false,
-        toolRows: turn.tools.map { _ in false }
+        toolRows: Array(repeating: false, count: toolCount)
     )
 }
 
@@ -102,7 +103,10 @@ public func structuredSessionOpenAgentTurnHasReasoningContent(
             continue
         }
         if turn.isOpen {
-            return turn.reasoning != nil
+            return turn.stackItems.contains {
+                if case .reasoning = $0 { return true }
+                return false
+            }
         }
         return false
     }

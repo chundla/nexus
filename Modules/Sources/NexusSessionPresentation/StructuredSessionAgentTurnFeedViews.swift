@@ -2,7 +2,7 @@ import NexusDomain
 import SwiftUI
 
 @available(macOS 12.0, iOS 15.0, *)
-public struct StructuredSessionAgentTurnReasoningCard: View {
+public struct StructuredSessionAgentTurnReasoningBubble: View {
     public let turn: StructuredSessionFeedAgentTurnSegment
     public let reasoning: StructuredSessionFeedAgentTurnReasoningSegment
     public let style: StructuredSessionPiFeedSegmentStyle
@@ -20,35 +20,59 @@ public struct StructuredSessionAgentTurnReasoningCard: View {
         self.disclosureState = disclosureState
     }
 
+    private var isExpanded: Bool {
+        disclosureState.reasoningRowIsExpanded(
+            turnID: turn.id,
+            reasoningID: reasoning.id,
+            defaultExpanded: false
+        )
+    }
+
     public var body: some View {
-        DisclosureGroup(
-            isExpanded: Binding(
-                get: { disclosureState.reasoningIsExpanded(for: turn) },
-                set: { disclosureState.setReasoningExpanded(turnID: turn.id, isExpanded: $0) }
-            )
-        ) {
-            structuredSessionFeedMarkdownContentView(
-                markdown: reasoning.markdownBody,
-                font: style.bodyFont(14, nil, nil),
-                color: style.assistantBodyForeground
-            )
-            .fixedSize(horizontal: false, vertical: true)
-        } label: {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Reasoning")
-                    .font(style.bodyFont(12, .caption, .semibold))
-                    .foregroundStyle(style.mutedForeground)
-                if disclosureState.reasoningIsExpanded(for: turn) == false {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    disclosureState.setReasoningRowExpanded(
+                        turnID: turn.id,
+                        reasoningID: reasoning.id,
+                        isExpanded: !isExpanded
+                    )
+                }
+            } label: {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(style.mutedForeground)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                        .padding(.top, 2)
                     Text(structuredSessionAgentTurnReasoningCollapsedPreview(markdownBody: reasoning.markdownBody))
                         .font(style.bodyFont(14, nil, nil))
-                        .foregroundStyle(style.assistantBodyForeground.opacity(0.88))
-                        .lineLimit(4)
+                        .foregroundStyle(style.assistantBodyForeground.opacity(0.92))
+                        .lineLimit(isExpanded ? nil : 4)
                         .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .contentShape(Rectangle())
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(.isButton)
+
+            if isExpanded {
+                Divider()
+                    .opacity(0.35)
+                    .padding(.horizontal, 12)
+                structuredSessionFeedMarkdownContentView(
+                    markdown: reasoning.markdownBody,
+                    font: style.bodyFont(14, nil, nil),
+                    color: style.assistantBodyForeground
+                )
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 12)
+            }
         }
-        .padding(12)
         .frame(maxWidth: 620, alignment: .leading)
         .background(style.assistantBubbleBackground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .structuredSessionFeedRowCompositing()
@@ -241,22 +265,23 @@ public struct StructuredSessionAgentTurnStackView: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if let reasoning = turn.reasoning {
-                StructuredSessionAgentTurnReasoningCard(
-                    turn: turn,
-                    reasoning: reasoning,
-                    style: style,
-                    disclosureState: disclosureState
-                )
-            }
-
-            ForEach(turn.tools) { tool in
-                StructuredSessionAgentTurnToolBubble(
-                    turn: turn,
-                    tool: tool,
-                    style: style,
-                    disclosureState: disclosureState
-                )
+            ForEach(turn.stackItems) { item in
+                switch item {
+                case .reasoning(let reasoning):
+                    StructuredSessionAgentTurnReasoningBubble(
+                        turn: turn,
+                        reasoning: reasoning,
+                        style: style,
+                        disclosureState: disclosureState
+                    )
+                case .tool(let tool):
+                    StructuredSessionAgentTurnToolBubble(
+                        turn: turn,
+                        tool: tool,
+                        style: style,
+                        disclosureState: disclosureState
+                    )
+                }
             }
 
             if turn.turnNotices.isEmpty == false {

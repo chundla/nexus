@@ -81,31 +81,34 @@ struct StructuredSessionFeedSegmentIterationPolicyTests {
         )
     }
 
-    @Test func agentTurnDisclosureDefaultsExpandReasoningWhileOpenTurnInProgress() {
+    @Test func agentTurnDisclosureDefaultsKeepPerRowBubblesCollapsedWhileOpenTurnInProgress() {
+        let reasoningID = UUID()
         let turn = StructuredSessionFeedAgentTurnSegment(
             id: UUID(),
             isOpen: true,
-            reasoning: StructuredSessionFeedAgentTurnReasoningSegment(markdownBody: "Plan."),
-            tools: [StructuredSessionFeedAgentTurnToolSegment(activityItemID: UUID(), callPreview: "tool: run")],
+            stackItems: [
+                .reasoning(StructuredSessionFeedAgentTurnReasoningSegment(activityItemID: reasoningID, markdownBody: "Plan.")),
+                .tool(StructuredSessionFeedAgentTurnToolSegment(activityItemID: UUID(), callPreview: "tool: run"))
+            ],
             finalAnswer: nil
         )
         let defaults = structuredSessionAgentTurnDisclosureExpansionDefaults(for: turn)
-        #expect(defaults.reasoning == true)
         #expect(defaults.tools == false)
         #expect(defaults.toolRows == [false])
     }
 
-    @Test func agentTurnDisclosureDefaultsCollapseReasoningAndToolsWhenTurnComplete() {
+    @Test func agentTurnDisclosureDefaultsCollapseToolsWhenTurnComplete() {
         let toolID = UUID()
         let turn = StructuredSessionFeedAgentTurnSegment(
             id: UUID(),
             isOpen: false,
-            reasoning: StructuredSessionFeedAgentTurnReasoningSegment(markdownBody: "Done thinking."),
-            tools: [StructuredSessionFeedAgentTurnToolSegment(activityItemID: toolID, callPreview: "bash: ls")],
+            stackItems: [
+                .reasoning(StructuredSessionFeedAgentTurnReasoningSegment(activityItemID: UUID(), markdownBody: "Done thinking.")),
+                .tool(StructuredSessionFeedAgentTurnToolSegment(activityItemID: toolID, callPreview: "bash: ls"))
+            ],
             finalAnswer: StructuredSessionFeedAgentTurnFinalAnswerSegment(text: "ok", isStreaming: false)
         )
         let defaults = structuredSessionAgentTurnDisclosureExpansionDefaults(for: turn)
-        #expect(defaults.reasoning == false)
         #expect(defaults.tools == false)
         #expect(defaults.toolRows == [false])
     }

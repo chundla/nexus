@@ -48,9 +48,9 @@ struct StructuredSessionIBMBobAgentTurnFeedSegmentsTests {
             return
         }
         #expect(turn.isOpen == false)
-        #expect(turn.tools.count == 1)
-        #expect(turn.tools[0].activityItemID == commandID)
-        #expect(turn.tools[0].subagentOutputs == ["Watch the retry path."])
+        #expect(turn.toolStackItems.count == 1)
+        #expect(turn.toolStackItems[0].activityItemID == commandID)
+        #expect(turn.toolStackItems[0].subagentOutputs == ["Watch the retry path."])
         #expect(turn.finalAnswer?.text == "Shipped the fix.")
     }
 
@@ -71,7 +71,7 @@ struct StructuredSessionIBMBobAgentTurnFeedSegmentsTests {
             Issue.record("Expected agent turn")
             return
         }
-        #expect(turn.reasoning?.markdownBody == "Outline steps.")
+        #expect(turn.reasoningStackItems.map(\.markdownBody) == ["Outline steps."])
         #expect(turn.finalAnswer?.text == "Here is the plan.")
     }
 
@@ -115,8 +115,8 @@ struct StructuredSessionIBMBobAgentTurnFeedSegmentsTests {
             Issue.record("Expected composite agent turn")
             return
         }
-        #expect(turn.tools.count == 1)
-        #expect(turn.tools[0].subagentOutputs == ["I am Bob."])
+        #expect(turn.toolStackItems.count == 1)
+        #expect(turn.toolStackItems[0].subagentOutputs == ["I am Bob."])
     }
 
     @Test func nonBobSessionsDoNotEmitBobCompositeFeedSegments() {
