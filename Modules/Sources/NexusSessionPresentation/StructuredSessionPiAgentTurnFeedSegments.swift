@@ -157,7 +157,48 @@ func structuredSessionPiFeedSegments(
         index += 1
     }
 
+    structuredSessionPiAppendLiveAssistantDraftStandaloneSegment(
+        to: &segments,
+        activityItems: activityItems,
+        isAgentTurnInProgress: isAgentTurnInProgress,
+        liveAssistantDraftText: liveAssistantDraftText
+    )
+
     return segments
+}
+
+private let structuredSessionPiLiveAssistantDraftSyntheticItemID =
+    UUID(uuidString: "A7B3C4D5-E6F7-4890-ABCD-EF1234567890")!
+
+private func structuredSessionPiAppendLiveAssistantDraftStandaloneSegment(
+    to segments: inout [StructuredSessionFeedSegment],
+    activityItems: [SessionActivityItem],
+    isAgentTurnInProgress: Bool,
+    liveAssistantDraftText: String?
+) {
+    guard isAgentTurnInProgress,
+        let draft = liveAssistantDraftText?.trimmingCharacters(in: .whitespacesAndNewlines),
+        draft.isEmpty == false
+    else {
+        return
+    }
+    let messageText = "Pi: \(draft)"
+    if activityItems.contains(where: { $0.kind == .message && $0.text == messageText }) {
+        return
+    }
+    if let last = segments.last,
+        case .standalone(let item) = last,
+        structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage(item)
+    {
+        return
+    }
+    segments.append(
+        .standalone(
+            SessionActivityItem(
+                id: structuredSessionPiLiveAssistantDraftSyntheticItemID,
+                kind: .message,
+                text: messageText
+            )))
 }
 
 private struct StructuredSessionPiAgentTurnSlice {

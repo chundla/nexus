@@ -177,8 +177,11 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
         )
 
         let segments = try #require(structuredSessionPiFeedSegments(for: screen))
-        guard case .agentTurn(let turn) = segments.last else {
-            Issue.record("Expected agent turn")
+        #expect(segments.count == 3)
+        guard case .agentTurn(let turn) = segments[1],
+            case .standalone = segments[2]
+        else {
+            Issue.record("Expected agent turn then draft standalone Pi")
             return
         }
         #expect(turn.isOpen == true)

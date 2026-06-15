@@ -50,16 +50,18 @@ func structuredSessionPiActivityTailSuggestsOpenTurn(_ activityItems: [SessionAc
             return false
         }
         let beforePi = Array(tail.prefix(firstPrimaryPiIndex))
-        guard beforePi.count <= 2,
-              structuredSessionPiThoughtsAppearBeforeAnyCommand(in: beforePi),
-              beforePi.contains(where: { $0.kind == .command })
-        else {
+        guard beforePi.count <= 2 else {
             return false
         }
         let piItem = tail[firstPrimaryPiIndex]
         let body = structuredSessionPiPrimaryAssistantBody(from: piItem.text) ?? ""
-        // Short terminal replies (e.g. "Shipped.") are finalized answers when provider events are omitted in tests.
-        return body.count >= 40
+        guard body.count >= 40 else {
+            return false
+        }
+        if beforePi.contains(where: { $0.kind == .command }) {
+            return structuredSessionPiThoughtsAppearBeforeAnyCommand(in: beforePi)
+        }
+        return beforePi.contains(where: { structuredSessionPiFeedSegmentIsThoughtsStatus($0) })
     }
 
     return tail.contains { item in

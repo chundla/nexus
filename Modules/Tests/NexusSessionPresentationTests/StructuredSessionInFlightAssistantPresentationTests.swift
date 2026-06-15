@@ -159,6 +159,70 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
         #expect(structuredSessionFeedUsesBottomEdgeScrollPositionBinding(for: presentation) == false)
     }
 
+    @Test func piThoughtsThenLongPiWithoutToolKeepsTurnOpen() throws {
+        let screen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            ),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .message, text: "You: review", prompt: SessionPrompt(text: "review")),
+                SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Scanning repo layout."),
+                SessionActivityItem(
+                    kind: .message,
+                    text: "Pi: Reviewing Nexus: mapping structure and sampling critical paths."
+                ),
+            ],
+            isAgentTurnInProgress: false
+        )
+
+        #expect(structuredSessionEffectiveAgentTurnInProgress(for: screen) == true)
+        let segments = try #require(structuredSessionPiFeedSegments(for: screen))
+        guard case .agentTurn(let turn) = segments[1],
+              case .standalone = segments[2]
+        else {
+            Issue.record("Expected open turn and standalone interim Pi")
+            return
+        }
+        #expect(turn.isOpen == true)
+        #expect(turn.finalAnswer == nil)
+    }
+
+    @Test func piLiveDraftRendersStandaloneWhileTurnOpenWithoutActivityRow() throws {
+        let screen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            ),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .message, text: "You: go", prompt: SessionPrompt(text: "go")),
+                SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Working."),
+            ],
+            providerFacts: StructuredSessionProviderFacts(
+                liveAssistantDraftText: "Reviewing Nexus: mapping structure and sampling critical paths."
+            ),
+            isAgentTurnInProgress: true
+        )
+
+        let segments = try #require(structuredSessionPiFeedSegments(for: screen))
+        #expect(segments.count == 3)
+        guard case .standalone(let item) = segments[2] else {
+            Issue.record("Expected synthetic draft standalone Pi segment")
+            return
+        }
+        #expect(item.text.contains("Reviewing Nexus"))
+    }
+
     @Test func piProvisionalPiLastLineKeepsTurnOpenWithoutServiceFlag() throws {
         let screen = SessionScreen(
             session: Session(
