@@ -112,7 +112,7 @@ public struct StructuredSessionPiFeedSegmentView: View {
                         set: { disclosureState.setReasoningExpanded(turnID: turn.id, isExpanded: $0) }
                     )
                 ) {
-                    StructuredSessionMarkdownText(
+                    structuredSessionFeedMarkdownContentView(
                         markdown: reasoning.markdownBody,
                         font: style.bodyFont(14, nil, nil),
                         color: style.assistantBodyForeground
@@ -273,9 +273,10 @@ private struct StructuredSessionPiAgentTurnFinalAnswerView: View {
             feedTailIsStableForInlineMarkdown: true
         )
         if policy.showsCollapsedPreview {
+            let previewMarkdown = structuredSessionFeedAssistantMarkdownBoundedPreviewText(for: conversation.text)
             VStack(alignment: .leading, spacing: 8) {
-                StructuredSessionIdleGatedAssistantFeedMarkdownText(
-                    markdown: structuredSessionFeedAssistantMarkdownBoundedPreviewText(for: conversation.text),
+                structuredSessionFeedFinalAnswerMarkdownView(
+                    markdown: previewMarkdown,
                     font: style.bodyFont(15, nil, nil),
                     color: style.assistantBodyForeground,
                     prefersPlainTextUntilIdle: prefersPlain,
@@ -289,7 +290,7 @@ private struct StructuredSessionPiAgentTurnFinalAnswerView: View {
                 }
             }
         } else {
-            StructuredSessionIdleGatedAssistantFeedMarkdownText(
+            structuredSessionFeedFinalAnswerMarkdownView(
                 markdown: conversation.text,
                 font: style.bodyFont(15, nil, nil),
                 color: style.assistantBodyForeground,
