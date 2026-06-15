@@ -1444,6 +1444,8 @@
             switch type {
             case "agent_start":
                 notifyChange()
+            case "thinking_level_changed":
+                handleThinkingLevelChanged(object)
             case "extension_error":
                 handleExtensionError(object)
             case "agent_end":
@@ -1979,6 +1981,27 @@
             lock.lock()
             appendActivityItemLocked(
                 SessionActivityItem(kind: .error, text: "Extension error (\(path), \(eventName)): \(error)"))
+            lock.unlock()
+            notifyChange()
+        }
+
+        /// Undocumented but emitted by Pi after model changes; keep current status in sync.
+        private func handleThinkingLevelChanged(_ object: [String: Any]) {
+            guard let level = trimmedString(for: "level", in: object) else {
+                return
+            }
+
+            lock.lock()
+            let clampedLevel = clampThinkingLevel(level, for: currentModel)
+            guard currentThinkingLevel != clampedLevel else {
+                lock.unlock()
+                return
+            }
+
+            currentThinkingLevel = clampedLevel
+            if let currentModelStatus = currentModelStatusTextLocked() {
+                appendActivityItemLocked(SessionActivityItem(kind: .status, text: currentModelStatus))
+            }
             lock.unlock()
             notifyChange()
         }

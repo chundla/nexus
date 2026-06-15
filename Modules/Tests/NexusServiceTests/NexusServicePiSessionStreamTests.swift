@@ -2807,6 +2807,44 @@
                 })
         }
 
+        @Test func localPiRuntimeTracksThinkingLevelChangedEvent() throws {
+            let runtime = try PiRPCSessionRuntime(
+                executable: "/tmp/fake-pi",
+                workingDirectory: "/tmp",
+                terminationStatusMessageBuilder: { _ in "" },
+                transportFactory: { _, _, _ in
+                    TestPiRPCTransport(
+                        stateModel: TestPiRPCModel(
+                            provider: "anthropic",
+                            id: "claude-sonnet-4-20250514",
+                            name: "Claude Sonnet 4",
+                            reasoning: true
+                        ),
+                        stateThinkingLevel: "high",
+                        promptEvents: [
+                            ["type": "thinking_level_changed", "level": "off"],
+                            ["type": "agent_end", "messages": []],
+                        ]
+                    )
+                }
+            )
+            let session = Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            )
+
+            try runtime.sendInput("hello")
+            let screen = runtime.sessionScreen(for: session)
+
+            #expect(
+                screen.activityItems.contains {
+                    $0.text == "Current Model: anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4 (thinking: off)"
+                })
+        }
+
         @Test func localPiRuntimeQueuesStreamingPromptWithFollowUpBehaviorForFollowUpSlashPrefix() throws {
             let transport = QueueControlPiRPCTransport()
             let runtime = try PiRPCSessionRuntime(
@@ -4695,6 +4733,7 @@
         private let cycledThinkingLevelResult: String?
         private let compactionSummary: String?
         private let compactionTokensBefore: Int?
+        private let promptEvents: [[String: Any]]
         private(set) var sentLines: [String] = []
         private var stdoutLineHandler: (@Sendable (String) -> Void)?
         private var terminationHandler: (@Sendable (Int32) -> Void)?
@@ -4715,7 +4754,8 @@
             cycledThinkingLevel: String? = nil,
             cycledThinkingLevelResult: String? = nil,
             compactionSummary: String? = nil,
-            compactionTokensBefore: Int? = nil
+            compactionTokensBefore: Int? = nil,
+            promptEvents: [[String: Any]] = []
         ) {
             self.promptResponseText = promptResponseText
             self.slashCommands = slashCommands
@@ -4733,6 +4773,7 @@
             self.cycledThinkingLevelResult = cycledThinkingLevelResult
             self.compactionSummary = compactionSummary
             self.compactionTokensBefore = compactionTokensBefore
+            self.promptEvents = promptEvents
         }
 
         func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
@@ -4942,6 +4983,9 @@
                     "command": "prompt",
                     "success": true,
                 ])
+                for event in promptEvents {
+                    emit(event)
+                }
                 guard promptResponseText.isEmpty == false else {
                     return
                 }
