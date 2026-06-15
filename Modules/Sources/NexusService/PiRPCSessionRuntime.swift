@@ -4155,6 +4155,7 @@
         }
 
         func sendLine(_ line: String) throws {
+            Self.appendWireRecord(stream: "stdin", line: line, nexusSessionID: nexusSessionID)
             guard let data = (line + "\n").data(using: .utf8) else {
                 throw PiRPCSessionRuntimeError.startupFailed("Failed to encode Pi RPC input.")
             }
@@ -4266,8 +4267,47 @@
             lock.unlock()
 
             for line in lines where line.isEmpty == false {
+                Self.appendWireRecord(stream: "stdout", line: line, nexusSessionID: nexusSessionID)
                 handler?(line)
             }
+        }
+
+        private static func appendWireRecord(stream: String, line: String, nexusSessionID: UUID?) {
+            guard let base = ProcessInfo.processInfo.environment["NEXUS_PI_RPC_RECORD_DIR"]?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+                base.isEmpty == false
+            else {
+                return
+            }
+            let sessionToken = nexusSessionID?.uuidString ?? "unknown"
+            let directory = URL(fileURLWithPath: base, isDirectory: true)
+                .appendingPathComponent(sessionToken, isDirectory: true)
+            let fileURL = directory.appendingPathComponent("\(stream).jsonl")
+            let payload: [String: Any] = [
+                "t": ProcessInfo.processInfo.systemUptime,
+                "line": line,
+            ]
+            guard let data = try? JSONSerialization.data(withJSONObject: payload),
+                let record = String(data: data, encoding: .utf8)
+            else {
+                return
+            }
+            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            guard let handle = try? FileHandle(forWritingTo: fileURL) else {
+                if FileManager.default.createFile(atPath: fileURL.path, contents: nil) == false {
+                    return
+                }
+                guard let newHandle = try? FileHandle(forWritingTo: fileURL) else {
+                    return
+                }
+                defer { try? newHandle.close() }
+                newHandle.seekToEndOfFile()
+                newHandle.write(Data((record + "\n").utf8))
+                return
+            }
+            defer { try? handle.close() }
+            handle.seekToEndOfFile()
+            handle.write(Data((record + "\n").utf8))
         }
 
         private func handleTermination(_ status: Int32) {
