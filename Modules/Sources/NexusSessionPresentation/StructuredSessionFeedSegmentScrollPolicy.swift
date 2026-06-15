@@ -272,8 +272,13 @@ public func structuredSessionAutoScrollTrigger(for screen: SessionScreen) -> Str
 
 /// Live draft text busts row-affecting presentation cache while an agent turn is open (#208, #233).
 public func structuredSessionHistoryPagingRowAffectingDraftKey(for screen: SessionScreen) -> String? {
-    guard screen.isAgentTurnInProgress else {
+    guard structuredSessionEffectiveAgentTurnInProgress(for: screen) else {
         return nil
     }
-    return screen.providerFacts.liveAssistantDraftText
+    if let draft = screen.providerFacts.liveAssistantDraftText?.trimmingCharacters(in: .whitespacesAndNewlines),
+       draft.isEmpty == false
+    {
+        return draft
+    }
+    return "open-turn"
 }

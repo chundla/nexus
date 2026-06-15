@@ -16,8 +16,66 @@ func structuredSessionPiFeedSegmentTurnInProgress(for screen: SessionScreen) -> 
         return true
     }
     if let draft = screen.providerFacts.liveAssistantDraftText?.trimmingCharacters(in: .whitespacesAndNewlines),
-       draft.isEmpty == false {
+       draft.isEmpty == false
+    {
         return true
+    }
+    return structuredSessionPiActivityTailSuggestsOpenTurn(screen.activityItems)
+}
+
+/// Live observation often omits `providerEvents`; infer an open turn when post-prompt work continues after a provisional `Pi:` line.
+func structuredSessionPiActivityTailSuggestsOpenTurn(_ activityItems: [SessionActivityItem]) -> Bool {
+    guard
+        let lastUserIndex = activityItems.lastIndex(where: {
+            structuredSessionPiFeedSegmentIsPromptAnchoredUserMessage($0)
+        })
+    else {
+        return false
+    }
+    let tail = Array(activityItems[activityItems.index(after: lastUserIndex)...])
+    guard tail.isEmpty == false else {
+        return false
+    }
+
+    var firstPrimaryPiIndex: Int?
+    for (index, item) in tail.enumerated() {
+        if structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage(item) {
+            firstPrimaryPiIndex = index
+            break
+        }
+    }
+
+    if let firstPrimaryPiIndex {
+        if firstPrimaryPiIndex < tail.count - 1 {
+            return false
+        }
+        let beforePi = Array(tail.prefix(firstPrimaryPiIndex))
+        guard beforePi.count <= 2,
+              structuredSessionPiThoughtsAppearBeforeAnyCommand(in: beforePi),
+              beforePi.contains(where: { $0.kind == .command })
+        else {
+            return false
+        }
+        let piItem = tail[firstPrimaryPiIndex]
+        let body = structuredSessionPiPrimaryAssistantBody(from: piItem.text) ?? ""
+        // Short terminal replies (e.g. "Shipped.") are finalized answers when provider events are omitted in tests.
+        return body.count >= 40
+    }
+
+    return tail.contains { item in
+        item.kind == .command || structuredSessionPiFeedSegmentIsThoughtsStatus(item) || item.kind == .progress
+    }
+}
+
+private func structuredSessionPiThoughtsAppearBeforeAnyCommand(in items: [SessionActivityItem]) -> Bool {
+    var sawCommand = false
+    for item in items {
+        if item.kind == .command {
+            sawCommand = true
+        }
+        if structuredSessionPiFeedSegmentIsThoughtsStatus(item), sawCommand == false {
+            return true
+        }
     }
     return false
 }

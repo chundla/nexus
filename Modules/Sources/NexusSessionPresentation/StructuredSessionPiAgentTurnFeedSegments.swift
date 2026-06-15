@@ -534,7 +534,7 @@ func structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage(_ item: SessionAc
     return split.label.caseInsensitiveCompare("Pi") == .orderedSame
 }
 
-private func structuredSessionPiPrimaryAssistantBody(from text: String) -> String? {
+func structuredSessionPiPrimaryAssistantBody(from text: String) -> String? {
     guard let split = structuredSessionPiConversationPrefixSplit(for: text) else {
         return nil
     }
