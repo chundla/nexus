@@ -175,6 +175,13 @@ private func structuredSessionPiAgentTurnActivitySlice(
             break
         }
 
+        if structuredSessionPiFeedSegmentIsInTurnToolErrorRow(item) {
+            structuredSessionPiAgentTurnAttachErrorText(item.text, to: &tools, openToolIndex: &openToolIndex)
+            consumedAny = true
+            cursor += 1
+            continue
+        }
+
         if structuredSessionPiFeedSegmentIsOutsideStackRow(item) {
             break
         }
@@ -261,6 +268,40 @@ private func structuredSessionPiAgentTurnActivitySlice(
     )
 
     return StructuredSessionPiAgentTurnSlice(nextIndex: cursor, turn: turn)
+}
+
+private func structuredSessionPiFeedSegmentIsInTurnToolErrorRow(_ item: SessionActivityItem) -> Bool {
+    item.kind == .error
+}
+
+private func structuredSessionPiAgentTurnAttachErrorText(
+    _ rawText: String,
+    to tools: inout [StructuredSessionFeedAgentTurnToolSegment],
+    openToolIndex: inout Int?
+) {
+    let errorText = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard errorText.isEmpty == false else {
+        return
+    }
+
+    guard let toolIndex = openToolIndex, tools.indices.contains(toolIndex) else {
+        return
+    }
+
+    var tool = tools[toolIndex]
+    let mergedDetail: String
+    if let existing = tool.detailText?.trimmingCharacters(in: .whitespacesAndNewlines), existing.isEmpty == false {
+        mergedDetail = existing + "\n" + errorText
+    } else {
+        mergedDetail = errorText
+    }
+    tool = StructuredSessionFeedAgentTurnToolSegment(
+        activityItemID: tool.activityItemID,
+        callPreview: tool.callPreview,
+        detailText: mergedDetail,
+        subagentOutputs: tool.subagentOutputs
+    )
+    tools[toolIndex] = tool
 }
 
 private func structuredSessionPiFeedSegmentIsPromptAnchoredUserMessage(_ item: SessionActivityItem) -> Bool {

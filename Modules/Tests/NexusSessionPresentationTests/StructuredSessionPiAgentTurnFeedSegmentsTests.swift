@@ -258,6 +258,36 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
         #expect(turn.finalAnswer?.text == "Scope unclear — checking recent changes and repo state to focus the review.")
     }
 
+    @Test func piToolErrorDoesNotSplitTurnIntoLegacyRows() throws {
+        let screen = SessionScreen(
+            session: piSession(),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .message, text: "You: review", prompt: SessionPrompt(text: "review")),
+                SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Scoping the review."),
+                SessionActivityItem(kind: .command, text: "read: first.swift"),
+                SessionActivityItem(kind: .message, text: "Pi: Scoping the review: repo layout, recent changes, and critical modules."),
+                SessionActivityItem(kind: .error, text: "ENOENT: no such file or directory, access '/tmp/missing'"),
+                SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Let me dive into recent Pi/agent-turn changes."),
+                SessionActivityItem(kind: .command, text: "read: second.swift")
+            ],
+            isAgentTurnInProgress: false
+        )
+
+        let segments = try #require(structuredSessionPiFeedSegments(for: screen))
+        #expect(segments.count == 2)
+        #expect(segments.contains { if case .standalone = $0 { return true }; return false } == false)
+        guard case .agentTurn(let turn) = segments[1] else {
+            Issue.record("Expected single composite agent turn")
+            return
+        }
+        #expect(turn.reasoning?.markdownBody == "Scoping the review.\n\nLet me dive into recent Pi/agent-turn changes.")
+        #expect(turn.tools.count == 2)
+        #expect(turn.tools[0].detailText?.contains("ENOENT") == true)
+        #expect(turn.finalAnswer?.text == "Scoping the review: repo layout, recent changes, and critical modules.")
+    }
+
     @Test func piClosedTurnUsesLastPiMessageAsFinalAnswerWhenMultipleAssistantLines() throws {
         let screen = SessionScreen(
             session: piSession(),
