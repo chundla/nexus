@@ -149,21 +149,24 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
 
         let segments = try #require(structuredSessionPiFeedSegments(for: screen))
         guard case .userMessage = segments[0],
-            case .agentTurn(let turn) = segments[1],
-            case .standalone(let piItem) = segments[2]
+            case .agentTurn(let beforePi) = segments[1],
+            case .standalone(let piItem) = segments[2],
+            case .agentTurn(let afterPi) = segments[3]
         else {
-            Issue.record("Expected user, open turn, then standalone interim Pi message")
+            Issue.record("Expected user, turn before Pi, standalone Pi, turn after Pi")
             return
         }
-        #expect(turn.isOpen == true)
-        #expect(turn.reasoningStackItems.map(\.markdownBody) == ["Plan.", "More planning."])
-        #expect(turn.toolStackItems.count == 2)
-        #expect(turn.finalAnswer == nil)
+        #expect(beforePi.isOpen == true)
+        #expect(beforePi.reasoningStackItems.map(\.markdownBody) == ["Plan."])
+        #expect(beforePi.toolStackItems.count == 1)
+        #expect(afterPi.reasoningStackItems.map(\.markdownBody) == ["More planning."])
+        #expect(afterPi.toolStackItems.count == 1)
+        #expect(afterPi.finalAnswer == nil)
         #expect(piItem.text.hasPrefix("Pi:"))
-        #expect(segments.count == 3)
+        #expect(segments.count == 4)
     }
 
-    @Test func piOpenTurnAbsorbsPostInterimPiCommandsIntoAgentTurnNotStandaloneRows() throws {
+    @Test func piOpenTurnPostInterimPiCommandsLiveInContinuationTurnBelowPiNotAbove() throws {
         let screen = SessionScreen(
             session: piSession(),
             primarySurface: .structuredActivityFeed,
@@ -181,22 +184,24 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
         )
 
         let segments = try #require(structuredSessionPiFeedSegments(for: screen))
-        #expect(segments.count == 3)
+        #expect(segments.count == 4)
         #expect(
             segments.contains {
                 if case .standalone(let item) = $0, item.kind == .command { return true }
                 return false
             } == false)
-        guard case .agentTurn(let turn) = segments[1],
-            case .standalone(let pi) = segments[2]
+        guard case .agentTurn(let beforePi) = segments[1],
+            case .standalone(let pi) = segments[2],
+            case .agentTurn(let afterPi) = segments[3]
         else {
-            Issue.record("Expected user, merged turn, interim Pi")
+            Issue.record("Expected user, turn, interim Pi, continuation turn with cd")
             return
         }
-        #expect(turn.isOpen == true)
-        #expect(turn.toolStackItems.count == 1)
-        #expect(turn.toolStackItems[0].callPreview == "cd /Users/ck/source/repos/nexus")
+        #expect(beforePi.toolStackItems.isEmpty)
         #expect(pi.text.contains("Reviewing Nexus"))
+        #expect(afterPi.isOpen == true)
+        #expect(afterPi.toolStackItems.count == 1)
+        #expect(afterPi.toolStackItems[0].callPreview == "cd /Users/ck/source/repos/nexus")
     }
 
     @Test func piOpenTurnDoesNotAttachLiveAssistantDraftAsFinalAnswerPlaceholder() throws {

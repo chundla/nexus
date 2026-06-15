@@ -209,7 +209,8 @@ private func structuredSessionPiAppendLiveAssistantDraftStandaloneSegment(
             )))
 }
 
-/// After an open turn breaks at interim `Pi:`, later `thoughts:` / `command` rows belong in the same agent-turn card—not flat standalone rows.
+/// After interim `Pi:` standalone, append further thoughts/tools as **new** agent-turn segments below it.
+/// Merging into the card above the `Pi:` bubble made the card grow upward while the bubble stayed fixed at the viewport bottom.
 private func structuredSessionPiAbsorbOpenTurnContinuationSlices(
     activityItems: [SessionActivityItem],
     isAgentTurnInProgress: Bool,
@@ -222,73 +223,28 @@ private func structuredSessionPiAbsorbOpenTurnContinuationSlices(
     }
 
     while index < activityItems.count {
-        let item = activityItems[index]
-        if structuredSessionPiFeedSegmentIsPromptAnchoredUserMessage(item) {
+        if structuredSessionPiFeedSegmentIsPromptAnchoredUserMessage(activityItems[index]) {
             return
         }
 
-        while index < activityItems.count {
-            let cursorItem = activityItems[index]
-            if structuredSessionPiFeedSegmentIsPromptAnchoredUserMessage(cursorItem) {
-                return
-            }
-            if structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage(cursorItem) {
-                break
-            }
-
-            let continuation = structuredSessionPiAgentTurnActivitySlice(
-                activityItems: activityItems,
-                startIndex: index,
-                isAgentTurnInProgress: isAgentTurnInProgress,
-                liveAssistantDraftText: liveAssistantDraftText
-            )
-            index = continuation.nextIndex
-            guard let continuationTurn = continuation.turn else {
-                return
-            }
-
-            guard
-                let turnIndex = segments.lastIndex(where: {
-                    if case .agentTurn = $0 { return true }
-                    return false
-                }),
-                case .agentTurn(let openTurn) = segments[turnIndex]
-            else {
-                segments.append(.agentTurn(continuationTurn))
-                break
-            }
-
-            segments[turnIndex] = .agentTurn(
-                structuredSessionPiMergedAgentTurnSegment(
-                    base: openTurn,
-                    continuation: continuationTurn,
-                    isAgentTurnInProgress: isAgentTurnInProgress
-                ))
+        if structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage(activityItems[index]) {
+            segments.append(.standalone(activityItems[index]))
+            index += 1
+            continue
         }
 
-        guard index < activityItems.count,
-            structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage(activityItems[index])
-        else {
+        let continuation = structuredSessionPiAgentTurnActivitySlice(
+            activityItems: activityItems,
+            startIndex: index,
+            isAgentTurnInProgress: isAgentTurnInProgress,
+            liveAssistantDraftText: liveAssistantDraftText
+        )
+        index = continuation.nextIndex
+        guard let continuationTurn = continuation.turn else {
             return
         }
-
-        segments.append(.standalone(activityItems[index]))
-        index += 1
+        segments.append(.agentTurn(continuationTurn))
     }
-}
-
-private func structuredSessionPiMergedAgentTurnSegment(
-    base: StructuredSessionFeedAgentTurnSegment,
-    continuation: StructuredSessionFeedAgentTurnSegment,
-    isAgentTurnInProgress: Bool
-) -> StructuredSessionFeedAgentTurnSegment {
-    StructuredSessionFeedAgentTurnSegment(
-        id: base.id,
-        isOpen: isAgentTurnInProgress,
-        stackItems: base.stackItems + continuation.stackItems,
-        turnNotices: base.turnNotices + continuation.turnNotices,
-        finalAnswer: continuation.finalAnswer ?? base.finalAnswer
-    )
 }
 
 private struct StructuredSessionPiAgentTurnSlice {
