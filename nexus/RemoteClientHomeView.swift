@@ -2178,7 +2178,7 @@ private struct RemoteSessionScreenView: View {
                 .onAppear {
                     structuredSessionPinState = StructuredSessionFeedPinState()
                     structuredSessionScheduleFeedActivityRowsIfNeeded()
-                    if feedPresentation.thinkingIndicator != nil {
+                    if structuredSessionEffectiveAgentTurnInProgress(for: presentation) {
                         structuredSessionFeedScrollPosition = ScrollPosition()
                     }
                     structuredSessionFeedScrollSnapshot = StructuredSessionFeedScrollSupport
@@ -2194,8 +2194,8 @@ private struct RemoteSessionScreenView: View {
                             )
                         )
                 }
-                .onChange(of: feedPresentation.thinkingIndicator != nil) { _, suppressTailStickyScroll in
-                    if suppressTailStickyScroll {
+                .onChange(of: structuredSessionEffectiveAgentTurnInProgress(for: presentation)) { _, turnOpen in
+                    if turnOpen {
                         structuredSessionFeedScrollPosition = ScrollPosition()
                     } else {
                         structuredSessionFeedScrollPosition = ScrollPosition(edge: .bottom)

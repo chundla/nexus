@@ -1596,7 +1596,7 @@ struct ContentView: View {
                     .onAppear {
                         structuredSessionPinState = StructuredSessionFeedPinState()
                         structuredSessionScheduleMacOSFeedActivityRowsIfNeeded()
-                        if feedPresentation.thinkingIndicator != nil {
+                        if structuredSessionEffectiveAgentTurnInProgress(for: structuredPresentation) {
                             structuredSessionFeedScrollPosition = ScrollPosition()
                         }
                         structuredSessionFeedScrollSnapshot = StructuredSessionFeedScrollSupport
@@ -1612,8 +1612,8 @@ struct ContentView: View {
                                 )
                             )
                     }
-                    .onChange(of: feedPresentation.thinkingIndicator != nil) { _, suppressTailStickyScroll in
-                        if suppressTailStickyScroll {
+                    .onChange(of: structuredSessionEffectiveAgentTurnInProgress(for: structuredPresentation)) { _, turnOpen in
+                        if turnOpen {
                             structuredSessionFeedScrollPosition = ScrollPosition()
                         } else {
                             structuredSessionFeedScrollPosition = ScrollPosition(edge: .bottom)

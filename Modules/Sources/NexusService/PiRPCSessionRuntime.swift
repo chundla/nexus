@@ -128,6 +128,8 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
     private var pendingSessionTransitions: [SessionRuntimeSessionTransition] = []
     private var changeHandler: (@Sendable () -> Void)?
     private var isStreaming = false
+    /// True after a user `prompt` starts a turn until `turn_end` (Pi can clear `isStreaming` before the turn finishes).
+    private var promptTurnCommitted = false
     private var assistantTranscriptIndex: Int?
     private var currentAssistantText = ""
     /// Full assistant body accumulated from `text_delta` for the active turn (not subject to transcript trimming).
@@ -356,7 +358,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             providerEvents: providerEvents,
             providerFacts: providerFacts,
             finalOutputDiagnostic: finalOutputDiagnostic,
-            isAgentTurnInProgress: isStreaming
+            isAgentTurnInProgress: isStreaming || promptTurnCommitted
         )
     }
 
@@ -613,6 +615,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         let isCurrentlyStreaming = isStreaming
         if isCurrentlyStreaming == false {
             isStreaming = true
+            promptTurnCommitted = true
             assistantTranscriptIndex = nil
             currentAssistantText = ""
             liveStreamedAssistantText = ""
@@ -1762,15 +1765,7 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
             }
             appendActivityItemLocked(SessionActivityItem(kind: .message, text: "Pi: \(finalText)"))
         }
-        currentAssistantText = ""
-        liveStreamedAssistantText = ""
-        assistantTranscriptIndex = nil
-        toolOutputByCallID.removeAll()
-        toolNamesByCallID.removeAll()
-        toolActivityItemIDByCallID.removeAll()
-        toolAgentsByCallID.removeAll()
-        isStreaming = false
-        lastAssistantStopReason = stopReason
+        finishPiAgentTurnLocked(stopReason: stopReason)
         appendActivityItemLocked(SessionActivityItem(kind: .error, text: errorText))
         lock.unlock()
         requestSlashCommands()
@@ -1891,6 +1886,14 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
                 expectedThinkingIndicatorVisible: false
             )
         }
+        finishPiAgentTurnLocked(stopReason: "stop")
+        lock.unlock()
+        requestSlashCommands()
+        requestSessionStats()
+        notifyChange()
+    }
+
+    private func clearAssistantStreamingBuffersLocked() {
         currentAssistantText = ""
         liveStreamedAssistantText = ""
         assistantTranscriptIndex = nil
@@ -1898,12 +1901,14 @@ final class PiRPCSessionRuntime: SessionRuntime, @unchecked Sendable {
         toolNamesByCallID.removeAll()
         toolActivityItemIDByCallID.removeAll()
         toolAgentsByCallID.removeAll()
+    }
+
+    /// Ends the user-visible agent turn (Thinking… + scroll policy) at `turn_end`.
+    private func finishPiAgentTurnLocked(stopReason: String) {
+        clearAssistantStreamingBuffersLocked()
         isStreaming = false
-        lastAssistantStopReason = "stop"
-        lock.unlock()
-        requestSlashCommands()
-        requestSessionStats()
-        notifyChange()
+        promptTurnCommitted = false
+        lastAssistantStopReason = stopReason
     }
 
     private func handleAgentEnd(_ object: [String: Any]) {

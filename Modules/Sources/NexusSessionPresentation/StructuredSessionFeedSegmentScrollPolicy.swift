@@ -94,7 +94,7 @@ public func structuredSessionFeedScrollAnchorTurnID(
 public func structuredSessionFeedScrollTarget(
     for presentation: FocusedStructuredSessionPresentation
 ) -> StructuredSessionFeedScrollTarget {
-    if presentation.feed.thinkingIndicator != nil {
+    if structuredSessionEffectiveAgentTurnInProgress(for: presentation) {
         if let anchorTurnID = structuredSessionFeedScrollAnchorTurnID(in: presentation.feed.feedSegments) {
             return .activityRow(anchorTurnID)
         }
@@ -128,7 +128,7 @@ public func structuredSessionFeedScrollSnapshot(
 ) -> StructuredSessionFeedScrollSnapshot {
     let target = structuredSessionFeedScrollTarget(for: presentation)
     let growthToken: String?
-    if presentation.feed.thinkingIndicator != nil {
+    if structuredSessionEffectiveAgentTurnInProgress(for: presentation) {
         growthToken = nil
     } else if case .activityRow(let rowID) = target {
         if let segments = presentation.feed.feedSegments,
@@ -153,21 +153,21 @@ public func structuredSessionFeedScrollSnapshot(
         feedScrollTarget: target,
         autoScrollTrigger: presentation.autoScrollTrigger,
         liveDraftGrowthToken: growthToken,
-        suppressesProgrammaticBottomScroll: presentation.feed.thinkingIndicator != nil
+        suppressesProgrammaticBottomScroll: structuredSessionEffectiveAgentTurnInProgress(for: presentation)
     )
 }
 
-/// `ScrollPosition(edge: .bottom)` follows every layout growth; turn off while **Thinking…** is visible.
+/// `ScrollPosition(edge: .bottom)` follows every layout growth; turn off while an **Agent Turn** is open.
 public func structuredSessionFeedUsesBottomEdgeScrollPositionBinding(
     for presentation: FocusedStructuredSessionPresentation
 ) -> Bool {
-    presentation.feed.thinkingIndicator == nil
+    structuredSessionEffectiveAgentTurnInProgress(for: presentation) == false
 }
 
 public func structuredSessionFeedFollowScrollToken(
     for presentation: FocusedStructuredSessionPresentation
 ) -> String {
-    if presentation.feed.thinkingIndicator != nil,
+    if structuredSessionEffectiveAgentTurnInProgress(for: presentation),
        let anchorTurnID = structuredSessionFeedScrollAnchorTurnID(in: presentation.feed.feedSegments) {
         return "thinking-anchor-\(anchorTurnID.uuidString)"
     }

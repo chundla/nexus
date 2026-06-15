@@ -1346,7 +1346,8 @@ public func structuredSessionThinkingIndicator(
     for screen: SessionScreen,
     hasPendingApprovalRequests: Bool
 ) -> StructuredSessionThinkingIndicator? {
-    guard screen.isAgentTurnInProgress, hasPendingApprovalRequests == false else {
+    guard structuredSessionEffectiveAgentTurnInProgress(for: screen),
+          hasPendingApprovalRequests == false else {
         return nil
     }
 
