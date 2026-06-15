@@ -2416,6 +2416,51 @@
             #expect(screen.activityItems.contains { $0.text == "Pi: Cycle one done." })
         }
 
+        @Test func localPiRuntimeClearsThinkingWhenTransportTerminatesMidPrompt() throws {
+            let transport = PromptEventPiRPCTransport(promptEvents: [
+                ["type": "agent_start", "agent": "pi"],
+                [
+                    "type": "message_update",
+                    "assistantMessageEvent": [
+                        "type": "thinking_end",
+                        "content": "Planning.",
+                    ],
+                ],
+                [
+                    "type": "message_update",
+                    "assistantMessageEvent": [
+                        "type": "toolcall_end",
+                        "toolCall": [
+                            "type": "toolCall",
+                            "id": "tool-1",
+                            "name": "read",
+                            "arguments": ["path": "README.md"],
+                        ],
+                    ],
+                ],
+            ])
+            let runtime = try PiRPCSessionRuntime(
+                executable: "/tmp/fake-pi",
+                workingDirectory: "/tmp",
+                terminationStatusMessageBuilder: { _ in "" },
+                transportFactory: { _, _, _ in transport }
+            )
+
+            let session = Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            )
+
+            try runtime.sendInput("review")
+            #expect(runtime.sessionScreen(for: session).isAgentTurnInProgress == true)
+            try transport.terminate()
+            let screen = runtime.sessionScreen(for: session)
+            #expect(screen.isAgentTurnInProgress == false)
+        }
+
         @Test func localPiRuntimeFinalizesTurnOnAgentEndWhenTurnEndMissing() throws {
             let transport = PromptEventPiRPCTransport(promptEvents: [
                 ["type": "agent_start", "agent": "pi"],

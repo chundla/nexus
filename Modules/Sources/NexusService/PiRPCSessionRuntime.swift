@@ -2159,6 +2159,10 @@
                     appendActivityItemLocked(SessionActivityItem(kind: .status, text: trimmedStatusMessage))
                 }
             }
+            let shouldFinalizeTurn = promptTurnCommitted
+            if shouldFinalizeTurn {
+                finishPiAgentTurnLocked(stopReason: "aborted")
+            }
             lock.unlock()
 
             if shouldNotify {
