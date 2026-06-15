@@ -239,7 +239,9 @@ final class RemoteClientPairingModel {
     private let focusedStructuredSessionChromePresenter = FocusedStructuredSessionChromePresenter()
     private var focusedStructuredSessionFinalOutputLatencyTracker = StructuredSessionFinalOutputLatencyTracker()
     @ObservationIgnored
-    private let focusedSessionScreenUpdatePump = CoalescingMainActorValuePump<SessionScreen>()
+    private let focusedSessionScreenUpdatePump = CoalescingMainActorValuePump<SessionScreen>(
+        mergePendingValue: preferredSessionScreenUpdate(pending:new:)
+    )
     private var focusedSessionObservation: (any SessionScreenObservation)?
     private var focusedSessionObservationStartupTask: Task<Void, Never>?
     private var focusedSessionReconnectTask: Task<Void, Never>?
@@ -1301,6 +1303,14 @@ final class RemoteClientPairingModel {
 
     private func applyCoalescedFocusedSessionScreenUpdate(_ screen: SessionScreen) {
         guard focusedSessionID == screen.session.id else {
+            return
+        }
+
+        if let currentScreen = focusedSessionScreen,
+            currentScreen.session.id == screen.session.id,
+            sessionScreenAppearsToAdvance(currentScreen, beyond: screen),
+            sessionScreenAppearsToAdvance(screen, beyond: currentScreen) == false
+        {
             return
         }
 
