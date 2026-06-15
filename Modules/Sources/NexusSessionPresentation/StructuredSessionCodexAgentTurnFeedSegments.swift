@@ -305,10 +305,13 @@ private func structuredSessionCodexConversationPrefixSplit(for text: String) -> 
     return (label, body)
 }
 
-/// Composite feed segments for structured **Sessions** that use agent-turn projection (Pi, Codex).
+/// Composite feed segments for structured **Sessions** that use agent-turn projection (Pi, Codex, IBM Bob).
 public func structuredSessionAgentTurnFeedSegments(for screen: SessionScreen) -> [StructuredSessionFeedSegment]? {
     if let segments = structuredSessionPiFeedSegments(for: screen) {
         return segments
     }
-    return structuredSessionCodexFeedSegments(for: screen)
+    if let segments = structuredSessionCodexFeedSegments(for: screen) {
+        return segments
+    }
+    return structuredSessionIBMBobFeedSegments(for: screen)
 }
