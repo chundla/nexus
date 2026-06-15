@@ -1491,144 +1491,23 @@ struct ContentView: View {
                         .padding(.top, 14)
                 }
 
-                ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 8) {
-                            structuredSessionHistoryPagingControls()
-                                .padding(.bottom, 6)
-
-                            if feedPresentation.activityRowChunks.isEmpty {
-                                ContentUnavailableView(
-                                    feedPresentation.copy.emptyStateTitle,
-                                    systemImage: "message",
-                                    description: Text(feedPresentation.copy.emptyStateDescription)
-                                )
-                                .frame(maxWidth: .infinity, minHeight: 220)
-                            } else if feedPresentation.activityRows.isEmpty == false {
-                                if feedPresentation.feedSegments != nil {
-                                    let visibleSegments = structuredSessionVisibleFeedSegments(
-                                        in: feedPresentation,
-                                        visibleTailItemCount: structuredSessionMacOSFeedVisibleTailRowCount
-                                    ) ?? []
-                                    ForEach(visibleSegments) { segment in
-                                        StructuredSessionPiFeedSegmentView(
-                                            segment: segment,
-                                            providerDisplayName: structuredPresentation.session.providerID.displayName,
-                                            style: macOSPiStructuredSessionFeedSegmentStyle(),
-                                            disclosureState: structuredSessionAgentTurnDisclosureState,
-                                            standaloneRow: { row in
-                                                AnyView(structuredSessionActivityRowView(row))
-                                            },
-                                            onShowFullAssistantResponse: { presentation in
-                                                presentedStructuredSessionAssistantFullResponse = presentation
-                                            },
-                                            artifactActions: { artifact in
-                                                structuredSessionFeedArtifactActionPresentation(
-                                                    for: artifact,
-                                                    hasWriterAuthority: true,
-                                                    usesHostArtifactFetch: false
-                                                )
-                                            },
-                                            onArtifactOpenOnHost: { artifact in
-                                                guard let path = artifact.hostPath else { return }
-                                                StructuredSessionFeedArtifactHostActions.openOnHost(path: path)
-                                            }
-                                        )
-                                        .id(segment.id)
-                                    }
-                                } else {
-                                    let visibleRows = StructuredSessionFeedMacOSStartupPolicy.visibleActivityRows(
-                                        in: feedPresentation,
-                                        visibleTailRowCount: structuredSessionMacOSFeedVisibleTailRowCount
-                                    )
-                                    ForEach(visibleRows) { row in
-                                        MacEquatableStructuredSessionActivityRow(row: row) {
-                                            structuredSessionActivityRowView(row)
-                                        }
-                                        .equatable()
-                                        .id(row.id)
-                                    }
-                                }
-
-                                if StructuredSessionFeedMacOSStartupPolicy.shouldShowThinkingIndicator(
-                                    in: feedPresentation,
-                                    visibleTailRowCount: structuredSessionMacOSFeedVisibleTailRowCount
-                                ), let thinkingIndicator = feedPresentation.thinkingIndicator {
-                                    structuredSessionThinkingIndicatorView(thinkingIndicator)
-                                        .id("structured-session-thinking-indicator")
-                                }
-                            }
-
-                            Color.clear
-                                .frame(height: 1)
-                                .id(structuredSessionFeedBottomSentinelID)
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 14)
-                        .scrollTargetLayout()
-                        .environment(
-                            \.structuredSessionFeedMarkdownHydrationAllowed,
-                            StructuredSessionFeedMacOSStartupPolicy.isFeedMarkdownHydrationAllowed(
-                                visibleTailRowCount: structuredSessionMacOSFeedVisibleTailRowCount,
-                                totalActivityRowCount: feedPresentation.feedScrollItemCount
-                            )
-                        )
-                    }
-                    .scrollPosition($structuredSessionFeedScrollPosition)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .onScrollGeometryChange(for: StructuredSessionScrollGeometrySample.self) { geometry in
-                        StructuredSessionScrollGeometrySample(
-                            distanceFromBottom: max(
-                                0,
-                                geometry.contentSize.height
-                                    - geometry.contentOffset.y
-                                    - geometry.containerSize.height
-                            ),
-                            contentOffsetY: geometry.contentOffset.y
-                        )
-                    } action: { _, sample in
-                        if let next = structuredSessionFeedPinStateIfChanged(
-                            previous: structuredSessionPinState,
-                            sample: sample
-                        ) {
-                            structuredSessionPinState = next
-                        }
-                    }
-                    .onAppear {
+                MacStructuredSessionFeedScrollLayer(
+                    presentation: structuredPresentation,
+                    feedPresentation: feedPresentation,
+                    scrollPosition: $structuredSessionFeedScrollPosition,
+                    pinState: $structuredSessionPinState,
+                    scrollSnapshot: $structuredSessionFeedScrollSnapshot,
+                    visibleTailRowCount: $structuredSessionMacOSFeedVisibleTailRowCount,
+                    coordinator: structuredSessionAutoScrollCoordinator,
+                    draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
+                    onAppearSetup: {
                         structuredSessionPinState = StructuredSessionFeedPinState()
                         structuredSessionScheduleMacOSFeedActivityRowsIfNeeded()
                         if structuredSessionEffectiveAgentTurnInProgress(for: structuredPresentation) {
                             structuredSessionFeedScrollPosition = ScrollPosition()
                         }
-                        structuredSessionFeedScrollSnapshot = StructuredSessionFeedScrollSupport
-                            .applyStructuredSessionFeedScrollSnapshotTransition(
-                                previous: nil,
-                                current: structuredPresentation.structuredSessionFeedScrollSnapshot,
-                                isFollowingBottom: structuredSessionPinState.isFollowingBottom,
-                                coordinator: structuredSessionAutoScrollCoordinator,
-                                draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
-                                scrollPosition: $structuredSessionFeedScrollPosition,
-                                scrollPositionUsesBottomEdge: structuredSessionFeedUsesBottomEdgeScrollPositionBinding(
-                                    for: structuredPresentation
-                                )
-                            )
-                    }
-                    .onChange(of: structuredSessionEffectiveAgentTurnInProgress(for: structuredPresentation)) { _, turnOpen in
-                        if turnOpen {
-                            structuredSessionFeedScrollPosition = ScrollPosition()
-                        } else {
-                            structuredSessionFeedScrollPosition = ScrollPosition(edge: .bottom)
-                        }
-                    }
-                    .onChange(of: structuredPresentation.feed.feedSegments?.count) { _, _ in
-                        guard structuredSessionEffectiveAgentTurnInProgress(for: structuredPresentation),
-                              let turnID = structuredSessionFeedScrollAnchorTurnID(
-                                  in: structuredPresentation.feed.feedSegments
-                              ) else {
-                            return
-                        }
-                        structuredSessionFeedScrollPosition = ScrollPosition(idType: UUID.self, id: turnID)
-                    }
-                    .onChange(of: structuredPresentation.session.id) { _, _ in
+                    },
+                    onSessionIdentityChange: {
                         structuredSessionPinState = StructuredSessionFeedPinState()
                         structuredSessionFeedScrollSnapshot = nil
                         presentedStructuredSessionAssistantFullResponse = nil
@@ -1636,35 +1515,13 @@ struct ContentView: View {
                         structuredSessionAgentTurnDisclosureState.reset()
                         structuredSessionScheduleMacOSFeedActivityRowsIfNeeded()
                     }
-                    .onChange(of: structuredPresentation.structuredSessionFeedScrollSnapshot) { _, current in
-                        guard structuredSessionFeedScrollSnapshotIfScrollPolicyChanged(
-                            previous: structuredSessionFeedScrollSnapshot,
-                            current: current
-                        ) != nil else {
-                            return
-                        }
-                        structuredSessionFeedScrollSnapshot = StructuredSessionFeedScrollSupport
-                            .applyStructuredSessionFeedScrollSnapshotTransition(
-                                previous: structuredSessionFeedScrollSnapshot,
-                                current: current,
-                                isFollowingBottom: structuredSessionPinState.isFollowingBottom,
-                                coordinator: structuredSessionAutoScrollCoordinator,
-                                draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
-                                scrollPosition: $structuredSessionFeedScrollPosition,
-                                scrollPositionUsesBottomEdge: structuredSessionFeedUsesBottomEdgeScrollPositionBinding(
-                                    for: structuredPresentation
-                                )
-                            )
-                    }
-                    .onChange(of: feedPresentation.feedScrollItemCount) { _, total in
-                        let synced = StructuredSessionFeedSegmentRevealPolicy.synchronizedVisibleTailSegmentCount(
-                            currentVisibleCount: structuredSessionMacOSFeedVisibleTailRowCount,
-                            totalFeedSegmentCount: total
-                        )
-                        if synced != structuredSessionMacOSFeedVisibleTailRowCount {
-                            structuredSessionMacOSFeedVisibleTailRowCount = synced
-                        }
-                    }
+                ) {
+                    structuredSessionMacOSFeedScrollContent(
+                        structuredPresentation: structuredPresentation,
+                        feedPresentation: feedPresentation,
+                        visibleTailRowCount: structuredSessionMacOSFeedVisibleTailRowCount
+                    )
+                }
 
                 if isReady, let structuredChrome {
                     MacStructuredSessionComposerSection(
@@ -1704,6 +1561,94 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .nexusPanel(tint: NexusMacTheme.coral)
         }
+    }
+
+    @ViewBuilder
+    private func structuredSessionMacOSFeedScrollContent(
+        structuredPresentation: FocusedStructuredSessionPresentation,
+        feedPresentation: StructuredSessionFeedPresentation,
+        visibleTailRowCount: Int
+    ) -> some View {
+        LazyVStack(alignment: .leading, spacing: 8) {
+            structuredSessionHistoryPagingControls()
+                .padding(.bottom, 6)
+
+            if feedPresentation.activityRowChunks.isEmpty {
+                ContentUnavailableView(
+                    feedPresentation.copy.emptyStateTitle,
+                    systemImage: "message",
+                    description: Text(feedPresentation.copy.emptyStateDescription)
+                )
+                .frame(maxWidth: .infinity, minHeight: 220)
+            } else if feedPresentation.activityRows.isEmpty == false {
+                if feedPresentation.feedSegments != nil {
+                    let visibleSegments = structuredSessionVisibleFeedSegments(
+                        in: feedPresentation,
+                        visibleTailItemCount: visibleTailRowCount
+                    ) ?? []
+                    ForEach(visibleSegments) { segment in
+                        StructuredSessionPiFeedSegmentView(
+                            segment: segment,
+                            providerDisplayName: structuredPresentation.session.providerID.displayName,
+                            style: macOSPiStructuredSessionFeedSegmentStyle(),
+                            disclosureState: structuredSessionAgentTurnDisclosureState,
+                            standaloneRow: { row in
+                                AnyView(structuredSessionActivityRowView(row))
+                            },
+                            onShowFullAssistantResponse: { presentation in
+                                presentedStructuredSessionAssistantFullResponse = presentation
+                            },
+                            artifactActions: { artifact in
+                                structuredSessionFeedArtifactActionPresentation(
+                                    for: artifact,
+                                    hasWriterAuthority: true,
+                                    usesHostArtifactFetch: false
+                                )
+                            },
+                            onArtifactOpenOnHost: { artifact in
+                                guard let path = artifact.hostPath else { return }
+                                StructuredSessionFeedArtifactHostActions.openOnHost(path: path)
+                            }
+                        )
+                        .id(segment.id)
+                    }
+                } else {
+                    let visibleRows = StructuredSessionFeedMacOSStartupPolicy.visibleActivityRows(
+                        in: feedPresentation,
+                        visibleTailRowCount: visibleTailRowCount
+                    )
+                    ForEach(visibleRows) { row in
+                        MacEquatableStructuredSessionActivityRow(row: row) {
+                            structuredSessionActivityRowView(row)
+                        }
+                        .equatable()
+                        .id(row.id)
+                    }
+                }
+
+                if StructuredSessionFeedMacOSStartupPolicy.shouldShowThinkingIndicator(
+                    in: feedPresentation,
+                    visibleTailRowCount: visibleTailRowCount
+                ), let thinkingIndicator = feedPresentation.thinkingIndicator {
+                    structuredSessionThinkingIndicatorView(thinkingIndicator)
+                        .id("structured-session-thinking-indicator")
+                }
+            }
+
+            Color.clear
+                .frame(height: 1)
+                .id(structuredSessionFeedBottomSentinelID)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 14)
+        .scrollTargetLayout()
+        .environment(
+            \.structuredSessionFeedMarkdownHydrationAllowed,
+            StructuredSessionFeedMacOSStartupPolicy.isFeedMarkdownHydrationAllowed(
+                visibleTailRowCount: visibleTailRowCount,
+                totalActivityRowCount: feedPresentation.feedScrollItemCount
+            )
+        )
     }
 
     private func structuredSessionScheduleMacOSFeedActivityRowsIfNeeded() {

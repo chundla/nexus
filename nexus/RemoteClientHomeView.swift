@@ -2208,7 +2208,9 @@ private struct RemoteSessionScreenView: View {
                           ) else {
                         return
                     }
-                    structuredSessionFeedScrollPosition = ScrollPosition(idType: UUID.self, id: turnID)
+                    var position = ScrollPosition()
+                    position.scrollTo(id: turnID)
+                    structuredSessionFeedScrollPosition = position
                 }
                 .onChange(of: presentation.session.id) { _, _ in
                     structuredSessionPinState = StructuredSessionFeedPinState()
