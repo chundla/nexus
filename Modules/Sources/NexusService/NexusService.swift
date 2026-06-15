@@ -123,6 +123,8 @@
         let sessionRecordAdapterMetadata: SessionRecordAdapterMetadata?
         let initialTranscript: String
         let terminationStatusMessageBuilder: (Int32) -> String
+        /// When true, an existing in-memory runtime is removed before starting a new one (persisted relaunch / fresh launch).
+        let replaceExistingRuntime: Bool
 
         init(
             executable: String,
@@ -133,7 +135,8 @@
             remoteRuntimeLaunchMode: RemoteRuntimeLaunchMode = .launchNew,
             sessionRecordAdapterMetadata: SessionRecordAdapterMetadata? = nil,
             initialTranscript: String = "",
-            terminationStatusMessageBuilder: @escaping (Int32) -> String = { _ in "" }
+            terminationStatusMessageBuilder: @escaping (Int32) -> String = { _ in "" },
+            replaceExistingRuntime: Bool = false
         ) {
             self.executable = executable
             self.arguments = arguments
@@ -144,6 +147,7 @@
             self.sessionRecordAdapterMetadata = sessionRecordAdapterMetadata
             self.initialTranscript = initialTranscript
             self.terminationStatusMessageBuilder = terminationStatusMessageBuilder
+            self.replaceExistingRuntime = replaceExistingRuntime
         }
     }
 
@@ -357,6 +361,10 @@
         ) async throws {
             let (shouldCreateRuntime, replacedExistingRuntime) = try withLock {
                 let hadRuntime = runtimes[session.id] != nil
+                if launchConfiguration.replaceExistingRuntime, hadRuntime {
+                    runtimes.removeValue(forKey: session.id)?.setChangeHandler(nil)
+                    return (true, true)
+                }
                 if let runtime = runtimes[session.id], runtime.state == .ready {
                     return (false, hadRuntime)
                 }
@@ -3383,7 +3391,8 @@
                 ),
                 terminationStatusMessageBuilder: { status in
                     providerModule.terminationStatusMessage(for: status)
-                }
+                },
+                replaceExistingRuntime: remoteRuntimeLaunchMode == .launchNew
             )
         }
 
