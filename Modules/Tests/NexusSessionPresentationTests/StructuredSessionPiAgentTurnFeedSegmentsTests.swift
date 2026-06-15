@@ -3,6 +3,7 @@ import NexusDomain
 @testable import NexusSessionPresentation
 import Testing
 
+/// Regression suite for Pi **Agent Turn** composite feed segments (#236, ADR 0037).
 struct StructuredSessionPiAgentTurnFeedSegmentsTests {
     private func piSession() -> Session {
         Session(
@@ -188,5 +189,146 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
         )
 
         #expect(structuredSessionPiFeedSegments(for: screen) == nil)
+    }
+
+    @Test func piAgentTurnRegressionThoughtsAndCommandRowsNeverLeakAsStandaloneSegments() throws {
+        let screen = SessionScreen(
+            session: piSession(),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .message, text: "You: ship it", prompt: SessionPrompt(text: "ship it")),
+                SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Checklist."),
+                SessionActivityItem(kind: .command, text: "read: AGENTS.md"),
+                SessionActivityItem(kind: .message, text: "Pi: Shipped.")
+            ]
+        )
+
+        let segments = try #require(structuredSessionPiFeedSegments(for: screen))
+        #expect(segments.count == 2)
+        #expect(segments.contains { if case .standalone = $0 { return true }; return false } == false)
+        guard case .agentTurn(let turn) = segments[1] else {
+            Issue.record("Expected composite agent turn")
+            return
+        }
+        #expect(turn.reasoning?.markdownBody == "Checklist.")
+        #expect(turn.tools.count == 1)
+        #expect(turn.tools[0].callPreview == "read: AGENTS.md")
+        #expect(turn.finalAnswer?.text == "Shipped.")
+    }
+
+    @Test func piAgentTurnRegressionCompositeTurnUsesFewerFeedSegmentsThanFlatActivityRows() throws {
+        let screen = SessionScreen(
+            session: piSession(),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .message, text: "You: go", prompt: SessionPrompt(text: "go")),
+                SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Plan."),
+                SessionActivityItem(kind: .command, text: "bash: true"),
+                SessionActivityItem(kind: .command, text: "read: README.md", detailText: "{\"path\":\"README.md\"}"),
+                SessionActivityItem(kind: .message, text: "Pi: done")
+            ]
+        )
+
+        let segments = try #require(structuredSessionPiFeedSegments(for: screen))
+        #expect(screen.activityItems.count == 5)
+        #expect(segments.count == 2)
+        guard case .agentTurn(let turn) = segments[1] else {
+            Issue.record("Expected agent turn segment")
+            return
+        }
+        #expect(turn.tools.count == 2)
+        #expect(turn.tools[1].detailText == "{\"path\":\"README.md\"}")
+    }
+
+    @Test func piAgentTurnRegressionOutsideStackRowsStayStandaloneNotInsideTurn() throws {
+        let approvalID = UUID()
+        let retryID = UUID()
+        let screen = SessionScreen(
+            session: piSession(),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .message, text: "You: deploy", prompt: SessionPrompt(text: "deploy")),
+                SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Verify."),
+                SessionActivityItem(kind: .message, text: "Pi: ok"),
+                SessionActivityItem(
+                    id: approvalID,
+                    kind: .approvalRequest,
+                    text: "Approval Request: Deploy to production?"
+                ),
+                SessionActivityItem(
+                    id: retryID,
+                    kind: .status,
+                    text: "Retrying after rate limit"
+                )
+            ]
+        )
+
+        let segments = try #require(structuredSessionPiFeedSegments(for: screen))
+        #expect(segments.count == 4)
+        guard case .userMessage = segments[0],
+              case .agentTurn = segments[1],
+              case .standalone(let approval) = segments[2],
+              case .standalone(let retry) = segments[3] else {
+            Issue.record("Expected user, agent turn, then outside-stack standalone rows")
+            return
+        }
+        #expect(approval.id == approvalID)
+        #expect(approval.kind == .approvalRequest)
+        #expect(retry.id == retryID)
+        #expect(retry.text == "Retrying after rate limit")
+    }
+
+    @Test func piAgentTurnRegressionMultipleTurnsProduceSegmentListShape() throws {
+        let screen = SessionScreen(
+            session: piSession(),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .message, text: "You: one", prompt: SessionPrompt(text: "one")),
+                SessionActivityItem(kind: .message, text: "Pi: first"),
+                SessionActivityItem(kind: .message, text: "You: two", prompt: SessionPrompt(text: "two")),
+                SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Again."),
+                SessionActivityItem(kind: .message, text: "Pi: second")
+            ]
+        )
+
+        let segments = try #require(structuredSessionPiFeedSegments(for: screen))
+        #expect(segments.count == 4)
+        let kinds = segments.map { segment -> String in
+            switch segment {
+            case .userMessage: "user"
+            case .agentTurn: "agentTurn"
+            case .standalone: "standalone"
+            }
+        }
+        #expect(kinds == ["user", "agentTurn", "user", "agentTurn"])
+    }
+
+    @Test func piAgentTurnRegressionOpenTurnWithoutThoughtsStillEmitsAgentTurnSegment() throws {
+        let screen = SessionScreen(
+            session: piSession(),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .message, text: "You: wait", prompt: SessionPrompt(text: "wait")),
+                SessionActivityItem(kind: .command, text: "bash: sleep 1")
+            ],
+            providerFacts: StructuredSessionProviderFacts(liveAssistantDraftText: nil),
+            isAgentTurnInProgress: true
+        )
+
+        let segments = try #require(structuredSessionPiFeedSegments(for: screen))
+        #expect(segments.count == 2)
+        guard case .agentTurn(let turn) = segments[1] else {
+            Issue.record("Expected open agent turn with in-flight tool only")
+            return
+        }
+        #expect(turn.isOpen == true)
+        #expect(turn.reasoning == nil)
+        #expect(turn.tools.count == 1)
+        #expect(turn.finalAnswer == nil)
     }
 }
