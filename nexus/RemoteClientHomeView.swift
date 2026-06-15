@@ -2464,11 +2464,18 @@
             } else if feedPresentation.activityRows.isEmpty {
                 EmptyView()
             } else if feedPresentation.feedSegments != nil {
+                let allSegments = feedPresentation.feedSegments ?? []
                 let visibleSegments =
-                    structuredSessionVisibleFeedSegments(
+                    (structuredSessionVisibleFeedSegments(
                         in: feedPresentation,
                         visibleTailItemCount: structuredSessionFeedVisibleTailRowCount
-                    ) ?? []
+                    ) ?? [])
+                    .filter { segment in
+                        guard case .standalone(let item) = segment else {
+                            return true
+                        }
+                        return structuredSessionPiShouldRenderStandaloneFeedSegment(item: item, in: allSegments)
+                    }
                 ForEach(visibleSegments) { segment in
                     StructuredSessionPiFeedSegmentView(
                         segment: segment,

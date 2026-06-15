@@ -166,6 +166,29 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
         #expect(segments.count == 4)
     }
 
+    @Test func piHidesStandalonePiWhenClosedTurnFinalAnswerMatches() throws {
+        let finalText = "Done with a long enough answer for the test."
+        let turnID = UUID()
+        let dupID = UUID()
+        let segments: [StructuredSessionFeedSegment] = [
+            .userMessage(StructuredSessionFeedUserMessageSegment(activityItemID: UUID(), text: "hi")),
+            .agentTurn(
+                StructuredSessionFeedAgentTurnSegment(
+                    id: turnID,
+                    isOpen: false,
+                    stackItems: [],
+                    finalAnswer: StructuredSessionFeedAgentTurnFinalAnswerSegment(text: finalText)
+                )),
+            .standalone(
+                SessionActivityItem(id: dupID, kind: .message, text: "Pi: \(finalText)")),
+        ]
+        guard case .standalone(let dup) = segments[2] else {
+            Issue.record("Expected standalone Pi")
+            return
+        }
+        #expect(structuredSessionPiShouldRenderStandaloneFeedSegment(item: dup, in: segments) == false)
+    }
+
     @Test func piOpenTurnPostInterimPiCommandsLiveInContinuationTurnBelowPiNotAbove() throws {
         let screen = SessionScreen(
             session: piSession(),

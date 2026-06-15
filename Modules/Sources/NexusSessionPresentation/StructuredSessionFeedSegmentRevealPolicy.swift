@@ -65,7 +65,11 @@ public enum StructuredSessionFeedSegmentRevealPolicy {
         if currentVisibleCount <= 0 {
             return min(initialVisibleTailSegmentCount, totalFeedSegmentCount)
         }
-        return min(max(currentVisibleCount, totalFeedSegmentCount), totalFeedSegmentCount)
+        if currentVisibleCount >= totalFeedSegmentCount {
+            return totalFeedSegmentCount
+        }
+        // Step the tail by batch size — jumping straight to `total` on session open mounted the full feed at once (main-thread hang).
+        return min(currentVisibleCount + visibleTailSegmentsPerRevealBatch, totalFeedSegmentCount)
     }
 }
 

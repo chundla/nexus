@@ -105,6 +105,34 @@ public enum StructuredSessionFeedSegment: Equatable, Identifiable, Sendable {
 }
 
 /// Pi v1 composite feed projection. Returns `nil` for non-Pi **Sessions** so clients keep flat row iteration.
+/// Standalone `Pi:` rows duplicate agent-turn `finalAnswer` when history still carries the same message activity item.
+public func structuredSessionPiShouldRenderStandaloneFeedSegment(
+    item: SessionActivityItem,
+    in segments: [StructuredSessionFeedSegment]
+) -> Bool {
+    guard structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage(item) else {
+        return true
+    }
+    guard let body = structuredSessionPiPrimaryAssistantBody(from: item.text)?
+        .trimmingCharacters(in: .whitespacesAndNewlines),
+        body.isEmpty == false
+    else {
+        return true
+    }
+    for segment in segments {
+        guard case .agentTurn(let turn) = segment,
+            turn.isOpen == false,
+            let final = turn.finalAnswer
+        else {
+            continue
+        }
+        if final.text.trimmingCharacters(in: .whitespacesAndNewlines) == body {
+            return false
+        }
+    }
+    return true
+}
+
 public func structuredSessionPiFeedSegments(for screen: SessionScreen) -> [StructuredSessionFeedSegment]? {
     guard screen.session.providerID == .pi else {
         return nil
