@@ -3663,7 +3663,7 @@
                 return
             }
 
-            let interval = 0.2
+            let interval = 0.4
             Task { [weak self] in
                 try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
                 guard let self else {

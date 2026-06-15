@@ -5,6 +5,10 @@
     @testable import nexus
 
     struct StructuredSessionFeedMacOSStartupPolicyTests {
+        @Test func progressiveRevealDisabledOnMacOS() {
+            #expect(StructuredSessionFeedMacOSStartupPolicy.usesProgressiveActivityRowReveal == false)
+        }
+
         @Test func visibleActivityRowsRevealsTailFirstInBatches() {
             let rows = (0..<20).map { index in
                 StructuredSessionActivityRow(
@@ -29,10 +33,10 @@
             #expect(StructuredSessionFeedMacOSStartupPolicy.initialVisibleTailRowCount == 3)
             #expect(StructuredSessionFeedMacOSStartupPolicy.visibleTailRowsPerRevealBatch == 3)
             #expect(
-                StructuredSessionFeedMacOSStartupPolicy.visibleActivityRows(in: feed, visibleTailRowCount: 0).isEmpty)
+                StructuredSessionFeedMacOSStartupPolicy.visibleActivityRows(in: feed, visibleTailRowCount: 0).count
+                    == 20)
             let four = StructuredSessionFeedMacOSStartupPolicy.visibleActivityRows(in: feed, visibleTailRowCount: 4)
-            #expect(four.count == 4)
-            #expect(four.map(\.title) == (16..<20).map { "Row \($0)" })
+            #expect(four.count == 20)
             #expect(
                 StructuredSessionFeedMacOSStartupPolicy.visibleActivityRows(in: feed, visibleTailRowCount: 20).count
                     == 20)

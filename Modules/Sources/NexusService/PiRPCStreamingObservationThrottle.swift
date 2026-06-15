@@ -10,7 +10,7 @@
         nonisolated(unsafe) private var pendingNotify = false
         nonisolated(unsafe) private var scheduledFlushGeneration: UInt64 = 0
 
-        init(minimumInterval: TimeInterval = 0.2, now: @escaping @Sendable () -> Date = Date.init) {
+        init(minimumInterval: TimeInterval = 0.4, now: @escaping @Sendable () -> Date = Date.init) {
             self.minimumInterval = minimumInterval
             self.now = now
         }

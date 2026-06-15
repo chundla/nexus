@@ -5,7 +5,8 @@
     /// macOS structured feed startup (#225); implementation shared with iOS via `StructuredSessionFeedProgressiveRevealPolicy`.
     enum StructuredSessionFeedMacOSStartupPolicy {
         static var usesProgressiveActivityRowReveal: Bool {
-            StructuredSessionFeedProgressiveRevealPolicy.usesProgressiveActivityRowReveal
+            // Progressive tail batches remount LazyVStack segments and can spin ScrollView layout (#hang).
+            false
         }
 
         static var initialVisibleTailRowCount: Int {

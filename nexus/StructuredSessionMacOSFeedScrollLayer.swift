@@ -42,12 +42,16 @@
                     contentOffsetY: geometry.contentOffset.y
                 )
             } action: { _, sample in
-                if let next = structuredSessionFeedPinStateIfChangedDuringOpenAgentTurn(
-                    previous: pinState,
-                    sample: sample,
-                    effectiveTurnInProgress: effectiveTurnOpen
-                ) {
-                    pinState = next
+                // Geometry-driven pin updates fight growing final-answer layout on AppKit (#hang).
+                guard effectiveTurnOpen == false else {
+                    if let next = structuredSessionFeedPinStateIfChangedDuringOpenAgentTurn(
+                        previous: pinState,
+                        sample: sample,
+                        effectiveTurnInProgress: true
+                    ) {
+                        pinState = next
+                    }
+                    return
                 }
             }
             .onAppear {
@@ -61,10 +65,9 @@
                     scrollPosition = ScrollPosition()
                     pinState = StructuredSessionFeedPinState(isFollowingBottom: false, userHasDetachedFromBottom: true)
                 } else {
-                    // Do not bind `ScrollPosition(edge: .bottom)` while final-answer markdown mounts;
-                    // bottom-edge tracking + growing content height can spin AppKit layout (#hang).
+                    // Do not bind bottom edge or re-enable tail-follow while final markdown lays out.
                     scrollPosition = ScrollPosition()
-                    pinState = StructuredSessionFeedPinState(isFollowingBottom: true, userHasDetachedFromBottom: false)
+                    pinState = StructuredSessionFeedPinState(isFollowingBottom: false, userHasDetachedFromBottom: true)
                 }
             }
             .onChange(of: presentation.session.id) { _, _ in
@@ -80,15 +83,6 @@
                     return
                 }
                 applyScrollSnapshotTransition(previous: scrollSnapshot, current: current)
-            }
-            .onChange(of: feedPresentation.feedScrollItemCount) { _, total in
-                let synced = StructuredSessionFeedSegmentRevealPolicy.synchronizedVisibleTailSegmentCount(
-                    currentVisibleCount: visibleTailRowCount,
-                    totalFeedSegmentCount: total
-                )
-                if synced != visibleTailRowCount {
-                    visibleTailRowCount = synced
-                }
             }
         }
 
