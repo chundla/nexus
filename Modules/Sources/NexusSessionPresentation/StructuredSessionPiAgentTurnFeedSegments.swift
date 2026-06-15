@@ -182,6 +182,7 @@ func structuredSessionPiFeedSegments(
 ) -> [StructuredSessionFeedSegment] {
     var segments: [StructuredSessionFeedSegment] = []
     var index = 0
+    let latestPromptIndex = activityItems.lastIndex(where: structuredSessionPiFeedSegmentIsPromptAnchoredUserMessage)
 
     while index < activityItems.count {
         let item = activityItems[index]
@@ -197,11 +198,12 @@ func structuredSessionPiFeedSegments(
                     )))
             index += 1
 
+            let turnIsInProgress = isAgentTurnInProgress && latestPromptIndex == activityItems.index(before: index)
             let turnSlice = structuredSessionPiAgentTurnActivitySlice(
                 activityItems: activityItems,
                 startIndex: index,
-                isAgentTurnInProgress: isAgentTurnInProgress,
-                liveAssistantDraftText: liveAssistantDraftText
+                isAgentTurnInProgress: turnIsInProgress,
+                liveAssistantDraftText: turnIsInProgress ? liveAssistantDraftText : nil
             )
             index = turnSlice.nextIndex
 
@@ -209,13 +211,15 @@ func structuredSessionPiFeedSegments(
                 segments.append(.agentTurn(turn))
             }
 
-            structuredSessionPiAbsorbOpenTurnContinuationSlices(
-                activityItems: activityItems,
-                isAgentTurnInProgress: isAgentTurnInProgress,
-                liveAssistantDraftText: liveAssistantDraftText,
-                index: &index,
-                segments: &segments
-            )
+            if turnIsInProgress {
+                structuredSessionPiAbsorbOpenTurnContinuationSlices(
+                    activityItems: activityItems,
+                    isAgentTurnInProgress: true,
+                    liveAssistantDraftText: liveAssistantDraftText,
+                    index: &index,
+                    segments: &segments
+                )
+            }
             continue
         }
 

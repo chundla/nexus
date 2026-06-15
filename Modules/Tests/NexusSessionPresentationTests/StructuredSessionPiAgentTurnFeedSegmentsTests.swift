@@ -743,6 +743,100 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
         #expect(retry.text == "Retrying after rate limit")
     }
 
+    @Test func piSecondOpenTurnKeepsPreviousFinalAnswerInClosedTurn() throws {
+        let screen = SessionScreen(
+            session: piSession(),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .message, text: "You: one", prompt: SessionPrompt(text: "one")),
+                SessionActivityItem(kind: .status, text: "thoughts:", detailText: "First thought."),
+                SessionActivityItem(kind: .message, text: "Pi: **first final**"),
+                SessionActivityItem(kind: .message, text: "You: two", prompt: SessionPrompt(text: "two")),
+                SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Second thought."),
+                SessionActivityItem(kind: .command, text: "read: file.swift"),
+                SessionActivityItem(kind: .message, text: "Pi: Still checking tools."),
+            ],
+            providerEvents: [
+                SessionProviderEvent(
+                    sequence: 0,
+                    providerID: .pi,
+                    type: "turn_end",
+                    family: .turn,
+                    rawPayload: #"{"type":"turn_end"}"#
+                ),
+                SessionProviderEvent(
+                    sequence: 1,
+                    providerID: .pi,
+                    type: "message_update",
+                    family: .message,
+                    rawPayload: #"{"type":"message_update"}"#
+                ),
+            ],
+            isAgentTurnInProgress: false
+        )
+
+        let segments = try #require(structuredSessionPiFeedSegments(for: screen))
+        #expect(segments.count == 5)
+        guard case .agentTurn(let firstTurn) = segments[1],
+            case .agentTurn(let secondTurn) = segments[3],
+            case .standalone(let interimPi) = segments[4]
+        else {
+            Issue.record("Expected closed first turn, open second turn, then interim Pi")
+            return
+        }
+        #expect(firstTurn.isOpen == false)
+        #expect(firstTurn.finalAnswer?.text == "**first final**")
+        #expect(secondTurn.isOpen == true)
+        #expect(secondTurn.finalAnswer == nil)
+        #expect(structuredSessionPiStandaloneAssistantPresentation(for: interimPi)?.text == "Still checking tools.")
+    }
+
+    @Test func piSecondClosedTurnFormatsBothFinalAnswers() throws {
+        let screen = SessionScreen(
+            session: piSession(),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .message, text: "You: one", prompt: SessionPrompt(text: "one")),
+                SessionActivityItem(kind: .message, text: "Pi: **first final**"),
+                SessionActivityItem(kind: .message, text: "You: two", prompt: SessionPrompt(text: "two")),
+                SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Second thought."),
+                SessionActivityItem(kind: .message, text: "Pi: # second final"),
+            ],
+            providerEvents: [
+                SessionProviderEvent(
+                    sequence: 0,
+                    providerID: .pi,
+                    type: "turn_end",
+                    family: .turn,
+                    rawPayload: #"{"type":"turn_end"}"#
+                ),
+                SessionProviderEvent(
+                    sequence: 1,
+                    providerID: .pi,
+                    type: "turn_end",
+                    family: .turn,
+                    rawPayload: #"{"type":"turn_end"}"#
+                ),
+            ],
+            isAgentTurnInProgress: false
+        )
+
+        let segments = try #require(structuredSessionPiFeedSegments(for: screen))
+        #expect(segments.count == 4)
+        guard case .agentTurn(let firstTurn) = segments[1],
+            case .agentTurn(let secondTurn) = segments[3]
+        else {
+            Issue.record("Expected two closed agent turns")
+            return
+        }
+        #expect(firstTurn.finalAnswer?.text == "**first final**")
+        #expect(secondTurn.finalAnswer?.text == "# second final")
+        #expect(firstTurn.isOpen == false)
+        #expect(secondTurn.isOpen == false)
+    }
+
     @Test func piAgentTurnRegressionMultipleTurnsProduceSegmentListShape() throws {
         let screen = SessionScreen(
             session: piSession(),

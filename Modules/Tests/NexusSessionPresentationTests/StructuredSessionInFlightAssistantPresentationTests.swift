@@ -357,6 +357,41 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
         #expect(detached.userHasDetachedFromBottom == true)
     }
 
+    @Test func interimPiDetectedWhenContinuationTurnFollowsStandaloneBubble() throws {
+        let screen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            ),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .message, text: "You: go", prompt: SessionPrompt(text: "go")),
+                SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Working."),
+                SessionActivityItem(kind: .message, text: "Pi: Reviewing Nexus while tools continue."),
+                SessionActivityItem(kind: .command, text: "read: file.swift"),
+            ],
+            isAgentTurnInProgress: true
+        )
+
+        let segments = try #require(structuredSessionPiFeedSegments(for: screen))
+        #expect(segments.count == 4)
+        guard case .agentTurn(let firstTurn) = segments[1],
+            case .standalone = segments[2],
+            case .agentTurn(let continuationTurn) = segments[3]
+        else {
+            Issue.record("Expected open turn, interim Pi, continuation turn")
+            return
+        }
+        #expect(firstTurn.isOpen)
+        #expect(continuationTurn.isOpen)
+        #expect(structuredSessionFeedHasInterimPiAssistantAfterOpenTurn(in: segments) == true)
+        #expect(structuredSessionFeedScrollAnchorTurnID(in: segments) == continuationTurn.id)
+    }
+
     @Test func effectiveTurnInProgressWhenOpenTurnAndInterimPiStandalone() throws {
         let screen = SessionScreen(
             session: Session(
