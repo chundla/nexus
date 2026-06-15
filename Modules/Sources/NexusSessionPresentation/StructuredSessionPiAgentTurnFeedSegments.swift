@@ -227,48 +227,7 @@ func structuredSessionPiFeedSegments(
         index += 1
     }
 
-    structuredSessionPiAppendLiveAssistantDraftStandaloneSegment(
-        to: &segments,
-        activityItems: activityItems,
-        isAgentTurnInProgress: isAgentTurnInProgress,
-        liveAssistantDraftText: liveAssistantDraftText
-    )
-
     return segments
-}
-
-private let structuredSessionPiLiveAssistantDraftSyntheticItemID =
-    UUID(uuidString: "A7B3C4D5-E6F7-4890-ABCD-EF1234567890")!
-
-private func structuredSessionPiAppendLiveAssistantDraftStandaloneSegment(
-    to segments: inout [StructuredSessionFeedSegment],
-    activityItems: [SessionActivityItem],
-    isAgentTurnInProgress: Bool,
-    liveAssistantDraftText: String?
-) {
-    guard isAgentTurnInProgress,
-        let draft = liveAssistantDraftText?.trimmingCharacters(in: .whitespacesAndNewlines),
-        draft.isEmpty == false
-    else {
-        return
-    }
-    let messageText = "Pi: \(draft)"
-    if activityItems.contains(where: { $0.kind == .message && $0.text == messageText }) {
-        return
-    }
-    if let last = segments.last,
-        case .standalone(let item) = last,
-        structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage(item)
-    {
-        return
-    }
-    segments.append(
-        .standalone(
-            SessionActivityItem(
-                id: structuredSessionPiLiveAssistantDraftSyntheticItemID,
-                kind: .message,
-                text: messageText
-            )))
 }
 
 /// After interim `Pi:` standalone, append further thoughts/tools as **new** agent-turn segments below it.
@@ -290,7 +249,7 @@ private func structuredSessionPiAbsorbOpenTurnContinuationSlices(
         }
 
         if structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage(activityItems[index]) {
-            segments.append(.standalone(activityItems[index]))
+            // Hide in-flight assistant text; Thinking… covers the open turn until final markdown mounts.
             index += 1
             continue
         }
@@ -452,15 +411,14 @@ private func structuredSessionPiAgentTurnActivitySlice(
         }
 
         if structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage(item) {
-            if isAgentTurnInProgress {
-                // Interim assistant lines render as standalone bubbles after the open turn; do not stick scroll to them.
-                break
-            }
-            if let body = structuredSessionPiPrimaryAssistantBody(from: item.text) {
+            if isAgentTurnInProgress == false,
+                let body = structuredSessionPiPrimaryAssistantBody(from: item.text)
+            {
                 finalAnswer = StructuredSessionFeedAgentTurnFinalAnswerSegment(text: body, isStreaming: false)
             }
             consumedAny = true
             cursor += 1
+            // Open turn: hide assistant text but keep absorbing thoughts/tools. Closed: last Pi line wins.
             continue
         }
 

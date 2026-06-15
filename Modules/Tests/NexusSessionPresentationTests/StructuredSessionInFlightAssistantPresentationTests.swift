@@ -5,7 +5,7 @@ import Testing
 @testable import NexusSessionPresentation
 
 struct StructuredSessionOpenTurnAssistantBubbleTests {
-    @Test func interimPiMessageRendersAsStandaloneAfterOpenTurn() throws {
+    @Test func interimPiMessageHiddenWhileTurnOpenShowsThinkingOnly() throws {
         let screen = SessionScreen(
             session: Session(
                 id: UUID(),
@@ -25,20 +25,16 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
         )
 
         let segments = try #require(structuredSessionPiFeedSegments(for: screen))
-        #expect(segments.count == 3)
+        #expect(segments.count == 2)
         guard case .userMessage = segments[0],
-            case .agentTurn(let turn) = segments[1],
-            case .standalone(let item) = segments[2]
+            case .agentTurn(let turn) = segments[1]
         else {
-            Issue.record("Expected user, open turn, then standalone Pi message")
+            Issue.record("Expected user and open turn without interim Pi bubble")
             return
         }
         #expect(turn.isOpen == true)
         #expect(turn.finalAnswer == nil)
-        #expect(item.text == "Pi: interim chunk")
-        let assistant = try #require(structuredSessionPiStandaloneAssistantPresentation(for: item))
-        #expect(assistant.label == "Pi")
-        #expect(assistant.text == "interim chunk")
+        #expect(structuredSessionThinkingIndicator(for: screen, hasPendingApprovalRequests: false) != nil)
     }
 
     @Test func primaryStandalonePiAssistantUsesDedicatedBubblePresentationNotActivityPreview() throws {
@@ -137,7 +133,7 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
         #expect(structuredSessionFeedUsesBottomEdgeScrollPositionBinding(for: presentation) == false)
     }
 
-    @Test func autoScrollTriggerAnchorsAgentTurnNotInterimPiWhenThinkingHidden() throws {
+    @Test func autoScrollTriggerAnchorsOpenAgentTurnWhileAssistantTextHidden() throws {
         let screen = SessionScreen(
             session: Session(
                 id: UUID(),
@@ -160,15 +156,13 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
         )
 
         let segments = try #require(structuredSessionPiFeedSegments(for: screen))
-        guard case .agentTurn(let turn) = segments[1],
-              case .standalone(let pi) = segments[2]
-        else {
-            Issue.record("Expected turn + interim Pi")
+        guard case .agentTurn(let turn) = segments[1] else {
+            Issue.record("Expected open agent turn")
             return
         }
+        #expect(segments.count == 2)
         #expect(structuredSessionEffectiveAgentTurnInProgress(for: screen) == true)
         #expect(structuredSessionAutoScrollTrigger(for: screen).lastActivityRowID == turn.id)
-        #expect(structuredSessionAutoScrollTrigger(for: screen).lastActivityRowID != pi.id)
 
         let feed = structuredSessionFeedPresentation(for: screen)
         let presentation = FocusedStructuredSessionPresentation(
@@ -220,12 +214,11 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
         #expect(structuredSessionEffectiveAgentTurnInProgress(for: screen) == true)
 
         let segments = try #require(structuredSessionPiFeedSegments(for: screen))
-        guard case .agentTurn(let turn) = segments[1],
-            case .standalone = segments[2]
-        else {
-            Issue.record("Expected open turn then interim Pi standalone")
+        guard case .agentTurn(let turn) = segments[1] else {
+            Issue.record("Expected open turn without interim Pi bubble")
             return
         }
+        #expect(segments.count == 2)
         #expect(turn.isOpen == true)
         #expect(structuredSessionThinkingIndicator(for: screen, hasPendingApprovalRequests: false) != nil)
 
@@ -262,17 +255,16 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
 
         #expect(structuredSessionEffectiveAgentTurnInProgress(for: screen) == true)
         let segments = try #require(structuredSessionPiFeedSegments(for: screen))
-        guard case .agentTurn(let turn) = segments[1],
-              case .standalone = segments[2]
-        else {
-            Issue.record("Expected open turn and standalone interim Pi")
+        guard case .agentTurn(let turn) = segments[1] else {
+            Issue.record("Expected open turn without visible assistant text")
             return
         }
+        #expect(segments.count == 2)
         #expect(turn.isOpen == true)
         #expect(turn.finalAnswer == nil)
     }
 
-    @Test func piLiveDraftRendersStandaloneWhileTurnOpenWithoutActivityRow() throws {
+    @Test func piLiveDraftDoesNotRenderAssistantBubbleWhileTurnOpen() throws {
         let screen = SessionScreen(
             session: Session(
                 id: UUID(),
@@ -294,12 +286,12 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
         )
 
         let segments = try #require(structuredSessionPiFeedSegments(for: screen))
-        #expect(segments.count == 3)
-        guard case .standalone(let item) = segments[2] else {
-            Issue.record("Expected synthetic draft standalone Pi segment")
-            return
-        }
-        #expect(item.text.contains("Reviewing Nexus"))
+        #expect(segments.count == 2)
+        #expect(
+            segments.contains {
+                if case .standalone = $0 { return true }
+                return false
+            } == false)
     }
 
     @Test func piProvisionalPiLastLineKeepsTurnOpenWithoutServiceFlag() throws {
@@ -329,14 +321,14 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
         #expect(structuredSessionEffectiveAgentTurnInProgress(for: screen) == true)
 
         let segments = try #require(structuredSessionPiFeedSegments(for: screen))
-        guard case .agentTurn(let turn) = segments[1],
-              case .standalone = segments[2]
-        else {
-            Issue.record("Expected open turn then standalone provisional Pi")
+        guard case .agentTurn(let turn) = segments[1] else {
+            Issue.record("Expected open turn with tools, no provisional Pi bubble")
             return
         }
+        #expect(segments.count == 2)
         #expect(turn.isOpen == true)
         #expect(turn.finalAnswer == nil)
+        #expect(turn.toolStackItems.count == 1)
         #expect(structuredSessionThinkingIndicator(for: screen, hasPendingApprovalRequests: false) != nil)
 
         let presentation = FocusedStructuredSessionPresentation(
@@ -383,7 +375,7 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
         #expect(detached.userHasDetachedFromBottom == true)
     }
 
-    @Test func interimPiDetectedWhenContinuationTurnFollowsStandaloneBubble() throws {
+    @Test func postInterimPiCommandsStayInContinuationTurnWithoutStandaloneBubble() throws {
         let screen = SessionScreen(
             session: Session(
                 id: UUID(),
@@ -404,21 +396,18 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
         )
 
         let segments = try #require(structuredSessionPiFeedSegments(for: screen))
-        #expect(segments.count == 4)
-        guard case .agentTurn(let firstTurn) = segments[1],
-            case .standalone = segments[2],
-            case .agentTurn(let continuationTurn) = segments[3]
-        else {
-            Issue.record("Expected open turn, interim Pi, continuation turn")
+        #expect(segments.count == 2)
+        guard case .agentTurn(let turn) = segments[1] else {
+            Issue.record("Expected single open turn with hidden interim Pi and follow-on tool")
             return
         }
-        #expect(firstTurn.isOpen)
-        #expect(continuationTurn.isOpen)
-        #expect(structuredSessionFeedHasInterimPiAssistantAfterOpenTurn(in: segments) == true)
-        #expect(structuredSessionFeedScrollAnchorTurnID(in: segments) == continuationTurn.id)
+        #expect(turn.isOpen)
+        #expect(turn.toolStackItems.count == 1)
+        #expect(structuredSessionFeedHasInterimPiAssistantAfterOpenTurn(in: segments) == false)
+        #expect(structuredSessionFeedScrollAnchorTurnID(in: segments) == turn.id)
     }
 
-    @Test func effectiveTurnInProgressWhenOpenTurnAndInterimPiStandalone() throws {
+    @Test func effectiveTurnInProgressWhenOpenTurnWithoutVisibleAssistantText() throws {
         let screen = SessionScreen(
             session: Session(
                 id: UUID(),
@@ -440,7 +429,7 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
         #expect(
             structuredSessionFeedHasInterimPiAssistantAfterOpenTurn(
                 in: structuredSessionPiFeedSegments(for: screen)
-            ) == true)
+            ) == false)
         #expect(structuredSessionEffectiveAgentTurnInProgress(for: screen) == true)
     }
 }

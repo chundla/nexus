@@ -175,29 +175,7 @@ struct StructuredSessionPiAgentTurnFinalAnswerView: View {
     let onShowFullAssistantResponse: ((StructuredSessionAssistantFullResponsePresentation) -> Void)?
 
     var body: some View {
-        if conversation.isStreaming {
-            streamingBody
-        } else {
-            finalizedBody
-        }
-    }
-
-    @ViewBuilder
-    private var streamingBody: some View {
-        let policy = structuredSessionFeedStreamingAssistantDisplayPolicy(
-            for: "Pi: \(conversation.text)",
-            charactersPerLine: style.charactersPerLine
-        )
-        let display = structuredSessionFeedStreamingAssistantDisplayText(
-            for: "Pi: \(conversation.text)",
-            policy: policy
-        )
-        Text(verbatim: display.hasPrefix("Pi: ") ? String(display.dropFirst(4)) : display)
-            .font(style.bodyFont(15, nil, nil))
-            .foregroundStyle(style.assistantBodyForeground)
-            .structuredSessionFeedTextSelection()
-            .lineLimit(policy.previewLineLimit)
-            .fixedSize(horizontal: false, vertical: true)
+        finalizedBody
     }
 
     @ViewBuilder

@@ -130,7 +130,7 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
         #expect(turn.finalAnswer?.text == "final")
     }
 
-    @Test func piOpenTurnSplitsAtProvisionalPiMessageForStandaloneBubble() throws {
+    @Test func piOpenTurnAbsorbsPostInterimPiWorkIntoContinuationTurn() throws {
         let screen = SessionScreen(
             session: piSession(),
             primarySurface: .structuredActivityFeed,
@@ -149,21 +149,16 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
 
         let segments = try #require(structuredSessionPiFeedSegments(for: screen))
         guard case .userMessage = segments[0],
-            case .agentTurn(let beforePi) = segments[1],
-            case .standalone(let piItem) = segments[2],
-            case .agentTurn(let afterPi) = segments[3]
+            case .agentTurn(let turn) = segments[1]
         else {
-            Issue.record("Expected user, turn before Pi, standalone Pi, turn after Pi")
+            Issue.record("Expected user and single open turn absorbing work after hidden interim Pi")
             return
         }
-        #expect(beforePi.isOpen == true)
-        #expect(beforePi.reasoningStackItems.map(\.markdownBody) == ["Plan."])
-        #expect(beforePi.toolStackItems.count == 1)
-        #expect(afterPi.reasoningStackItems.map(\.markdownBody) == ["More planning."])
-        #expect(afterPi.toolStackItems.count == 1)
-        #expect(afterPi.finalAnswer == nil)
-        #expect(piItem.text.hasPrefix("Pi:"))
-        #expect(segments.count == 4)
+        #expect(segments.count == 2)
+        #expect(turn.isOpen == true)
+        #expect(turn.finalAnswer == nil)
+        #expect(turn.reasoningStackItems.map(\.markdownBody) == ["Plan.", "More planning."])
+        #expect(turn.toolStackItems.count == 2)
     }
 
     @Test func piHidesStandalonePiWhenClosedTurnFinalAnswerMatches() throws {
@@ -189,7 +184,7 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
         #expect(structuredSessionPiShouldRenderStandaloneFeedSegment(item: dup, in: segments) == false)
     }
 
-    @Test func piOpenTurnPostInterimPiCommandsLiveInContinuationTurnBelowPiNotAbove() throws {
+    @Test func piOpenTurnPostInterimPiCommandsLiveInContinuationTurn() throws {
         let screen = SessionScreen(
             session: piSession(),
             primarySurface: .structuredActivityFeed,
@@ -207,24 +202,15 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
         )
 
         let segments = try #require(structuredSessionPiFeedSegments(for: screen))
-        #expect(segments.count == 4)
-        #expect(
-            segments.contains {
-                if case .standalone(let item) = $0, item.kind == .command { return true }
-                return false
-            } == false)
-        guard case .agentTurn(let beforePi) = segments[1],
-            case .standalone(let pi) = segments[2],
-            case .agentTurn(let afterPi) = segments[3]
-        else {
-            Issue.record("Expected user, turn, interim Pi, continuation turn with cd")
+        #expect(segments.count == 2)
+        guard case .agentTurn(let turn) = segments[1] else {
+            Issue.record("Expected single open turn with thoughts, hidden interim Pi, and cd")
             return
         }
-        #expect(beforePi.toolStackItems.isEmpty)
-        #expect(pi.text.contains("Reviewing Nexus"))
-        #expect(afterPi.isOpen == true)
-        #expect(afterPi.toolStackItems.count == 1)
-        #expect(afterPi.toolStackItems[0].callPreview == "cd /Users/ck/source/repos/nexus")
+        #expect(turn.isOpen == true)
+        #expect(turn.finalAnswer == nil)
+        #expect(turn.toolStackItems.count == 1)
+        #expect(turn.toolStackItems[0].callPreview == "cd /Users/ck/source/repos/nexus")
     }
 
     @Test func piOpenTurnDoesNotAttachLiveAssistantDraftAsFinalAnswerPlaceholder() throws {
@@ -241,11 +227,9 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
         )
 
         let segments = try #require(structuredSessionPiFeedSegments(for: screen))
-        #expect(segments.count == 3)
-        guard case .agentTurn(let turn) = segments[1],
-            case .standalone = segments[2]
-        else {
-            Issue.record("Expected agent turn then draft standalone Pi")
+        #expect(segments.count == 2)
+        guard case .agentTurn(let turn) = segments[1] else {
+            Issue.record("Expected agent turn without draft Pi bubble")
             return
         }
         #expect(turn.isOpen == true)
@@ -777,19 +761,17 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
         )
 
         let segments = try #require(structuredSessionPiFeedSegments(for: screen))
-        #expect(segments.count == 5)
+        #expect(segments.count == 4)
         guard case .agentTurn(let firstTurn) = segments[1],
-            case .agentTurn(let secondTurn) = segments[3],
-            case .standalone(let interimPi) = segments[4]
+            case .agentTurn(let secondTurn) = segments[3]
         else {
-            Issue.record("Expected closed first turn, open second turn, then interim Pi")
+            Issue.record("Expected closed first turn and open second turn without interim Pi bubble")
             return
         }
         #expect(firstTurn.isOpen == false)
         #expect(firstTurn.finalAnswer?.text == "**first final**")
         #expect(secondTurn.isOpen == true)
         #expect(secondTurn.finalAnswer == nil)
-        #expect(structuredSessionPiStandaloneAssistantPresentation(for: interimPi)?.text == "Still checking tools.")
     }
 
     @Test func piSecondClosedTurnFormatsBothFinalAnswers() throws {
