@@ -282,6 +282,33 @@ private enum RemoteClientFixture {
             latestScreen
         }
 
+        func fetchStructuredSessionHistoryPage(
+            for pairedMac: PairedMac,
+            sessionID: UUID,
+            pageSize: Int,
+            before cursor: StructuredSessionHistoryCursor?
+        ) async throws -> StructuredSessionHistoryPage {
+            StructuredSessionHistoryPage(
+                sessionID: session.id,
+                activityItems: [],
+                providerEvents: [],
+                nextCursor: nil
+            )
+        }
+
+        func fetchStructuredSessionArtifactFile(
+            for pairedMac: PairedMac,
+            sessionID: UUID,
+            hostPath: String
+        ) async throws -> StructuredSessionArtifactFile {
+            let fileName = URL(fileURLWithPath: hostPath).lastPathComponent
+            return StructuredSessionArtifactFile(
+                fileName: fileName.isEmpty ? "fixture-artifact.html" : fileName,
+                contentType: "text/html",
+                data: Data("<html><body>Fixture artifact</body></html>".utf8)
+            )
+        }
+
         func takeSessionControl(for pairedMac: PairedMac, sessionID: UUID, columns: Int, rows: Int) async throws -> SessionScreen {
             rebuildLatestScreen(
                 controller: .pairedDevice(pairedMac.pairedDeviceID!),
