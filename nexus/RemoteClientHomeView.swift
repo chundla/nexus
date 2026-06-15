@@ -2295,6 +2295,10 @@
                     presentedStructuredSessionAssistantFullResponse = nil
                     structuredSessionFeedVisibleTailRowCount = 0
                     structuredSessionAgentTurnDisclosureState.reset()
+                    structuredSessionFeedScrollPosition =
+                        structuredSessionEffectiveAgentTurnInProgress(for: presentation)
+                        ? ScrollPosition()
+                        : ScrollPosition(edge: .bottom)
                     structuredSessionScheduleFeedActivityRowsIfNeeded()
                 }
                 .onChange(of: presentation.structuredSessionFeedScrollSnapshot) { _, current in

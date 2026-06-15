@@ -105,6 +105,36 @@ public enum StructuredSessionFeedSegment: Equatable, Identifiable, Sendable {
 }
 
 /// Pi v1 composite feed projection. Returns `nil` for non-Pi **Sessions** so clients keep flat row iteration.
+public struct StructuredSessionPiStandaloneAssistantPresentation: Equatable, Sendable {
+    public let activityItemID: UUID
+    public let label: String
+    public let text: String
+
+    public init(activityItemID: UUID, label: String, text: String) {
+        self.activityItemID = activityItemID
+        self.label = label
+        self.text = text
+    }
+}
+
+/// Primary standalone `Pi:` assistant rows render as Pi assistant bubbles, never as legacy activity-row previews.
+public func structuredSessionPiStandaloneAssistantPresentation(
+    for item: SessionActivityItem
+) -> StructuredSessionPiStandaloneAssistantPresentation? {
+    guard structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage(item),
+        let body = structuredSessionPiPrimaryAssistantBody(from: item.text)?.trimmingCharacters(
+            in: .whitespacesAndNewlines),
+        body.isEmpty == false
+    else {
+        return nil
+    }
+    return StructuredSessionPiStandaloneAssistantPresentation(
+        activityItemID: item.id,
+        label: "Pi",
+        text: body
+    )
+}
+
 /// Standalone `Pi:` rows duplicate agent-turn `finalAnswer` when history still carries the same message activity item.
 public func structuredSessionPiShouldRenderStandaloneFeedSegment(
     item: SessionActivityItem,

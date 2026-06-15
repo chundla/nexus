@@ -1560,6 +1560,10 @@
                             presentedStructuredSessionAssistantFullResponse = nil
                             structuredSessionMacOSFeedVisibleTailRowCount = 0
                             structuredSessionAgentTurnDisclosureState.reset()
+                            structuredSessionFeedScrollPosition =
+                                structuredSessionEffectiveAgentTurnInProgress(for: structuredPresentation)
+                                ? ScrollPosition()
+                                : ScrollPosition(edge: .bottom)
                             structuredSessionScheduleMacOSFeedActivityRowsIfNeeded()
                         }
                     ) {

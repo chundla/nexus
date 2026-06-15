@@ -36,6 +36,16 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
         #expect(turn.isOpen == true)
         #expect(turn.finalAnswer == nil)
         #expect(item.text == "Pi: interim chunk")
+        let assistant = try #require(structuredSessionPiStandaloneAssistantPresentation(for: item))
+        #expect(assistant.label == "Pi")
+        #expect(assistant.text == "interim chunk")
+    }
+
+    @Test func primaryStandalonePiAssistantUsesDedicatedBubblePresentationNotActivityPreview() throws {
+        let item = SessionActivityItem(kind: .message, text: "Pi: # Done\n\nFinal body")
+        let assistant = try #require(structuredSessionPiStandaloneAssistantPresentation(for: item))
+        #expect(assistant.label == "Pi")
+        #expect(assistant.text == "# Done\n\nFinal body")
     }
 
     @Test func scrollTargetUsesBottomSentinelWhileThinkingIndicatorVisible() throws {
