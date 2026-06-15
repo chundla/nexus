@@ -139,5 +139,37 @@
                 """
             )
         }
+
+        static func logPiTurnWatchdogPoll(
+            sessionID: UUID,
+            idleThresholdSeconds: Int,
+            piSessionFile: String?
+        ) {
+            let file = piSessionFile ?? "unknown"
+            logger.notice(
+                """
+                piTurnWatchdogPoll nexusHostPID=\(nexusHostPID, privacy: .public) \
+                sessionID=\(sessionID.uuidString, privacy: .public) \
+                idleThresholdSec=\(idleThresholdSeconds, privacy: .public) \
+                piSessionFile=\(file, privacy: .public)
+                """
+            )
+        }
+
+        static func logPiTurnWatchdogStallDeclared(
+            sessionID: UUID,
+            idleSeconds: Int,
+            piSessionFile: String?
+        ) {
+            let file = piSessionFile ?? "unknown"
+            logger.notice(
+                """
+                piTurnWatchdogStallDeclared nexusHostPID=\(nexusHostPID, privacy: .public) \
+                sessionID=\(sessionID.uuidString, privacy: .public) \
+                idleSeconds=\(idleSeconds, privacy: .public) \
+                piSessionFile=\(file, privacy: .public)
+                """
+            )
+        }
     }
 #endif

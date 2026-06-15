@@ -167,6 +167,11 @@
         private var nextBashRequestSequence = 0
         private var nextExportHTMLRequestSequence = 0
         private let nexusSessionID: UUID?
+        private var lastStdoutActivityUptimeNanoseconds: UInt64?
+        private var lastProviderPollUptimeNanoseconds: UInt64?
+        private var watchdogPollsSinceIdleThreshold = 0
+        private var providerStallDeclared = false
+        private var turnWatchdogTask: Task<Void, Never>?
 
         convenience init(
             executable: String,
@@ -313,6 +318,9 @@
                     return
                 }
 
+                if Self.countsAsTurnWatchdogStdoutProgress(type: type) {
+                    self.noteStdoutActivityForTurnWatchdog()
+                }
                 self.recordProviderEvent(rawPayload: line, object: object, type: type)
 
                 if type == "response" {
@@ -351,10 +359,14 @@
                 throw startupError
             }
 
-            requestSessionStats()
+            if ProcessInfo.processInfo.environment["NEXUS_PI_RPC_STARTUP_SESSION_STATS"] == "1" {
+                requestSessionStats()
+            }
+            startTurnWatchdogIfNeeded()
         }
 
         deinit {
+            turnWatchdogTask?.cancel()
             try? transport.terminate()
         }
 
@@ -670,6 +682,7 @@
                 isStreaming = true
                 promptTurnCommitted = true
                 awaitingPromptAcceptance = true
+                resetTurnWatchdogLocked()
                 if let nexusSessionID {
                     NexusSessionRuntimeDiagnostics.logPiPromptDispatch(
                         sessionID: nexusSessionID,
@@ -1005,6 +1018,130 @@
                 return
             }
             finishPiAgentTurnLocked(stopReason: "stop")
+            resetTurnWatchdogLocked()
+        }
+
+        private static func countsAsTurnWatchdogStdoutProgress(type: String) -> Bool {
+            type != "response"
+        }
+
+        private func noteStdoutActivityForTurnWatchdog() {
+            lock.lock()
+            lastStdoutActivityUptimeNanoseconds = DispatchTime.now().uptimeNanoseconds
+            watchdogPollsSinceIdleThreshold = 0
+            lock.unlock()
+        }
+
+        private func resetTurnWatchdogLocked() {
+            providerStallDeclared = false
+            watchdogPollsSinceIdleThreshold = 0
+            lastProviderPollUptimeNanoseconds = nil
+            lastStdoutActivityUptimeNanoseconds = DispatchTime.now().uptimeNanoseconds
+        }
+
+        private func startTurnWatchdogIfNeeded() {
+            turnWatchdogTask?.cancel()
+            turnWatchdogTask = Task { [weak self] in
+                let tick = PiRPCTurnWatchdog.configuredWatchdogTickNanoseconds()
+                while Task.isCancelled == false {
+                    try? await Task.sleep(nanoseconds: tick)
+                    self?.runTurnWatchdogTick()
+                }
+            }
+        }
+
+        private func runTurnWatchdogTick() {
+            let snapshot: (
+                committed: Bool,
+                declared: Bool,
+                lastActivity: UInt64?,
+                lastPoll: UInt64?,
+                polls: Int,
+                sessionID: UUID?,
+                sessionFile: String?
+            )
+            lock.lock()
+            snapshot = (
+                promptTurnCommitted,
+                providerStallDeclared,
+                lastStdoutActivityUptimeNanoseconds,
+                lastProviderPollUptimeNanoseconds,
+                watchdogPollsSinceIdleThreshold,
+                nexusSessionID,
+                sessionLinkage?.sessionFile
+            )
+            lock.unlock()
+
+            let now = DispatchTime.now().uptimeNanoseconds
+            let action = PiRPCTurnWatchdog.evaluate(
+                promptTurnCommitted: snapshot.committed,
+                providerStallDeclared: snapshot.declared,
+                lastStdoutActivityUptimeNanoseconds: snapshot.lastActivity,
+                lastProviderPollUptimeNanoseconds: snapshot.lastPoll,
+                watchdogPollsSinceIdleThreshold: snapshot.polls,
+                nowUptimeNanoseconds: now,
+                pollIntervalNanoseconds: PiRPCTurnWatchdog.configuredPollIntervalNanoseconds(),
+                stallThresholdNanoseconds: PiRPCTurnWatchdog.configuredStallThresholdNanoseconds()
+            )
+
+            switch action {
+            case .none:
+                return
+            case .pollProviderState:
+                lock.lock()
+                lastProviderPollUptimeNanoseconds = now
+                watchdogPollsSinceIdleThreshold += 1
+                lock.unlock()
+                requestGetStateReconciliation()
+                requestSessionStatsForWatchdog()
+                if let sessionID = snapshot.sessionID {
+                    NexusSessionRuntimeDiagnostics.logPiTurnWatchdogPoll(
+                        sessionID: sessionID,
+                        idleThresholdSeconds: Int(
+                            PiRPCTurnWatchdog.configuredStallThresholdNanoseconds() / 1_000_000_000),
+                        piSessionFile: snapshot.sessionFile
+                    )
+                }
+            case .declareProviderStall(let idleSeconds):
+                declareProviderStall(idleSeconds: idleSeconds, piSessionFile: snapshot.sessionFile)
+            }
+        }
+
+        private func requestSessionStatsForWatchdog() {
+            do {
+                try transport.sendLine(
+                    Self.jsonLine([
+                        "id": "nexus-pi-watchdog-stats-\(UUID().uuidString)",
+                        "type": "get_session_stats",
+                    ]))
+            } catch {
+                return
+            }
+        }
+
+        private func declareProviderStall(idleSeconds: Int, piSessionFile: String?) {
+            lock.lock()
+            guard promptTurnCommitted, providerStallDeclared == false else {
+                lock.unlock()
+                return
+            }
+            providerStallDeclared = true
+            let sessionID = nexusSessionID
+            let message =
+                "Pi stopped responding during this turn (no RPC progress for \(idleSeconds)s). "
+                + "Use Stop or relaunch this Session, then try again."
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: message))
+            finishPiAgentTurnLocked(stopReason: "provider_stall")
+            lock.unlock()
+
+            if let sessionID {
+                NexusSessionRuntimeDiagnostics.logPiTurnWatchdogStallDeclared(
+                    sessionID: sessionID,
+                    idleSeconds: idleSeconds,
+                    piSessionFile: piSessionFile
+                )
+            }
+            notifyChange()
         }
 
         private func isAutomaticSessionStatsRequestID(_ requestID: String?) -> Bool {
@@ -2190,6 +2327,11 @@
             isStreaming = false
             promptTurnCommitted = false
             lastAssistantStopReason = stopReason
+            if stopReason != "provider_stall" {
+                providerStallDeclared = false
+            }
+            watchdogPollsSinceIdleThreshold = 0
+            lastProviderPollUptimeNanoseconds = nil
         }
 
         private func handleAgentEnd(_ object: [String: Any]) {

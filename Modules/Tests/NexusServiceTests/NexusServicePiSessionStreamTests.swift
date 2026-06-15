@@ -4734,6 +4734,7 @@
         private let compactionSummary: String?
         private let compactionTokensBefore: Int?
         private let promptEvents: [[String: Any]]
+        private let stallAfterPromptAcceptance: Bool
         private(set) var sentLines: [String] = []
         private var stdoutLineHandler: (@Sendable (String) -> Void)?
         private var terminationHandler: (@Sendable (Int32) -> Void)?
@@ -4755,7 +4756,8 @@
             cycledThinkingLevelResult: String? = nil,
             compactionSummary: String? = nil,
             compactionTokensBefore: Int? = nil,
-            promptEvents: [[String: Any]] = []
+            promptEvents: [[String: Any]] = [],
+            stallAfterPromptAcceptance: Bool = false
         ) {
             self.promptResponseText = promptResponseText
             self.slashCommands = slashCommands
@@ -4774,6 +4776,7 @@
             self.compactionSummary = compactionSummary
             self.compactionTokensBefore = compactionTokensBefore
             self.promptEvents = promptEvents
+            self.stallAfterPromptAcceptance = stallAfterPromptAcceptance
         }
 
         func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
@@ -4799,7 +4802,8 @@
             switch type {
             case "get_state":
                 var data: [String: Any] = [
-                    "sessionId": "pi-session-1"
+                    "sessionId": "pi-session-1",
+                    "isStreaming": stallAfterPromptAcceptance,
                 ]
                 if let stateModel {
                     data["model"] = stateModel.responseObject()
@@ -4983,6 +4987,9 @@
                     "command": "prompt",
                     "success": true,
                 ])
+                if stallAfterPromptAcceptance {
+                    return
+                }
                 for event in promptEvents {
                     emit(event)
                 }
@@ -5023,6 +5030,44 @@
                 return
             }
             stdoutLineHandler?(line)
+        }
+    }
+
+    extension NexusServicePiSessionStreamTests {
+        @Test func piTurnWatchdogDeclaresProviderStallWhenRpcStdoutStaysIdle() async throws {
+            setenv("NEXUS_PI_RPC_TURN_STALL_SEC", "1", 1)
+            setenv("NEXUS_PI_RPC_TURN_POLL_SEC", "0.2", 1)
+            setenv("NEXUS_PI_RPC_TURN_WATCHDOG_TICK_SEC", "0.1", 1)
+            defer {
+                unsetenv("NEXUS_PI_RPC_TURN_STALL_SEC")
+                unsetenv("NEXUS_PI_RPC_TURN_POLL_SEC")
+                unsetenv("NEXUS_PI_RPC_TURN_WATCHDOG_TICK_SEC")
+            }
+
+            let runtime = try await PiRPCSessionRuntime(
+                executable: "/tmp/fake-pi",
+                workingDirectory: "/tmp",
+                terminationStatusMessageBuilder: { _ in "" },
+                nexusSessionID: UUID(),
+                transportFactory: { _, _, _ in
+                    TestPiRPCTransport(stallAfterPromptAcceptance: true)
+                }
+            )
+
+            let session = Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            )
+
+            try runtime.sendInput("stall me")
+            try await Task.sleep(nanoseconds: 2_500_000_000)
+
+            let screen = runtime.sessionScreen(for: session)
+            #expect(screen.isAgentTurnInProgress == false)
+            #expect(screen.activityItems.contains { $0.kind == .error && $0.text.contains("Pi stopped responding") })
         }
     }
 #endif
