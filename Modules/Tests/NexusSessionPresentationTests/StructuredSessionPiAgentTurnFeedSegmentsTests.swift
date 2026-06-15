@@ -128,6 +128,35 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
         #expect(turn.finalAnswer?.text == "final")
     }
 
+    @Test func piOpenTurnKeepsAbsorbingThoughtsAndToolsAfterProvisionalPiMessage() throws {
+        let screen = SessionScreen(
+            session: piSession(),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .message, text: "You: review", prompt: SessionPrompt(text: "review")),
+                SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Plan."),
+                SessionActivityItem(kind: .command, text: "read: CONTEXT.md"),
+                SessionActivityItem(kind: .message, text: "Pi: Gathering recent changes and project context for the review"),
+                SessionActivityItem(kind: .status, text: "thoughts:", detailText: "More planning."),
+                SessionActivityItem(kind: .command, text: "bash: ls")
+            ],
+            isAgentTurnInProgress: true
+        )
+
+        let segments = try #require(structuredSessionPiFeedSegments(for: screen))
+        #expect(segments.count == 2)
+        guard case .agentTurn(let turn) = segments[1] else {
+            Issue.record("Expected single open agent turn")
+            return
+        }
+        #expect(turn.isOpen == true)
+        #expect(turn.reasoning?.markdownBody == "Plan.\n\nMore planning.")
+        #expect(turn.tools.count == 2)
+        #expect(turn.finalAnswer?.text == "Gathering recent changes and project context for the review")
+        #expect(turn.finalAnswer?.isStreaming == false)
+    }
+
     @Test func piFeedSegmentsAttachLiveAssistantDraftToOpenTurn() throws {
         let screen = SessionScreen(
             session: piSession(),

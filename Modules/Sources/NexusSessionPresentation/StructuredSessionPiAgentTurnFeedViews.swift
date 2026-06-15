@@ -282,47 +282,23 @@ private struct StructuredSessionPiAgentTurnFinalAnswerView: View {
 
     @ViewBuilder
     private var finalizedBody: some View {
-        let policy = structuredSessionFeedAssistantMarkdownDisplayPolicy(
+        let policy = structuredSessionFeedAgentTurnFinalAnswerMarkdownDisplayPolicy(
             for: conversation.text,
             charactersPerLine: style.charactersPerLine
         )
-        let prefersPlain = structuredSessionFeedAssistantAutoExpandedLatestResponsePrefersPlainText(
-            policy: policy,
-            isLatestFinalizedAssistantRow: true,
-            isExplicitlyExpanded: false
-        )
         let allowsHydration = structuredSessionFeedAllowsLatestAssistantInlineMarkdownHydration(
-            prefersPlainTextInitialRender: prefersPlain,
+            prefersPlainTextInitialRender: false,
             feedReaderIsScrollIdle: style.feedReaderIsScrollIdle,
             feedTailIsStableForInlineMarkdown: true
         )
-        if policy.showsCollapsedPreview {
-            let previewMarkdown = structuredSessionFeedAssistantMarkdownBoundedPreviewText(for: conversation.text)
-            VStack(alignment: .leading, spacing: 8) {
-                structuredSessionFeedFinalAnswerMarkdownView(
-                    markdown: previewMarkdown,
-                    font: style.bodyFont(15, nil, nil),
-                    color: style.assistantBodyForeground,
-                    prefersPlainTextUntilIdle: prefersPlain,
-                    allowsInlineMarkdownHydration: allowsHydration
-                )
-                if let onShow = onShowFullAssistantResponse {
-                    Button(policy.showFullResponseTitle) {
-                        onShow(StructuredSessionAssistantFullResponsePresentation(id: turnID, markdown: conversation.text))
-                    }
-                    .font(style.bodyFont(12, .caption, .medium))
-                }
-            }
-        } else {
-            structuredSessionFeedFinalAnswerMarkdownView(
-                markdown: conversation.text,
-                font: style.bodyFont(15, nil, nil),
-                color: style.assistantBodyForeground,
-                prefersPlainTextUntilIdle: prefersPlain,
-                allowsInlineMarkdownHydration: allowsHydration
-            )
-            .fixedSize(horizontal: false, vertical: true)
-        }
+        structuredSessionFeedFinalAnswerMarkdownView(
+            markdown: conversation.text,
+            font: style.bodyFont(15, nil, nil),
+            color: style.assistantBodyForeground,
+            prefersPlainTextUntilIdle: false,
+            allowsInlineMarkdownHydration: allowsHydration
+        )
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 

@@ -222,14 +222,19 @@ private func structuredSessionPiAgentTurnActivitySlice(
             }
             consumedAny = true
             cursor += 1
-            break
+            // Keep absorbing thoughts/tools after a provisional assistant line while the turn is still open.
+            if isAgentTurnInProgress == false {
+                break
+            }
+            continue
         }
 
         break
     }
 
-    let isOpenTurn = isAgentTurnInProgress && finalAnswer == nil
-    if isOpenTurn,
+    let isOpenTurn = isAgentTurnInProgress
+    if isAgentTurnInProgress,
+       finalAnswer == nil,
        let draft = liveAssistantDraftText?.trimmingCharacters(in: .whitespacesAndNewlines),
        draft.isEmpty == false {
         finalAnswer = StructuredSessionFeedAgentTurnFinalAnswerSegment(text: draft, isStreaming: true)

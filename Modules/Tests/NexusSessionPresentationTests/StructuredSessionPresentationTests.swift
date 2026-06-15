@@ -1911,6 +1911,12 @@ struct StructuredSessionPresentationTests {
         #expect(structuredSessionShouldCollapseDetailPreview(detailLong, charactersPerLine: 60) == true)
     }
 
+    @Test func structuredSessionFeedAgentTurnFinalAnswerNeverUsesCollapsedPreview() {
+        let long = (0 ..< 20).map { _ in String(repeating: "a", count: 70) }.joined(separator: "\n")
+        let policy = structuredSessionFeedAgentTurnFinalAnswerMarkdownDisplayPolicy(for: long, charactersPerLine: 72)
+        #expect(policy.showsCollapsedPreview == false)
+    }
+
     @Test func structuredSessionFeedAssistantMarkdownDisplayPolicyBoundsLongFinalizedResponses() {
         let short = structuredSessionFeedAssistantMarkdownDisplayPolicy(for: "Done.", charactersPerLine: 72)
         #expect(short == StructuredSessionFeedAssistantMarkdownDisplayPolicy(

@@ -2562,6 +2562,19 @@ public func structuredSessionFeedAssistantMarkdownDisplayPolicy(
     )
 }
 
+/// Final answer inside an agent-turn stack (ADR 0037) always renders in full — no bounded preview / Show full response.
+public func structuredSessionFeedAgentTurnFinalAnswerMarkdownDisplayPolicy(
+    for text: String,
+    charactersPerLine: Int
+) -> StructuredSessionFeedAssistantMarkdownDisplayPolicy {
+    let _ = charactersPerLine
+    let _ = text
+    return StructuredSessionFeedAssistantMarkdownDisplayPolicy(
+        showsCollapsedPreview: false,
+        previewLineLimit: structuredSessionFeedAssistantMarkdownPreviewLineLimit
+    )
+}
+
 public func structuredSessionLatestFinalizedAssistantActivityRowID(
     in rows: [StructuredSessionActivityRow]
 ) -> UUID? {
