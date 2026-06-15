@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 /// Per-turn sticky DisclosureGroup expansion for the attached **Session** (CONTEXT.md; not persisted).
@@ -14,6 +15,7 @@ public final class StructuredSessionAgentTurnDisclosureState: ObservableObject, 
     public init() {}
 
     public func reset() {
+        objectWillChange.send()
         overridesByTurnID = [:]
     }
 
@@ -39,18 +41,21 @@ public final class StructuredSessionAgentTurnDisclosureState: ObservableObject, 
     }
 
     public func setReasoningExpanded(turnID: UUID, isExpanded: Bool) {
+        objectWillChange.send()
         var entry = overridesByTurnID[turnID] ?? TurnOverrides()
         entry.reasoning = isExpanded
         overridesByTurnID[turnID] = entry
     }
 
     public func setToolsExpanded(turnID: UUID, isExpanded: Bool) {
+        objectWillChange.send()
         var entry = overridesByTurnID[turnID] ?? TurnOverrides()
         entry.tools = isExpanded
         overridesByTurnID[turnID] = entry
     }
 
     public func setToolRowExpanded(turnID: UUID, toolID: UUID, isExpanded: Bool) {
+        objectWillChange.send()
         var entry = overridesByTurnID[turnID] ?? TurnOverrides()
         entry.toolRows[toolID] = isExpanded
         overridesByTurnID[turnID] = entry
