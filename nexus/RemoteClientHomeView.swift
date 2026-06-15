@@ -2284,18 +2284,7 @@
                         structuredSessionFeedScrollPosition = ScrollPosition(edge: .bottom)
                     }
                 }
-                .onChange(of: structuredSessionFeedFollowScrollToken(for: presentation)) { _, _ in
-                    guard structuredSessionEffectiveAgentTurnInProgress(for: presentation),
-                        let turnID = structuredSessionFeedScrollAnchorTurnID(
-                            in: presentation.feed.feedSegments
-                        )
-                    else {
-                        return
-                    }
-                    var position = ScrollPosition()
-                    position.scrollTo(id: turnID)
-                    structuredSessionFeedScrollPosition = position
-                }
+
                 .onChange(of: presentation.session.id) { _, _ in
                     structuredSessionPinState = StructuredSessionFeedPinState()
                     structuredSessionFeedScrollSnapshot = nil

@@ -56,15 +56,13 @@
             }
             .onChange(of: effectiveTurnOpen) { _, turnOpen in
                 if turnOpen {
+                    // Detach bottom-edge binding only; do not `scrollTo(turnID)` — that pins the viewport
+                    // while the agent-turn card grows and leaves interim `Pi:` stuck at the bottom.
                     scrollPosition = ScrollPosition()
                     pinState = StructuredSessionFeedPinState(isFollowingBottom: false, userHasDetachedFromBottom: true)
-                    reanchorScrollToOpenTurnIfNeeded()
                 } else {
                     scrollPosition = ScrollPosition(edge: .bottom)
                 }
-            }
-            .onChange(of: structuredSessionFeedFollowScrollToken(for: presentation)) { _, _ in
-                reanchorScrollToOpenTurnIfNeeded()
             }
             .onChange(of: presentation.session.id) { _, _ in
                 onSessionIdentityChange()
@@ -89,17 +87,6 @@
                     visibleTailRowCount = synced
                 }
             }
-        }
-
-        private func reanchorScrollToOpenTurnIfNeeded() {
-            guard effectiveTurnOpen,
-                let turnID = structuredSessionFeedScrollAnchorTurnID(in: feedPresentation.feedSegments)
-            else {
-                return
-            }
-            var position = ScrollPosition()
-            position.scrollTo(id: turnID)
-            scrollPosition = position
         }
 
         private func applyScrollSnapshotTransition(
