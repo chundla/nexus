@@ -146,7 +146,7 @@ struct StructuredSessionMarkdownRendererTests {
         )
     }
 
-    @Test func rendererPreservesMultilineFencedCodeBlocks() {
+    @Test func rendererPreservesMultilineFencedCodeBlocksAsSegments() {
         let renderer = StructuredSessionMarkdownRenderer(cacheLimit: 0)
         let markdown = """
         Before
@@ -159,18 +159,16 @@ struct StructuredSessionMarkdownRendererTests {
         After
         """
 
-        let rendered = renderer.render(markdown)
+        let rendered = renderer.renderContent(markdown)
 
-        #expect(
-            String(rendered.characters) == """
-            Before
-
-            print(1)
-            print(2)
-
-            After
-            """
-        )
+        guard case .segments(let segments) = rendered else {
+            Issue.record("Expected segment render path for fenced markdown")
+            return
+        }
+        #expect(segments.count == 3)
+        #expect(segments[0] == .prose("Before"))
+        #expect(segments[1] == .fencedCode(language: "swift", content: "print(1)\nprint(2)"))
+        #expect(segments[2] == .prose("After"))
     }
 
     @Test func structuredSessionFeedTextSelectionIsDisabledForScrollPerformance() {

@@ -1,3 +1,4 @@
+import LaTeXSwiftUI
 import MarkdownUI
 import SwiftUI
 
@@ -12,27 +13,42 @@ import UIKit
 public struct StructuredSessionAssistantFullResponseReader: View {
     private let markdown: String
     private let codeBlockPolicy: StructuredSessionAssistantFullResponseCodeBlockPolicy
+    private let displayMathPolicy: StructuredSessionAssistantFullResponseDisplayMathPolicy
 
     public init(
         markdown: String,
-        codeBlockPolicy: StructuredSessionAssistantFullResponseCodeBlockPolicy = structuredSessionAssistantFullResponseCodeBlockPolicy()
+        codeBlockPolicy: StructuredSessionAssistantFullResponseCodeBlockPolicy = structuredSessionAssistantFullResponseCodeBlockPolicy(),
+        displayMathPolicy: StructuredSessionAssistantFullResponseDisplayMathPolicy = structuredSessionAssistantFullResponseDisplayMathPolicy()
     ) {
         self.markdown = markdown
         self.codeBlockPolicy = codeBlockPolicy
+        self.displayMathPolicy = displayMathPolicy
     }
 
     public var body: some View {
         ScrollView {
-            Markdown(markdown)
-                .markdownBlockStyle(\.codeBlock) { configuration in
-                    structuredSessionAssistantFullResponseCodeBlock(
-                        configuration: configuration,
-                        policy: codeBlockPolicy
-                    )
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(structuredSessionAssistantFullResponseReaderSegments(in: markdown, policy: displayMathPolicy).enumerated()), id: \.offset) { _, segment in
+                    if let chunk = segment.markdownChunk {
+                        Markdown(chunk)
+                            .markdownBlockStyle(\.codeBlock) { configuration in
+                                structuredSessionAssistantFullResponseCodeBlock(
+                                    configuration: configuration,
+                                    policy: codeBlockPolicy
+                                )
+                            }
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else if let math = segment.displayMath {
+                        LaTeX("\\[\(math.latex)\\]")
+                            .blockMode(.blockViews)
+                            .errorMode(.original)
+                            .padding(.vertical, displayMathPolicy.blockVerticalPaddingPoints)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                    }
                 }
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding()
+            }
+            .padding()
         }
     }
 

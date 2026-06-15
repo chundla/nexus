@@ -98,7 +98,7 @@ public func structuredSessionAssistantFullResponseFencedCodeBlocks(
     return blocks
 }
 
-private func structuredSessionAssistantFullResponseIsFencedCodeDelimiter(_ line: String) -> Bool {
+func structuredSessionAssistantFullResponseIsFencedCodeDelimiter(_ line: String) -> Bool {
     line.trimmingCharacters(in: .whitespaces).hasPrefix("```")
 }
 

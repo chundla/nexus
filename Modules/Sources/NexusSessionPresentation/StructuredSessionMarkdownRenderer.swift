@@ -5,6 +5,7 @@ import SwiftUI
 public enum StructuredSessionRenderedText: Equatable, Sendable {
     case plain(String)
     case attributed(AttributedString)
+    case segments([StructuredSessionFeedMarkdownSegment])
 }
 
 public struct StructuredSessionMarkdownRendererMetrics: Equatable, Sendable {
@@ -78,15 +79,51 @@ public final class StructuredSessionMarkdownRenderer: @unchecked Sendable {
             return AttributedString(text)
         case .attributed(let attributed):
             return attributed
+        case .segments(let segments):
+            return Self.attributedString(fromFeedSegments: segments, proseRenderer: parser)
         }
     }
 
+    private static func attributedString(
+        fromFeedSegments segments: [StructuredSessionFeedMarkdownSegment],
+        proseRenderer: (String) -> AttributedString
+    ) -> AttributedString {
+        var rendered = AttributedString()
+        for (index, segment) in segments.enumerated() {
+            if index > 0 {
+                rendered.append(AttributedString("\n\n"))
+            }
+            switch segment {
+            case .prose(let prose):
+                rendered.append(proseRenderer(prose))
+            case .fencedCode(_, let content):
+                rendered.append(AttributedString(content))
+            }
+        }
+        return rendered
+    }
+
     public func renderContent(_ text: String) -> StructuredSessionRenderedText {
+        if structuredSessionFeedDisplayMathUsesPlainFallback(for: text) {
+            lock.lock()
+            metrics.plainTextBypassCount += 1
+            lock.unlock()
+            return .plain(text)
+        }
+
         guard Self.requiresMarkdownParsing(text) else {
             lock.lock()
             metrics.plainTextBypassCount += 1
             lock.unlock()
             return .plain(text)
+        }
+
+        if text.contains("```") {
+            lock.lock()
+            metrics.cacheMissCount += 1
+            metrics.parseCount += 1
+            lock.unlock()
+            return .segments(structuredSessionFeedMarkdownParse(text).segments)
         }
 
         lock.lock()
@@ -272,28 +309,16 @@ public final class StructuredSessionMarkdownRenderer: @unchecked Sendable {
     }
 
     private static func defaultParse(_ text: String) -> AttributedString {
-        renderPreservingBlockLayout(text)
+        renderProseOnlyMarkdown(text)
     }
 
-    private static func renderPreservingBlockLayout(_ text: String) -> AttributedString {
+    private static func renderProseOnlyMarkdown(_ text: String) -> AttributedString {
         var rendered = AttributedString()
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
-        var isInsideFencedCodeBlock = false
 
         for index in lines.indices {
             let line = String(lines[index])
-
-            if isFencedCodeBlockDelimiter(line) {
-                isInsideFencedCodeBlock.toggle()
-                continue
-            }
-
-            if isInsideFencedCodeBlock {
-                rendered.append(AttributedString(line))
-            } else {
-                rendered.append(renderInlineMarkdown(line))
-            }
-
+            rendered.append(renderInlineMarkdown(line))
             if index < lines.index(before: lines.endIndex) {
                 rendered.append(AttributedString("\n"))
             }
@@ -336,9 +361,6 @@ public final class StructuredSessionMarkdownRenderer: @unchecked Sendable {
         )
     }
 
-    private static func isFencedCodeBlockDelimiter(_ line: String) -> Bool {
-        line.trimmingCharacters(in: .whitespaces).hasPrefix("```")
-    }
 }
 
 /// Parses deferred row markdown off the main thread, then delivers on the main actor (#225).
@@ -649,6 +671,13 @@ public struct StructuredSessionMarkdownText: View {
                 Text(verbatim: text)
             case .attributed(let attributed):
                 Text(attributed)
+            case .segments(let segments):
+                structuredSessionMarkdownSegmentStack(
+                    segments: segments,
+                    font: font,
+                    color: color,
+                    renderer: renderer
+                )
             }
         }
         .font(font)
@@ -714,6 +743,34 @@ public struct StructuredSessionMarkdownText: View {
             }
         } else {
             scheduleHydration()
+        }
+    }
+}
+
+@available(macOS 12.0, iOS 15.0, *)
+@ViewBuilder
+func structuredSessionMarkdownSegmentStack(
+    segments: [StructuredSessionFeedMarkdownSegment],
+    font: Font,
+    color: Color,
+    renderer: StructuredSessionMarkdownRenderer
+) -> some View {
+    let fencedPolicy = structuredSessionFeedFencedCodeBlockPolicy()
+    let monoFont = font.monospaced()
+    VStack(alignment: .leading, spacing: 8) {
+        ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
+            switch segment {
+            case .prose(let prose):
+                Text(renderer.render(prose))
+            case .fencedCode(let language, let content):
+                StructuredSessionFeedFencedCodeBlockView(
+                    language: language,
+                    content: content,
+                    policy: fencedPolicy,
+                    monoFont: monoFont,
+                    foreground: color
+                )
+            }
         }
     }
 }

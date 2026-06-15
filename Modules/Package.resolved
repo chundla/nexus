@@ -1,6 +1,24 @@
 {
-  "originHash" : "1187c5f25d51c58e8bbc8e6ac677aac007ceac555eb9a2e56ce0d6c3c72616d6",
+  "originHash" : "1a599b2e26f43580c3b79617429bfb26cfc088e09a177125c8714276fad6a316",
   "pins" : [
+    {
+      "identity" : "latexswiftui",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/colinc86/LaTeXSwiftUI",
+      "state" : {
+        "revision" : "cc677f66b9cc1751e09207621d62d1cda0200675",
+        "version" : "2.0.0"
+      }
+    },
+    {
+      "identity" : "mathjaxswift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/colinc86/MathJaxSwift",
+      "state" : {
+        "revision" : "00e9c3df6b1c82031c7fe3785028f3d21c0d73ba",
+        "version" : "3.5.0"
+      }
+    },
     {
       "identity" : "networkimage",
       "kind" : "remoteSourceControl",
@@ -20,12 +38,30 @@
       }
     },
     {
+      "identity" : "swift-html-entities",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Kitura/swift-html-entities",
+      "state" : {
+        "revision" : "d8ca73197f59ce260c71bd6d7f6eb8bbdccf508b",
+        "version" : "4.0.1"
+      }
+    },
+    {
       "identity" : "swift-markdown-ui",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/gonzalezreal/swift-markdown-ui",
       "state" : {
         "revision" : "5f613358148239d0292c0cef674a3c2314737f9e",
         "version" : "2.4.1"
+      }
+    },
+    {
+      "identity" : "swiftdraw",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/swhitty/SwiftDraw",
+      "state" : {
+        "revision" : "776456051ea2b099343e18ed8a53fca9dd2e9807",
+        "version" : "0.27.0"
       }
     }
   ],

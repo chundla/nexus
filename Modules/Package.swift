@@ -30,7 +30,8 @@ let package = Package(
         )
     ],
     dependencies: [
-        .package(url: "https://github.com/gonzalezreal/swift-markdown-ui", from: "2.4.1")
+        .package(url: "https://github.com/gonzalezreal/swift-markdown-ui", from: "2.4.1"),
+        .package(url: "https://github.com/colinc86/LaTeXSwiftUI", from: "2.0.0")
     ],
     targets: [
         .target(
@@ -44,7 +45,8 @@ let package = Package(
             name: "NexusSessionPresentation",
             dependencies: [
                 "NexusDomain",
-                .product(name: "MarkdownUI", package: "swift-markdown-ui")
+                .product(name: "MarkdownUI", package: "swift-markdown-ui"),
+                .product(name: "LaTeXSwiftUI", package: "LaTeXSwiftUI")
             ]
         ),
         .target(

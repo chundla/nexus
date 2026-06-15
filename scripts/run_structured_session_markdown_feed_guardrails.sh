@@ -9,8 +9,9 @@ cd "$ROOT"
 echo "== NexusSessionPresentation: markdown renderer + hydration =="
 swift test --package-path Modules --filter StructuredSessionMarkdownRendererTests
 
-echo "== NexusSessionPresentation: full-response reader (code blocks) =="
+echo "== NexusSessionPresentation: full-response reader (code blocks + display math #235) =="
 swift test --package-path Modules --filter StructuredSessionAssistantFullResponseReaderTests
+swift test --package-path Modules --filter structuredSessionFeedPlainFallbackBypassesMarkdownParseForDisplayMath
 
 echo "== NexusSessionPresentation: assistant markdown policy + idle-gated hydration =="
 swift test --package-path Modules --filter 'StructuredSessionPresentationTests/structuredSessionFeedMarkdownParsingIsAssistantOnly'
