@@ -35,7 +35,7 @@ struct StructuredSessionFeedMacOSStartupPolicyTests {
         #expect(StructuredSessionFeedMacOSStartupPolicy.visibleActivityRows(in: feed, visibleTailRowCount: 20).count == 20)
     }
 
-    @Test func thinkingIndicatorHiddenUntilFullReveal() {
+    @Test func thinkingIndicatorVisibleDuringProgressiveReveal() {
         let row = StructuredSessionActivityRow(
             id: UUID(),
             title: "Row",
@@ -54,7 +54,7 @@ struct StructuredSessionFeedMacOSStartupPolicyTests {
             thinkingIndicator: StructuredSessionThinkingIndicator(text: "Thinking…")
         )
 
-        #expect(StructuredSessionFeedMacOSStartupPolicy.shouldShowThinkingIndicator(in: feed, visibleTailRowCount: 0) == false)
+        #expect(StructuredSessionFeedMacOSStartupPolicy.shouldShowThinkingIndicator(in: feed, visibleTailRowCount: 0) == true)
         #expect(StructuredSessionFeedMacOSStartupPolicy.shouldShowThinkingIndicator(in: feed, visibleTailRowCount: 1) == true)
     }
 

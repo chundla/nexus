@@ -2396,6 +2396,7 @@ private struct RemoteSessionScreenView: View {
                 visibleTailRowCount: structuredSessionFeedVisibleTailRowCount
             ), let thinkingIndicator = feedPresentation.thinkingIndicator {
                 structuredSessionThinkingIndicatorView(thinkingIndicator)
+                    .id("structured-session-thinking-indicator")
             }
         } else {
             let visibleRows = StructuredSessionFeedProgressiveRevealPolicy.visibleActivityRows(
@@ -2415,6 +2416,7 @@ private struct RemoteSessionScreenView: View {
                 visibleTailRowCount: structuredSessionFeedVisibleTailRowCount
             ), let thinkingIndicator = feedPresentation.thinkingIndicator {
                 structuredSessionThinkingIndicatorView(thinkingIndicator)
+                    .id("structured-session-thinking-indicator")
             }
         }
     }

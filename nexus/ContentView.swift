@@ -1554,6 +1554,7 @@ struct ContentView: View {
                                     visibleTailRowCount: structuredSessionMacOSFeedVisibleTailRowCount
                                 ), let thinkingIndicator = feedPresentation.thinkingIndicator {
                                     structuredSessionThinkingIndicatorView(thinkingIndicator)
+                                        .id("structured-session-thinking-indicator")
                                 }
                             }
 

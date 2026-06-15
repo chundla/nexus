@@ -1335,11 +1335,6 @@ public func structuredSessionThinkingIndicator(
         return nil
     }
 
-    if screen.session.providerID == .pi,
-       structuredSessionOpenAgentTurnHasReasoningContent(for: screen) {
-        return nil
-    }
-
     return StructuredSessionThinkingIndicator(text: "Thinking…")
 }
 

@@ -57,7 +57,7 @@ struct StructuredSessionFeedSegmentIterationPolicyTests {
         )
     }
 
-    @Test func thinkingIndicatorDefersWhenOpenTurnHasReasoningContent() {
+    @Test func thinkingIndicatorStaysVisibleWhileOpenTurnHasReasoningContent() {
         let session = Session(
             id: UUID(),
             workspaceID: UUID(),
@@ -75,7 +75,10 @@ struct StructuredSessionFeedSegmentIterationPolicyTests {
             ],
             isAgentTurnInProgress: true
         )
-        #expect(structuredSessionThinkingIndicator(for: screen, hasPendingApprovalRequests: false) == nil)
+        #expect(
+            structuredSessionThinkingIndicator(for: screen, hasPendingApprovalRequests: false)
+                == StructuredSessionThinkingIndicator(text: "Thinking…")
+        )
     }
 
     @Test func agentTurnDisclosureDefaultsExpandReasoningWhileOpenTurnInProgress() {

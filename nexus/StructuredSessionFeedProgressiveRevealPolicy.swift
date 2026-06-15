@@ -46,12 +46,7 @@ enum StructuredSessionFeedProgressiveRevealPolicy {
                 visibleTailSegmentCount: visibleTailRowCount
             )
         }
-        guard usesProgressiveActivityRowReveal else {
-            return feed.thinkingIndicator != nil
-        }
-        guard visibleTailRowCount >= feed.activityRows.count else {
-            return false
-        }
+        _ = visibleTailRowCount
         return feed.thinkingIndicator != nil
     }
 

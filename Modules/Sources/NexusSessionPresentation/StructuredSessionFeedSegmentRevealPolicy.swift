@@ -38,15 +38,7 @@ public enum StructuredSessionFeedSegmentRevealPolicy {
         guard feed.thinkingIndicator != nil else {
             return false
         }
-        guard let segments = feed.feedSegments, segments.isEmpty == false else {
-            return true
-        }
-        guard usesProgressiveFeedSegmentReveal else {
-            return true
-        }
-        guard visibleTailSegmentCount >= segments.count else {
-            return false
-        }
+        _ = visibleTailSegmentCount
         return true
     }
 
