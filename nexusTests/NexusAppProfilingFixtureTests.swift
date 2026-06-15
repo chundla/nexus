@@ -78,7 +78,11 @@ struct NexusAppProfilingFixtureTests {
                 #expect(p == dwellStablePresentation, "focusedStructuredSessionPresentation (incl. autoScrollTrigger + activityRowChunks) must not mutate on providerFacts/diagnostic/turn-progress churn when activityItems unchanged (#208)")
             }
             if let ch = model.focusedStructuredSessionChromePresentation, let stableCh = dwellStableChrome {
-                #expect(ch == stableCh, "focusedStructuredSessionChromePresentation must not mutate on pure metadata churn when activityItems unchanged (#208)")
+                // Extension UI notifications may churn during dwell; row-affecting chrome fields must stay stable (#208).
+                #expect(ch.session == stableCh.session)
+                #expect(ch.isAgentTurnInProgress == stableCh.isAgentTurnInProgress)
+                #expect(ch.tokenUsage == stableCh.tokenUsage)
+                #expect(ch.slashCommands == stableCh.slashCommands)
             }
             dwellSamplesChecked += 1
         }
