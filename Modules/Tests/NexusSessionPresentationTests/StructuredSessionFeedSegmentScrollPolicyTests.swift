@@ -94,7 +94,7 @@ struct StructuredSessionFeedSegmentScrollPolicyTests {
         #expect(Set(tailTwo.map(\.id)) == Set(segmentIDs.suffix(2)))
     }
 
-    @Test func scrollTargetUsesOpenAgentTurnSegmentWhileStreamingDraft() throws {
+    @Test func scrollTargetUsesOpenAgentTurnSegmentWithoutFinalAnswerPlaceholder() throws {
         let turnAnchorID = UUID()
         let userID = UUID()
         let screen = SessionScreen(
@@ -121,7 +121,7 @@ struct StructuredSessionFeedSegmentScrollPolicyTests {
             return
         }
         #expect(turn.id == turnAnchorID)
-        #expect(turn.finalAnswer?.isStreaming == true)
+        #expect(turn.finalAnswer == nil)
 
         let presentation = FocusedStructuredSessionPresentation(
             session: screen.session,
@@ -134,7 +134,7 @@ struct StructuredSessionFeedSegmentScrollPolicyTests {
 
         let snapshot = structuredSessionFeedScrollSnapshot(for: presentation)
         #expect(snapshot.feedScrollTarget == .activityRow(turnAnchorID))
-        #expect(snapshot.liveDraftGrowthToken != nil)
+        #expect(snapshot.liveDraftGrowthToken == nil)
     }
 
     @Test func autoScrollTriggerUsesLastSegmentIDWhenManyActivityItemsCollapseIntoTurn() throws {

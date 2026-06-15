@@ -153,11 +153,10 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
         #expect(turn.isOpen == true)
         #expect(turn.reasoning?.markdownBody == "Plan.\n\nMore planning.")
         #expect(turn.tools.count == 2)
-        #expect(turn.finalAnswer?.text == "Gathering recent changes and project context for the review")
-        #expect(turn.finalAnswer?.isStreaming == false)
+        #expect(turn.finalAnswer == nil)
     }
 
-    @Test func piFeedSegmentsAttachLiveAssistantDraftToOpenTurn() throws {
+    @Test func piOpenTurnDoesNotAttachLiveAssistantDraftAsFinalAnswerPlaceholder() throws {
         let screen = SessionScreen(
             session: piSession(),
             primarySurface: .structuredActivityFeed,
@@ -176,8 +175,7 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
             return
         }
         #expect(turn.isOpen == true)
-        #expect(turn.finalAnswer?.text == "partial")
-        #expect(turn.finalAnswer?.isStreaming == true)
+        #expect(turn.finalAnswer == nil)
     }
 
     @Test func piFeedPresentationIncludesCompositeFeedSegments() throws {

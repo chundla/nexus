@@ -158,12 +158,6 @@ private func structuredSessionIBMBobAgentTurnActivitySlice(
     }
 
     let isOpenTurn = isAgentTurnInProgress && finalAnswer == nil
-    if isOpenTurn,
-       let draft = liveAssistantDraftText?.trimmingCharacters(in: .whitespacesAndNewlines),
-       draft.isEmpty == false {
-        finalAnswer = StructuredSessionFeedAgentTurnFinalAnswerSegment(text: draft, isStreaming: true)
-        consumedAny = true
-    }
 
     guard consumedAny else {
         return StructuredSessionIBMBobAgentTurnSlice(nextIndex: startIndex, turn: nil)

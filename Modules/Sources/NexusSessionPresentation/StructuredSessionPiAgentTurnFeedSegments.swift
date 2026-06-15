@@ -284,7 +284,8 @@ private func structuredSessionPiAgentTurnActivitySlice(
         }
 
         if structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage(item) {
-            if let body = structuredSessionPiPrimaryAssistantBody(from: item.text) {
+            if isAgentTurnInProgress == false,
+               let body = structuredSessionPiPrimaryAssistantBody(from: item.text) {
                 finalAnswer = StructuredSessionFeedAgentTurnFinalAnswerSegment(text: body, isStreaming: false)
             }
             consumedAny = true
@@ -297,13 +298,6 @@ private func structuredSessionPiAgentTurnActivitySlice(
     }
 
     let isOpenTurn = isAgentTurnInProgress
-    if isAgentTurnInProgress,
-       finalAnswer == nil,
-       let draft = liveAssistantDraftText?.trimmingCharacters(in: .whitespacesAndNewlines),
-       draft.isEmpty == false {
-        finalAnswer = StructuredSessionFeedAgentTurnFinalAnswerSegment(text: draft, isStreaming: true)
-        consumedAny = true
-    }
 
     guard consumedAny else {
         return StructuredSessionPiAgentTurnSlice(nextIndex: startIndex, turn: nil)
