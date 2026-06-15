@@ -56,7 +56,7 @@ enum StructuredSessionFeedScrollSupport {
         }
 
         guard let previous else {
-            if isFollowingBottom {
+            if isFollowingBottom, current.suppressesProgrammaticBottomScroll == false {
                 structuredSessionRequestBottomScroll(
                     intent: .immediate,
                     coordinator: coordinator,
@@ -72,6 +72,9 @@ enum StructuredSessionFeedScrollSupport {
             current: current,
             isPinnedToBottom: isFollowingBottom
         )
+        if current.suppressesProgrammaticBottomScroll {
+            return current
+        }
         if scrollPositionUsesBottomEdge == false || intent != .none {
             structuredSessionRequestBottomScroll(
                 intent: intent,

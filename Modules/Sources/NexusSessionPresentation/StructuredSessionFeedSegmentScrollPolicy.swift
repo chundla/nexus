@@ -152,8 +152,16 @@ public func structuredSessionFeedScrollSnapshot(
     return StructuredSessionFeedScrollSnapshot(
         feedScrollTarget: target,
         autoScrollTrigger: presentation.autoScrollTrigger,
-        liveDraftGrowthToken: growthToken
+        liveDraftGrowthToken: growthToken,
+        suppressesProgrammaticBottomScroll: presentation.feed.thinkingIndicator != nil
     )
+}
+
+/// `ScrollPosition(edge: .bottom)` follows every layout growth; turn off while **Thinking…** is visible.
+public func structuredSessionFeedUsesBottomEdgeScrollPositionBinding(
+    for presentation: FocusedStructuredSessionPresentation
+) -> Bool {
+    presentation.feed.thinkingIndicator == nil
 }
 
 public func structuredSessionFeedFollowScrollToken(

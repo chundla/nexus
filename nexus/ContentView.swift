@@ -1596,6 +1596,9 @@ struct ContentView: View {
                     .onAppear {
                         structuredSessionPinState = StructuredSessionFeedPinState()
                         structuredSessionScheduleMacOSFeedActivityRowsIfNeeded()
+                        if feedPresentation.thinkingIndicator != nil {
+                            structuredSessionFeedScrollPosition = ScrollPosition()
+                        }
                         structuredSessionFeedScrollSnapshot = StructuredSessionFeedScrollSupport
                             .applyStructuredSessionFeedScrollSnapshotTransition(
                                 previous: nil,
@@ -1604,8 +1607,17 @@ struct ContentView: View {
                                 coordinator: structuredSessionAutoScrollCoordinator,
                                 draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
                                 scrollPosition: $structuredSessionFeedScrollPosition,
-                                scrollPositionUsesBottomEdge: true
+                                scrollPositionUsesBottomEdge: structuredSessionFeedUsesBottomEdgeScrollPositionBinding(
+                                    for: structuredPresentation
+                                )
                             )
+                    }
+                    .onChange(of: feedPresentation.thinkingIndicator != nil) { _, suppressTailStickyScroll in
+                        if suppressTailStickyScroll {
+                            structuredSessionFeedScrollPosition = ScrollPosition()
+                        } else {
+                            structuredSessionFeedScrollPosition = ScrollPosition(edge: .bottom)
+                        }
                     }
                     .onChange(of: structuredPresentation.session.id) { _, _ in
                         structuredSessionPinState = StructuredSessionFeedPinState()
@@ -1630,7 +1642,9 @@ struct ContentView: View {
                                 coordinator: structuredSessionAutoScrollCoordinator,
                                 draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
                                 scrollPosition: $structuredSessionFeedScrollPosition,
-                                scrollPositionUsesBottomEdge: true
+                                scrollPositionUsesBottomEdge: structuredSessionFeedUsesBottomEdgeScrollPositionBinding(
+                                    for: structuredPresentation
+                                )
                             )
                     }
                     .onChange(of: feedPresentation.feedScrollItemCount) { _, total in

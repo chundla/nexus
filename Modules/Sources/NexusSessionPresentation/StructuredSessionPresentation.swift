@@ -1066,15 +1066,19 @@ public struct StructuredSessionFeedScrollSnapshot: Equatable {
     public let autoScrollTrigger: StructuredSessionAutoScrollTrigger
     /// Non-nil while a live assistant draft row is visible; changes when draft text grows.
     public let liveDraftGrowthToken: String?
+    /// While **Thinking…** is shown (`isAgentTurnInProgress`); disables bottom-edge binding and programmatic tail scroll.
+    public let suppressesProgrammaticBottomScroll: Bool
 
     public init(
         feedScrollTarget: StructuredSessionFeedScrollTarget,
         autoScrollTrigger: StructuredSessionAutoScrollTrigger,
-        liveDraftGrowthToken: String?
+        liveDraftGrowthToken: String?,
+        suppressesProgrammaticBottomScroll: Bool = false
     ) {
         self.feedScrollTarget = feedScrollTarget
         self.autoScrollTrigger = autoScrollTrigger
         self.liveDraftGrowthToken = liveDraftGrowthToken
+        self.suppressesProgrammaticBottomScroll = suppressesProgrammaticBottomScroll
     }
 }
 
@@ -1098,6 +1102,10 @@ public func structuredSessionBottomScrollIntent(
     isPinnedToBottom: Bool
 ) -> StructuredSessionBottomScrollIntent {
     guard isPinnedToBottom else {
+        return .none
+    }
+
+    if current.suppressesProgrammaticBottomScroll {
         return .none
     }
 

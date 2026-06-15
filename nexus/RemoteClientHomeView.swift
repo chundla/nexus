@@ -2178,6 +2178,9 @@ private struct RemoteSessionScreenView: View {
                 .onAppear {
                     structuredSessionPinState = StructuredSessionFeedPinState()
                     structuredSessionScheduleFeedActivityRowsIfNeeded()
+                    if feedPresentation.thinkingIndicator != nil {
+                        structuredSessionFeedScrollPosition = ScrollPosition()
+                    }
                     structuredSessionFeedScrollSnapshot = StructuredSessionFeedScrollSupport
                         .applyStructuredSessionFeedScrollSnapshotTransition(
                             previous: nil,
@@ -2186,8 +2189,17 @@ private struct RemoteSessionScreenView: View {
                             coordinator: structuredSessionAutoScrollCoordinator,
                             draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
                             scrollPosition: $structuredSessionFeedScrollPosition,
-                            scrollPositionUsesBottomEdge: true
+                            scrollPositionUsesBottomEdge: structuredSessionFeedUsesBottomEdgeScrollPositionBinding(
+                                for: presentation
+                            )
                         )
+                }
+                .onChange(of: feedPresentation.thinkingIndicator != nil) { _, suppressTailStickyScroll in
+                    if suppressTailStickyScroll {
+                        structuredSessionFeedScrollPosition = ScrollPosition()
+                    } else {
+                        structuredSessionFeedScrollPosition = ScrollPosition(edge: .bottom)
+                    }
                 }
                 .onChange(of: presentation.session.id) { _, _ in
                     structuredSessionPinState = StructuredSessionFeedPinState()
@@ -2216,7 +2228,9 @@ private struct RemoteSessionScreenView: View {
                             coordinator: structuredSessionAutoScrollCoordinator,
                             draftGrowthThrottle: structuredSessionDraftGrowthScrollThrottle,
                             scrollPosition: $structuredSessionFeedScrollPosition,
-                            scrollPositionUsesBottomEdge: true
+                            scrollPositionUsesBottomEdge: structuredSessionFeedUsesBottomEdgeScrollPositionBinding(
+                                for: presentation
+                            )
                         )
                 }
                 .onChange(of: presentation.feed.feedScrollItemCount) { _, total in

@@ -94,5 +94,7 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
         #expect(
             structuredSessionBottomScrollIntent(previous: previous, current: current, isPinnedToBottom: true) == .none
         )
+        #expect(current.suppressesProgrammaticBottomScroll == true)
+        #expect(structuredSessionFeedUsesBottomEdgeScrollPositionBinding(for: presentation) == false)
     }
 }
