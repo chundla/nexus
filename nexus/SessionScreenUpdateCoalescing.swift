@@ -9,7 +9,7 @@ let preferredSessionScreenMergePendingValue: CoalescingMainActorValuePump<Sessio
     preferredSessionScreenUpdate(pending: pending, new: candidate)
 }
 
-func sessionScreenAppearsToAdvance(_ candidate: SessionScreen, beyond current: SessionScreen) -> Bool {
+nonisolated func sessionScreenAppearsToAdvance(_ candidate: SessionScreen, beyond current: SessionScreen) -> Bool {
     guard candidate.session.id == current.session.id else {
         return false
     }
@@ -43,7 +43,7 @@ func sessionScreenAppearsToAdvance(_ candidate: SessionScreen, beyond current: S
     return true
 }
 
-func preferredSessionScreenUpdate(pending: SessionScreen, new candidate: SessionScreen) -> SessionScreen {
+nonisolated func preferredSessionScreenUpdate(pending: SessionScreen, new candidate: SessionScreen) -> SessionScreen {
     guard pending.session.id == candidate.session.id else {
         return candidate
     }
@@ -62,6 +62,6 @@ func preferredSessionScreenUpdate(pending: SessionScreen, new candidate: Session
     return candidate
 }
 
-private func sessionScreenProviderEventCount(_ screen: SessionScreen) -> Int {
+nonisolated private func sessionScreenProviderEventCount(_ screen: SessionScreen) -> Int {
     screen.providerFacts.providerEventCount == 0 ? screen.providerEvents.count : screen.providerFacts.providerEventCount
 }
