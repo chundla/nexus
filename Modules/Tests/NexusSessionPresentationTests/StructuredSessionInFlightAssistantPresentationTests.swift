@@ -432,4 +432,44 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
             ) == false)
         #expect(structuredSessionEffectiveAgentTurnInProgress(for: screen) == true)
     }
+
+    @Test func shortInterimPiWithPostPromptToolsKeepsTurnOpenWhenServiceFlagFalse() throws {
+        let interim = "Let me gather context first"
+        let screen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            ),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(
+                    kind: .message,
+                    text: "You: Lets perform a code review on nexus",
+                    prompt: SessionPrompt(text: "Lets perform a code review on nexus")
+                ),
+                SessionActivityItem(kind: .status, text: "thoughts:", detailText: interim),
+                SessionActivityItem(kind: .message, text: "Pi: \(interim)"),
+                SessionActivityItem(kind: .command, text: "read: README.md"),
+            ],
+            isAgentTurnInProgress: false
+        )
+
+        #expect(structuredSessionPiFeedSegmentTurnInProgress(for: screen) == true)
+        #expect(structuredSessionEffectiveAgentTurnInProgress(for: screen) == true)
+
+        let segments = try #require(structuredSessionPiFeedSegments(for: screen))
+        #expect(segments.count == 2)
+        guard case .agentTurn(let turn) = segments[1] else {
+            Issue.record("Expected single open turn with reasoning and tool")
+            return
+        }
+        #expect(turn.isOpen == true)
+        #expect(turn.reasoningStackItems.map(\.markdownBody) == [interim])
+        #expect(turn.toolStackItems.count == 1)
+        #expect(turn.finalAnswer == nil)
+    }
 }

@@ -2291,6 +2291,7 @@
                     "Session stream connected",
                     "You: inspect auth",
                     "thoughts:",
+                    "subagent reviewer: Inspect the auth flow",
                     "Pi: Done",
                 ])
             #expect(
@@ -2298,6 +2299,7 @@
                     .status,
                     .message,
                     .status,
+                    .command,
                     .message,
                 ])
             #expect(screen.activityItems[2].detailText == "Inspect the auth flow before running tools.")

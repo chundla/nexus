@@ -1825,10 +1825,58 @@
                 lock.unlock()
                 notifyChange()
             case "toolcall_end":
-                return
+                handleToolCallEnd(assistantMessageEvent)
             default:
                 return
             }
+        }
+
+        private func handleToolCallEnd(_ assistantMessageEvent: [String: Any]) {
+            guard let toolCall = assistantMessageEvent["toolCall"] as? [String: Any],
+                let toolCallID = string(for: "id", in: toolCall),
+                let toolName = string(for: "name", in: toolCall)
+            else {
+                return
+            }
+
+            let rawArguments = toolCall["arguments"]
+            let args: [String: Any]?
+            if let dictionary = rawArguments as? [String: Any] {
+                args = dictionary
+            } else if let jsonString = rawArguments as? String,
+                let data = jsonString.data(using: .utf8),
+                let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            {
+                args = parsed
+            } else {
+                args = nil
+            }
+
+            let callText = toolExecutionCallText(toolName: toolName, args: args)
+            guard callText.isEmpty == false else {
+                return
+            }
+
+            lock.lock()
+            if toolActivityItemIDByCallID[toolCallID] != nil {
+                lock.unlock()
+                return
+            }
+
+            let activityItemID = UUID()
+            toolNamesByCallID[toolCallID] = toolName
+            toolOutputByCallID[toolCallID] = ""
+            toolActivityItemIDByCallID[toolCallID] = activityItemID
+            if toolName.caseInsensitiveCompare("subagent") == .orderedSame,
+                let agent = args.flatMap({ string(for: "agent", in: $0) })?.trimmingCharacters(
+                    in: .whitespacesAndNewlines),
+                agent.isEmpty == false
+            {
+                toolAgentsByCallID[toolCallID] = agent
+            }
+            appendActivityItemLocked(SessionActivityItem(id: activityItemID, kind: .command, text: callText))
+            lock.unlock()
+            notifyChange()
         }
 
         private func handleMessageEnd(_ object: [String: Any]) {

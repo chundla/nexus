@@ -46,26 +46,64 @@ func structuredSessionPiActivityTailSuggestsOpenTurn(_ activityItems: [SessionAc
     }
 
     if let firstPrimaryPiIndex {
+        let interimPiBody =
+            structuredSessionPiPrimaryAssistantBody(from: tail[firstPrimaryPiIndex].text) ?? ""
         if firstPrimaryPiIndex < tail.count - 1 {
+            if let last = tail.last,
+                structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage(last)
+            {
+                return false
+            }
+            // Long interim `Pi:` with more activity after is a closed multi-phase turn (composite card absorbs tail).
+            guard interimPiBody.count < 40 else {
+                return false
+            }
+            let afterPi = Array(tail[(firstPrimaryPiIndex + 1)...])
+            if afterPi.contains(where: { $0.kind == .error }) {
+                return false
+            }
+            if structuredSessionPiTailIsOpenTurnContinuationAfterInterimAssistant(afterPi) {
+                return true
+            }
             return false
         }
         let beforePi = Array(tail.prefix(firstPrimaryPiIndex))
         guard beforePi.count <= 2 else {
             return false
         }
-        let piItem = tail[firstPrimaryPiIndex]
-        let body = structuredSessionPiPrimaryAssistantBody(from: piItem.text) ?? ""
-        guard body.count >= 40 else {
-            return false
-        }
         if beforePi.contains(where: { $0.kind == .command }) {
-            return structuredSessionPiThoughtsAppearBeforeAnyCommand(in: beforePi)
+            // Short trailing `Pi:` after tools is the final answer; long lines are still in-flight status.
+            return interimPiBody.count >= 40
         }
-        return beforePi.contains(where: { structuredSessionPiFeedSegmentIsThoughtsStatus($0) })
+        if beforePi.contains(where: { structuredSessionPiFeedSegmentIsThoughtsStatus($0) }) {
+            return interimPiBody.count >= 40
+        }
+        return false
     }
 
     return tail.contains { item in
         item.kind == .command || structuredSessionPiFeedSegmentIsThoughtsStatus(item) || item.kind == .progress
+    }
+}
+
+/// Post–interim-`Pi:` thoughts, tools, and progress still belong to the same user prompt until `turn_end`.
+private func structuredSessionPiTailIsOpenTurnContinuationAfterInterimAssistant(_ items: [SessionActivityItem]) -> Bool {
+    guard items.isEmpty == false else {
+        return false
+    }
+    guard
+        items.allSatisfy({
+            $0.kind == .command
+                || structuredSessionPiFeedSegmentIsThoughtsStatus($0)
+                || $0.kind == .progress
+                || $0.kind == .error
+                || structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage($0)
+        })
+    else {
+        return false
+    }
+    return items.contains {
+        $0.kind == .command || structuredSessionPiFeedSegmentIsThoughtsStatus($0) || $0.kind == .progress
     }
 }
 
