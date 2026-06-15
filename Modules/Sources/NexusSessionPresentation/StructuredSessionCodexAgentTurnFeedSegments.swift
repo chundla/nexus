@@ -10,7 +10,7 @@ public func structuredSessionCodexFeedSegments(for screen: SessionScreen) -> [St
     }
 
     return structuredSessionCodexFeedSegments(
-        activityItems: screen.activityItems,
+        activityItems: structuredSessionActivityItemsForFeedPresentation(for: screen),
         isAgentTurnInProgress: screen.isAgentTurnInProgress,
         liveAssistantDraftText: screen.providerFacts.liveAssistantDraftText
     )
@@ -256,7 +256,7 @@ private func structuredSessionCodexFeedSegmentIsOutsideStackRow(_ item: SessionA
     }
 }
 
-private func structuredSessionCodexFeedSegmentIsPrimaryCodexAssistantMessage(_ item: SessionActivityItem) -> Bool {
+func structuredSessionCodexFeedSegmentIsPrimaryCodexAssistantMessage(_ item: SessionActivityItem) -> Bool {
     guard item.kind == .message else {
         return false
     }

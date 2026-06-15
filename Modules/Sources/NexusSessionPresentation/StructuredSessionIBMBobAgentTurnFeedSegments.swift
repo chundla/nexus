@@ -10,7 +10,7 @@ public func structuredSessionIBMBobFeedSegments(for screen: SessionScreen) -> [S
     }
 
     return structuredSessionIBMBobFeedSegments(
-        activityItems: screen.activityItems,
+        activityItems: structuredSessionActivityItemsForFeedPresentation(for: screen),
         isAgentTurnInProgress: screen.isAgentTurnInProgress,
         liveAssistantDraftText: screen.providerFacts.liveAssistantDraftText
     )
@@ -269,7 +269,7 @@ private func structuredSessionIBMBobFeedSegmentIsOutsideStackRow(_ item: Session
     }
 }
 
-private func structuredSessionIBMBobPlainAssistantMessageBody(from item: SessionActivityItem) -> String? {
+func structuredSessionIBMBobPlainAssistantMessageBody(from item: SessionActivityItem) -> String? {
     guard item.kind == .message else {
         return nil
     }

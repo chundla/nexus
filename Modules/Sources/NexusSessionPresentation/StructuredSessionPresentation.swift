@@ -505,27 +505,29 @@ public final class StructuredSessionFeedPresenter {
     private func activityRows(for screen: SessionScreen) -> [StructuredSessionActivityRow] {
         let providerDisplayName = screen.session.providerID.displayName
 
+        let feedActivityItems = structuredSessionActivityItemsForFeedPresentation(for: screen)
+
         guard cachedSessionID == screen.session.id else {
             return rebuildActivityRows(
-                for: screen.activityItems,
+                for: feedActivityItems,
                 sessionID: screen.session.id,
                 providerDisplayName: providerDisplayName
             )
         }
 
-        if screen.activityItems == cachedActivityItems {
+        if feedActivityItems == cachedActivityItems {
             return cachedActivityRows
         }
 
-        let stablePrefixCount = structuredSessionCommonPrefixCount(cachedActivityItems, screen.activityItems)
+        let stablePrefixCount = structuredSessionCommonPrefixCount(cachedActivityItems, feedActivityItems)
         if stablePrefixCount == cachedActivityItems.count,
-           screen.activityItems.count > cachedActivityItems.count {
-            let appendedItems = Array(screen.activityItems.dropFirst(cachedActivityItems.count))
+           feedActivityItems.count > cachedActivityItems.count {
+            let appendedItems = Array(feedActivityItems.dropFirst(cachedActivityItems.count))
             let appendedRows = annotateStructuredSessionActivityRows(
                 rowBuilder(appendedItems),
                 providerDisplayName: providerDisplayName
             )
-            cachedActivityItems = screen.activityItems
+            cachedActivityItems = feedActivityItems
             cachedActivityRows.append(contentsOf: appendedRows)
             cachedActivityRowChunks = appendStructuredSessionActivityRowChunks(
                 cachedActivityRowChunks,
@@ -538,14 +540,14 @@ public final class StructuredSessionFeedPresenter {
 
         if stablePrefixCount > 0 {
             return rebuildAffectedTailRows(
-                for: screen.activityItems,
+                for: feedActivityItems,
                 stablePrefixCount: stablePrefixCount,
                 providerDisplayName: providerDisplayName
             )
         }
 
         return rebuildActivityRows(
-            for: screen.activityItems,
+            for: feedActivityItems,
             sessionID: screen.session.id,
             providerDisplayName: providerDisplayName
         )
@@ -611,10 +613,11 @@ public final class StructuredSessionFeedPresenter {
         let currentActivityItemIDs = Set(screen.activityItems.map(\.id))
         presentedRowIDByActivityItemID = presentedRowIDByActivityItemID.filter { currentActivityItemIDs.contains($0.key) }
 
-        let liveDraftRow: StructuredSessionActivityRow?
-        let usesCompositeAgentTurnFeed = structuredSessionAgentTurnFeedSegments(for: screen) != nil
-        if usesCompositeAgentTurnFeed == false,
-           let draftText = structuredSessionLiveAssistantDraftText(for: screen) {
+        var liveDraftRow: StructuredSessionActivityRow?
+        if structuredSessionAgentTurnFeedSegments(for: screen) != nil {
+            liveAssistantDraft = nil
+            liveDraftRow = nil
+        } else if let draftText = structuredSessionLiveAssistantDraftText(for: screen) {
             let rowID = liveAssistantDraft?.rowID ?? UUID()
             liveAssistantDraft = LiveAssistantDraftState(rowID: rowID, text: draftText)
             liveDraftRow = structuredSessionLiveAssistantDraftRow(

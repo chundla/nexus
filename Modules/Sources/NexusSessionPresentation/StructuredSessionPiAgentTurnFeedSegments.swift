@@ -109,7 +109,7 @@ public func structuredSessionPiFeedSegments(for screen: SessionScreen) -> [Struc
     }
 
     return structuredSessionPiFeedSegments(
-        activityItems: screen.activityItems,
+        activityItems: structuredSessionActivityItemsForFeedPresentation(for: screen),
         isAgentTurnInProgress: screen.isAgentTurnInProgress,
         liveAssistantDraftText: screen.providerFacts.liveAssistantDraftText
     )
@@ -508,7 +508,7 @@ private func structuredSessionPiFeedSegmentIsOutsideStackRow(_ item: SessionActi
     }
 }
 
-private func structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage(_ item: SessionActivityItem) -> Bool {
+func structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage(_ item: SessionActivityItem) -> Bool {
     guard item.kind == .message else {
         return false
     }
