@@ -17,12 +17,18 @@ public func structuredSessionFeedMarkdownContentView(
             color: color,
             renderer: renderer
         )
-    } else {
+    } else if markdown.contains("```") {
         StructuredSessionMarkdownText(
             markdown: markdown,
             font: font,
             color: color,
             renderer: renderer
+        )
+    } else {
+        StructuredSessionFeedRichMarkdownView(
+            markdown: markdown,
+            font: font,
+            color: color
         )
     }
 }
@@ -49,7 +55,8 @@ func structuredSessionFeedFinalAnswerMarkdownView(
             color: color,
             renderer: renderer
         )
-    } else {
+    } else if prefersPlainTextUntilIdle,
+              allowsInlineMarkdownHydration == false {
         StructuredSessionIdleGatedAssistantFeedMarkdownText(
             markdown: markdown,
             font: font,
@@ -57,6 +64,19 @@ func structuredSessionFeedFinalAnswerMarkdownView(
             prefersPlainTextUntilIdle: prefersPlainTextUntilIdle,
             allowsInlineMarkdownHydration: allowsInlineMarkdownHydration,
             renderer: renderer
+        )
+    } else if markdown.contains("```") {
+        StructuredSessionMarkdownText(
+            markdown: markdown,
+            font: font,
+            color: color,
+            renderer: renderer
+        )
+    } else {
+        StructuredSessionFeedRichMarkdownView(
+            markdown: markdown,
+            font: font,
+            color: color
         )
     }
 }
@@ -90,10 +110,22 @@ public struct StructuredSessionFeedMarkdownBodySegmentsView: View {
                 switch segment {
                 case .text(let text):
                     if text.isEmpty == false {
-                        Text(renderer.render(text))
-                            .font(font)
-                            .foregroundColor(color)
+                        if text.contains("```") {
+                            StructuredSessionMarkdownText(
+                                markdown: text,
+                                font: font,
+                                color: color,
+                                renderer: renderer
+                            )
                             .fixedSize(horizontal: false, vertical: true)
+                        } else {
+                            StructuredSessionFeedRichMarkdownView(
+                                markdown: text,
+                                font: font,
+                                color: color
+                            )
+                            .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 case .image(let ref):
                     if imageRefs.count > 1 {

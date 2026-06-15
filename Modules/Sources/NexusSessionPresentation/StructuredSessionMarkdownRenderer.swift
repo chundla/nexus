@@ -297,6 +297,10 @@ public final class StructuredSessionMarkdownRenderer: @unchecked Sendable {
                     trimmed.hasPrefix("1. ") {
                     return true
                 }
+                if structuredSessionFeedMarkdownLineLooksLikeTableRow(trimmed) ||
+                    structuredSessionFeedMarkdownLineLooksLikeThematicBreak(trimmed) {
+                    return true
+                }
             }
         }
 
@@ -309,10 +313,27 @@ public final class StructuredSessionMarkdownRenderer: @unchecked Sendable {
     }
 
     private static func defaultParse(_ text: String) -> AttributedString {
-        renderProseOnlyMarkdown(text)
+        renderFullMarkdownDocument(text)
     }
 
-    private static func renderProseOnlyMarkdown(_ text: String) -> AttributedString {
+    private static func renderFullMarkdownDocument(_ text: String) -> AttributedString {
+        if #available(macOS 13.0, iOS 16.0, *) {
+            if let rendered = try? AttributedString(
+                markdown: text,
+                options: .init(
+                    interpretedSyntax: .full,
+                    failurePolicy: .returnPartiallyParsedIfPossible
+                )
+            ) {
+                return rendered
+            }
+        }
+
+        return renderInlineOnlyMarkdownPreservingLineBreaks(text)
+    }
+
+    /// Fallback when full document parsing is unavailable or fails.
+    private static func renderInlineOnlyMarkdownPreservingLineBreaks(_ text: String) -> AttributedString {
         var rendered = AttributedString()
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
 
@@ -345,6 +366,24 @@ public final class StructuredSessionMarkdownRenderer: @unchecked Sendable {
             text.contains("[") ||
             text.contains("!") ||
             text.contains("~")
+    }
+
+    static func structuredSessionFeedMarkdownLineLooksLikeTableRow(_ trimmedLine: String) -> Bool {
+        guard trimmedLine.contains("|") else {
+            return false
+        }
+        let pipeCount = trimmedLine.filter { $0 == "|" }.count
+        return pipeCount >= 2
+    }
+
+    static func structuredSessionFeedMarkdownLineLooksLikeThematicBreak(_ trimmedLine: String) -> Bool {
+        guard trimmedLine.isEmpty == false else {
+            return false
+        }
+        let allowed = CharacterSet(charactersIn: "-_* ")
+        return trimmedLine.unicodeScalars.allSatisfy { allowed.contains($0) }
+            && trimmedLine.contains(where: { $0 == "-" || $0 == "*" || $0 == "_" })
+            && trimmedLine.filter { $0 != " " }.count >= 3
     }
 
     private static func inlineMarkdownParsingOptions() -> AttributedString.MarkdownParsingOptions {
@@ -664,6 +703,7 @@ public struct StructuredSessionMarkdownText: View {
         )
     }
 
+    @MainActor
     public var body: some View {
         Group {
             switch renderedContent {
@@ -748,6 +788,7 @@ public struct StructuredSessionMarkdownText: View {
 }
 
 @available(macOS 12.0, iOS 15.0, *)
+@MainActor
 @ViewBuilder
 func structuredSessionMarkdownSegmentStack(
     segments: [StructuredSessionFeedMarkdownSegment],
@@ -761,7 +802,11 @@ func structuredSessionMarkdownSegmentStack(
         ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
             switch segment {
             case .prose(let prose):
-                Text(renderer.render(prose))
+                StructuredSessionFeedRichMarkdownView(
+                    markdown: prose,
+                    font: font,
+                    color: color
+                )
             case .fencedCode(let language, let content):
                 StructuredSessionFeedFencedCodeBlockView(
                     language: language,

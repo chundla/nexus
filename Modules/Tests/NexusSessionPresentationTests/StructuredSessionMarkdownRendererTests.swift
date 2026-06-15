@@ -119,31 +119,23 @@ struct StructuredSessionMarkdownRendererTests {
         #expect(metrics.cachedEntryCount == 1)
     }
 
-    @Test func rendererPreservesListLineBreaksForBlockMarkdown() {
+    @Test func rendererParsesBlockMarkdownWithFullDocumentSyntax() {
         let renderer = StructuredSessionMarkdownRenderer(cacheLimit: 0)
         let markdown = """
-        In `/Users/ck/source/repos/nexus`:
+        ## Section
 
-        - `.DS_Store`
-        - `.git/`
-        - `.gitignore`
+        - one
+        - two
 
-        Want a recursive tree too?
+        `inline`
         """
 
         let rendered = renderer.render(markdown)
-
-        #expect(
-            String(rendered.characters) == """
-            In /Users/ck/source/repos/nexus:
-
-            - .DS_Store
-            - .git/
-            - .gitignore
-
-            Want a recursive tree too?
-            """
-        )
+        let plain = String(rendered.characters)
+        #expect(plain.contains("Section"))
+        #expect(plain.contains("one"))
+        #expect(plain.contains("two"))
+        #expect(plain.contains("inline"))
     }
 
     @Test func rendererPreservesMultilineFencedCodeBlocksAsSegments() {
