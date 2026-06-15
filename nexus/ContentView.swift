@@ -4,19 +4,6 @@ import NexusDomain
 import NexusSessionPresentation
 import SwiftUI
 
-private struct MacEquatableStructuredSessionActivityRow<Content: View>: View, Equatable {
-    let row: StructuredSessionActivityRow
-    @ViewBuilder let content: () -> Content
-
-    static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.row == rhs.row
-    }
-
-    var body: some View {
-        content()
-    }
-}
-
 struct ContentView: View {
     @Bindable var appModel: NexusAppModel
 
@@ -1516,10 +1503,15 @@ struct ContentView: View {
                         structuredSessionScheduleMacOSFeedActivityRowsIfNeeded()
                     }
                 ) {
-                    structuredSessionMacOSFeedScrollContent(
+                    MacStructuredSessionFeedScrollContent(
                         structuredPresentation: structuredPresentation,
                         feedPresentation: feedPresentation,
-                        visibleTailRowCount: structuredSessionMacOSFeedVisibleTailRowCount
+                        visibleTailRowCount: structuredSessionMacOSFeedVisibleTailRowCount,
+                        disclosureState: structuredSessionAgentTurnDisclosureState,
+                        historyPaging: { structuredSessionHistoryPagingControls() },
+                        activityRow: { structuredSessionActivityRowView($0) },
+                        onShowFullAssistantResponse: { presentedStructuredSessionAssistantFullResponse = $0 },
+                        thinkingIndicator: { structuredSessionThinkingIndicatorView($0) }
                     )
                 }
 
@@ -1561,94 +1553,6 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .nexusPanel(tint: NexusMacTheme.coral)
         }
-    }
-
-    @ViewBuilder
-    private func structuredSessionMacOSFeedScrollContent(
-        structuredPresentation: FocusedStructuredSessionPresentation,
-        feedPresentation: StructuredSessionFeedPresentation,
-        visibleTailRowCount: Int
-    ) -> some View {
-        LazyVStack(alignment: .leading, spacing: 8) {
-            structuredSessionHistoryPagingControls()
-                .padding(.bottom, 6)
-
-            if feedPresentation.activityRowChunks.isEmpty {
-                ContentUnavailableView(
-                    feedPresentation.copy.emptyStateTitle,
-                    systemImage: "message",
-                    description: Text(feedPresentation.copy.emptyStateDescription)
-                )
-                .frame(maxWidth: .infinity, minHeight: 220)
-            } else if feedPresentation.activityRows.isEmpty == false {
-                if feedPresentation.feedSegments != nil {
-                    let visibleSegments = structuredSessionVisibleFeedSegments(
-                        in: feedPresentation,
-                        visibleTailItemCount: visibleTailRowCount
-                    ) ?? []
-                    ForEach(visibleSegments) { segment in
-                        StructuredSessionPiFeedSegmentView(
-                            segment: segment,
-                            providerDisplayName: structuredPresentation.session.providerID.displayName,
-                            style: macOSPiStructuredSessionFeedSegmentStyle(),
-                            disclosureState: structuredSessionAgentTurnDisclosureState,
-                            standaloneRow: { row in
-                                AnyView(structuredSessionActivityRowView(row))
-                            },
-                            onShowFullAssistantResponse: { presentation in
-                                presentedStructuredSessionAssistantFullResponse = presentation
-                            },
-                            artifactActions: { artifact in
-                                structuredSessionFeedArtifactActionPresentation(
-                                    for: artifact,
-                                    hasWriterAuthority: true,
-                                    usesHostArtifactFetch: false
-                                )
-                            },
-                            onArtifactOpenOnHost: { artifact in
-                                guard let path = artifact.hostPath else { return }
-                                StructuredSessionFeedArtifactHostActions.openOnHost(path: path)
-                            }
-                        )
-                        .id(segment.id)
-                    }
-                } else {
-                    let visibleRows = StructuredSessionFeedMacOSStartupPolicy.visibleActivityRows(
-                        in: feedPresentation,
-                        visibleTailRowCount: visibleTailRowCount
-                    )
-                    ForEach(visibleRows) { row in
-                        MacEquatableStructuredSessionActivityRow(row: row) {
-                            structuredSessionActivityRowView(row)
-                        }
-                        .equatable()
-                        .id(row.id)
-                    }
-                }
-
-                if StructuredSessionFeedMacOSStartupPolicy.shouldShowThinkingIndicator(
-                    in: feedPresentation,
-                    visibleTailRowCount: visibleTailRowCount
-                ), let thinkingIndicator = feedPresentation.thinkingIndicator {
-                    structuredSessionThinkingIndicatorView(thinkingIndicator)
-                        .id("structured-session-thinking-indicator")
-                }
-            }
-
-            Color.clear
-                .frame(height: 1)
-                .id(structuredSessionFeedBottomSentinelID)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 14)
-        .scrollTargetLayout()
-        .environment(
-            \.structuredSessionFeedMarkdownHydrationAllowed,
-            StructuredSessionFeedMacOSStartupPolicy.isFeedMarkdownHydrationAllowed(
-                visibleTailRowCount: visibleTailRowCount,
-                totalActivityRowCount: feedPresentation.feedScrollItemCount
-            )
-        )
     }
 
     private func structuredSessionScheduleMacOSFeedActivityRowsIfNeeded() {
