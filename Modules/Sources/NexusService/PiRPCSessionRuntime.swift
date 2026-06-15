@@ -2044,10 +2044,13 @@
                     trigger: .turnEnd,
                     activityItem: finalActivityItem,
                     providerRuntimeLatencyMilliseconds: elapsedMilliseconds(since: startedAt),
-                    expectedThinkingIndicatorVisible: false
+                    expectedThinkingIndicatorVisible: promptTurnCommitted
                 )
             }
-            finishPiAgentTurnLocked(stopReason: "stop")
+            // Pi agent loop emits `turn_end` after every tool cycle; only `agent_end` ends the user prompt.
+            clearAssistantStreamingBuffersLocked()
+            streamingObservationThrottle.reset()
+            lastAssistantStopReason = "stop"
             lock.unlock()
             requestSlashCommands()
             requestSessionStats()

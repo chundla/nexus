@@ -144,5 +144,12 @@ func structuredSessionPiProviderTurnAwaitingTurnEnd(
         return false
     }
     let turnEndCount = providerEvents.filter { $0.type == "turn_end" }.count
+    let agentEndCount = providerEvents.filter { $0.type == "agent_end" }.count
+    let hasAnyAgentEnd = agentEndCount > 0
+    if hasAnyAgentEnd {
+        // Live Pi RPC: one `agent_end` per user prompt; intermediate `turn_end` does not close the prompt.
+        return agentEndCount < userPromptOrdinal
+    }
+    // History snapshots often record `turn_end` per completed prompt without `agent_end`.
     return turnEndCount < userPromptOrdinal
 }

@@ -2365,6 +2365,57 @@
             #expect(screen.transcript == "> inspect auth\nPartial answer")
         }
 
+        @Test func localPiRuntimeKeepsPromptTurnOpenAfterIntermediateTurnEndUntilAgentEnd() throws {
+            let transport = PromptEventPiRPCTransport(promptEvents: [
+                ["type": "agent_start", "agent": "pi"],
+                [
+                    "type": "message_update",
+                    "assistantMessageEvent": [
+                        "type": "thinking_end",
+                        "content": "Plan step one.",
+                    ],
+                ],
+                [
+                    "type": "message_update",
+                    "assistantMessageEvent": [
+                        "type": "toolcall_end",
+                        "toolCall": [
+                            "type": "toolCall",
+                            "id": "tool-1",
+                            "name": "read",
+                            "arguments": ["path": "A.md"],
+                        ],
+                    ],
+                ],
+                [
+                    "type": "turn_end",
+                    "message": [
+                        "content": [["type": "text", "text": "Cycle one done."]]
+                    ],
+                ],
+            ])
+            let runtime = try PiRPCSessionRuntime(
+                executable: "/tmp/fake-pi",
+                workingDirectory: "/tmp",
+                terminationStatusMessageBuilder: { _ in "" },
+                transportFactory: { _, _, _ in transport }
+            )
+
+            let session = Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            )
+
+            try runtime.sendInput("review")
+            let screen = runtime.sessionScreen(for: session)
+
+            #expect(screen.isAgentTurnInProgress == true)
+            #expect(screen.activityItems.contains { $0.text == "Pi: Cycle one done." })
+        }
+
         @Test func localPiRuntimeFinalizesTurnOnAgentEndWhenTurnEndMissing() throws {
             let transport = PromptEventPiRPCTransport(promptEvents: [
                 ["type": "agent_start", "agent": "pi"],
@@ -2478,6 +2529,10 @@
                             ]
                         ]
                     ],
+                ],
+                [
+                    "type": "agent_end",
+                    "messages": [],
                 ],
             ])
             let runtime = try PiRPCSessionRuntime(
