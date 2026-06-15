@@ -112,7 +112,7 @@ public func structuredSessionPiFeedSegments(for screen: SessionScreen) -> [Struc
 
     return structuredSessionPiFeedSegments(
         activityItems: screen.activityItems,
-        isAgentTurnInProgress: screen.isAgentTurnInProgress,
+        isAgentTurnInProgress: structuredSessionPiFeedSegmentTurnInProgress(for: screen),
         liveAssistantDraftText: screen.providerFacts.liveAssistantDraftText
     )
 }
@@ -456,7 +456,7 @@ private func structuredSessionPiAgentTurnMergeDetailLine(
     )
 }
 
-private func structuredSessionPiFeedSegmentIsPromptAnchoredUserMessage(_ item: SessionActivityItem) -> Bool {
+func structuredSessionPiFeedSegmentIsPromptAnchoredUserMessage(_ item: SessionActivityItem) -> Bool {
     if item.prompt != nil {
         return true
     }

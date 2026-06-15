@@ -57,7 +57,7 @@ struct MacStructuredSessionFeedScrollLayer<Content: View>: View {
                 scrollPosition = ScrollPosition(edge: .bottom)
             }
         }
-        .onChange(of: feedPresentation.feedSegments?.count) { _, _ in
+        .onChange(of: structuredSessionFeedFollowScrollToken(for: presentation)) { _, _ in
             reanchorScrollToOpenTurnIfNeeded()
         }
         .onChange(of: presentation.session.id) { _, _ in

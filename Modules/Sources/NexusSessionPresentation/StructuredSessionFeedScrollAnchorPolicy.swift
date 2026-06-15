@@ -38,9 +38,16 @@ public func structuredSessionOpenAgentTurnSegment(
     return nil
 }
 
-/// UI turn-in-progress: service flag, open turn segment, or interim `Pi:` after an open turn.
+/// UI turn-in-progress: service flag, Pi `turn_end` lifecycle, open turn segment, or interim `Pi:` after open turn.
 public func structuredSessionEffectiveAgentTurnInProgress(for screen: SessionScreen) -> Bool {
     if screen.isAgentTurnInProgress {
+        return true
+    }
+    if screen.session.providerID == .pi,
+       structuredSessionPiProviderTurnAwaitingTurnEnd(
+           activityItems: screen.activityItems,
+           providerEvents: screen.providerEvents
+       ) {
         return true
     }
     let segments = structuredSessionAgentTurnFeedSegments(for: screen)
@@ -56,6 +63,7 @@ public func structuredSessionEffectiveAgentTurnInProgress(
     if presentation.feed.thinkingIndicator != nil {
         return true
     }
+    // Feed was built with segment open state; re-check segments before chrome-only flags.
     let segments = presentation.feed.feedSegments
     if structuredSessionOpenAgentTurnSegment(in: segments) != nil {
         return true

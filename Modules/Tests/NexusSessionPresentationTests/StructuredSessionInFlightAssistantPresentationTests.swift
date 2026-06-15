@@ -98,6 +98,62 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
         #expect(structuredSessionFeedUsesBottomEdgeScrollPositionBinding(for: presentation) == false)
     }
 
+    @Test func piTurnStaysOpenWhenServiceFlagFalseBeforeTurnEndProviderEvent() throws {
+        let userID = UUID()
+        let thoughtsID = UUID()
+        let interimID = UUID()
+        let screen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            ),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(
+                    id: userID,
+                    kind: .message,
+                    text: "You: go",
+                    prompt: SessionPrompt(text: "go")
+                ),
+                SessionActivityItem(id: thoughtsID, kind: .status, text: "thoughts:", detailText: "Working."),
+                SessionActivityItem(id: interimID, kind: .message, text: "Pi: No PR or file named — reviewing architecture.")
+            ],
+            providerEvents: [
+                SessionProviderEvent(
+                    sequence: 0,
+                    providerID: .pi,
+                    type: "message_update",
+                    family: .message,
+                    rawPayload: #"{"type":"message_update"}"#
+                )
+            ],
+            isAgentTurnInProgress: false
+        )
+
+        #expect(structuredSessionEffectiveAgentTurnInProgress(for: screen) == true)
+
+        let segments = try #require(structuredSessionPiFeedSegments(for: screen))
+        guard case .agentTurn(let turn) = segments[1],
+              case .standalone = segments[2] else {
+            Issue.record("Expected open turn then interim Pi standalone")
+            return
+        }
+        #expect(turn.isOpen == true)
+        #expect(structuredSessionThinkingIndicator(for: screen, hasPendingApprovalRequests: false) != nil)
+
+        let feed = structuredSessionFeedPresentation(for: screen)
+        let presentation = FocusedStructuredSessionPresentation(
+            session: screen.session,
+            feed: feed,
+            autoScrollTrigger: structuredSessionAutoScrollTrigger(for: screen)
+        )
+        #expect(structuredSessionFeedUsesBottomEdgeScrollPositionBinding(for: presentation) == false)
+    }
+
     @Test func effectiveTurnInProgressWhenOpenTurnAndInterimPiStandalone() throws {
         let screen = SessionScreen(
             session: Session(
