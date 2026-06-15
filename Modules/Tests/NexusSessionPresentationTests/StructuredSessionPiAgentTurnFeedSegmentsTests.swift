@@ -285,6 +285,58 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
         #expect(turn.finalAnswer?.text == "done")
     }
 
+    @Test func piMidTurnSessionStatusStaysInTurnNoticesWithoutSplitting() throws {
+        let screen = SessionScreen(
+            session: piSession(),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .message, text: "You: work", prompt: SessionPrompt(text: "work")),
+                SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Plan."),
+                SessionActivityItem(kind: .status, text: "Auto-compacting the session context"),
+                SessionActivityItem(kind: .command, text: "read: x.swift"),
+                SessionActivityItem(kind: .message, text: "Pi: done")
+            ],
+            isAgentTurnInProgress: false
+        )
+
+        let segments = try #require(structuredSessionPiFeedSegments(for: screen))
+        #expect(segments.count == 2)
+        guard case .agentTurn(let turn) = segments[1] else {
+            Issue.record("Expected agent turn")
+            return
+        }
+        #expect(turn.turnNotices.contains(.progress("Auto-compacting the session context")))
+        #expect(turn.tools.count == 1)
+    }
+
+    @Test func piBashOutputMergesIntoOpenBashToolWithoutStandaloneRow() throws {
+        let screen = SessionScreen(
+            session: piSession(),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .message, text: "You: ls", prompt: SessionPrompt(text: "ls")),
+                SessionActivityItem(kind: .command, text: "/bash ls -la"),
+                SessionActivityItem(kind: .progress, text: "Running bash: ls -la"),
+                SessionActivityItem(kind: .message, text: "bash: total 8\ndrwxr-xr-x"),
+                SessionActivityItem(kind: .message, text: "Pi: listed")
+            ],
+            isAgentTurnInProgress: false
+        )
+
+        let segments = try #require(structuredSessionPiFeedSegments(for: screen))
+        #expect(segments.count == 2)
+        #expect(segments.contains { if case .standalone = $0 { return true }; return false } == false)
+        guard case .agentTurn(let turn) = segments[1] else {
+            Issue.record("Expected agent turn")
+            return
+        }
+        #expect(turn.tools.count == 1)
+        #expect(turn.tools[0].detailText?.contains("total 8") == true)
+        #expect(turn.finalAnswer?.text == "listed")
+    }
+
     @Test func piOrphanTurnErrorSurfacesInTurnNoticesWithoutSplitting() throws {
         let screen = SessionScreen(
             session: piSession(),

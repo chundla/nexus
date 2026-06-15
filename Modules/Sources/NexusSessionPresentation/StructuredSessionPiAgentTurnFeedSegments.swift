@@ -204,6 +204,26 @@ private func structuredSessionPiAgentTurnActivitySlice(
             continue
         }
 
+        if structuredSessionPiFeedSegmentIsInTurnSessionStatusRow(item) {
+            structuredSessionPiAgentTurnAppendSessionStatusNotice(from: item, to: &turnNotices)
+            consumedAny = true
+            cursor += 1
+            continue
+        }
+
+        if item.kind == .message,
+           let bashOutput = structuredSessionPiBashOutputBody(from: item.text) {
+            structuredSessionPiAgentTurnAttachBashOutput(
+                bashOutput,
+                to: &tools,
+                openToolIndex: &openToolIndex,
+                turnNotices: &turnNotices
+            )
+            consumedAny = true
+            cursor += 1
+            continue
+        }
+
         if structuredSessionPiFeedSegmentIsOutsideStackRow(item) {
             break
         }
@@ -297,6 +317,68 @@ private func structuredSessionPiFeedSegmentIsInTurnProgressRow(_ item: SessionAc
     item.kind == .progress
 }
 
+private func structuredSessionPiFeedSegmentIsInTurnSessionStatusRow(_ item: SessionActivityItem) -> Bool {
+    guard item.kind == .status else {
+        return false
+    }
+    return structuredSessionPiFeedSegmentIsThoughtsStatus(item) == false
+}
+
+private func structuredSessionPiAgentTurnAppendSessionStatusNotice(
+    from item: SessionActivityItem,
+    to turnNotices: inout [StructuredSessionFeedAgentTurnNotice]
+) {
+    let headline = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
+    let detail = item.detailText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let combined: String
+    if headline.isEmpty {
+        combined = detail
+    } else if detail.isEmpty {
+        combined = headline
+    } else {
+        combined = headline + "\n" + detail
+    }
+    structuredSessionPiAgentTurnAppendProgressNotice(combined, to: &turnNotices)
+}
+
+private func structuredSessionPiBashOutputBody(from text: String) -> String? {
+    guard let split = structuredSessionPiConversationPrefixSplit(for: text) else {
+        return nil
+    }
+    guard split.label.caseInsensitiveCompare("bash") == .orderedSame else {
+        return nil
+    }
+    let body = split.body.trimmingCharacters(in: .whitespacesAndNewlines)
+    return body.isEmpty ? nil : body
+}
+
+private func structuredSessionPiAgentTurnAttachBashOutput(
+    _ output: String,
+    to tools: inout [StructuredSessionFeedAgentTurnToolSegment],
+    openToolIndex: inout Int?,
+    turnNotices: inout [StructuredSessionFeedAgentTurnNotice]
+) {
+    guard let toolIndex = openToolIndex, tools.indices.contains(toolIndex) else {
+        structuredSessionPiAgentTurnAppendProgressNotice(output, to: &turnNotices)
+        return
+    }
+
+    var tool = tools[toolIndex]
+    let mergedDetail: String
+    if let existing = tool.detailText?.trimmingCharacters(in: .whitespacesAndNewlines), existing.isEmpty == false {
+        mergedDetail = existing + "\n" + output
+    } else {
+        mergedDetail = output
+    }
+    tool = StructuredSessionFeedAgentTurnToolSegment(
+        activityItemID: tool.activityItemID,
+        callPreview: tool.callPreview,
+        detailText: mergedDetail,
+        subagentOutputs: tool.subagentOutputs
+    )
+    tools[toolIndex] = tool
+}
+
 private func structuredSessionPiAgentTurnAppendProgressNotice(
     _ rawText: String,
     to turnNotices: inout [StructuredSessionFeedAgentTurnNotice]
@@ -388,6 +470,9 @@ private func structuredSessionPiFeedSegmentIsOutsideStackRow(_ item: SessionActi
         if structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage(item) {
             return false
         }
+        if structuredSessionPiBashOutputBody(from: item.text) != nil {
+            return false
+        }
         return structuredSessionPiSubagentOutputBody(from: item.text) == nil
     case .progress, .completion, .error, .approvalRequest, .approvalDecision, .diff:
         return true
@@ -435,7 +520,8 @@ private func structuredSessionPiSubagentOutputBody(from text: String) -> String?
     }
     let label = split.label.trimmingCharacters(in: .whitespacesAndNewlines)
     guard label.caseInsensitiveCompare("Pi") != .orderedSame,
-          label.caseInsensitiveCompare("you") != .orderedSame else {
+          label.caseInsensitiveCompare("you") != .orderedSame,
+          label.caseInsensitiveCompare("bash") != .orderedSame else {
         return nil
     }
     let body = split.body.trimmingCharacters(in: .whitespacesAndNewlines)
