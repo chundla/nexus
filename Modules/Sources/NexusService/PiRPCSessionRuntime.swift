@@ -2084,7 +2084,57 @@
                 return
             }
 
+            lock.lock()
+            let shouldFinalizeTurn = promptTurnCommitted
+            let finalText = shouldFinalizeTurn ? resolvedPiAssistantFinalTextFromAgentEndMessages(object) : ""
+            if shouldFinalizeTurn {
+                if finalText.isEmpty == false {
+                    let alreadyHasMatchingPiRow = activityItems.contains {
+                        $0.kind == .message && $0.text == "Pi: \(finalText)"
+                    }
+                    if alreadyHasMatchingPiRow == false {
+                        ensureAssistantTranscriptEntryLocked()
+                        if let assistantTranscriptIndex {
+                            transcriptEntries[assistantTranscriptIndex] = finalText
+                            trimTranscriptEntriesLocked()
+                        }
+                        appendActivityItemLocked(SessionActivityItem(kind: .message, text: "Pi: \(finalText)"))
+                    }
+                }
+                finishPiAgentTurnLocked(stopReason: "stop")
+            }
+            lock.unlock()
+
+            if shouldFinalizeTurn {
+                requestSlashCommands()
+                requestSessionStats()
+            }
             notifyChange()
+        }
+
+        /// Pi RPC clients often treat `agent_end` as run completion; `turn_end` may be absent or carry no assistant body.
+        private func resolvedPiAssistantFinalTextFromAgentEndMessages(_ object: [String: Any]) -> String {
+            guard let messages = object["messages"] as? [[String: Any]] else {
+                return resolvedPiAssistantFinalText(from: nil)
+            }
+            var lastAssistant = ""
+            for message in messages {
+                guard string(for: "role", in: message) == "assistant" else {
+                    continue
+                }
+                let text = assistantText(from: message).trimmingCharacters(in: .whitespacesAndNewlines)
+                if text.isEmpty == false {
+                    lastAssistant = text
+                }
+            }
+            if lastAssistant.isEmpty == false {
+                return resolvedPiAssistantFinalText(
+                    from: [
+                        "role": "assistant",
+                        "content": [["type": "text", "text": lastAssistant]],
+                    ])
+            }
+            return resolvedPiAssistantFinalText(from: nil)
         }
 
         private func handleTermination(status: Int32) {

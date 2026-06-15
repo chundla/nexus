@@ -2360,8 +2360,82 @@
                     "Pi: Partial answer",
                     "Provider overloaded",
                 ])
+            #expect(screen.isAgentTurnInProgress == false)
             #expect(screen.activityItems.contains(where: { $0.kind == .completion }) == false)
             #expect(screen.transcript == "> inspect auth\nPartial answer")
+        }
+
+        @Test func localPiRuntimeFinalizesTurnOnAgentEndWhenTurnEndMissing() throws {
+            let transport = PromptEventPiRPCTransport(promptEvents: [
+                ["type": "agent_start", "agent": "pi"],
+                [
+                    "type": "message_update",
+                    "assistantMessageEvent": [
+                        "type": "thinking_end",
+                        "content": "Plan the review.",
+                    ],
+                ],
+                [
+                    "type": "message_update",
+                    "assistantMessageEvent": [
+                        "type": "toolcall_end",
+                        "toolCall": [
+                            "type": "toolCall",
+                            "id": "tool-1",
+                            "name": "read",
+                            "arguments": ["path": "README.md"],
+                        ],
+                    ],
+                ],
+                [
+                    "type": "message_update",
+                    "assistantMessageEvent": [
+                        "type": "toolcall_end",
+                        "toolCall": [
+                            "type": "toolCall",
+                            "id": "tool-2",
+                            "name": "read",
+                            "arguments": ["path": "ARCHITECTURE.md"],
+                        ],
+                    ],
+                ],
+                [
+                    "type": "agent_end",
+                    "messages": [
+                        [
+                            "role": "assistant",
+                            "content": [
+                                [
+                                    "type": "text",
+                                    "text": "## Code review\n\nFindings look good.",
+                                ]
+                            ],
+                        ]
+                    ],
+                ],
+            ])
+            let runtime = try PiRPCSessionRuntime(
+                executable: "/tmp/fake-pi",
+                workingDirectory: "/tmp",
+                terminationStatusMessageBuilder: { _ in "" },
+                transportFactory: { _, _, _ in transport }
+            )
+
+            let session = Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            )
+
+            try runtime.sendInput("review nexus")
+            let screen = runtime.sessionScreen(for: session)
+
+            #expect(screen.isAgentTurnInProgress == false)
+            #expect(screen.providerFacts.liveAssistantDraftText == nil)
+            #expect(screen.activityItems.map(\.kind).filter { $0 == .command }.count == 2)
+            #expect(screen.activityItems.contains { $0.text == "Pi: ## Code review\n\nFindings look good." })
         }
 
         @Test func localPiRuntimeRecordsToolUseMessageEndBeforeTurnEndWithoutClosingAgentTurn() throws {
