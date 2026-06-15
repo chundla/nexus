@@ -235,6 +235,24 @@ nonisolated final class RemotePairingServer: RemotePairingServing, @unchecked Se
         }
 
         if request.method == "GET",
+           let structuredSessionArtifactRequest = structuredSessionArtifactFileRequest(from: request) {
+            await respondToAuthorizedRequest(
+                operation: .fetchSessionScreen,
+                request: request,
+                over: connection,
+                sessionID: structuredSessionArtifactRequest.sessionID
+            ) { [self] in
+                let pairedDeviceID = try self.pairedDeviceID(from: request)
+                return try await self.client.getStructuredSessionArtifactFile(
+                    sessionID: structuredSessionArtifactRequest.sessionID,
+                    hostPath: structuredSessionArtifactRequest.hostPath,
+                    requestingPairedDeviceID: pairedDeviceID
+                )
+            }
+            return
+        }
+
+        if request.method == "GET",
            let sessionScreenObservationRequest = sessionScreenObservationRequest(from: request) {
             do {
                 try await authorize(request)
@@ -689,6 +707,25 @@ nonisolated final class RemotePairingServer: RemotePairingServing, @unchecked Se
             nil
         }
         return StructuredSessionHistoryPageRequest(sessionID: sessionID, pageSize: pageSize, cursor: cursor)
+    }
+
+    private func structuredSessionArtifactFileRequest(from request: ParsedRequest) -> StructuredSessionArtifactFileRequest? {
+        guard let components = URLComponents(string: "http://localhost\(request.path)") else {
+            return nil
+        }
+        let pathComponents = components.path.split(separator: "/")
+        guard pathComponents.count == 4,
+              pathComponents[0] == "remote-client",
+              pathComponents[1] == "sessions",
+              let sessionID = UUID(uuidString: String(pathComponents[2])),
+              pathComponents[3] == "artifact" else {
+            return nil
+        }
+        guard let hostPath = components.queryItems?.first(where: { $0.name == "hostPath" })?.value,
+              hostPath.isEmpty == false else {
+            return nil
+        }
+        return StructuredSessionArtifactFileRequest(sessionID: sessionID, hostPath: hostPath)
     }
 
     private func structuredObservationRevision(from request: ParsedRequest) -> Int? {
@@ -1164,6 +1201,11 @@ private struct StructuredSessionHistoryPageRequest {
     let sessionID: UUID
     let pageSize: Int
     let cursor: StructuredSessionHistoryCursor?
+}
+
+private struct StructuredSessionArtifactFileRequest {
+    let sessionID: UUID
+    let hostPath: String
 }
 
 private struct SessionScreenRequest {

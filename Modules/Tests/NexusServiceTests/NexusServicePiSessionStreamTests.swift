@@ -1079,7 +1079,7 @@ struct NexusServicePiSessionStreamTests {
         #expect(screen.activityItems.map(\.text) == [
             "Session stream connected",
             "/export-html /tmp/pi-session.html",
-            "Exported Pi Session HTML to /tmp/pi-session.html"
+            "Exported session HTML to /tmp/pi-session.html"
         ])
         #expect(screen.activityItems.map(\.kind) == [.status, .command, .status])
     }

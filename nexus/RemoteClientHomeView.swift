@@ -2365,6 +2365,18 @@ private struct RemoteSessionScreenView: View {
                     },
                     onShowFullAssistantResponse: { presentation in
                         presentedStructuredSessionAssistantFullResponse = presentation
+                    },
+                    artifactActions: { artifact in
+                        structuredSessionFeedArtifactActionPresentation(
+                            for: artifact,
+                            hasWriterAuthority: model.focusedSessionIsController,
+                            usesHostArtifactFetch: true
+                        )
+                    },
+                    onArtifactDownload: { artifact in
+                        Task {
+                            await model.downloadFocusedStructuredSessionArtifact(artifact)
+                        }
                     }
                 )
                 .id(segment.id)

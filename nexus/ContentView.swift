@@ -1520,6 +1520,17 @@ struct ContentView: View {
                                             },
                                             onShowFullAssistantResponse: { presentation in
                                                 presentedStructuredSessionAssistantFullResponse = presentation
+                                            },
+                                            artifactActions: { artifact in
+                                                structuredSessionFeedArtifactActionPresentation(
+                                                    for: artifact,
+                                                    hasWriterAuthority: true,
+                                                    usesHostArtifactFetch: false
+                                                )
+                                            },
+                                            onArtifactOpenOnHost: { artifact in
+                                                guard let path = artifact.hostPath else { return }
+                                                StructuredSessionFeedArtifactHostActions.openOnHost(path: path)
                                             }
                                         )
                                         .id(segment.id)

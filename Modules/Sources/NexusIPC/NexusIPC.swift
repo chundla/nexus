@@ -47,6 +47,7 @@ public protocol SessionScreenObservation: Sendable {
     func getSessionScreen(sessionID: String, reply: @escaping (Data?, NSString?) -> Void)
     func getSessionScreenObservationSnapshot(sessionID: String, reply: @escaping (Data?, NSString?) -> Void)
     func getStructuredSessionHistoryPage(sessionID: String, pageSize: Int, cursorPayload: Data, reply: @escaping (Data?, NSString?) -> Void)
+    func getStructuredSessionArtifactFile(sessionID: String, hostPath: String, pairedDeviceID: String?, reply: @escaping (Data?, NSString?) -> Void)
     func observeSessionScreen(sessionID: String, reply: @escaping (Data?, NSString?) -> Void)
     func cancelSessionScreenObservation(observationID: String, reply: @escaping (Data?, NSString?) -> Void)
     func sendSessionInput(sessionID: String, text: String, reply: @escaping (Data?, NSString?) -> Void)
@@ -106,6 +107,7 @@ public protocol NexusServiceClient: Sendable {
         pageSize: Int,
         before cursor: StructuredSessionHistoryCursor?
     ) async throws -> StructuredSessionHistoryPage
+    func getStructuredSessionArtifactFile(sessionID: UUID, hostPath: String) async throws -> StructuredSessionArtifactFile
     func observeSessionScreen(sessionID: UUID, onUpdate: @escaping @Sendable (SessionScreen) -> Void) async throws -> any SessionScreenObservation
     func sendSessionInput(sessionID: UUID, text: String) async throws -> SessionScreen
     func sendSessionInput(sessionID: UUID, prompt: SessionPrompt) async throws -> SessionScreen
@@ -185,6 +187,11 @@ public protocol SessionScreenObservationEventClient: NexusServiceClient {
         pageSize: Int,
         before cursor: StructuredSessionHistoryCursor?
     ) async throws -> StructuredSessionHistoryPage
+    func getStructuredSessionArtifactFile(
+        sessionID: UUID,
+        hostPath: String,
+        requestingPairedDeviceID: UUID?
+    ) async throws -> StructuredSessionArtifactFile
     func observeSessionScreenUpdateEvents(
         sessionID: UUID,
         onUpdate: @escaping @Sendable (SessionScreenObservationUpdate) -> Void
@@ -470,6 +477,32 @@ public final class NexusIPCClient: NexusServiceClient, SessionScreenObservationE
                 sessionID: sessionID.uuidString,
                 pageSize: pageSize,
                 cursorPayload: cursorPayload,
+                reply: reply
+            )
+        }
+    }
+
+    nonisolated public func getStructuredSessionArtifactFile(
+        sessionID: UUID,
+        hostPath: String
+    ) async throws -> StructuredSessionArtifactFile {
+        try await getStructuredSessionArtifactFile(
+            sessionID: sessionID,
+            hostPath: hostPath,
+            requestingPairedDeviceID: nil
+        )
+    }
+
+    nonisolated public func getStructuredSessionArtifactFile(
+        sessionID: UUID,
+        hostPath: String,
+        requestingPairedDeviceID: UUID?
+    ) async throws -> StructuredSessionArtifactFile {
+        try await requestDecodable { proxy, reply in
+            proxy.getStructuredSessionArtifactFile(
+                sessionID: sessionID.uuidString,
+                hostPath: hostPath,
+                pairedDeviceID: requestingPairedDeviceID?.uuidString,
                 reply: reply
             )
         }

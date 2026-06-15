@@ -230,6 +230,18 @@ private enum NexusAppFixture {
             StructuredSessionHistoryPage(sessionID: session.id, activityItems: [], providerEvents: [], nextCursor: nil)
         }
 
+        func getStructuredSessionArtifactFile(sessionID: UUID, hostPath: String) async throws -> StructuredSessionArtifactFile {
+            try unsupported()
+        }
+
+        func getStructuredSessionArtifactFile(
+            sessionID: UUID,
+            hostPath: String,
+            requestingPairedDeviceID: UUID?
+        ) async throws -> StructuredSessionArtifactFile {
+            try unsupported()
+        }
+
         func observeSessionScreen(
             sessionID: UUID,
             onUpdate: @escaping @Sendable (SessionScreen) -> Void

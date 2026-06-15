@@ -3,6 +3,9 @@ import NexusDomain
 import NexusIPC
 import NexusSessionPresentation
 import Observation
+#if os(iOS)
+import UIKit
+#endif
 
 protocol RemotePairingClient {
     func fetchStatus(host: String, port: Int) async throws -> RemotePairedMacStatus
@@ -21,6 +24,11 @@ protocol RemotePairingClient {
         pageSize: Int,
         before cursor: StructuredSessionHistoryCursor?
     ) async throws -> StructuredSessionHistoryPage
+    func fetchStructuredSessionArtifactFile(
+        for pairedMac: PairedMac,
+        sessionID: UUID,
+        hostPath: String
+    ) async throws -> StructuredSessionArtifactFile
     func takeSessionControl(for pairedMac: PairedMac, sessionID: UUID, columns: Int, rows: Int) async throws -> SessionScreen
     func releaseSessionControl(for pairedMac: PairedMac, sessionID: UUID) async throws -> SessionScreen
     func sendSessionInput(for pairedMac: PairedMac, sessionID: UUID, text: String) async throws -> SessionScreen
@@ -691,6 +699,51 @@ final class RemoteClientPairingModel {
 
         if preserveAttachment == false {
             stopFocusingRemoteSession()
+        }
+    }
+
+    func downloadFocusedStructuredSessionArtifact(
+        _ artifact: StructuredSessionFeedArtifactPresentation
+    ) async {
+        guard let pairedMac = activePairedMac,
+              let sessionID = focusedSessionID,
+              let hostPath = artifact.hostPath else {
+            focusedSessionErrorMessage = "Artifact path unavailable for download."
+            return
+        }
+        guard focusedSessionIsController else {
+            focusedSessionErrorMessage = "Take Controller to download artifacts from this iPhone."
+            return
+        }
+
+        do {
+            let file = try await client.fetchStructuredSessionArtifactFile(
+                for: pairedMac,
+                sessionID: sessionID,
+                hostPath: hostPath
+            )
+            let tempURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent(file.fileName)
+            try file.data.write(to: tempURL, options: .atomic)
+            #if os(iOS)
+            await MainActor.run {
+                guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                      let root = scene.windows.first(where: \.isKeyWindow)?.rootViewController else {
+                    focusedSessionErrorMessage = "Could not present download share sheet."
+                    return
+                }
+                StructuredSessionFeedArtifactSharePresenter.presentShare(for: tempURL, from: root)
+            }
+            #endif
+        } catch {
+            focusedSessionErrorMessage = error.localizedDescription
+            recordRemoteFailureBreadcrumb(
+                kind: .actionFailure,
+                operation: .fetchSessionScreen,
+                pairedMac: pairedMac,
+                sessionID: sessionID,
+                error: error
+            )
         }
     }
 

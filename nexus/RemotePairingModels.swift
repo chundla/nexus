@@ -186,6 +186,19 @@ nonisolated struct RemotePairingHTTPClient {
         return try JSONDecoder().decode(StructuredSessionHistoryPage.self, from: data)
     }
 
+    func fetchStructuredSessionArtifactFile(
+        for pairedMac: PairedMac,
+        sessionID: UUID,
+        hostPath: String
+    ) async throws -> StructuredSessionArtifactFile {
+        var components = URLComponents()
+        components.path = "/remote-client/sessions/\(sessionID.uuidString)/artifact"
+        components.queryItems = [URLQueryItem(name: "hostPath", value: hostPath)]
+        let request = try authenticatedRequest(for: pairedMac, path: components.string ?? components.path)
+        let data = try await send(request)
+        return try JSONDecoder().decode(StructuredSessionArtifactFile.self, from: data)
+    }
+
     func launchOrResumeSession(for pairedMac: PairedMac, sessionID: UUID) async throws -> Session {
         var request = try authenticatedRequest(
             for: pairedMac,

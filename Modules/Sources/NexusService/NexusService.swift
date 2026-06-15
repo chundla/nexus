@@ -2132,6 +2132,25 @@ public final class NexusService: NSObject, NexusEmbeddedServiceSession, @uncheck
         )
     }
 
+    func getStructuredSessionArtifactFile(
+        sessionID: UUID,
+        hostPath: String,
+        requestingPairedDeviceID: UUID?
+    ) throws -> StructuredSessionArtifactFile {
+        guard try sessionRecordStore.session(id: sessionID) != nil else {
+            throw NexusMetadataStoreError.sessionNotFound
+        }
+        if let requestingPairedDeviceID {
+            guard sessionControllerRegistry.isRemoteController(
+                sessionID: sessionID,
+                pairedDeviceID: requestingPairedDeviceID
+            ) else {
+                throw NexusSessionControlError.remoteControllerRequired
+            }
+        }
+        return try StructuredSessionArtifactFileReader.read(hostPath: hostPath)
+    }
+
     func observeSessionScreen(
         observationID: UUID,
         sessionID: UUID,
@@ -4584,6 +4603,25 @@ private final class NexusXPCBridge: NSObject, NexusXPCProtocol, @unchecked Senda
                     sessionID: resolveUUID(sessionID),
                     pageSize: pageSize,
                     before: cursor
+                )
+            },
+            reply: reply
+        )
+    }
+
+    func getStructuredSessionArtifactFile(
+        sessionID: String,
+        hostPath: String,
+        pairedDeviceID: String?,
+        reply: @escaping (Data?, NSString?) -> Void
+    ) {
+        sendReply(
+            with: { [self] in
+                let deviceID = pairedDeviceID.flatMap(UUID.init(uuidString:))
+                return try service.getStructuredSessionArtifactFile(
+                    sessionID: resolveUUID(sessionID),
+                    hostPath: hostPath,
+                    requestingPairedDeviceID: deviceID
                 )
             },
             reply: reply

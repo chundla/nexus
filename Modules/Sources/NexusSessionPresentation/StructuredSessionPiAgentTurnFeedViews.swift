@@ -55,6 +55,9 @@ public struct StructuredSessionPiFeedSegmentView: View {
     public let disclosureState: StructuredSessionAgentTurnDisclosureState
     public let standaloneRow: (StructuredSessionActivityRow) -> AnyView
     public let onShowFullAssistantResponse: ((StructuredSessionAssistantFullResponsePresentation) -> Void)?
+    public let artifactActions: (StructuredSessionFeedArtifactPresentation) -> StructuredSessionFeedArtifactActionPresentation
+    public let onArtifactDownload: ((StructuredSessionFeedArtifactPresentation) -> Void)?
+    public let onArtifactOpenOnHost: ((StructuredSessionFeedArtifactPresentation) -> Void)?
 
     public init(
         segment: StructuredSessionFeedSegment,
@@ -62,7 +65,16 @@ public struct StructuredSessionPiFeedSegmentView: View {
         style: StructuredSessionPiFeedSegmentStyle,
         disclosureState: StructuredSessionAgentTurnDisclosureState,
         standaloneRow: @escaping (StructuredSessionActivityRow) -> AnyView,
-        onShowFullAssistantResponse: ((StructuredSessionAssistantFullResponsePresentation) -> Void)? = nil
+        onShowFullAssistantResponse: ((StructuredSessionAssistantFullResponsePresentation) -> Void)? = nil,
+        artifactActions: @escaping (StructuredSessionFeedArtifactPresentation) -> StructuredSessionFeedArtifactActionPresentation = { artifact in
+            structuredSessionFeedArtifactActionPresentation(
+                for: artifact,
+                hasWriterAuthority: true,
+                usesHostArtifactFetch: false
+            )
+        },
+        onArtifactDownload: ((StructuredSessionFeedArtifactPresentation) -> Void)? = nil,
+        onArtifactOpenOnHost: ((StructuredSessionFeedArtifactPresentation) -> Void)? = nil
     ) {
         self.segment = segment
         self.providerDisplayName = providerDisplayName
@@ -70,6 +82,9 @@ public struct StructuredSessionPiFeedSegmentView: View {
         self.disclosureState = disclosureState
         self.standaloneRow = standaloneRow
         self.onShowFullAssistantResponse = onShowFullAssistantResponse
+        self.artifactActions = artifactActions
+        self.onArtifactDownload = onArtifactDownload
+        self.onArtifactOpenOnHost = onArtifactOpenOnHost
     }
 
     public var body: some View {
@@ -79,7 +94,16 @@ public struct StructuredSessionPiFeedSegmentView: View {
         case .agentTurn(let turn):
             agentTurnView(turn)
         case .standalone(let item):
-            standaloneRow(structuredSessionAnnotatedActivityRow(for: item, providerDisplayName: providerDisplayName))
+            if let artifact = structuredSessionFeedArtifactPresentation(for: item) {
+                StructuredSessionFeedArtifactPreviewCard(
+                    artifact: artifact,
+                    actions: artifactActions(artifact),
+                    onDownload: { onArtifactDownload?(artifact) },
+                    onOpenOnHost: { onArtifactOpenOnHost?(artifact) }
+                )
+            } else {
+                standaloneRow(structuredSessionAnnotatedActivityRow(for: item, providerDisplayName: providerDisplayName))
+            }
         }
     }
 
