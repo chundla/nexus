@@ -1,6 +1,7 @@
 import Foundation
 import NexusDomain
 import Testing
+
 @testable import NexusSessionPresentation
 
 struct StructuredSessionOpenTurnAssistantBubbleTests {
@@ -18,7 +19,7 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
             activityItems: [
                 SessionActivityItem(kind: .message, text: "You: go", prompt: SessionPrompt(text: "go")),
                 SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Working."),
-                SessionActivityItem(kind: .message, text: "Pi: interim chunk")
+                SessionActivityItem(kind: .message, text: "Pi: interim chunk"),
             ],
             isAgentTurnInProgress: true
         )
@@ -26,8 +27,9 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
         let segments = try #require(structuredSessionPiFeedSegments(for: screen))
         #expect(segments.count == 3)
         guard case .userMessage = segments[0],
-              case .agentTurn(let turn) = segments[1],
-              case .standalone(let item) = segments[2] else {
+            case .agentTurn(let turn) = segments[1],
+            case .standalone(let item) = segments[2]
+        else {
             Issue.record("Expected user, open turn, then standalone Pi message")
             return
         }
@@ -50,7 +52,7 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
             activityItems: [
                 SessionActivityItem(kind: .message, text: "You: hi", prompt: SessionPrompt(text: "hi")),
                 SessionActivityItem(kind: .status, text: "thoughts:", detailText: "think"),
-                SessionActivityItem(kind: .message, text: "Pi: partial")
+                SessionActivityItem(kind: .message, text: "Pi: partial"),
             ],
             isAgentTurnInProgress: true
         )
@@ -65,7 +67,8 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
         )
 
         guard let segments = feed.feedSegments,
-              case .agentTurn(let turn) = segments[1] else {
+            case .agentTurn(let turn) = segments[1]
+        else {
             Issue.record("Expected open turn segment")
             return
         }
@@ -120,7 +123,8 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
                     prompt: SessionPrompt(text: "go")
                 ),
                 SessionActivityItem(id: thoughtsID, kind: .status, text: "thoughts:", detailText: "Working."),
-                SessionActivityItem(id: interimID, kind: .message, text: "Pi: No PR or file named — reviewing architecture.")
+                SessionActivityItem(
+                    id: interimID, kind: .message, text: "Pi: No PR or file named — reviewing architecture."),
             ],
             providerEvents: [
                 SessionProviderEvent(
@@ -138,7 +142,8 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
 
         let segments = try #require(structuredSessionPiFeedSegments(for: screen))
         guard case .agentTurn(let turn) = segments[1],
-              case .standalone = segments[2] else {
+            case .standalone = segments[2]
+        else {
             Issue.record("Expected open turn then interim Pi standalone")
             return
         }
@@ -168,14 +173,15 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
             activityItems: [
                 SessionActivityItem(kind: .message, text: "You: go", prompt: SessionPrompt(text: "go")),
                 SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Working."),
-                SessionActivityItem(kind: .message, text: "Pi: interim")
+                SessionActivityItem(kind: .message, text: "Pi: interim"),
             ],
             isAgentTurnInProgress: true
         )
 
-        #expect(structuredSessionFeedHasInterimPiAssistantAfterOpenTurn(
-            in: structuredSessionPiFeedSegments(for: screen)
-        ) == true)
+        #expect(
+            structuredSessionFeedHasInterimPiAssistantAfterOpenTurn(
+                in: structuredSessionPiFeedSegments(for: screen)
+            ) == true)
         #expect(structuredSessionEffectiveAgentTurnInProgress(for: screen) == true)
     }
 }

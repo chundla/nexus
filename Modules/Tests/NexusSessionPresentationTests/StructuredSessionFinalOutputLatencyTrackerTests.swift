@@ -1,7 +1,8 @@
 import Foundation
 import NexusDomain
-@testable import NexusSessionPresentation
 import Testing
+
+@testable import NexusSessionPresentation
 
 struct StructuredSessionFinalOutputLatencyTrackerTests {
     @Test mutating func trackerMeasuresClientPresentationLatencyAfterObservationReceivesFinalOutput() {
@@ -21,7 +22,7 @@ struct StructuredSessionFinalOutputLatencyTrackerTests {
                     kind: .status,
                     text: "Thinking turn active"
                 ),
-                finalMessage
+                finalMessage,
             ],
             isAgentTurnInProgress: false,
             finalOutputDiagnostic: StructuredSessionFinalOutputDiagnostic(
@@ -76,14 +77,15 @@ struct StructuredSessionFinalOutputLatencyTrackerTests {
             isDefault: true,
             state: .ready
         )
-        let resolvedItems = activityItems ?? [
-            SessionActivityItem(
-                id: UUID(uuidString: "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC")!,
-                kind: .status,
-                text: "Thinking turn active"
-            ),
-            SessionActivityItem(kind: .message, text: "Pi: \(marker)")
-        ]
+        let resolvedItems =
+            activityItems ?? [
+                SessionActivityItem(
+                    id: UUID(uuidString: "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC")!,
+                    kind: .status,
+                    text: "Thinking turn active"
+                ),
+                SessionActivityItem(kind: .message, text: "Pi: \(marker)"),
+            ]
 
         return SessionScreen(
             session: session,

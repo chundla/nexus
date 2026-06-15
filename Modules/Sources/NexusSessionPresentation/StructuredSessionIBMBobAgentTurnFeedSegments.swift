@@ -28,11 +28,14 @@ func structuredSessionIBMBobFeedSegments(
         let item = activityItems[index]
 
         if structuredSessionIBMBobFeedSegmentIsPromptAnchoredUserMessage(item),
-           let userBody = structuredSessionIBMBobUserMessageBody(from: item) {
-            segments.append(.userMessage(StructuredSessionFeedUserMessageSegment(
-                activityItemID: item.id,
-                text: userBody
-            )))
+            let userBody = structuredSessionIBMBobUserMessageBody(from: item)
+        {
+            segments.append(
+                .userMessage(
+                    StructuredSessionFeedUserMessageSegment(
+                        activityItemID: item.id,
+                        text: userBody
+                    )))
             index += 1
 
             let turnSlice = structuredSessionIBMBobAgentTurnActivitySlice(
@@ -91,11 +94,14 @@ private func structuredSessionIBMBobAgentTurnActivitySlice(
 
         if structuredSessionIBMBobFeedSegmentIsThoughtsStatus(item) {
             if let detail = item.detailText?.trimmingCharacters(in: .whitespacesAndNewlines),
-               detail.isEmpty == false {
-                stackItems.append(.reasoning(StructuredSessionFeedAgentTurnReasoningSegment(
-                    activityItemID: item.id,
-                    markdownBody: detail
-                )))
+                detail.isEmpty == false
+            {
+                stackItems.append(
+                    .reasoning(
+                        StructuredSessionFeedAgentTurnReasoningSegment(
+                            activityItemID: item.id,
+                            markdownBody: detail
+                        )))
             }
             consumedAny = true
             cursor += 1
@@ -103,10 +109,12 @@ private func structuredSessionIBMBobAgentTurnActivitySlice(
         }
 
         if let thinkingBody = structuredSessionIBMBobThinkingStreamBody(from: item) {
-            stackItems.append(.reasoning(StructuredSessionFeedAgentTurnReasoningSegment(
-                activityItemID: item.id,
-                markdownBody: thinkingBody
-            )))
+            stackItems.append(
+                .reasoning(
+                    StructuredSessionFeedAgentTurnReasoningSegment(
+                        activityItemID: item.id,
+                        markdownBody: thinkingBody
+                    )))
             consumedAny = true
             cursor += 1
             continue
@@ -127,7 +135,8 @@ private func structuredSessionIBMBobAgentTurnActivitySlice(
         }
 
         if let plainBody = structuredSessionIBMBobPlainAssistantMessageBody(from: item),
-           openToolIndex != nil {
+            openToolIndex != nil
+        {
             let toolIndex = openToolIndex!
             let hasFollowingPlainAssistant = structuredSessionIBMBobHasPlainAssistantMessage(
                 in: activityItems,
@@ -220,7 +229,8 @@ private func structuredSessionIBMBobUserMessageBody(from item: SessionActivityIt
         return text.isEmpty ? nil : text
     }
     guard let split = structuredSessionIBMBobConversationPrefixSplit(for: item.text),
-          split.label.caseInsensitiveCompare("you") == .orderedSame else {
+        split.label.caseInsensitiveCompare("you") == .orderedSame
+    else {
         return nil
     }
     let body = split.body.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -242,7 +252,8 @@ private func structuredSessionIBMBobThinkingStreamBody(from item: SessionActivit
         return nil
     }
     guard let split = structuredSessionIBMBobConversationPrefixSplit(for: item.text),
-          split.label.caseInsensitiveCompare("thinking") == .orderedSame else {
+        split.label.caseInsensitiveCompare("thinking") == .orderedSame
+    else {
         return nil
     }
     let body = split.body.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -293,8 +304,9 @@ private func structuredSessionIBMBobConversationPrefixSplit(for text: String) ->
     let label = String(text[..<separatorRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
     let body = String(text[separatorRange.upperBound...])
     guard label.isEmpty == false,
-          body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
-          label.count <= 32 else {
+        body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
+        label.count <= 32
+    else {
         return nil
     }
     return (label, body)

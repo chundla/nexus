@@ -18,10 +18,13 @@ public struct StructuredSessionObservationProgressSample: Equatable, Sendable {
         self.transcriptCharacterCount = screen.transcript.count
         self.activityItemCount = screen.activityItems.count
         self.approvalRequestCount = screen.approvalRequests.count
-        self.providerEventCount = screen.providerFacts.providerEventCount == 0 ? screen.providerEvents.count : screen.providerFacts.providerEventCount
+        self.providerEventCount =
+            screen.providerFacts.providerEventCount == 0
+            ? screen.providerEvents.count : screen.providerFacts.providerEventCount
         self.lastActivityItemID = screen.activityItems.last?.id
         self.lastActivityItemText = screen.activityItems.last?.text
-        self.lastProviderEventSequence = screen.providerFacts.lastProviderEventSequence ?? screen.providerEvents.last?.sequence
+        self.lastProviderEventSequence =
+            screen.providerFacts.lastProviderEventSequence ?? screen.providerEvents.last?.sequence
         self.lastProviderEventType = screen.providerFacts.lastProviderEventType ?? screen.providerEvents.last?.type
         self.isAgentTurnInProgress = screen.isAgentTurnInProgress
     }
@@ -110,15 +113,17 @@ public func structuredSessionThinkingStallAttribution(
 ) -> StructuredSessionThinkingStallAttribution {
     let serviceAdvanced = currentService.hasAdvanced(since: previousService)
     let clientObservationAdvanced = currentClientObservation.hasAdvanced(since: previousClientObservation)
-    let clientPresentationAdvanced = switch (previousClientPresentation, currentClientPresentation) {
-    case let (.some(previous), .some(current)):
-        current.hasAdvanced(since: previous)
-    case (.none, .none):
-        false
-    default:
-        true
-    }
-    let stillThinking = currentService.isAgentTurnInProgress
+    let clientPresentationAdvanced =
+        switch (previousClientPresentation, currentClientPresentation) {
+        case (.some(let previous), .some(let current)):
+            current.hasAdvanced(since: previous)
+        case (.none, .none):
+            false
+        default:
+            true
+        }
+    let stillThinking =
+        currentService.isAgentTurnInProgress
         || currentClientObservation.isAgentTurnInProgress
         || currentClientPresentation?.hasThinkingIndicator == true
 

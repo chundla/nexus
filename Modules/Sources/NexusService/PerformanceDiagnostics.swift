@@ -80,8 +80,8 @@ struct PerformanceDiagnosticTrace {
     }
 }
 
-private extension UInt64 {
-    func saturatingSubtract(_ other: UInt64) -> UInt64 {
+extension UInt64 {
+    fileprivate func saturatingSubtract(_ other: UInt64) -> UInt64 {
         self >= other ? self - other : 0
     }
 }

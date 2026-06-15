@@ -1,7 +1,8 @@
 import Foundation
 import NexusDomain
-@testable import NexusSessionPresentation
 import Testing
+
+@testable import NexusSessionPresentation
 
 /// IBM Bob **Agent Turn** composite feed segments (#238, ADR 0037).
 struct StructuredSessionIBMBobAgentTurnFeedSegmentsTests {
@@ -29,7 +30,7 @@ struct StructuredSessionIBMBobAgentTurnFeedSegmentsTests {
                     text: "subagent: reviewer: Summarize the latest diff"
                 ),
                 SessionActivityItem(kind: .message, text: "Watch the retry path."),
-                SessionActivityItem(kind: .message, text: "Shipped the fix.")
+                SessionActivityItem(kind: .message, text: "Shipped the fix."),
             ],
             isAgentTurnInProgress: false
         )
@@ -62,7 +63,7 @@ struct StructuredSessionIBMBobAgentTurnFeedSegmentsTests {
             activityItems: [
                 SessionActivityItem(kind: .message, text: "You: plan"),
                 SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Outline steps."),
-                SessionActivityItem(kind: .message, text: "Here is the plan.")
+                SessionActivityItem(kind: .message, text: "Here is the plan."),
             ]
         )
 
@@ -82,7 +83,7 @@ struct StructuredSessionIBMBobAgentTurnFeedSegmentsTests {
             transcript: "",
             activityItems: [
                 SessionActivityItem(kind: .message, text: "You: hi"),
-                SessionActivityItem(kind: .message, text: "Hello from Bob.")
+                SessionActivityItem(kind: .message, text: "Hello from Bob."),
             ]
         )
 
@@ -90,7 +91,8 @@ struct StructuredSessionIBMBobAgentTurnFeedSegmentsTests {
         let segments = try #require(feed.feedSegments)
         #expect(segments.count == 2)
         guard case .userMessage = segments[0],
-              case .agentTurn = segments[1] else {
+            case .agentTurn = segments[1]
+        else {
             Issue.record("Expected user then agent turn segments")
             return
         }
@@ -104,13 +106,17 @@ struct StructuredSessionIBMBobAgentTurnFeedSegmentsTests {
             activityItems: [
                 SessionActivityItem(kind: .message, text: "You: run"),
                 SessionActivityItem(kind: .command, text: "attempt_completion: I am Bob."),
-                SessionActivityItem(kind: .message, text: "I am Bob.")
+                SessionActivityItem(kind: .message, text: "I am Bob."),
             ]
         )
 
         let segments = try #require(structuredSessionIBMBobFeedSegments(for: screen))
         #expect(segments.count == 2)
-        #expect(segments.contains { if case .standalone = $0 { return true }; return false } == false)
+        #expect(
+            segments.contains {
+                if case .standalone = $0 { return true }
+                return false
+            } == false)
         guard case .agentTurn(let turn) = segments[1] else {
             Issue.record("Expected composite agent turn")
             return

@@ -1,12 +1,19 @@
 import Foundation
 import NexusDomain
-@testable import NexusService
 import Testing
+
+@testable import NexusService
 
 struct NexusServiceStructuredSessionCopyTests {
     @Test func structuredInterruptedSessionFailureMessageUsesProviderDisplayName() {
-        #expect(structuredInterruptedSessionFailureMessage(for: .pi) == "Pi Session Record survived, but its live runtime was lost when the background service restarted. Relaunch to create a new live runtime.")
-        #expect(structuredInterruptedSessionFailureMessage(for: .codex) == "Codex Session Record survived, but its live runtime was lost when the background service restarted. Relaunch to create a new live runtime.")
+        #expect(
+            structuredInterruptedSessionFailureMessage(for: .pi)
+                == "Pi Session Record survived, but its live runtime was lost when the background service restarted. Relaunch to create a new live runtime."
+        )
+        #expect(
+            structuredInterruptedSessionFailureMessage(for: .codex)
+                == "Codex Session Record survived, but its live runtime was lost when the background service restarted. Relaunch to create a new live runtime."
+        )
     }
 
     @Test func restartedStructuredNonPiSessionStaysOnStructuredSurface() throws {
@@ -38,7 +45,8 @@ struct NexusServiceStructuredSessionCopyTests {
         let restartedService = try makeService(sessionRuntimeManager: InMemorySessionRuntimeManager())
         let interruptedScreen = try restartedService.getSessionScreen(sessionID: session.id)
 
-        let expectedMessage = "Codex Session Record survived, but its live runtime was lost when the background service restarted. Relaunch to create a new live runtime."
+        let expectedMessage =
+            "Codex Session Record survived, but its live runtime was lost when the background service restarted. Relaunch to create a new live runtime."
 
         #expect(interruptedScreen.primarySurface == .structuredActivityFeed)
         #expect(interruptedScreen.session.state == .interrupted)
@@ -49,7 +57,9 @@ struct NexusServiceStructuredSessionCopyTests {
 }
 
 private struct StructuredCodexProviderHealthFacts: ProviderHealthEvaluating {
-    func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> [WorkspaceProviderCard] {
+    func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async
+        -> [WorkspaceProviderCard]
+    {
         ProviderID.allCases.map { providerID in
             WorkspaceProviderCard(
                 provider: Provider(id: providerID),
@@ -63,7 +73,9 @@ private struct StructuredCodexProviderHealthFacts: ProviderHealthEvaluating {
         }
     }
 
-    func healthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> ProviderHealthSummary {
+    func healthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?)
+        async -> ProviderHealthSummary
+    {
         switch providerID {
         case .codex:
             ProviderHealthSummary(

@@ -20,12 +20,14 @@ func structuredSessionAgentTurnSyncStackTool(
     _ tool: StructuredSessionFeedAgentTurnToolSegment,
     in stackItems: inout [StructuredSessionFeedAgentTurnStackItem]
 ) {
-    guard let index = stackItems.firstIndex(where: { item in
-        if case .tool(let existing) = item {
-            return existing.id == tool.id
-        }
-        return false
-    }) else {
+    guard
+        let index = stackItems.firstIndex(where: { item in
+            if case .tool(let existing) = item {
+                return existing.id == tool.id
+            }
+            return false
+        })
+    else {
         return
     }
     stackItems[index] = .tool(tool)

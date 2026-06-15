@@ -138,7 +138,8 @@ nonisolated struct RemotePairingHTTPClient {
     ) async throws -> Session {
         var request = try authenticatedRequest(
             for: pairedMac,
-            path: "/remote-client/workspaces/\(workspaceID.uuidString)/providers/\(providerID.rawValue)/default-session/launch"
+            path:
+                "/remote-client/workspaces/\(workspaceID.uuidString)/providers/\(providerID.rawValue)/default-session/launch"
         )
         request.httpMethod = "POST"
         let data = try await send(request)
@@ -178,8 +179,10 @@ nonisolated struct RemotePairingHTTPClient {
         components.path = "/remote-client/sessions/\(sessionID.uuidString)/structured-history"
         components.queryItems = [URLQueryItem(name: "pageSize", value: String(pageSize))]
         if let cursor {
-            components.queryItems?.append(URLQueryItem(name: "activityItemOffset", value: String(cursor.activityItemOffset)))
-            components.queryItems?.append(URLQueryItem(name: "providerEventOffset", value: String(cursor.providerEventOffset)))
+            components.queryItems?.append(
+                URLQueryItem(name: "activityItemOffset", value: String(cursor.activityItemOffset)))
+            components.queryItems?.append(
+                URLQueryItem(name: "providerEventOffset", value: String(cursor.providerEventOffset)))
         }
         let request = try authenticatedRequest(for: pairedMac, path: components.string ?? components.path)
         let data = try await send(request)
@@ -229,7 +232,9 @@ nonisolated struct RemotePairingHTTPClient {
         return try JSONDecoder().decode(Bool.self, from: data)
     }
 
-    func takeSessionControl(for pairedMac: PairedMac, sessionID: UUID, columns: Int, rows: Int) async throws -> SessionScreen {
+    func takeSessionControl(for pairedMac: PairedMac, sessionID: UUID, columns: Int, rows: Int) async throws
+        -> SessionScreen
+    {
         var request = try authenticatedRequest(
             for: pairedMac,
             path: "/remote-client/sessions/\(sessionID.uuidString)/controller/take"
@@ -255,7 +260,9 @@ nonisolated struct RemotePairingHTTPClient {
         try await sendSessionInput(for: pairedMac, sessionID: sessionID, prompt: SessionPrompt(text: text))
     }
 
-    func sendSessionInput(for pairedMac: PairedMac, sessionID: UUID, prompt: SessionPrompt) async throws -> SessionScreen {
+    func sendSessionInput(for pairedMac: PairedMac, sessionID: UUID, prompt: SessionPrompt) async throws
+        -> SessionScreen
+    {
         var request = try authenticatedRequest(
             for: pairedMac,
             path: "/remote-client/sessions/\(sessionID.uuidString)/input"
@@ -275,7 +282,8 @@ nonisolated struct RemotePairingHTTPClient {
     ) async throws -> SessionScreen {
         var request = try authenticatedRequest(
             for: pairedMac,
-            path: "/remote-client/sessions/\(sessionID.uuidString)/approval-requests/\(approvalRequestID.uuidString)/decision"
+            path:
+                "/remote-client/sessions/\(sessionID.uuidString)/approval-requests/\(approvalRequestID.uuidString)/decision"
         )
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -313,7 +321,9 @@ nonisolated struct RemotePairingHTTPClient {
         return try JSONDecoder().decode(SessionScreen.self, from: data)
     }
 
-    func sendSessionInputKey(for pairedMac: PairedMac, sessionID: UUID, key: SessionInputKey) async throws -> SessionScreen {
+    func sendSessionInputKey(for pairedMac: PairedMac, sessionID: UUID, key: SessionInputKey) async throws
+        -> SessionScreen
+    {
         var request = try authenticatedRequest(
             for: pairedMac,
             path: "/remote-client/sessions/\(sessionID.uuidString)/keys"
@@ -371,7 +381,10 @@ nonisolated struct RemotePairingHTTPClient {
                         try await Self.emitObservedUpdate(
                             from: eventLines,
                             accumulator: accumulator,
-                            snapshotFetcher: { try await self.fetchSessionScreenObservationSnapshot(for: pairedMac, sessionID: sessionID) },
+                            snapshotFetcher: {
+                                try await self.fetchSessionScreenObservationSnapshot(
+                                    for: pairedMac, sessionID: sessionID)
+                            },
                             onUpdate: onUpdate
                         )
                     }
@@ -381,7 +394,9 @@ nonisolated struct RemotePairingHTTPClient {
                     try await Self.emitObservedUpdate(
                         from: eventLines,
                         accumulator: accumulator,
-                        snapshotFetcher: { try await self.fetchSessionScreenObservationSnapshot(for: pairedMac, sessionID: sessionID) },
+                        snapshotFetcher: {
+                            try await self.fetchSessionScreenObservationSnapshot(for: pairedMac, sessionID: sessionID)
+                        },
                         onUpdate: onUpdate
                     )
                 }
@@ -470,11 +485,13 @@ nonisolated struct RemotePairingHTTPClient {
 
     private nonisolated static func observedEventLines(from data: Data) -> [String]? {
         guard data.isEmpty == false,
-              let text = String(data: data, encoding: .utf8) else {
+            let text = String(data: data, encoding: .utf8)
+        else {
             return nil
         }
 
-        let lines = text
+        let lines =
+            text
             .components(separatedBy: .newlines)
             .filter { $0.hasPrefix("data:") }
             .map { String($0.dropFirst(5)).trimmingCharacters(in: .whitespaces) }
@@ -482,7 +499,8 @@ nonisolated struct RemotePairingHTTPClient {
     }
 
     private nonisolated static func decodeRequestFailure(from data: Data, statusCode: Int) -> RemotePairingHTTPError {
-        let message = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["message"] as? String
+        let message =
+            ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["message"] as? String
             ?? HTTPURLResponse.localizedString(forStatusCode: statusCode)
 
         if statusCode == 401 {

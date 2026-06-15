@@ -1,6 +1,7 @@
 import Foundation
-@testable import NexusService
 import Testing
+
+@testable import NexusService
 
 struct StructuredSessionArtifactFileReaderTests {
     @Test func readArtifactReturnsFileBytesForAbsolutePath() throws {

@@ -1,3 +1,3 @@
 #if os(macOS)
-@_exported import NexusService
+    @_exported import NexusService
 #endif

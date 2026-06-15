@@ -1,7 +1,8 @@
 import Foundation
 import NexusDomain
-@testable import NexusSessionPresentation
 import Testing
+
+@testable import NexusSessionPresentation
 
 /// Regression suite for Pi **Agent Turn** composite feed segments (#236, ADR 0037).
 struct StructuredSessionPiAgentTurnFeedSegmentsTests {
@@ -43,7 +44,7 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
                 ),
                 SessionActivityItem(id: commandID, kind: .command, text: "subagent reviewer: Review diff"),
                 SessionActivityItem(id: subagentMessageID, kind: .message, text: "reviewer: Looks good overall."),
-                SessionActivityItem(id: answerID, kind: .message, text: "Pi: Done")
+                SessionActivityItem(id: answerID, kind: .message, text: "Pi: Done"),
             ],
             isAgentTurnInProgress: false
         )
@@ -90,7 +91,7 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
                 ),
                 SessionActivityItem(kind: .status, text: "thoughts:", detailText: "First thought."),
                 SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Second thought."),
-                SessionActivityItem(kind: .message, text: "Pi: ok")
+                SessionActivityItem(kind: .message, text: "Pi: ok"),
             ]
         )
 
@@ -110,9 +111,10 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
             transcript: "",
             activityItems: [
                 SessionActivityItem(kind: .message, text: "You: run", prompt: SessionPrompt(text: "run")),
-                SessionActivityItem(id: commandID, kind: .command, text: "subagent reviewer: Task", detailText: "step 1"),
+                SessionActivityItem(
+                    id: commandID, kind: .command, text: "subagent reviewer: Task", detailText: "step 1"),
                 SessionActivityItem(kind: .message, text: "reviewer: Summary output"),
-                SessionActivityItem(kind: .message, text: "Pi: final")
+                SessionActivityItem(kind: .message, text: "Pi: final"),
             ]
         )
 
@@ -137,17 +139,19 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
                 SessionActivityItem(kind: .message, text: "You: review", prompt: SessionPrompt(text: "review")),
                 SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Plan."),
                 SessionActivityItem(kind: .command, text: "read: CONTEXT.md"),
-                SessionActivityItem(kind: .message, text: "Pi: Gathering recent changes and project context for the review"),
+                SessionActivityItem(
+                    kind: .message, text: "Pi: Gathering recent changes and project context for the review"),
                 SessionActivityItem(kind: .status, text: "thoughts:", detailText: "More planning."),
-                SessionActivityItem(kind: .command, text: "bash: ls")
+                SessionActivityItem(kind: .command, text: "bash: ls"),
             ],
             isAgentTurnInProgress: true
         )
 
         let segments = try #require(structuredSessionPiFeedSegments(for: screen))
         guard case .userMessage = segments[0],
-              case .agentTurn(let turn) = segments[1],
-              case .standalone(let piItem) = segments[2] else {
+            case .agentTurn(let turn) = segments[1],
+            case .standalone(let piItem) = segments[2]
+        else {
             Issue.record("Expected user, open turn, then standalone interim Pi message")
             return
         }
@@ -166,7 +170,7 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
             transcript: "",
             activityItems: [
                 SessionActivityItem(kind: .message, text: "You: hi", prompt: SessionPrompt(text: "hi")),
-                SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Thinking through it.")
+                SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Thinking through it."),
             ],
             providerFacts: StructuredSessionProviderFacts(liveAssistantDraftText: "partial"),
             isAgentTurnInProgress: true
@@ -188,7 +192,7 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
             transcript: "",
             activityItems: [
                 SessionActivityItem(kind: .message, text: "You: hi", prompt: SessionPrompt(text: "hi")),
-                SessionActivityItem(kind: .message, text: "Pi: hey")
+                SessionActivityItem(kind: .message, text: "Pi: hey"),
             ]
         )
 
@@ -196,7 +200,8 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
         let segments = try #require(feed.feedSegments)
         #expect(segments.count == 2)
         guard case .userMessage = segments[0],
-              case .agentTurn = segments[1] else {
+            case .agentTurn = segments[1]
+        else {
             Issue.record("Expected user then agent turn segments")
             return
         }
@@ -242,22 +247,27 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
                     detailText: "The user asked for a code review on Nexus…"
                 ),
                 SessionActivityItem(kind: .command, text: "read: StructuredSessionPiFeedSegmentStyle.swift"),
-                SessionActivityItem(kind: .command, text: "read: NexusSessionPresentation/foo.swift")
+                SessionActivityItem(kind: .command, text: "read: NexusSessionPresentation/foo.swift"),
             ],
             isAgentTurnInProgress: false
         )
 
         let segments = try #require(structuredSessionPiFeedSegments(for: screen))
         #expect(segments.count == 2)
-        #expect(segments.contains { if case .standalone = $0 { return true }; return false } == false)
+        #expect(
+            segments.contains {
+                if case .standalone = $0 { return true }
+                return false
+            } == false)
         guard case .agentTurn(let turn) = segments[1] else {
             Issue.record("Expected single composite agent turn")
             return
         }
-        #expect(turn.reasoningStackItems.map(\.markdownBody) == [
-            "Early plan.",
-            "The user asked for a code review on Nexus…"
-        ])
+        #expect(
+            turn.reasoningStackItems.map(\.markdownBody) == [
+                "Early plan.",
+                "The user asked for a code review on Nexus…",
+            ])
         #expect(turn.toolStackItems.count == 4)
         #expect(turn.finalAnswer?.text == "Scope unclear — checking recent changes and repo state to focus the review.")
     }
@@ -272,14 +282,18 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
                 SessionActivityItem(kind: .command, text: "/bash ls"),
                 SessionActivityItem(kind: .progress, text: "Running bash: ls"),
                 SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Still working."),
-                SessionActivityItem(kind: .message, text: "Pi: done")
+                SessionActivityItem(kind: .message, text: "Pi: done"),
             ],
             isAgentTurnInProgress: false
         )
 
         let segments = try #require(structuredSessionPiFeedSegments(for: screen))
         #expect(segments.count == 2)
-        #expect(segments.contains { if case .standalone = $0 { return true }; return false } == false)
+        #expect(
+            segments.contains {
+                if case .standalone = $0 { return true }
+                return false
+            } == false)
         guard case .agentTurn(let turn) = segments[1] else {
             Issue.record("Expected composite agent turn")
             return
@@ -299,7 +313,7 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
                 SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Plan."),
                 SessionActivityItem(kind: .status, text: "Auto-compacting the session context"),
                 SessionActivityItem(kind: .command, text: "read: x.swift"),
-                SessionActivityItem(kind: .message, text: "Pi: done")
+                SessionActivityItem(kind: .message, text: "Pi: done"),
             ],
             isAgentTurnInProgress: false
         )
@@ -324,14 +338,18 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
                 SessionActivityItem(kind: .command, text: "/bash ls -la"),
                 SessionActivityItem(kind: .progress, text: "Running bash: ls -la"),
                 SessionActivityItem(kind: .message, text: "bash: total 8\ndrwxr-xr-x"),
-                SessionActivityItem(kind: .message, text: "Pi: listed")
+                SessionActivityItem(kind: .message, text: "Pi: listed"),
             ],
             isAgentTurnInProgress: false
         )
 
         let segments = try #require(structuredSessionPiFeedSegments(for: screen))
         #expect(segments.count == 2)
-        #expect(segments.contains { if case .standalone = $0 { return true }; return false } == false)
+        #expect(
+            segments.contains {
+                if case .standalone = $0 { return true }
+                return false
+            } == false)
         guard case .agentTurn(let turn) = segments[1] else {
             Issue.record("Expected agent turn")
             return
@@ -350,7 +368,7 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
                 SessionActivityItem(kind: .message, text: "You: go", prompt: SessionPrompt(text: "go")),
                 SessionActivityItem(kind: .message, text: "Pi: partial answer"),
                 SessionActivityItem(kind: .error, text: "Operation aborted"),
-                SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Recovering.")
+                SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Recovering."),
             ],
             isAgentTurnInProgress: false
         )
@@ -375,7 +393,7 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
                 SessionActivityItem(kind: .message, text: "You: /last", prompt: SessionPrompt(text: "/last")),
                 SessionActivityItem(kind: .command, text: "/get-last-assistant-text"),
                 SessionActivityItem(kind: .message, text: "Last assistant message: prior reply text"),
-                SessionActivityItem(kind: .message, text: "Pi: noted")
+                SessionActivityItem(kind: .message, text: "Pi: noted"),
             ],
             isAgentTurnInProgress: false
         )
@@ -399,14 +417,18 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
                 SessionActivityItem(kind: .message, text: "You: edit", prompt: SessionPrompt(text: "edit")),
                 SessionActivityItem(kind: .diff, text: "Edited ContentView.swift"),
                 SessionActivityItem(kind: .completion, text: "Turn complete"),
-                SessionActivityItem(kind: .message, text: "Pi: saved")
+                SessionActivityItem(kind: .message, text: "Pi: saved"),
             ],
             isAgentTurnInProgress: false
         )
 
         let segments = try #require(structuredSessionPiFeedSegments(for: screen))
         #expect(segments.count == 2)
-        #expect(segments.contains { if case .standalone = $0 { return true }; return false } == false)
+        #expect(
+            segments.contains {
+                if case .standalone = $0 { return true }
+                return false
+            } == false)
         guard case .agentTurn(let turn) = segments[1] else {
             Issue.record("Expected agent turn")
             return
@@ -425,7 +447,7 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
                 SessionActivityItem(kind: .command, text: "read: x.swift", detailText: "partial output"),
                 SessionActivityItem(kind: .error, text: "first failure"),
                 SessionActivityItem(kind: .error, text: "second failure"),
-                SessionActivityItem(kind: .message, text: "Pi: stopped")
+                SessionActivityItem(kind: .message, text: "Pi: stopped"),
             ],
             isAgentTurnInProgress: false
         )
@@ -450,7 +472,7 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
                 SessionActivityItem(kind: .error, text: "err-a"),
                 SessionActivityItem(kind: .command, text: "read: b.swift"),
                 SessionActivityItem(kind: .error, text: "err-b"),
-                SessionActivityItem(kind: .message, text: "Pi: ok")
+                SessionActivityItem(kind: .message, text: "Pi: ok"),
             ],
             isAgentTurnInProgress: false
         )
@@ -476,7 +498,7 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
                 SessionActivityItem(kind: .message, text: "Pi: still checking"),
                 SessionActivityItem(kind: .error, text: "ENOENT: skill.md"),
                 SessionActivityItem(kind: .command, text: "read: fallback.swift"),
-                SessionActivityItem(kind: .message, text: "Pi: done")
+                SessionActivityItem(kind: .message, text: "Pi: done"),
             ],
             isAgentTurnInProgress: false
         )
@@ -500,25 +522,32 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
                 SessionActivityItem(kind: .message, text: "You: review", prompt: SessionPrompt(text: "review")),
                 SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Scoping the review."),
                 SessionActivityItem(kind: .command, text: "read: first.swift"),
-                SessionActivityItem(kind: .message, text: "Pi: Scoping the review: repo layout, recent changes, and critical modules."),
+                SessionActivityItem(
+                    kind: .message, text: "Pi: Scoping the review: repo layout, recent changes, and critical modules."),
                 SessionActivityItem(kind: .error, text: "ENOENT: no such file or directory, access '/tmp/missing'"),
-                SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Let me dive into recent Pi/agent-turn changes."),
-                SessionActivityItem(kind: .command, text: "read: second.swift")
+                SessionActivityItem(
+                    kind: .status, text: "thoughts:", detailText: "Let me dive into recent Pi/agent-turn changes."),
+                SessionActivityItem(kind: .command, text: "read: second.swift"),
             ],
             isAgentTurnInProgress: false
         )
 
         let segments = try #require(structuredSessionPiFeedSegments(for: screen))
         #expect(segments.count == 2)
-        #expect(segments.contains { if case .standalone = $0 { return true }; return false } == false)
+        #expect(
+            segments.contains {
+                if case .standalone = $0 { return true }
+                return false
+            } == false)
         guard case .agentTurn(let turn) = segments[1] else {
             Issue.record("Expected single composite agent turn")
             return
         }
-        #expect(turn.reasoningStackItems.map(\.markdownBody) == [
-            "Scoping the review.",
-            "Let me dive into recent Pi/agent-turn changes."
-        ])
+        #expect(
+            turn.reasoningStackItems.map(\.markdownBody) == [
+                "Scoping the review.",
+                "Let me dive into recent Pi/agent-turn changes.",
+            ])
         #expect(turn.toolStackItems.count == 2)
         #expect(turn.toolStackItems[0].detailText?.contains("ENOENT") == true)
         #expect(turn.finalAnswer?.text == "Scoping the review: repo layout, recent changes, and critical modules.")
@@ -533,7 +562,7 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
                 SessionActivityItem(kind: .message, text: "You: go", prompt: SessionPrompt(text: "go")),
                 SessionActivityItem(kind: .message, text: "Pi: interim status"),
                 SessionActivityItem(kind: .command, text: "read: x"),
-                SessionActivityItem(kind: .message, text: "Pi: final report")
+                SessionActivityItem(kind: .message, text: "Pi: final report"),
             ],
             isAgentTurnInProgress: false
         )
@@ -545,7 +574,11 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
         }
         #expect(turn.toolStackItems.count == 1)
         #expect(turn.finalAnswer?.text == "final report")
-        #expect(segments.contains { if case .standalone = $0 { return true }; return false } == false)
+        #expect(
+            segments.contains {
+                if case .standalone = $0 { return true }
+                return false
+            } == false)
     }
 
     @Test func piAgentTurnRegressionThoughtsAndCommandRowsNeverLeakAsStandaloneSegments() throws {
@@ -557,13 +590,17 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
                 SessionActivityItem(kind: .message, text: "You: ship it", prompt: SessionPrompt(text: "ship it")),
                 SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Checklist."),
                 SessionActivityItem(kind: .command, text: "read: AGENTS.md"),
-                SessionActivityItem(kind: .message, text: "Pi: Shipped.")
+                SessionActivityItem(kind: .message, text: "Pi: Shipped."),
             ]
         )
 
         let segments = try #require(structuredSessionPiFeedSegments(for: screen))
         #expect(segments.count == 2)
-        #expect(segments.contains { if case .standalone = $0 { return true }; return false } == false)
+        #expect(
+            segments.contains {
+                if case .standalone = $0 { return true }
+                return false
+            } == false)
         guard case .agentTurn(let turn) = segments[1] else {
             Issue.record("Expected composite agent turn")
             return
@@ -584,7 +621,7 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
                 SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Plan."),
                 SessionActivityItem(kind: .command, text: "bash: true"),
                 SessionActivityItem(kind: .command, text: "read: README.md", detailText: "{\"path\":\"README.md\"}"),
-                SessionActivityItem(kind: .message, text: "Pi: done")
+                SessionActivityItem(kind: .message, text: "Pi: done"),
             ]
         )
 
@@ -619,16 +656,17 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
                     id: retryID,
                     kind: .status,
                     text: "Retrying after rate limit"
-                )
+                ),
             ]
         )
 
         let segments = try #require(structuredSessionPiFeedSegments(for: screen))
         #expect(segments.count == 4)
         guard case .userMessage = segments[0],
-              case .agentTurn = segments[1],
-              case .standalone(let approval) = segments[2],
-              case .standalone(let retry) = segments[3] else {
+            case .agentTurn = segments[1],
+            case .standalone(let approval) = segments[2],
+            case .standalone(let retry) = segments[3]
+        else {
             Issue.record("Expected user, agent turn, then outside-stack standalone rows")
             return
         }
@@ -648,7 +686,7 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
                 SessionActivityItem(kind: .message, text: "Pi: first"),
                 SessionActivityItem(kind: .message, text: "You: two", prompt: SessionPrompt(text: "two")),
                 SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Again."),
-                SessionActivityItem(kind: .message, text: "Pi: second")
+                SessionActivityItem(kind: .message, text: "Pi: second"),
             ]
         )
 
@@ -671,7 +709,7 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
             transcript: "",
             activityItems: [
                 SessionActivityItem(kind: .message, text: "You: wait", prompt: SessionPrompt(text: "wait")),
-                SessionActivityItem(kind: .command, text: "bash: sleep 1")
+                SessionActivityItem(kind: .command, text: "bash: sleep 1"),
             ],
             providerFacts: StructuredSessionProviderFacts(liveAssistantDraftText: nil),
             isAgentTurnInProgress: true

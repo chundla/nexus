@@ -3,9 +3,9 @@ import MarkdownUI
 import SwiftUI
 
 #if canImport(AppKit)
-import AppKit
+    import AppKit
 #elseif canImport(UIKit)
-import UIKit
+    import UIKit
 #endif
 
 /// Dedicated full assistant response reader for structured Session feed rows (#226, #228).
@@ -17,8 +17,10 @@ public struct StructuredSessionAssistantFullResponseReader: View {
 
     public init(
         markdown: String,
-        codeBlockPolicy: StructuredSessionAssistantFullResponseCodeBlockPolicy = structuredSessionAssistantFullResponseCodeBlockPolicy(),
-        displayMathPolicy: StructuredSessionAssistantFullResponseDisplayMathPolicy = structuredSessionAssistantFullResponseDisplayMathPolicy()
+        codeBlockPolicy: StructuredSessionAssistantFullResponseCodeBlockPolicy =
+            structuredSessionAssistantFullResponseCodeBlockPolicy(),
+        displayMathPolicy: StructuredSessionAssistantFullResponseDisplayMathPolicy =
+            structuredSessionAssistantFullResponseDisplayMathPolicy()
     ) {
         self.markdown = markdown
         self.codeBlockPolicy = codeBlockPolicy
@@ -28,7 +30,11 @@ public struct StructuredSessionAssistantFullResponseReader: View {
     public var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(structuredSessionAssistantFullResponseReaderSegments(in: markdown, policy: displayMathPolicy).enumerated()), id: \.offset) { _, segment in
+                ForEach(
+                    Array(
+                        structuredSessionAssistantFullResponseReaderSegments(in: markdown, policy: displayMathPolicy)
+                            .enumerated()), id: \.offset
+                ) { _, segment in
                     if let chunk = segment.markdownChunk {
                         Markdown(chunk)
                             .markdownBlockStyle(\.codeBlock) { configuration in
@@ -81,7 +87,8 @@ public struct StructuredSessionAssistantFullResponseReader: View {
             Group {
                 if policy.usesHorizontalScrolling {
                     ScrollView(.horizontal, showsIndicators: true) {
-                        structuredSessionAssistantFullResponseCodeBlockLabel(configuration: configuration, policy: policy)
+                        structuredSessionAssistantFullResponseCodeBlockLabel(
+                            configuration: configuration, policy: policy)
                     }
                 } else {
                     structuredSessionAssistantFullResponseCodeBlockLabel(configuration: configuration, policy: policy)
@@ -120,18 +127,18 @@ public struct StructuredSessionAssistantFullResponseReader: View {
 @available(macOS 12.0, iOS 15.0, *)
 private func structuredSessionAssistantFullResponseCodeBlockBackgroundColor() -> Color {
     #if os(iOS)
-    Color(uiColor: .secondarySystemBackground)
+        Color(uiColor: .secondarySystemBackground)
     #else
-    Color(nsColor: .controlBackgroundColor)
+        Color(nsColor: .controlBackgroundColor)
     #endif
 }
 
 @available(macOS 12.0, iOS 15.0, *)
 private func structuredSessionAssistantFullResponseCopyToPasteboard(_ text: String) {
     #if os(macOS)
-    NSPasteboard.general.clearContents()
-    NSPasteboard.general.setString(text, forType: .string)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     #elseif os(iOS)
-    UIPasteboard.general.string = text
+        UIPasteboard.general.string = text
     #endif
 }

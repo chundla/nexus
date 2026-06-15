@@ -117,7 +117,7 @@ private func structuredSessionFeedMarkdownInlineSegments(
         }
 
         if bang > index {
-            segments.append(.text(String(line[index ..< bang])))
+            segments.append(.text(String(line[index..<bang])))
         }
 
         let bracketAfterBang = line.index(after: bang)
@@ -127,8 +127,9 @@ private func structuredSessionFeedMarkdownInlineSegments(
         }
         let altStart = line.index(after: bracketAfterBang)
         guard let altEnd = line[altStart...].firstIndex(of: "]"),
-              line.index(after: altEnd) < line.endIndex,
-              line[line.index(after: altEnd)] == "(" else {
+            line.index(after: altEnd) < line.endIndex,
+            line[line.index(after: altEnd)] == "("
+        else {
             segments.append(.text(String(line[altStart...])))
             break
         }
@@ -143,8 +144,8 @@ private func structuredSessionFeedMarkdownInlineSegments(
             break
         }
 
-        let alt = String(line[altStart ..< altEnd])
-        let url = String(line[urlStart ..< urlEnd]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let alt = String(line[altStart..<altEnd])
+        let url = String(line[urlStart..<urlEnd]).trimmingCharacters(in: .whitespacesAndNewlines)
         if url.isEmpty == false {
             segments.append(.image(StructuredSessionFeedMarkdownImageReference(altText: alt, urlString: url)))
             index = line.index(after: urlEnd)

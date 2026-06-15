@@ -1,6 +1,7 @@
 import NexusSessionPresentation
 import SwiftUI
 import Testing
+
 @testable import nexus
 
 @MainActor
@@ -207,7 +208,8 @@ struct StructuredSessionFeedScrollSupportTests {
         #expect(StructuredSessionFeedScrollSupport.scrollToBottomInvocationCountForTesting == 0)
     }
 
-    @Test func applyStructuredSessionFeedScrollSnapshotTransitionSkipsDraftGrowthScrollWhenScrollPositionUsesBottomEdge() {
+    @Test
+    func applyStructuredSessionFeedScrollSnapshotTransitionSkipsDraftGrowthScrollWhenScrollPositionUsesBottomEdge() {
         StructuredSessionFeedScrollSupport.resetScrollToBottomInvocationCountForTesting()
         var scrollPosition = ScrollPosition(edge: .bottom)
         let binding = Binding(get: { scrollPosition }, set: { scrollPosition = $0 })

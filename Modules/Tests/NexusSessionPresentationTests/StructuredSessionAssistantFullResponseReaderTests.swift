@@ -1,6 +1,7 @@
 import Foundation
-@testable import NexusSessionPresentation
 import Testing
+
+@testable import NexusSessionPresentation
 
 struct StructuredSessionAssistantFullResponseReaderTests {
     @Test func structuredSessionAssistantFullResponseCodeBlockPolicyEnablesCopyAndHorizontalScrollOnBothPlatforms() {
@@ -24,17 +25,17 @@ struct StructuredSessionAssistantFullResponseReaderTests {
 
     @Test func structuredSessionAssistantFullResponseExtractsFencedCodeBlocksForCopyActions() {
         let markdown = """
-        Intro
+            Intro
 
-        ```swift
-        let x = 1
-        print(x)
-        ```
+            ```swift
+            let x = 1
+            print(x)
+            ```
 
-        ```bash
-        git status
-        ```
-        """
+            ```bash
+            git status
+            ```
+            """
 
         let blocks = structuredSessionAssistantFullResponseFencedCodeBlocks(in: markdown)
 
@@ -55,14 +56,14 @@ struct StructuredSessionAssistantFullResponseReaderTests {
 
     @Test func structuredSessionAssistantFullResponseExtractsDisplayMathBlocksFromDoubleDollarFences() {
         let markdown = """
-        Before
+            Before
 
-        $$
-        E = mc^2
-        $$
+            $$
+            E = mc^2
+            $$
 
-        After
-        """
+            After
+            """
 
         let blocks = structuredSessionAssistantFullResponseDisplayMathBlocks(in: markdown)
 
@@ -73,10 +74,10 @@ struct StructuredSessionAssistantFullResponseReaderTests {
 
     @Test func structuredSessionAssistantFullResponseExtractsDisplayMathFromBracketDelimiters() {
         let markdown = """
-        \\[
-        \\int_0^1 x\\,dx
-        \\]
-        """
+            \\[
+            \\int_0^1 x\\,dx
+            \\]
+            """
 
         let blocks = structuredSessionAssistantFullResponseDisplayMathBlocks(in: markdown)
 
@@ -87,14 +88,14 @@ struct StructuredSessionAssistantFullResponseReaderTests {
 
     @Test func structuredSessionAssistantFullResponseSegmentsInterleaveMarkdownAndDisplayMath() {
         let markdown = """
-        ## Result
+            ## Result
 
-        $$
-        a^2 + b^2 = c^2
-        $$
+            $$
+            a^2 + b^2 = c^2
+            $$
 
-        Done.
-        """
+            Done.
+            """
 
         let segments = structuredSessionAssistantFullResponseReaderSegments(in: markdown)
 
@@ -106,12 +107,12 @@ struct StructuredSessionAssistantFullResponseReaderTests {
 
     @Test func structuredSessionFeedPlainFallbackBypassesMarkdownParseForDisplayMath() {
         let markdown = """
-        Summary
+            Summary
 
-        $$
-        \\sum_{i=1}^n i
-        $$
-        """
+            $$
+            \\sum_{i=1}^n i
+            $$
+            """
 
         #expect(structuredSessionFeedDisplayMathUsesPlainFallback(for: markdown))
 
@@ -132,12 +133,12 @@ struct StructuredSessionAssistantFullResponseReaderTests {
 
     @Test func structuredSessionAssistantFullResponseIgnoresDisplayMathInsideFencedCode() {
         let markdown = """
-        ```text
-        $$
-        not math
-        $$
-        ```
-        """
+            ```text
+            $$
+            not math
+            $$
+            ```
+            """
 
         let blocks = structuredSessionAssistantFullResponseDisplayMathBlocks(in: markdown)
         #expect(blocks.isEmpty)

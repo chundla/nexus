@@ -28,11 +28,14 @@ func structuredSessionCodexFeedSegments(
         let item = activityItems[index]
 
         if structuredSessionCodexFeedSegmentIsPromptAnchoredUserMessage(item),
-           let userBody = structuredSessionCodexUserMessageBody(from: item) {
-            segments.append(.userMessage(StructuredSessionFeedUserMessageSegment(
-                activityItemID: item.id,
-                text: userBody
-            )))
+            let userBody = structuredSessionCodexUserMessageBody(from: item)
+        {
+            segments.append(
+                .userMessage(
+                    StructuredSessionFeedUserMessageSegment(
+                        activityItemID: item.id,
+                        text: userBody
+                    )))
             index += 1
 
             let turnSlice = structuredSessionCodexAgentTurnActivitySlice(
@@ -91,11 +94,14 @@ private func structuredSessionCodexAgentTurnActivitySlice(
 
         if structuredSessionCodexFeedSegmentIsThoughtsStatus(item) {
             if let detail = item.detailText?.trimmingCharacters(in: .whitespacesAndNewlines),
-               detail.isEmpty == false {
-                stackItems.append(.reasoning(StructuredSessionFeedAgentTurnReasoningSegment(
-                    activityItemID: item.id,
-                    markdownBody: detail
-                )))
+                detail.isEmpty == false
+            {
+                stackItems.append(
+                    .reasoning(
+                        StructuredSessionFeedAgentTurnReasoningSegment(
+                            activityItemID: item.id,
+                            markdownBody: detail
+                        )))
             }
             consumedAny = true
             cursor += 1
@@ -103,10 +109,12 @@ private func structuredSessionCodexAgentTurnActivitySlice(
         }
 
         if let thinkingBody = structuredSessionCodexThinkingStreamBody(from: item) {
-            stackItems.append(.reasoning(StructuredSessionFeedAgentTurnReasoningSegment(
-                activityItemID: item.id,
-                markdownBody: thinkingBody
-            )))
+            stackItems.append(
+                .reasoning(
+                    StructuredSessionFeedAgentTurnReasoningSegment(
+                        activityItemID: item.id,
+                        markdownBody: thinkingBody
+                    )))
             consumedAny = true
             cursor += 1
             continue
@@ -132,7 +140,8 @@ private func structuredSessionCodexAgentTurnActivitySlice(
         }
 
         if let toolOutput = structuredSessionCodexToolStreamOutputBody(from: item.text),
-           let toolIndex = openToolIndex {
+            let toolIndex = openToolIndex
+        {
             var tool = tools[toolIndex]
             tool = StructuredSessionFeedAgentTurnToolSegment(
                 activityItemID: tool.activityItemID,
@@ -149,7 +158,8 @@ private func structuredSessionCodexAgentTurnActivitySlice(
 
         if structuredSessionCodexFeedSegmentIsPrimaryCodexAssistantMessage(item) {
             if isAgentTurnInProgress == false,
-               let body = structuredSessionCodexPrimaryAssistantBody(from: item.text) {
+                let body = structuredSessionCodexPrimaryAssistantBody(from: item.text)
+            {
                 finalAnswer = StructuredSessionFeedAgentTurnFinalAnswerSegment(text: body, isStreaming: false)
             }
             consumedAny = true
@@ -196,7 +206,8 @@ private func structuredSessionCodexUserMessageBody(from item: SessionActivityIte
         return text.isEmpty ? nil : text
     }
     guard let split = structuredSessionCodexConversationPrefixSplit(for: item.text),
-          split.label.caseInsensitiveCompare("you") == .orderedSame else {
+        split.label.caseInsensitiveCompare("you") == .orderedSame
+    else {
         return nil
     }
     let body = split.body.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -226,7 +237,8 @@ private func structuredSessionCodexThinkingStreamBody(from item: SessionActivity
         return nil
     }
     guard let split = structuredSessionCodexConversationPrefixSplit(for: item.text),
-          split.label.caseInsensitiveCompare("thinking") == .orderedSame else {
+        split.label.caseInsensitiveCompare("thinking") == .orderedSame
+    else {
         return nil
     }
     let body = split.body.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -279,8 +291,9 @@ private func structuredSessionCodexToolStreamOutputBody(from text: String) -> St
     }
     let label = split.label.trimmingCharacters(in: .whitespacesAndNewlines)
     guard label.caseInsensitiveCompare("Codex") != .orderedSame,
-          label.caseInsensitiveCompare("you") != .orderedSame,
-          label.caseInsensitiveCompare("thinking") != .orderedSame else {
+        label.caseInsensitiveCompare("you") != .orderedSame,
+        label.caseInsensitiveCompare("thinking") != .orderedSame
+    else {
         return nil
     }
     let body = split.body.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -295,8 +308,9 @@ private func structuredSessionCodexConversationPrefixSplit(for text: String) -> 
     let label = String(text[..<separatorRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
     let body = String(text[separatorRange.upperBound...])
     guard label.isEmpty == false,
-          body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
-          label.count <= 32 else {
+        body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
+        label.count <= 32
+    else {
         return nil
     }
     return (label, body)

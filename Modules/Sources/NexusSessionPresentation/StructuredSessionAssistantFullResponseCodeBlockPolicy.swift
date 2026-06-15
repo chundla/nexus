@@ -33,7 +33,9 @@ public struct StructuredSessionAssistantFullResponseCodeBlockPolicy: Equatable, 
     }
 }
 
-public func structuredSessionAssistantFullResponseCodeBlockPolicy() -> StructuredSessionAssistantFullResponseCodeBlockPolicy {
+public func structuredSessionAssistantFullResponseCodeBlockPolicy()
+    -> StructuredSessionAssistantFullResponseCodeBlockPolicy
+{
     StructuredSessionAssistantFullResponseCodeBlockPolicy(
         showsCopyAction: true,
         enablesPerBlockTextSelection: true,

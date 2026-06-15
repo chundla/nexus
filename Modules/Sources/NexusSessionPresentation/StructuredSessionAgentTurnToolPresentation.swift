@@ -21,7 +21,8 @@ public func structuredSessionAgentTurnToolCollapsedCommandLine(callPreview: Stri
     }
 
     if let space = trimmed.firstIndex(of: " "),
-       trimmed[..<space].contains(":") == false {
+        trimmed[..<space].contains(":") == false
+    {
         let verb = String(trimmed[..<space])
         let remainder = String(trimmed[trimmed.index(after: space)...]).trimmingCharacters(in: .whitespacesAndNewlines)
         if remainder.isEmpty == false {
@@ -71,7 +72,8 @@ public func structuredSessionAgentTurnReasoningCollapsedPreview(markdownBody: St
     guard trimmed.isEmpty == false else {
         return ""
     }
-    let paragraphs = trimmed
+    let paragraphs =
+        trimmed
         .components(separatedBy: "\n\n")
         .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
         .filter { $0.isEmpty == false }

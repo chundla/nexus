@@ -48,8 +48,9 @@ final class TerminalViewportResizeCoordinator {
             return
         }
         guard currentSize() != size,
-              pendingSize != size,
-              lastRequestedSize != size else {
+            pendingSize != size,
+            lastRequestedSize != size
+        else {
             return
         }
 
@@ -79,9 +80,10 @@ final class TerminalViewportResizeCoordinator {
 
         while true {
             guard pendingSize != nil,
-                  let currentSizeProvider,
-                  let submitAction,
-                  let errorHandler else {
+                let currentSizeProvider,
+                let submitAction,
+                let errorHandler
+            else {
                 return
             }
 
@@ -97,7 +99,8 @@ final class TerminalViewportResizeCoordinator {
             syncLastRequestedSize(currentSize: currentSizeProvider)
 
             guard currentSizeProvider() != targetSize,
-                  lastRequestedSize != targetSize else {
+                lastRequestedSize != targetSize
+            else {
                 continue
             }
 
@@ -116,7 +119,8 @@ final class TerminalViewportResizeCoordinator {
 
     private func syncLastRequestedSize(currentSize: CurrentSizeProvider) {
         guard let lastRequestedSize,
-              currentSize() != lastRequestedSize else {
+            currentSize() != lastRequestedSize
+        else {
             return
         }
 

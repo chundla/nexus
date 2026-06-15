@@ -1,6 +1,7 @@
 import Foundation
 import NexusSessionPresentation
 import Testing
+
 @testable import nexus
 
 @MainActor
@@ -17,12 +18,14 @@ struct RemoteClientProfilingFixtureTests {
         #expect(model.availability(for: pairedMac) == .available)
 
         await model.refreshActivePairedMacCatalog()
-        let presentation = try #require(model.workspaceBrowsePresentation(showingGroupsOnly: false, selectedGroupID: nil as UUID?))
+        let presentation = try #require(
+            model.workspaceBrowsePresentation(showingGroupsOnly: false, selectedGroupID: nil as UUID?))
 
-        #expect(presentation.workspaceOverviews.map { $0.workspace.name } == [
-            "Baseline API",
-            "Baseline iPhone"
-        ])
+        #expect(
+            presentation.workspaceOverviews.map { $0.workspace.name } == [
+                "Baseline API",
+                "Baseline iPhone",
+            ])
     }
 
     @Test func bootstrapStreamsFocusedSessionUpdatesForInvalidationProfiling() async throws {
@@ -38,14 +41,14 @@ struct RemoteClientProfilingFixtureTests {
 
         await model.focusRemoteSession(sessionID: session.id, workspaceID: session.workspaceID)
 
-        for _ in 0 ..< 20 where model.focusedSessionScreen == nil {
+        for _ in 0..<20 where model.focusedSessionScreen == nil {
             try await Task.sleep(nanoseconds: 50_000_000)
         }
 
         let initialScreen = try #require(model.focusedSessionScreen)
         #expect(initialScreen.transcript.contains("Pi shared Session stream connected"))
 
-        for _ in 0 ..< 30 where model.focusedSessionScreen?.transcript == initialScreen.transcript {
+        for _ in 0..<30 where model.focusedSessionScreen?.transcript == initialScreen.transcript {
             try await Task.sleep(nanoseconds: 50_000_000)
         }
 
@@ -68,7 +71,7 @@ struct RemoteClientProfilingFixtureTests {
 
         await model.focusRemoteSession(sessionID: session.id, workspaceID: session.workspaceID)
 
-        for _ in 0 ..< 20 where model.focusedStructuredSessionDiagnosticSnapshot == nil {
+        for _ in 0..<20 where model.focusedStructuredSessionDiagnosticSnapshot == nil {
             try await Task.sleep(nanoseconds: 50_000_000)
         }
 
@@ -76,13 +79,18 @@ struct RemoteClientProfilingFixtureTests {
         #expect(initialSnapshot.observation.isAgentTurnInProgress)
         #expect(initialSnapshot.presentation?.hasThinkingIndicator == true)
 
-        for _ in 0 ..< 30 where model.focusedStructuredSessionDiagnosticSnapshot?.observation.lastActivityItemText == initialSnapshot.observation.lastActivityItemText {
+        for _ in 0..<30
+        where model.focusedStructuredSessionDiagnosticSnapshot?.observation.lastActivityItemText
+            == initialSnapshot.observation.lastActivityItemText
+        {
             try await Task.sleep(nanoseconds: 50_000_000)
         }
 
         let updatedSnapshot = try #require(model.focusedStructuredSessionDiagnosticSnapshot)
-        #expect(updatedSnapshot.observation.transcriptCharacterCount > initialSnapshot.observation.transcriptCharacterCount)
-        #expect(updatedSnapshot.presentation?.activityRowCount ?? 0 > initialSnapshot.presentation?.activityRowCount ?? 0)
+        #expect(
+            updatedSnapshot.observation.transcriptCharacterCount > initialSnapshot.observation.transcriptCharacterCount)
+        #expect(
+            updatedSnapshot.presentation?.activityRowCount ?? 0 > initialSnapshot.presentation?.activityRowCount ?? 0)
         #expect(updatedSnapshot.presentation?.hasThinkingIndicator == true)
         #expect(updatedSnapshot.observation.lastActivityItemText?.contains("Pi: thinking step") == true)
     }
@@ -99,7 +107,7 @@ struct RemoteClientProfilingFixtureTests {
         )
 
         await model.focusRemoteSession(sessionID: session.id, workspaceID: session.workspaceID)
-        for _ in 0 ..< 20 where model.focusedStructuredSessionDiagnosticSnapshot == nil {
+        for _ in 0..<20 where model.focusedStructuredSessionDiagnosticSnapshot == nil {
             try await Task.sleep(nanoseconds: 50_000_000)
         }
 
@@ -126,7 +134,7 @@ struct RemoteClientProfilingFixtureTests {
         )
 
         await model.focusRemoteSession(sessionID: session.id, workspaceID: session.workspaceID)
-        for _ in 0 ..< 40 where model.focusedStructuredSessionPresentation == nil {
+        for _ in 0..<40 where model.focusedStructuredSessionPresentation == nil {
             try await Task.sleep(nanoseconds: 25_000_000)
         }
 
@@ -138,7 +146,8 @@ struct RemoteClientProfilingFixtureTests {
         #expect(initialPresentation.feed.thinkingIndicator == StructuredSessionThinkingIndicator(text: "Thinking…"))
         #expect(initialRow.conversationPresentation?.isStreaming == true)
 
-        for _ in 0 ..< 40 where model.focusedStructuredSessionPresentation?.feed.activityRows.last?.text == initialRow.text {
+        for _ in 0..<40
+        where model.focusedStructuredSessionPresentation?.feed.activityRows.last?.text == initialRow.text {
             try await Task.sleep(nanoseconds: 25_000_000)
         }
 
@@ -147,7 +156,8 @@ struct RemoteClientProfilingFixtureTests {
         #expect(expandedDraftRow.conversationPresentation?.isStreaming == true)
         #expect(expandedDraftRow.text != initialRow.text)
 
-        for _ in 0 ..< 80 where model.focusedStructuredSessionDiagnosticSnapshot?.observation.isAgentTurnInProgress != false {
+        for _ in 0..<80
+        where model.focusedStructuredSessionDiagnosticSnapshot?.observation.isAgentTurnInProgress != false {
             try await Task.sleep(nanoseconds: 25_000_000)
         }
 
@@ -164,15 +174,19 @@ struct RemoteClientProfilingFixtureTests {
         let dwellStableChrome = model.focusedStructuredSessionChromePresentation
         let dwellStableRowID = finalizedRow.id
         var dwellSamplesChecked = 0
-        for _ in 0 ..< 8 {
+        for _ in 0..<8 {
             try await Task.sleep(nanoseconds: 35_000_000)
             if let snap = model.focusedStructuredSessionDiagnosticSnapshot,
-               snap.observation.isAgentTurnInProgress {
+                snap.observation.isAgentTurnInProgress
+            {
                 break
             }
             if let p = model.focusedStructuredSessionPresentation {
                 #expect(p.feed.activityRows.last?.id == dwellStableRowID, "rows must stay stable in dwell")
-                #expect(p == dwellStablePresentation, "focusedStructuredSessionPresentation (incl. autoScrollTrigger + activityRowChunks) must not mutate on providerFacts/diagnostic/turn-progress churn when activityItems unchanged (#208) on Remote Client path")
+                #expect(
+                    p == dwellStablePresentation,
+                    "focusedStructuredSessionPresentation (incl. autoScrollTrigger + activityRowChunks) must not mutate on providerFacts/diagnostic/turn-progress churn when activityItems unchanged (#208) on Remote Client path"
+                )
             }
             if let ch = model.focusedStructuredSessionChromePresentation, let stableCh = dwellStableChrome {
                 #expect(ch.session == stableCh.session)
@@ -187,7 +201,8 @@ struct RemoteClientProfilingFixtureTests {
         // After dwell sampling (and any remaining dwell ticks), ensure the final-output latency sample is visible
         // in presentation, then capture and assert its fields. This mirrors the original Remote Client test intent
         // while keeping the #208 stability check in the correct temporal window.
-        for _ in 0 ..< 40 where model.focusedStructuredSessionDiagnosticSnapshot?.finalOutputLatency?.isVisibleInPresentation != true {
+        for _ in 0..<40
+        where model.focusedStructuredSessionDiagnosticSnapshot?.finalOutputLatency?.isVisibleInPresentation != true {
             try await Task.sleep(nanoseconds: 25_000_000)
         }
 
@@ -198,16 +213,18 @@ struct RemoteClientProfilingFixtureTests {
         #expect(finalizedRow.conversationPresentation?.isStreaming == false)
         #expect(finalizedPresentation.feed.thinkingIndicator == nil)
         #expect(finalizedPresentation.feed.activityRows.count == initialPresentation.feed.activityRows.count + 1)
-        #expect(finalizedPresentation.feed.activityRows.filter { $0.title == "Command" }.count == initialCommandCount + 1)
+        #expect(
+            finalizedPresentation.feed.activityRows.filter { $0.title == "Command" }.count == initialCommandCount + 1)
         #expect(finalOutputLatency.providerRuntimeLatencyMilliseconds > 0)
         #expect(finalOutputLatency.serviceObservationLatencyMilliseconds != nil)
 
-        for _ in 0 ..< 80 {
+        for _ in 0..<80 {
             if let snapshot = model.focusedStructuredSessionDiagnosticSnapshot,
-               let row = model.focusedStructuredSessionPresentation?.feed.activityRows.last,
-               snapshot.observation.isAgentTurnInProgress,
-               row.id != initialRow.id,
-               row.conversationPresentation?.isStreaming == true {
+                let row = model.focusedStructuredSessionPresentation?.feed.activityRows.last,
+                snapshot.observation.isAgentTurnInProgress,
+                row.id != initialRow.id,
+                row.conversationPresentation?.isStreaming == true
+            {
                 break
             }
             try await Task.sleep(nanoseconds: 25_000_000)

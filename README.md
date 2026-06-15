@@ -43,6 +43,16 @@ xcodebuild test -scheme nexus -project nexus.xcodeproj -destination 'platform=ma
 swift test --package-path Modules
 ```
 
+## Swift lint (CI)
+
+Requires [swift-format](https://github.com/swiftlang/swift-format) and [SwiftLint](https://github.com/realm/SwiftLint) (`brew install swift-format swiftlint`).
+
+```bash
+./scripts/lint-swift.sh
+```
+
+Enforces **swift-format** on `Modules/`, `nexus/`, and test targets, and SwiftLint **`force_try`** only.
+
 ## Repo layout
 
 - `nexus/` — multiplatform app (macOS UI + iOS **Remote Client**)

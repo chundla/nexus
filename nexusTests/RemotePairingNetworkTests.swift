@@ -1,8 +1,9 @@
 import Foundation
 import NexusDomain
 import NexusIPC
-@testable import NexusService
 import Testing
+
+@testable import NexusService
 @testable import nexus
 
 @MainActor
@@ -122,7 +123,8 @@ struct RemotePairingNetworkTests {
         #expect(claudeCard.capabilities.launchDefaultSession.disabledReason == claudeCard.health.summary)
     }
 
-    @Test func fetchesCatalogWithPlaceholderOverviewsBeforeSlowHealthChecksTimeoutOverDedicatedNetworkAPI() async throws {
+    @Test func fetchesCatalogWithPlaceholderOverviewsBeforeSlowHealthChecksTimeoutOverDedicatedNetworkAPI() async throws
+    {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -134,9 +136,13 @@ struct RemotePairingNetworkTests {
             rootURL: rootURL,
             providerHealthEvaluator: AvailableRemotePairingProviderHealthEvaluator(),
             providerModuleRegistry: ProviderModuleRegistry(
-                modules: Dictionary(uniqueKeysWithValues: ProviderID.allCases.map { providerID in
-                    (providerID, SlowCatalogReadProviderModule(providerID: providerID, delayNanoseconds: 1_500_000_000))
-                })
+                modules: Dictionary(
+                    uniqueKeysWithValues: ProviderID.allCases.map { providerID in
+                        (
+                            providerID,
+                            SlowCatalogReadProviderModule(providerID: providerID, delayNanoseconds: 1_500_000_000)
+                        )
+                    })
             )
         )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -409,8 +415,10 @@ struct RemotePairingNetworkTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(stdout: "Usage: codex\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(
+                        stdout: "1.2.3\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
+                        stdout: "Usage: codex\n"),
                 ])
             )
         )
@@ -512,8 +520,10 @@ struct RemotePairingNetworkTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(stdout: "Usage: codex\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(
+                        stdout: "1.2.3\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
+                        stdout: "Usage: codex\n"),
                 ])
             )
         )
@@ -568,8 +578,10 @@ struct RemotePairingNetworkTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(stdout: "Usage: codex\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(
+                        stdout: "1.2.3\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
+                        stdout: "Usage: codex\n"),
                 ])
             )
         )
@@ -619,7 +631,7 @@ struct RemotePairingNetworkTests {
                     stdoutLines: [
                         #"{"type":"status","text":"Bob turn started"}"#,
                         #"{"type":"message","text":"Hello from Bob"}"#,
-                        #"{"type":"completion","text":"Bob turn complete"}"#
+                        #"{"type":"completion","text":"Bob turn complete"}"#,
                     ],
                     terminationStatus: 0
                 )
@@ -630,8 +642,12 @@ struct RemotePairingNetworkTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: RemotePairingTestExecutableResolver(executables: ["bob": "/tmp/fake-bob"]),
                 commandRunner: RemotePairingTestCommandRunner(results: [
-                    RemotePairingTestCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--version'"]): .success(stdout: "3.4.5\n"),
-                    RemotePairingTestCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--list-sessions'"]): .success(stdout: "[]\n")
+                    RemotePairingTestCommandRunner.Invocation(
+                        executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--version'"]): .success(
+                            stdout: "3.4.5\n"),
+                    RemotePairingTestCommandRunner.Invocation(
+                        executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--list-sessions'"]): .success(
+                            stdout: "[]\n"),
                 ]),
                 localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
             ),
@@ -697,7 +713,8 @@ struct RemotePairingNetworkTests {
         }
 
         _ = try await remoteClient.takeSessionControl(for: pairedMac, sessionID: session.id, columns: 44, rows: 12)
-        let responseScreen = try await remoteClient.sendSessionInput(for: pairedMac, sessionID: session.id, text: "Ship it")
+        let responseScreen = try await remoteClient.sendSessionInput(
+            for: pairedMac, sessionID: session.id, text: "Ship it")
         let observedScreen = try await waitForObservedScreen {
             observedScreens.last { $0.activityItems.contains(where: { $0.text == "Bob turn complete" }) }
         }
@@ -705,13 +722,14 @@ struct RemotePairingNetworkTests {
 
         #expect(responseScreen.session.id == session.id)
         #expect(responseScreen.primarySurface == .structuredActivityFeed)
-        #expect(responseScreen.activityItems.map(\.text) == [
-            "IBM Bob Session ready. Send a prompt to start IBM Bob.",
-            "You: Ship it",
-            "Bob turn started",
-            "Hello from Bob",
-            "Bob turn complete"
-        ])
+        #expect(
+            responseScreen.activityItems.map(\.text) == [
+                "IBM Bob Session ready. Send a prompt to start IBM Bob.",
+                "You: Ship it",
+                "Bob turn started",
+                "Hello from Bob",
+                "Bob turn complete",
+            ])
         #expect(observedScreen.session.id == session.id)
         #expect(observedScreen.activityItems.map(\.text) == responseScreen.activityItems.map(\.text))
         #expect(fetchedScreen == responseScreen)
@@ -785,8 +803,10 @@ struct RemotePairingNetworkTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(stdout: "Usage: codex\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(
+                        stdout: "1.2.3\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
+                        stdout: "Usage: codex\n"),
                 ])
             ),
             sessionRuntimeManager: StructuredPromptSessionRuntimeManager(
@@ -830,11 +850,12 @@ struct RemotePairingNetworkTests {
 
         #expect(responseScreen.controller == .pairedDevice(try #require(pairedMac.pairedDeviceID)))
         #expect(responseScreen.primarySurface == .structuredActivityFeed)
-        #expect(responseScreen.activityItems.map(\.text) == [
-            "Codex shared Session stream connected",
-            "Approval Request: deploy --prod",
-            "Approved: deploy --prod"
-        ])
+        #expect(
+            responseScreen.activityItems.map(\.text) == [
+                "Codex shared Session stream connected",
+                "Approval Request: deploy --prod",
+                "Approved: deploy --prod",
+            ])
         #expect(responseScreen.approvalRequests.first?.state == .approved)
         #expect(fetchedScreen == responseScreen)
     }
@@ -857,8 +878,10 @@ struct RemotePairingNetworkTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(stdout: "Usage: codex\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(
+                        stdout: "1.2.3\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
+                        stdout: "Usage: codex\n"),
                 ])
             ),
             sessionRuntimeManager: StructuredPromptSessionRuntimeManager(
@@ -900,7 +923,8 @@ struct RemotePairingNetworkTests {
             )
             Issue.record("Expected viewer approval decision to require Controller first")
         } catch {
-            #expect(error.localizedDescription == "Take Controller on this iPhone before responding to Approval Requests.")
+            #expect(
+                error.localizedDescription == "Take Controller on this iPhone before responding to Approval Requests.")
         }
     }
 
@@ -917,8 +941,10 @@ struct RemotePairingNetworkTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(stdout: "Usage: codex\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(
+                        stdout: "1.2.3\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
+                        stdout: "Usage: codex\n"),
                 ])
             ),
             sessionRuntimeManager: StructuredPromptSessionRuntimeManager(providerName: "Codex")
@@ -949,16 +975,18 @@ struct RemotePairingNetworkTests {
         )
 
         _ = try await remoteClient.takeSessionControl(for: pairedMac, sessionID: session.id, columns: 44, rows: 12)
-        let responseScreen = try await remoteClient.sendSessionInput(for: pairedMac, sessionID: session.id, text: "Ship it")
+        let responseScreen = try await remoteClient.sendSessionInput(
+            for: pairedMac, sessionID: session.id, text: "Ship it")
         let fetchedScreen = try await remoteClient.fetchSessionScreen(for: pairedMac, sessionID: session.id)
 
         #expect(responseScreen.controller == .pairedDevice(try #require(pairedMac.pairedDeviceID)))
         #expect(responseScreen.primarySurface == .structuredActivityFeed)
-        #expect(responseScreen.activityItems.map(\.text) == [
-            "Codex shared Session stream connected",
-            "You: Ship it",
-            "Codex: Acknowledged Ship it"
-        ])
+        #expect(
+            responseScreen.activityItems.map(\.text) == [
+                "Codex shared Session stream connected",
+                "You: Ship it",
+                "Codex: Acknowledged Ship it",
+            ])
         #expect(fetchedScreen == responseScreen)
     }
 
@@ -975,8 +1003,10 @@ struct RemotePairingNetworkTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(stdout: "Usage: codex\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(
+                        stdout: "1.2.3\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
+                        stdout: "Usage: codex\n"),
                 ])
             )
         )
@@ -1220,7 +1250,7 @@ struct RemotePairingNetworkTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    remoteClaudeProbeScript("/srv/api")
+                    remoteClaudeProbeScript("/srv/api"),
                 ]
             ): .success(stdout: "", stderr: "NEXUS_REMOTE_CLAUDE_NOT_FOUND\n", exitStatus: 1)
         ])
@@ -1231,7 +1261,7 @@ struct RemotePairingNetworkTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    "python3 - <<'PY'\nimport os\nimport sys\npath = '/srv/api'\nif os.path.isdir(path):\n    print('available')\n    sys.exit(0)\nprint('missing')\nsys.exit(1)\nPY"
+                    "python3 - <<'PY'\nimport os\nimport sys\npath = '/srv/api'\nif os.path.isdir(path):\n    print('available')\n    sys.exit(0)\nprint('missing')\nsys.exit(1)\nPY",
                 ]
             ): .success(stdout: "available\n")
         ])
@@ -1264,7 +1294,8 @@ struct RemotePairingNetworkTests {
             remotePath: "/srv/api",
             primaryGroupID: group.id
         )
-        let failedSession = try await client.createNamedSession(workspaceID: workspace.id, providerID: .claude, name: "Review")
+        let failedSession = try await client.createNamedSession(
+            workspaceID: workspace.id, providerID: .claude, name: "Review")
 
         let remoteClient = RemotePairingHTTPClient()
         let pairedMac = try await remoteClient.completePairing(
@@ -1370,7 +1401,7 @@ struct RemotePairingNetworkTests {
         let messages = (0..<messageCount).map { index in
             [
                 "role": "user",
-                "content": "History \(index)"
+                "content": "History \(index)",
             ]
         }
         let service = try NexusService.bootstrapForTests(
@@ -1378,8 +1409,12 @@ struct RemotePairingNetworkTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
-                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                    StubCommandRunner.Invocation(
+                        executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(
+                            stdout: "0.9.0\n"),
+                    StubCommandRunner.Invocation(
+                        executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(
+                            stdout: "Usage: pi\n"),
                 ]),
                 localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
             ),
@@ -1539,7 +1574,8 @@ struct RemotePairingNetworkTests {
             deviceName: "Chris’s iPhone"
         )
         _ = try await remoteClient.takeSessionControl(for: pairedMac, sessionID: session.id, columns: 44, rows: 12)
-        let resizedScreen = try await remoteClient.takeSessionControl(for: pairedMac, sessionID: session.id, columns: 60, rows: 20)
+        let resizedScreen = try await remoteClient.takeSessionControl(
+            for: pairedMac, sessionID: session.id, columns: 60, rows: 20)
         let refreshedScreen = try await client.getSessionScreen(sessionID: session.id)
 
         #expect(resizedScreen.controller == .pairedDevice(pairedMac.pairedDeviceID!))
@@ -1550,7 +1586,8 @@ struct RemotePairingNetworkTests {
         #expect(refreshedScreen.terminalRows == 20)
     }
 
-    @Test func macInteractionReclaimsControllerStatusAndBlocksRemoteTerminalInputOverDedicatedNetworkAPI() async throws {
+    @Test func macInteractionReclaimsControllerStatusAndBlocksRemoteTerminalInputOverDedicatedNetworkAPI() async throws
+    {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1570,15 +1607,22 @@ struct RemotePairingNetworkTests {
         second = sys.stdin.readline().rstrip("\r\n")
         print(f"REMOTE:{second}", flush=True)
         """#.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
 
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: RemotePairingTestExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
+                executableResolver: RemotePairingTestExecutableResolver(executables: [
+                    "claude": executableURL.path(percentEncoded: false)
+                ]),
                 commandRunner: RemotePairingTestCommandRunner(results: [
-                    RemotePairingTestCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    RemotePairingTestCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    RemotePairingTestCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
+                            stdout: "9.9.9 (Claude Code)\n"),
+                    RemotePairingTestCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
+                            stdout: "Usage: claude\n"),
                 ])
             )
         )
@@ -1644,15 +1688,22 @@ struct RemotePairingNetworkTests {
         line = sys.stdin.readline().rstrip("\r\n")
         print(f"AUTH:{line}", flush=True)
         """#.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
 
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: RemotePairingTestExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
+                executableResolver: RemotePairingTestExecutableResolver(executables: [
+                    "claude": executableURL.path(percentEncoded: false)
+                ]),
                 commandRunner: RemotePairingTestCommandRunner(results: [
-                    RemotePairingTestCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    RemotePairingTestCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    RemotePairingTestCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
+                            stdout: "9.9.9 (Claude Code)\n"),
+                    RemotePairingTestCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
+                            stdout: "Usage: claude\n"),
                 ])
             )
         )
@@ -1733,15 +1784,22 @@ struct RemotePairingNetworkTests {
         line = sys.stdin.readline().rstrip("\r\n")
         print(f"AUTH:{line}", flush=True)
         """#.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
 
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: RemotePairingTestExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
+                executableResolver: RemotePairingTestExecutableResolver(executables: [
+                    "claude": executableURL.path(percentEncoded: false)
+                ]),
                 commandRunner: RemotePairingTestCommandRunner(results: [
-                    RemotePairingTestCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    RemotePairingTestCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    RemotePairingTestCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
+                            stdout: "9.9.9 (Claude Code)\n"),
+                    RemotePairingTestCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
+                            stdout: "Usage: claude\n"),
                 ])
             )
         )
@@ -1792,8 +1850,10 @@ struct RemotePairingNetworkTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: RemotePairingTestExecutableResolver(executables: ["claude": "/bin/cat"]),
                 commandRunner: RemotePairingTestCommandRunner(results: [
-                    RemotePairingTestCommandRunner.Invocation(executable: "/bin/cat", arguments: ["--version"]): .success(stdout: "cat (test)\n"),
-                    RemotePairingTestCommandRunner.Invocation(executable: "/bin/cat", arguments: ["--help"]): .success(stdout: "Usage: cat\n")
+                    RemotePairingTestCommandRunner.Invocation(executable: "/bin/cat", arguments: ["--version"]):
+                        .success(stdout: "cat (test)\n"),
+                    RemotePairingTestCommandRunner.Invocation(executable: "/bin/cat", arguments: ["--help"]): .success(
+                        stdout: "Usage: cat\n"),
                 ])
             )
         )
@@ -1871,8 +1931,10 @@ struct RemotePairingNetworkTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: RemotePairingTestExecutableResolver(executables: ["claude": "/bin/cat"]),
                 commandRunner: RemotePairingTestCommandRunner(results: [
-                    RemotePairingTestCommandRunner.Invocation(executable: "/bin/cat", arguments: ["--version"]): .success(stdout: "cat (test)\n"),
-                    RemotePairingTestCommandRunner.Invocation(executable: "/bin/cat", arguments: ["--help"]): .success(stdout: "Usage: cat\n")
+                    RemotePairingTestCommandRunner.Invocation(executable: "/bin/cat", arguments: ["--version"]):
+                        .success(stdout: "cat (test)\n"),
+                    RemotePairingTestCommandRunner.Invocation(executable: "/bin/cat", arguments: ["--help"]): .success(
+                        stdout: "Usage: cat\n"),
                 ])
             ),
             sessionRuntimeManager: delayedRuntimeManager
@@ -1933,7 +1995,8 @@ struct RemotePairingNetworkTests {
         #expect(observedScreen.transcript.contains("ayyyyooo"))
     }
 
-    @Test func remotePiStructuredSessionStreamsToolAndSubagentUpdatesBeforeTurnEndOverDedicatedNetworkAPI() async throws {
+    @Test func remotePiStructuredSessionStreamsToolAndSubagentUpdatesBeforeTurnEndOverDedicatedNetworkAPI() async throws
+    {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1949,8 +2012,12 @@ struct RemotePairingNetworkTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: RemotePairingTestExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
                 commandRunner: RemotePairingTestCommandRunner(results: [
-                    RemotePairingTestCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
-                    RemotePairingTestCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                    RemotePairingTestCommandRunner.Invocation(
+                        executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(
+                            stdout: "0.9.0\n"),
+                    RemotePairingTestCommandRunner.Invocation(
+                        executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(
+                            stdout: "Usage: pi\n"),
                 ]),
                 localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
             ),
@@ -2010,13 +2077,16 @@ struct RemotePairingNetworkTests {
         }
 
         _ = try await remoteClient.takeSessionControl(for: pairedMac, sessionID: session.id, columns: 44, rows: 12)
-        let responseScreen = try await remoteClient.sendSessionInput(for: pairedMac, sessionID: session.id, text: "delegate")
+        let responseScreen = try await remoteClient.sendSessionInput(
+            for: pairedMac, sessionID: session.id, text: "delegate")
 
         let streamedScreen = try await waitForObservedScreen {
             observedScreens.last {
                 $0.session.id == session.id
                     && $0.isAgentTurnInProgress
-                    && $0.activityItems.contains(where: { $0.text == "subagent: Looks good overall. Watch the new error path." })
+                    && $0.activityItems.contains(where: {
+                        $0.text == "subagent: Looks good overall. Watch the new error path."
+                    })
             }
         }
         let completedScreen = try await waitForObservedScreen {
@@ -2027,23 +2097,26 @@ struct RemotePairingNetworkTests {
             }
         }
 
-        #expect(responseScreen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
-            "You: delegate"
-        ])
-        #expect(streamedScreen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
-            "You: delegate",
-            "subagent reviewer: Review the latest diff and summarize issues",
-            "subagent: Looks good overall. Watch the new error path."
-        ])
-        #expect(completedScreen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
-            "You: delegate",
-            "subagent reviewer: Review the latest diff and summarize issues",
-            "subagent: Looks good overall. Watch the new error path.",
-            "Pi: Done"
-        ])
+        #expect(
+            responseScreen.activityItems.map(\.text) == [
+                "Pi shared Session stream connected",
+                "You: delegate",
+            ])
+        #expect(
+            streamedScreen.activityItems.map(\.text) == [
+                "Pi shared Session stream connected",
+                "You: delegate",
+                "subagent reviewer: Review the latest diff and summarize issues",
+                "subagent: Looks good overall. Watch the new error path.",
+            ])
+        #expect(
+            completedScreen.activityItems.map(\.text) == [
+                "Pi shared Session stream connected",
+                "You: delegate",
+                "subagent reviewer: Review the latest diff and summarize issues",
+                "subagent: Looks good overall. Watch the new error path.",
+                "Pi: Done",
+            ])
     }
 
     @Test func remotePiNetworkControllerCanSendImageBearingPromptThroughDedicatedAPI() async throws {
@@ -2063,8 +2136,12 @@ struct RemotePairingNetworkTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: RemotePairingTestExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
                 commandRunner: RemotePairingTestCommandRunner(results: [
-                    RemotePairingTestCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
-                    RemotePairingTestCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                    RemotePairingTestCommandRunner.Invocation(
+                        executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(
+                            stdout: "0.9.0\n"),
+                    RemotePairingTestCommandRunner.Invocation(
+                        executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(
+                            stdout: "Usage: pi\n"),
                 ]),
                 localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
             ),
@@ -2121,7 +2198,8 @@ struct RemotePairingNetworkTests {
             text: "What changed in this screenshot?",
             images: [SessionPromptImage(data: Data([0x89, 0x50, 0x4E, 0x47]), mimeType: "image/png")]
         )
-        let responseScreen = try await remoteClient.sendSessionInput(for: pairedMac, sessionID: session.id, prompt: prompt)
+        let responseScreen = try await remoteClient.sendSessionInput(
+            for: pairedMac, sessionID: session.id, prompt: prompt)
         let observedScreen = try await waitForObservedScreen {
             observedScreens.last { $0.activityItems.contains(where: { $0.text == "Pi: world" }) }
         }
@@ -2137,11 +2215,12 @@ struct RemotePairingNetworkTests {
         #expect(responseScreen.activityItems[1].prompt == prompt)
         #expect(observedScreen.activityItems[1].prompt == prompt)
         #expect(fetchedScreen.activityItems[1].prompt == prompt)
-        #expect(fetchedScreen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
-            "You: What changed in this screenshot? [1 image]",
-            "Pi: world"
-        ])
+        #expect(
+            fetchedScreen.activityItems.map(\.text) == [
+                "Pi shared Session stream connected",
+                "You: What changed in this screenshot? [1 image]",
+                "Pi: world",
+            ])
     }
 
     @Test func remotePiReconnectRecoversProviderEventsAndExtensionUIWhileControllerOwnsDialogResponses() async throws {
@@ -2161,8 +2240,12 @@ struct RemotePairingNetworkTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: RemotePairingTestExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
                 commandRunner: RemotePairingTestCommandRunner(results: [
-                    RemotePairingTestCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
-                    RemotePairingTestCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                    RemotePairingTestCommandRunner.Invocation(
+                        executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(
+                            stdout: "0.9.0\n"),
+                    RemotePairingTestCommandRunner.Invocation(
+                        executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(
+                            stdout: "Usage: pi\n"),
                 ]),
                 localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
             ),
@@ -2215,7 +2298,8 @@ struct RemotePairingNetworkTests {
         }
 
         _ = try await remoteClient.takeSessionControl(for: pairedMac, sessionID: session.id, columns: 44, rows: 12)
-        let pendingScreen = try await remoteClient.sendSessionInput(for: pairedMac, sessionID: session.id, text: "deploy")
+        let pendingScreen = try await remoteClient.sendSessionInput(
+            for: pairedMac, sessionID: session.id, text: "deploy")
         let dialog = try #require(pendingScreen.extensionUI?.pendingDialogs.first)
 
         #expect(pendingScreen.providerEvents.contains(where: { $0.type == "extension_ui_request" }))
@@ -2232,8 +2316,15 @@ struct RemotePairingNetworkTests {
         }
         let fetchedPendingScreen = try await remoteClient.fetchSessionScreen(for: pairedMac, sessionID: session.id)
 
-        #expect(observedPendingScreen.extensionUI?.statuses == [SessionExtensionUIStatus(key: "rpc-demo", text: "Turn ready")])
-        #expect(fetchedPendingScreen.extensionUI?.widgets == [SessionExtensionUIWidget(key: "rpc-demo", lines: ["Ready.", "Waiting for input"], placement: .belowEditor)])
+        #expect(
+            observedPendingScreen.extensionUI?.statuses == [
+                SessionExtensionUIStatus(key: "rpc-demo", text: "Turn ready")
+            ])
+        #expect(
+            fetchedPendingScreen.extensionUI?.widgets == [
+                SessionExtensionUIWidget(
+                    key: "rpc-demo", lines: ["Ready.", "Waiting for input"], placement: .belowEditor)
+            ])
         #expect(fetchedPendingScreen.extensionUI?.editorText == "This text was set by the rpc-demo extension.")
 
         await observation.cancel()
@@ -2271,7 +2362,9 @@ struct RemotePairingNetworkTests {
             )
             Issue.record("Expected Pi Extension UI dialog responses on iPhone to require Controller first")
         } catch {
-            #expect(error.localizedDescription == "Take Controller on this iPhone before responding to Extension UI dialogs.")
+            #expect(
+                error.localizedDescription
+                    == "Take Controller on this iPhone before responding to Extension UI dialogs.")
         }
 
         _ = try await remoteClient.takeSessionControl(for: pairedMac, sessionID: session.id, columns: 44, rows: 12)
@@ -2295,7 +2388,10 @@ struct RemotePairingNetworkTests {
 
         let fetchedApprovedScreen = try await remoteClient.fetchSessionScreen(for: pairedMac, sessionID: session.id)
         #expect(fetchedApprovedScreen.providerEvents.contains(where: { $0.type == "extension_ui_request" }))
-        #expect(fetchedApprovedScreen.extensionUI?.statuses == [SessionExtensionUIStatus(key: "rpc-demo", text: "Turn ready")])
+        #expect(
+            fetchedApprovedScreen.extensionUI?.statuses == [
+                SessionExtensionUIStatus(key: "rpc-demo", text: "Turn ready")
+            ])
     }
 
     @Test func completesFirstTimePairingOverDedicatedNetworkAPI() async throws {
@@ -2341,7 +2437,9 @@ private func waitForObservedScreen(
         }
 
         guard DispatchTime.now().uptimeNanoseconds < deadline else {
-            throw NSError(domain: "RemotePairingNetworkTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for observed Session screen update"])
+            throw NSError(
+                domain: "RemotePairingNetworkTests", code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for observed Session screen update"])
         }
 
         try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
@@ -2364,7 +2462,9 @@ private func waitForSessionScreen(
         }
 
         guard DispatchTime.now().uptimeNanoseconds < deadline else {
-            throw NSError(domain: "RemotePairingNetworkTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for Session screen update"])
+            throw NSError(
+                domain: "RemotePairingNetworkTests", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for Session screen update"])
         }
 
         try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
@@ -2423,8 +2523,9 @@ private final class RemotePairingStreamingPiRPCTransport: PiRPCTransporting, @un
 
     func sendLine(_ line: String) throws {
         guard let data = line.data(using: .utf8),
-              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let type = object["type"] as? String else {
+            let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let type = object["type"] as? String
+        else {
             return
         }
 
@@ -2435,13 +2536,13 @@ private final class RemotePairingStreamingPiRPCTransport: PiRPCTransporting, @un
                 "type": "response",
                 "command": "get_state",
                 "success": true,
-                "data": ["sessionId": "pi-session-1"]
+                "data": ["sessionId": "pi-session-1"],
             ])
         case "prompt":
             emit([
                 "type": "response",
                 "command": "prompt",
-                "success": true
+                "success": true,
             ])
 
             DispatchQueue.global().asyncAfter(deadline: .now() + 0.05) { [weak self] in
@@ -2451,8 +2552,8 @@ private final class RemotePairingStreamingPiRPCTransport: PiRPCTransporting, @un
                     "toolName": "subagent",
                     "args": [
                         "agent": "reviewer",
-                        "task": "Review the latest diff and summarize issues"
-                    ]
+                        "task": "Review the latest diff and summarize issues",
+                    ],
                 ])
             }
 
@@ -2462,11 +2563,13 @@ private final class RemotePairingStreamingPiRPCTransport: PiRPCTransporting, @un
                     "toolCallId": "tool-1",
                     "toolName": "subagent",
                     "result": [
-                        "content": [[
-                            "type": "text",
-                            "text": "Looks good overall. Watch the new error path."
-                        ]]
-                    ]
+                        "content": [
+                            [
+                                "type": "text",
+                                "text": "Looks good overall. Watch the new error path.",
+                            ]
+                        ]
+                    ],
                 ])
             }
 
@@ -2474,11 +2577,13 @@ private final class RemotePairingStreamingPiRPCTransport: PiRPCTransporting, @un
                 self?.emit([
                     "type": "turn_end",
                     "message": [
-                        "content": [[
-                            "type": "text",
-                            "text": "Done"
-                        ]]
-                    ]
+                        "content": [
+                            [
+                                "type": "text",
+                                "text": "Done",
+                            ]
+                        ]
+                    ],
                 ])
             }
         default:
@@ -2492,7 +2597,8 @@ private final class RemotePairingStreamingPiRPCTransport: PiRPCTransporting, @un
 
     private func emit(_ object: [String: Any]) {
         guard let data = try? JSONSerialization.data(withJSONObject: object),
-              let line = String(data: data, encoding: .utf8) else {
+            let line = String(data: data, encoding: .utf8)
+        else {
             return
         }
         stdoutLineHandler?(line)
@@ -2522,8 +2628,9 @@ private final class RemotePairingRecordingPiRPCTransport: PiRPCTransporting, @un
     func sendLine(_ line: String) throws {
         sentLines.append(line)
         guard let data = line.data(using: .utf8),
-              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let type = object["type"] as? String else {
+            let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let type = object["type"] as? String
+        else {
             return
         }
 
@@ -2534,13 +2641,13 @@ private final class RemotePairingRecordingPiRPCTransport: PiRPCTransporting, @un
                 "type": "response",
                 "command": "get_state",
                 "success": true,
-                "data": ["sessionId": "pi-session-1"]
+                "data": ["sessionId": "pi-session-1"],
             ])
         case "prompt":
             emit([
                 "type": "response",
                 "command": "prompt",
-                "success": true
+                "success": true,
             ])
             guard promptResponseText.isEmpty == false else {
                 return
@@ -2549,17 +2656,19 @@ private final class RemotePairingRecordingPiRPCTransport: PiRPCTransporting, @un
                 "type": "message_update",
                 "assistantMessageEvent": [
                     "type": "text_delta",
-                    "delta": promptResponseText
-                ]
+                    "delta": promptResponseText,
+                ],
             ])
             emit([
                 "type": "turn_end",
                 "message": [
-                    "content": [[
-                        "type": "text",
-                        "text": promptResponseText
-                    ]]
-                ]
+                    "content": [
+                        [
+                            "type": "text",
+                            "text": promptResponseText,
+                        ]
+                    ]
+                ],
             ])
         default:
             return
@@ -2572,7 +2681,8 @@ private final class RemotePairingRecordingPiRPCTransport: PiRPCTransporting, @un
 
     private func emit(_ object: [String: Any]) {
         guard let data = try? JSONSerialization.data(withJSONObject: object),
-              let line = String(data: data, encoding: .utf8) else {
+            let line = String(data: data, encoding: .utf8)
+        else {
             return
         }
         stdoutLineHandler?(line)
@@ -2596,8 +2706,9 @@ private final class RemotePairingExtensionUIPiRPCTransport: PiRPCTransporting, @
 
     func sendLine(_ line: String) throws {
         guard let data = line.data(using: .utf8),
-              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let type = object["type"] as? String else {
+            let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let type = object["type"] as? String
+        else {
             return
         }
 
@@ -2608,14 +2719,14 @@ private final class RemotePairingExtensionUIPiRPCTransport: PiRPCTransporting, @
                 "type": "response",
                 "command": "get_state",
                 "success": true,
-                "data": ["sessionId": "pi-session-1"]
+                "data": ["sessionId": "pi-session-1"],
             ])
         case "prompt":
             pendingPrompt = object["message"] as? String
             emit([
                 "type": "response",
                 "command": "prompt",
-                "success": true
+                "success": true,
             ])
             emit([
                 "type": "extension_ui_request",
@@ -2623,7 +2734,7 @@ private final class RemotePairingExtensionUIPiRPCTransport: PiRPCTransporting, @
                 "method": "confirm",
                 "title": "Deploy to production?",
                 "message": "Pi wants to run deploy --prod.",
-                "timeout": 5000
+                "timeout": 5000,
             ])
         case "extension_ui_response":
             let confirmed = object["confirmed"] as? Bool ?? false
@@ -2644,14 +2755,14 @@ private final class RemotePairingExtensionUIPiRPCTransport: PiRPCTransporting, @
             "id": "notify-1",
             "method": "notify",
             "message": "Editor prefilled",
-            "notifyType": "info"
+            "notifyType": "info",
         ])
         emit([
             "type": "extension_ui_request",
             "id": "status-1",
             "method": "setStatus",
             "statusKey": "rpc-demo",
-            "statusText": "Turn ready"
+            "statusText": "Turn ready",
         ])
         emit([
             "type": "extension_ui_request",
@@ -2659,19 +2770,19 @@ private final class RemotePairingExtensionUIPiRPCTransport: PiRPCTransporting, @
             "method": "setWidget",
             "widgetKey": "rpc-demo",
             "widgetLines": ["Ready.", "Waiting for input"],
-            "widgetPlacement": "belowEditor"
+            "widgetPlacement": "belowEditor",
         ])
         emit([
             "type": "extension_ui_request",
             "id": "title-1",
             "method": "setTitle",
-            "title": "Pi Demo"
+            "title": "Pi Demo",
         ])
         emit([
             "type": "extension_ui_request",
             "id": "editor-text-1",
             "method": "set_editor_text",
-            "text": "This text was set by the rpc-demo extension."
+            "text": "This text was set by the rpc-demo extension.",
         ])
     }
 
@@ -2679,17 +2790,20 @@ private final class RemotePairingExtensionUIPiRPCTransport: PiRPCTransporting, @
         emit([
             "type": "turn_end",
             "message": [
-                "content": [[
-                    "type": "text",
-                    "text": text
-                ]]
-            ]
+                "content": [
+                    [
+                        "type": "text",
+                        "text": text,
+                    ]
+                ]
+            ],
         ])
     }
 
     private func emit(_ object: [String: Any]) {
         guard let data = try? JSONSerialization.data(withJSONObject: object),
-              let line = String(data: data, encoding: .utf8) else {
+            let line = String(data: data, encoding: .utf8)
+        else {
             return
         }
         stdoutLineHandler?(line)
@@ -2723,7 +2837,9 @@ private struct RemotePairingTestCommandRunner: ProviderCommandRunning {
 
     func run(executable: String, arguments: [String], currentDirectoryURL: URL?) throws -> ProviderCommandResult {
         guard let result = results[Invocation(executable: executable, arguments: arguments)] else {
-            throw NSError(domain: "RemotePairingTestCommandRunner", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing stub"])
+            throw NSError(
+                domain: "RemotePairingTestCommandRunner", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing stub"]
+            )
         }
 
         switch result {
@@ -2734,7 +2850,9 @@ private struct RemotePairingTestCommandRunner: ProviderCommandRunning {
 }
 
 private struct AvailableRemotePairingProviderHealthEvaluator: ProviderHealthEvaluating {
-    func healthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async -> ProviderHealthSummary {
+    func healthSummary(for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?)
+        async -> ProviderHealthSummary
+    {
         ProviderHealthSummary(
             state: .available,
             summary: "\(providerID.displayName) is available",
@@ -2762,7 +2880,8 @@ private struct SlowCatalogReadProviderModule: ProviderModule {
         remoteContext: RemoteWorkspaceHealthContext?,
         providerHealthEvaluator: any ProviderHealthEvaluating
     ) async -> ProviderHealthSummary {
-        await providerHealthEvaluator.healthSummary(for: provider.id, workspace: workspace, remoteContext: remoteContext)
+        await providerHealthEvaluator.healthSummary(
+            for: provider.id, workspace: workspace, remoteContext: remoteContext)
     }
 
     func readCatalog(
@@ -2773,7 +2892,8 @@ private struct SlowCatalogReadProviderModule: ProviderModule {
         let health = try await actions.providerHealthSummary()
         return ProviderModuleCatalogReadResult(
             health: health,
-            capabilities: providerCapabilities(in: request.workspace, health: health, defaultSession: request.defaultSession),
+            capabilities: providerCapabilities(
+                in: request.workspace, health: health, defaultSession: request.defaultSession),
             prelaunchPrimarySurface: prelaunchPrimarySurface(in: request.workspace),
             defaultSession: defaultSessionSummary(for: request.defaultSession)
         )
@@ -2832,7 +2952,9 @@ private final class DelayedEchoSessionRuntimeManager: SessionRuntimeManaging, @u
 
     func setRuntimeChangePostObserverHandler(_ handler: (@Sendable (UUID) -> Void)?) {}
 
-    func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) async throws {
+    func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration)
+        async throws
+    {
         lock.lock()
         runtimes[session.id] = RuntimeRecord(transcript: initialTranscript)
         lock.unlock()
@@ -2946,11 +3068,14 @@ private final class DelayedEchoSessionRuntimeManager: SessionRuntimeManaging, @u
         )
     }
 
-    func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool, to session: Session) throws -> SessionScreen {
+    func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool, to session: Session) throws -> SessionScreen
+    {
         try sessionScreen(for: session)
     }
 
-    func respondToApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision, to session: Session) throws -> SessionScreen {
+    func respondToApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision, to session: Session)
+        throws -> SessionScreen
+    {
         throw NexusSessionApprovalError.approvalRequestsUnavailable
     }
 
@@ -3016,12 +3141,16 @@ private final class StructuredPromptSessionRuntimeManager: SessionRuntimeManagin
 
     func setRuntimeChangePostObserverHandler(_ handler: (@Sendable (UUID) -> Void)?) {}
 
-    func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) async throws {
+    func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration)
+        async throws
+    {
         lock.lock()
         runtimes[session.id] = RuntimeRecord(
             session: session,
             activityItems: [SessionActivityItem(kind: .status, text: "\(providerName) shared Session stream connected")]
-                + initialApprovalRequests.map { SessionActivityItem(kind: .approvalRequest, text: "Approval Request: \($0.title)") },
+                + initialApprovalRequests.map {
+                    SessionActivityItem(kind: .approvalRequest, text: "Approval Request: \($0.title)")
+                },
             approvalRequests: initialApprovalRequests
         )
         lock.unlock()
@@ -3109,7 +3238,8 @@ private final class StructuredPromptSessionRuntimeManager: SessionRuntimeManagin
             throw NexusMetadataStoreError.sessionNotFound
         }
         runtime.activityItems.append(SessionActivityItem(kind: .message, text: "You: \(trimmed)"))
-        runtime.activityItems.append(SessionActivityItem(kind: .message, text: "\(providerName): Acknowledged \(trimmed)"))
+        runtime.activityItems.append(
+            SessionActivityItem(kind: .message, text: "\(providerName): Acknowledged \(trimmed)"))
         runtimes[session.id] = runtime
         lock.unlock()
         notifyUpdateObservers(for: session.id)
@@ -3120,11 +3250,14 @@ private final class StructuredPromptSessionRuntimeManager: SessionRuntimeManagin
         try sessionScreen(for: session)
     }
 
-    func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool, to session: Session) throws -> SessionScreen {
+    func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool, to session: Session) throws -> SessionScreen
+    {
         try sessionScreen(for: session)
     }
 
-    func respondToApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision, to session: Session) throws -> SessionScreen {
+    func respondToApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision, to session: Session)
+        throws -> SessionScreen
+    {
         lock.lock()
         guard var runtime = runtimes[session.id] else {
             lock.unlock()

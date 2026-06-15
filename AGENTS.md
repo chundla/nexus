@@ -50,6 +50,14 @@ xcodebuild test -scheme nexus -project nexus.xcodeproj -destination 'platform=ma
 swift test --package-path Modules --filter <TestTypeOrMethodName>
 ```
 
+**Swift lint (before PR; matches CI):**
+
+```bash
+./scripts/lint-swift.sh
+```
+
+Strict on `swift format lint` and SwiftLint `force_try` only. After editing Swift, you may run `swift format -i` on touched files.
+
 **Performance / baseline workflows:** `docs/performance-baselines.md` (Xcode UI launch tests, `NexusServicePerformanceBaselineTests`, Instruments harness in `docs/structured-session-instruments-harness.md`).
 
 For Xcode/iOS/macOS tasks, prefer **XcodeBuildMCP** (`xcodebuildmcp`) over raw `xcodebuild` when the skill is available.

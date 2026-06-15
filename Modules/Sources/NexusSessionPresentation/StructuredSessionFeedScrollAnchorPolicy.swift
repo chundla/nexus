@@ -9,11 +9,13 @@ public func structuredSessionFeedHasInterimPiAssistantAfterOpenTurn(
         return false
     }
     guard case .agentTurn(let turn) = feedSegments[feedSegments.count - 2],
-          turn.isOpen else {
+        turn.isOpen
+    else {
         return false
     }
     guard case .standalone(let item) = feedSegments.last,
-          structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage(item) else {
+        structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage(item)
+    else {
         return false
     }
     return true
@@ -44,10 +46,11 @@ public func structuredSessionEffectiveAgentTurnInProgress(for screen: SessionScr
         return true
     }
     if screen.session.providerID == .pi,
-       structuredSessionPiProviderTurnAwaitingTurnEnd(
-           activityItems: screen.activityItems,
-           providerEvents: screen.providerEvents
-       ) {
+        structuredSessionPiProviderTurnAwaitingTurnEnd(
+            activityItems: screen.activityItems,
+            providerEvents: screen.providerEvents
+        )
+    {
         return true
     }
     let segments = structuredSessionAgentTurnFeedSegments(for: screen)

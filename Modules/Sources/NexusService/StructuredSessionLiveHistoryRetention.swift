@@ -17,9 +17,11 @@ enum StructuredSessionLiveHistoryRetention {
         let transcript = retainedTranscript(screen.transcript)
         let activityItems = retainedActivityItems(screen.activityItems)
         let providerEvents = retainedProviderEvents(screen.providerEvents)
-        guard transcript != screen.transcript
+        guard
+            transcript != screen.transcript
                 || activityItems != screen.activityItems
-                || providerEvents != screen.providerEvents else {
+                || providerEvents != screen.providerEvents
+        else {
             return screen
         }
 

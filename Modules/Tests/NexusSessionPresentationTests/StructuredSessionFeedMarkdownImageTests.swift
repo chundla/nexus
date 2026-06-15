@@ -1,6 +1,7 @@
 import Foundation
-@testable import NexusSessionPresentation
 import Testing
+
+@testable import NexusSessionPresentation
 
 struct StructuredSessionFeedMarkdownImageTests {
     @Test func feedMarkdownImageReferencesExtractSingleInlineImage() {
@@ -15,10 +16,10 @@ struct StructuredSessionFeedMarkdownImageTests {
 
     @Test func feedMarkdownImageReferencesIgnoreImagesInsideFencedCode() {
         let markdown = """
-        ```text
-        ![not an image](https://example.com/skip.png)
-        ```
-        """
+            ```text
+            ![not an image](https://example.com/skip.png)
+            ```
+            """
 
         let refs = structuredSessionFeedMarkdownImageReferences(in: markdown)
 

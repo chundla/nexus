@@ -5,7 +5,8 @@ import NexusSessionPresentation
 
 @MainActor
 final class StructuredSessionHistoryPagingController {
-    typealias FetchPage = @Sendable (UUID, Int, StructuredSessionHistoryCursor?) async throws -> StructuredSessionHistoryPage
+    typealias FetchPage =
+        @Sendable (UUID, Int, StructuredSessionHistoryCursor?) async throws -> StructuredSessionHistoryPage
 
     private let pageSize: Int
     private let fetchPage: FetchPage
@@ -42,7 +43,8 @@ final class StructuredSessionHistoryPagingController {
         let supportsPaging = supportsPaging(for: screen)
 
         guard sessionID == currentSessionID,
-              supportsPaging == currentSessionSupportsPaging else {
+            supportsPaging == currentSessionSupportsPaging
+        else {
             reset(sessionID: sessionID, supportsPaging: supportsPaging)
             return
         }
@@ -52,9 +54,10 @@ final class StructuredSessionHistoryPagingController {
 
     func recoverPersistedGapIfNeeded(from previousScreen: SessionScreen?, to screen: SessionScreen) async {
         guard supportsPaging(for: screen),
-              let previousScreen,
-              previousScreen.session.id == screen.session.id,
-              currentSessionID == screen.session.id else {
+            let previousScreen,
+            previousScreen.session.id == screen.session.id,
+            currentSessionID == screen.session.id
+        else {
             return
         }
 
@@ -75,15 +78,17 @@ final class StructuredSessionHistoryPagingController {
             }
 
             guard page.sessionID == screen.session.id,
-                  currentSessionID == screen.session.id else {
+                currentSessionID == screen.session.id
+            else {
                 return
             }
 
             recoveredActivityItems = prependHistoricalActivityItems(page.activityItems, to: recoveredActivityItems)
 
-            let recoveredMissingActivityItem = missingFirstActivityItemID.map { missingID in
-                recoveredActivityItems.contains(where: { $0.id == missingID })
-            } ?? true
+            let recoveredMissingActivityItem =
+                missingFirstActivityItemID.map { missingID in
+                    recoveredActivityItems.contains(where: { $0.id == missingID })
+                } ?? true
             if recoveredMissingActivityItem {
                 break
             }
@@ -100,8 +105,9 @@ final class StructuredSessionHistoryPagingController {
 
     func loadOlderHistory(for screen: SessionScreen) async {
         guard supportsPaging(for: screen),
-              currentSessionID == screen.session.id,
-              isLoading == false else {
+            currentSessionID == screen.session.id,
+            isLoading == false
+        else {
             return
         }
         guard hasLoadedFirstPage == false || nextCursor != nil else {
@@ -117,7 +123,8 @@ final class StructuredSessionHistoryPagingController {
         do {
             let page = try await fetchPage(screen.session.id, pageSize, cursor)
             guard page.sessionID == screen.session.id,
-                  currentSessionID == screen.session.id else {
+                currentSessionID == screen.session.id
+            else {
                 isLoading = false
                 refreshAvailability()
                 return
@@ -160,9 +167,10 @@ final class StructuredSessionHistoryPagingController {
         let draftKey = structuredSessionHistoryPagingRowAffectingDraftKey(for: merged)
 
         if let last = lastRowStablePresentation,
-           last.session.id == screen.session.id,
-           merged.activityItems == lastSourceActivityItems,
-           draftKey == lastLiveDraftKey {
+            last.session.id == screen.session.id,
+            merged.activityItems == lastSourceActivityItems,
+            draftKey == lastLiveDraftKey
+        {
             // Row-affecting inputs unchanged → reuse prior presentation (stable autoScrollTrigger + chunks).
             // Callers still call applyLiveScreen separately for paging availability state.
             return last
@@ -182,8 +190,9 @@ final class StructuredSessionHistoryPagingController {
 
     private func mergedScreen(for screen: SessionScreen) -> SessionScreen {
         guard currentSessionSupportsPaging,
-              currentSessionID == screen.session.id,
-              historicalActivityItems.isEmpty == false else {
+            currentSessionID == screen.session.id,
+            historicalActivityItems.isEmpty == false
+        else {
             return screen
         }
 
@@ -234,7 +243,8 @@ final class StructuredSessionHistoryPagingController {
     }
 
     private func refreshAvailability() {
-        canLoadOlder = currentSessionSupportsPaging
+        canLoadOlder =
+            currentSessionSupportsPaging
             && isLoading == false
             && (hasLoadedFirstPage == false || nextCursor != nil)
     }
@@ -247,13 +257,17 @@ final class StructuredSessionHistoryPagingController {
         return screen.primarySurface == .structuredActivityFeed
     }
 
-    private func missingFirstActivityItemID(from previousScreen: SessionScreen, to currentScreen: SessionScreen) -> UUID? {
+    private func missingFirstActivityItemID(from previousScreen: SessionScreen, to currentScreen: SessionScreen)
+        -> UUID?
+    {
         guard let currentFirstID = currentScreen.activityItems.first?.id,
-              previousScreen.activityItems.isEmpty == false else {
+            previousScreen.activityItems.isEmpty == false
+        else {
             return nil
         }
 
-        let knownIDs = Set(mergeHistoricalActivityItems(historicalActivityItems, with: previousScreen.activityItems).map(\.id))
+        let knownIDs = Set(
+            mergeHistoricalActivityItems(historicalActivityItems, with: previousScreen.activityItems).map(\.id))
         guard knownIDs.contains(currentFirstID) == false else {
             return nil
         }

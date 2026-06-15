@@ -3,9 +3,9 @@ import Foundation
 import SwiftUI
 
 #if canImport(AppKit)
-import AppKit
+    import AppKit
 #elseif canImport(UIKit)
-import UIKit
+    import UIKit
 #endif
 
 public struct StructuredSessionFeedFencedCodeBlockPolicy: Equatable, Sendable {
@@ -192,10 +192,10 @@ func structuredSessionFeedMarkdownFenceLanguage(from line: String) -> String? {
 
 func structuredSessionFeedMarkdownCopyToPasteboard(_ text: String) {
     #if os(macOS)
-    NSPasteboard.general.clearContents()
-    NSPasteboard.general.setString(text, forType: .string)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     #elseif os(iOS)
-    UIPasteboard.general.string = text
+        UIPasteboard.general.string = text
     #endif
 }
 
@@ -214,7 +214,9 @@ func structuredSessionFeedFencedCodeHighlightedContent(
     let keywords: Set<String>
     switch normalizedLanguage {
     case "swift":
-        keywords = ["import", "struct", "class", "enum", "func", "let", "var", "if", "else", "return", "true", "false", "nil"]
+        keywords = [
+            "import", "struct", "class", "enum", "func", "let", "var", "if", "else", "return", "true", "false", "nil",
+        ]
     case "bash", "sh", "shell", "zsh":
         keywords = ["if", "then", "else", "fi", "for", "export", "cd", "echo", "git"]
     default:
@@ -239,13 +241,16 @@ func structuredSessionFeedFencedCodeHighlightedContent(
             tokenStart = searchRange.location
             tokenEnd = wordRange.location
         } else {
-            searchRange = NSRange(location: wordRange.location + wordRange.length, length: nsContent.length - wordRange.location - wordRange.length)
+            searchRange = NSRange(
+                location: wordRange.location + wordRange.length,
+                length: nsContent.length - wordRange.location - wordRange.length)
             continue
         }
         let token = nsContent.substring(with: NSRange(location: tokenStart, length: tokenEnd - tokenStart))
         if keywords.contains(token),
-           let range = Range(NSRange(location: tokenStart, length: tokenEnd - tokenStart), in: content),
-           let attributedRange = Range(range, in: attributed) {
+            let range = Range(NSRange(location: tokenStart, length: tokenEnd - tokenStart), in: content),
+            let attributedRange = Range(range, in: attributed)
+        {
             attributed[attributedRange].foregroundColor = keywordForeground
         }
         searchRange = NSRange(location: tokenEnd, length: nsContent.length - tokenEnd)
@@ -315,8 +320,8 @@ struct StructuredSessionFeedFencedCodeBlockView: View {
 
 private func structuredSessionFeedFencedCodeBlockBackgroundColor() -> Color {
     #if os(macOS)
-    Color(nsColor: .textBackgroundColor).opacity(0.65)
+        Color(nsColor: .textBackgroundColor).opacity(0.65)
     #else
-    Color(uiColor: .secondarySystemBackground)
+        Color(uiColor: .secondarySystemBackground)
     #endif
 }

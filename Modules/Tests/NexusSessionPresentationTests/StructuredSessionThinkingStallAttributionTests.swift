@@ -1,7 +1,8 @@
 import Foundation
 import NexusDomain
-@testable import NexusSessionPresentation
 import Testing
+
+@testable import NexusSessionPresentation
 
 struct StructuredSessionThinkingStallAttributionTests {
     @Test func attributesStuckThinkingToObservationWhenCanonicalStateAdvancesWithoutObservedProgress() {

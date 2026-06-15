@@ -45,9 +45,11 @@ struct RemoteProviderActionState: Equatable {
             let disabledReason: String
             switch capability.action {
             case .launchDefaultSession:
-                disabledReason = "Open this Workspace on the paired Mac to launch \(provider.displayName) because this iPhone cannot operate its primary Session surface yet."
+                disabledReason =
+                    "Open this Workspace on the paired Mac to launch \(provider.displayName) because this iPhone cannot operate its primary Session surface yet."
             case .createNamedSession:
-                disabledReason = "Open this Workspace on the paired Mac to create a \(provider.displayName) Named Session because this iPhone cannot operate its primary Session surface yet."
+                disabledReason =
+                    "Open this Workspace on the paired Mac to create a \(provider.displayName) Named Session because this iPhone cannot operate its primary Session surface yet."
             }
             self.init(isEnabled: false, disabledReason: disabledReason)
             return
@@ -79,7 +81,8 @@ func sessionSurfaceSupport(
     }
 }
 
-func sessionSurfaceSupport(for primarySurface: SessionSurface, on client: SessionSurfaceClient) -> SessionSurfaceSupport {
+func sessionSurfaceSupport(for primarySurface: SessionSurface, on client: SessionSurfaceClient) -> SessionSurfaceSupport
+{
     switch client {
     case .mac:
         .supported
@@ -103,7 +106,8 @@ func remoteSessionSurfacePresentation(
     if support == .unsupported {
         unsupportedCopy = UnsupportedRemoteSessionSurfaceCopy(
             title: "Unsupported Session Surface",
-            summary: "This iPhone can inspect this \(screen.session.providerID.displayName) Session, but it cannot present or operate its primary Session surface yet.",
+            summary:
+                "This iPhone can inspect this \(screen.session.providerID.displayName) Session, but it cannot present or operate its primary Session surface yet.",
             recovery: "Open this Session on the paired Mac to use its primary Session surface."
         )
     } else {
@@ -118,7 +122,8 @@ func remoteSessionSurfacePresentation(
         relaunchDisabledReason = nil
     } else {
         relaunchIsEnabled = false
-        relaunchDisabledReason = "Open this Session on the paired Mac to relaunch it because this iPhone cannot operate its primary Session surface yet."
+        relaunchDisabledReason =
+            "Open this Session on the paired Mac to relaunch it because this iPhone cannot operate its primary Session surface yet."
     }
 
     let showsTerminal = support == .supported && screen.primarySurface == .terminal

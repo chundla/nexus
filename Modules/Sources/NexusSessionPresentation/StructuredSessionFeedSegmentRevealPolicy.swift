@@ -42,7 +42,8 @@ public enum StructuredSessionFeedSegmentRevealPolicy {
         return true
     }
 
-    public static func isFeedMarkdownHydrationAllowed(visibleTailSegmentCount: Int, totalFeedSegmentCount: Int) -> Bool {
+    public static func isFeedMarkdownHydrationAllowed(visibleTailSegmentCount: Int, totalFeedSegmentCount: Int) -> Bool
+    {
         guard usesProgressiveFeedSegmentReveal else {
             return true
         }
@@ -116,4 +117,3 @@ public func structuredSessionOpenAgentTurnHasReasoningContent(
 public func structuredSessionOpenAgentTurnHasReasoningContent(for screen: SessionScreen) -> Bool {
     structuredSessionOpenAgentTurnHasReasoningContent(in: structuredSessionAgentTurnFeedSegments(for: screen))
 }
-

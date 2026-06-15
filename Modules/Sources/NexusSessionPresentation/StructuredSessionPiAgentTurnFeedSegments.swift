@@ -129,11 +129,14 @@ func structuredSessionPiFeedSegments(
         let item = activityItems[index]
 
         if structuredSessionPiFeedSegmentIsPromptAnchoredUserMessage(item),
-           let userBody = structuredSessionPiUserMessageBody(from: item) {
-            segments.append(.userMessage(StructuredSessionFeedUserMessageSegment(
-                activityItemID: item.id,
-                text: userBody
-            )))
+            let userBody = structuredSessionPiUserMessageBody(from: item)
+        {
+            segments.append(
+                .userMessage(
+                    StructuredSessionFeedUserMessageSegment(
+                        activityItemID: item.id,
+                        text: userBody
+                    )))
             index += 1
 
             let turnSlice = structuredSessionPiAgentTurnActivitySlice(
@@ -222,7 +225,8 @@ private func structuredSessionPiAgentTurnActivitySlice(
         }
 
         if item.kind == .message,
-           let lastAssistant = structuredSessionPiLastAssistantMessageBody(from: item.text) {
+            let lastAssistant = structuredSessionPiLastAssistantMessageBody(from: item.text)
+        {
             structuredSessionPiAgentTurnAppendProgressNotice(
                 "Last assistant message: \(lastAssistant)",
                 to: &turnNotices
@@ -233,7 +237,8 @@ private func structuredSessionPiAgentTurnActivitySlice(
         }
 
         if item.kind == .message,
-           let bashOutput = structuredSessionPiBashOutputBody(from: item.text) {
+            let bashOutput = structuredSessionPiBashOutputBody(from: item.text)
+        {
             structuredSessionPiAgentTurnAttachBashOutput(
                 bashOutput,
                 to: &tools,
@@ -252,11 +257,14 @@ private func structuredSessionPiAgentTurnActivitySlice(
 
         if structuredSessionPiFeedSegmentIsThoughtsStatus(item) {
             if let detail = item.detailText?.trimmingCharacters(in: .whitespacesAndNewlines),
-               detail.isEmpty == false {
-                stackItems.append(.reasoning(StructuredSessionFeedAgentTurnReasoningSegment(
-                    activityItemID: item.id,
-                    markdownBody: detail
-                )))
+                detail.isEmpty == false
+            {
+                stackItems.append(
+                    .reasoning(
+                        StructuredSessionFeedAgentTurnReasoningSegment(
+                            activityItemID: item.id,
+                            markdownBody: detail
+                        )))
             }
             consumedAny = true
             cursor += 1
@@ -278,7 +286,8 @@ private func structuredSessionPiAgentTurnActivitySlice(
         }
 
         if let subagentOutput = structuredSessionPiSubagentOutputBody(from: item.text),
-           let toolIndex = openToolIndex {
+            let toolIndex = openToolIndex
+        {
             var tool = tools[toolIndex]
             tool = StructuredSessionFeedAgentTurnToolSegment(
                 activityItemID: tool.activityItemID,
@@ -472,7 +481,8 @@ private func structuredSessionPiUserMessageBody(from item: SessionActivityItem) 
         return text.isEmpty ? nil : text
     }
     guard let split = structuredSessionPiConversationPrefixSplit(for: item.text),
-          split.label.caseInsensitiveCompare("you") == .orderedSame else {
+        split.label.caseInsensitiveCompare("you") == .orderedSame
+    else {
         return nil
     }
     let body = split.body.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -540,8 +550,9 @@ private func structuredSessionPiConversationPrefixSplit(for text: String) -> (la
     let label = String(text[..<separatorRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
     let body = String(text[separatorRange.upperBound...])
     guard label.isEmpty == false,
-          body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
-          label.count <= 24 else {
+        body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
+        label.count <= 24
+    else {
         return nil
     }
     return (label, body)
@@ -553,8 +564,9 @@ private func structuredSessionPiSubagentOutputBody(from text: String) -> String?
     }
     let label = split.label.trimmingCharacters(in: .whitespacesAndNewlines)
     guard label.caseInsensitiveCompare("Pi") != .orderedSame,
-          label.caseInsensitiveCompare("you") != .orderedSame,
-          label.caseInsensitiveCompare("bash") != .orderedSame else {
+        label.caseInsensitiveCompare("you") != .orderedSame,
+        label.caseInsensitiveCompare("bash") != .orderedSame
+    else {
         return nil
     }
     let body = split.body.trimmingCharacters(in: .whitespacesAndNewlines)

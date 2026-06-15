@@ -3,6 +3,7 @@ import NexusDomain
 import NexusIPC
 import NexusSessionPresentation
 import Testing
+
 @testable import nexus
 
 @MainActor
@@ -45,10 +46,11 @@ struct StructuredSessionHistoryPagingControllerTests {
 
             #expect(controller.canLoadOlder == false)
             let presentation = try #require(controller.presentation(for: screen))
-            #expect(presentation.feed.activityRows.map { $0.text } == [
-                "Older message",
-                "Live message"
-            ])
+            #expect(
+                presentation.feed.activityRows.map { $0.text } == [
+                    "Older message",
+                    "Live message",
+                ])
         }
     }
 
@@ -64,7 +66,11 @@ struct StructuredSessionHistoryPagingControllerTests {
             activityItems: [activity],
             providerEvents: [
                 providerEvent(sequence: 1, payload: "{\"type\":\"turn_start\"}"),
-                providerEvent(sequence: 2, payload: "{\"type\":\"message_update\",\"assistantMessageEvent\":{\"type\":\"text_delta\",\"delta\":\"Hi\"}}")
+                providerEvent(
+                    sequence: 2,
+                    payload:
+                        "{\"type\":\"message_update\",\"assistantMessageEvent\":{\"type\":\"text_delta\",\"delta\":\"Hi\"}}"
+                ),
             ],
             providerFacts: StructuredSessionProviderFacts(providerEventCount: 2, lastProviderEventSequence: 2)
         )
@@ -76,8 +82,12 @@ struct StructuredSessionHistoryPagingControllerTests {
             terminalRows: 24,
             activityItems: [activity],
             providerEvents: [
-                providerEvent(sequence: 2, payload: "{\"type\":\"message_update\",\"assistantMessageEvent\":{\"type\":\"text_delta\",\"delta\":\"Hi\"}}"),
-                providerEvent(sequence: 3, payload: "{\"type\":\"turn_end\"}")
+                providerEvent(
+                    sequence: 2,
+                    payload:
+                        "{\"type\":\"message_update\",\"assistantMessageEvent\":{\"type\":\"text_delta\",\"delta\":\"Hi\"}}"
+                ),
+                providerEvent(sequence: 3, payload: "{\"type\":\"turn_end\"}"),
             ],
             providerFacts: StructuredSessionProviderFacts(providerEventCount: 2, lastProviderEventSequence: 3)
         )
@@ -131,7 +141,11 @@ struct StructuredSessionHistoryPagingControllerTests {
             terminalRows: 24,
             activityItems: [activity],
             providerEvents: [
-                providerEvent(sequence: 1, payload: "{\"type\":\"message_update\",\"assistantMessageEvent\":{\"type\":\"text_delta\",\"delta\":\"x\"}}")
+                providerEvent(
+                    sequence: 1,
+                    payload:
+                        "{\"type\":\"message_update\",\"assistantMessageEvent\":{\"type\":\"text_delta\",\"delta\":\"x\"}}"
+                )
             ],
             providerFacts: StructuredSessionProviderFacts(providerEventCount: 99, liveAssistantDraftText: nil),
             isAgentTurnInProgress: true
@@ -152,7 +166,13 @@ struct StructuredSessionHistoryPagingControllerTests {
                 StructuredSessionHistoryPage(
                     sessionID: sessionID,
                     activityItems: [olderActivity],
-                    providerEvents: [providerEvent(sequence: 1, payload: "{\"type\":\"message_update\",\"assistantMessageEvent\":{\"type\":\"text_delta\",\"delta\":\"historical draft\"}}")],
+                    providerEvents: [
+                        providerEvent(
+                            sequence: 1,
+                            payload:
+                                "{\"type\":\"message_update\",\"assistantMessageEvent\":{\"type\":\"text_delta\",\"delta\":\"historical draft\"}}"
+                        )
+                    ],
                     nextCursor: nil
                 )
             }
@@ -173,10 +193,11 @@ struct StructuredSessionHistoryPagingControllerTests {
         await controller.loadOlderHistory(for: screen)
 
         let presentation = try #require(controller.presentation(for: screen))
-        #expect(presentation.feed.activityRows.map(\.text) == [
-            "Older message",
-            "You: Keep going"
-        ])
+        #expect(
+            presentation.feed.activityRows.map(\.text) == [
+                "Older message",
+                "You: Keep going",
+            ])
     }
 }
 

@@ -109,7 +109,8 @@ final class StructuredSessionObservationStore: @unchecked Sendable {
         var gapRecord: PerformanceDiagnosticRecord?
         let updates: [SessionScreenObservationUpdate] = withLock {
             guard let revision,
-                  let entry = entries[sessionID] else {
+                let entry = entries[sessionID]
+            else {
                 return []
             }
 
@@ -270,7 +271,8 @@ final class StructuredSessionObservationStore: @unchecked Sendable {
 
         if let firstChangedIndex {
             if changedIndices.count == 1,
-               newItems.count == existingItems.count {
+                newItems.count == existingItems.count
+            {
                 return [.replaceActivityItem(newItems[firstChangedIndex])]
             }
 
@@ -329,7 +331,7 @@ final class StructuredSessionObservationStore: @unchecked Sendable {
             "slashCommandCount": snapshot.slashCommands?.count ?? 0,
             "transcriptCharacterCount": snapshot.transcript.count,
             "extensionDialogVisibleCount": snapshot.extensionUI == nil ? 0 : 1,
-            "agentTurnInProgressCount": snapshot.isAgentTurnInProgress ? 1 : 0
+            "agentTurnInProgressCount": snapshot.isAgentTurnInProgress ? 1 : 0,
         ].merging(finalOutputMetrics(from: snapshot.finalOutputDiagnostic)) { _, new in new }
     }
 
@@ -394,14 +396,15 @@ final class StructuredSessionObservationStore: @unchecked Sendable {
             "finalOutputServiceObservationMilliseconds": diagnostic.serviceObservationLatencyMilliseconds ?? 0,
             "finalOutputTriggerTextDeltaCount": diagnostic.trigger == .textDelta ? 1 : 0,
             "finalOutputTriggerTurnEndCount": diagnostic.trigger == .turnEnd ? 1 : 0,
-            "finalOutputThinkingIndicatorVisibleCount": diagnostic.expectedThinkingIndicatorVisible ? 1 : 0
+            "finalOutputThinkingIndicatorVisibleCount": diagnostic.expectedThinkingIndicatorVisible ? 1 : 0,
         ]
     }
 
     private func screenWithObservedFinalOutputDiagnostic(_ screen: SessionScreen) -> SessionScreen {
         guard let diagnostic = screen.finalOutputDiagnostic,
-              diagnostic.serviceObservationLatencyMilliseconds == nil,
-              let anchor = diagnostic.serviceObservationAnchorUptimeNanoseconds else {
+            diagnostic.serviceObservationLatencyMilliseconds == nil,
+            let anchor = diagnostic.serviceObservationAnchorUptimeNanoseconds
+        else {
             return screen
         }
 
@@ -455,7 +458,7 @@ final class StructuredSessionObservationStore: @unchecked Sendable {
                 "gapFallbackCount": 1,
                 "requestedRevision": requestedRevision,
                 "currentRevision": currentRevision,
-                "retainedDeltaCount": retainedDeltaCount
+                "retainedDeltaCount": retainedDeltaCount,
             ],
             recordedAt: currentDate()
         )
@@ -472,8 +475,8 @@ final class StructuredSessionObservationStore: @unchecked Sendable {
     }
 }
 
-private extension UInt64 {
-    func saturatingSubtract(_ other: UInt64) -> UInt64 {
+extension UInt64 {
+    fileprivate func saturatingSubtract(_ other: UInt64) -> UInt64 {
         self >= other ? self - other : 0
     }
 }

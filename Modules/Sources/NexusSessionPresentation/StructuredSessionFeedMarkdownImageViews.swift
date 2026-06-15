@@ -56,7 +56,8 @@ func structuredSessionFeedFinalAnswerMarkdownView(
             renderer: renderer
         )
     } else if prefersPlainTextUntilIdle,
-              allowsInlineMarkdownHydration == false {
+        allowsInlineMarkdownHydration == false
+    {
         StructuredSessionIdleGatedAssistantFeedMarkdownText(
             markdown: markdown,
             font: font,
@@ -196,9 +197,9 @@ struct StructuredSessionFeedMarkdownImageCarousel: View {
                 }
             }
             #if os(iOS)
-            .tabViewStyle(.page(indexDisplayMode: .automatic))
+                .tabViewStyle(.page(indexDisplayMode: .automatic))
             #else
-            .tabViewStyle(.automatic)
+                .tabViewStyle(.automatic)
             #endif
 
             if references.count > 1 {
@@ -272,7 +273,7 @@ struct StructuredSessionFeedExpandedImageSheet: View {
         }
         .navigationTitle(altText.isEmpty ? "Image" : altText)
         #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
+            .navigationBarTitleDisplayMode(.inline)
         #endif
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {

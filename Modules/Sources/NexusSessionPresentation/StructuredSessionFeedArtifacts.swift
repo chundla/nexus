@@ -57,7 +57,8 @@ public func structuredSessionFeedArtifactPresentation(
     }
 
     let hostPath = structuredSessionPiExportedHTMLHostPath(from: trimmed)
-    let fileName = hostPath.map { ($0 as NSString).lastPathComponent }
+    let fileName =
+        hostPath.map { ($0 as NSString).lastPathComponent }
         ?? "session.html"
 
     return StructuredSessionFeedArtifactPresentation(

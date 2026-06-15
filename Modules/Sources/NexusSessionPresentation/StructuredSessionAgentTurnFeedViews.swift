@@ -175,15 +175,18 @@ public struct StructuredSessionAgentTurnToolBubble: View {
             }
 
             if let detail = tool.detailText?.trimmingCharacters(in: .whitespacesAndNewlines),
-               detail.isEmpty == false {
+                detail.isEmpty == false
+            {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Output")
                         .font(style.bodyFont(11, .caption2, .semibold))
                         .foregroundStyle(style.mutedForeground)
-                    if showsRawJSON, let raw = structuredSessionAgentTurnToolRawJSONCandidate(
-                        callPreview: tool.callPreview,
-                        detailText: tool.detailText
-                    ) {
+                    if showsRawJSON,
+                        let raw = structuredSessionAgentTurnToolRawJSONCandidate(
+                            callPreview: tool.callPreview,
+                            detailText: tool.detailText
+                        )
+                    {
                         Text(raw)
                             .font(style.monoFont(11, .caption))
                             .foregroundStyle(style.mutedForeground)

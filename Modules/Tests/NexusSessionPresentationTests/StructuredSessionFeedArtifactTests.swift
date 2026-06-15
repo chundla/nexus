@@ -1,7 +1,8 @@
 import Foundation
 import NexusDomain
-@testable import NexusSessionPresentation
 import Testing
+
+@testable import NexusSessionPresentation
 
 struct StructuredSessionFeedArtifactTests {
     @Test func piExportedSessionHTMLStatusMapsToArtifactPresentation() {
@@ -56,7 +57,7 @@ struct StructuredSessionFeedArtifactTests {
                     id: exportID,
                     kind: .status,
                     text: "Exported session HTML to /tmp/out.html"
-                )
+                ),
             ]
         )
 

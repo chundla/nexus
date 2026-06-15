@@ -29,21 +29,23 @@ nonisolated enum StructuredFeedProfilingFixture {
         var activityItems = [SessionActivityItem(kind: .status, text: "Pi shared Session stream connected")]
         var providerEventSequence = 0
 
-        for turnIndex in 0 ..< seededTurnCount {
+        for turnIndex in 0..<seededTurnCount {
             let prompt = userPrompt(for: turnIndex)
             let assistantMessage = finalizedAssistantMessage(for: turnIndex)
 
             activityItems.append(SessionActivityItem(kind: .message, text: "You: \(prompt)"))
-            activityItems.append(SessionActivityItem(
-                kind: .progress,
-                text: "Planning streaming burst \(turnIndex)",
-                detailText: progressDetail(for: turnIndex)
-            ))
-            activityItems.append(SessionActivityItem(
-                kind: .command,
-                text: commandTitle(for: turnIndex),
-                detailText: commandOutput(for: turnIndex)
-            ))
+            activityItems.append(
+                SessionActivityItem(
+                    kind: .progress,
+                    text: "Planning streaming burst \(turnIndex)",
+                    detailText: progressDetail(for: turnIndex)
+                ))
+            activityItems.append(
+                SessionActivityItem(
+                    kind: .command,
+                    text: commandTitle(for: turnIndex),
+                    detailText: commandOutput(for: turnIndex)
+                ))
             activityItems.append(SessionActivityItem(kind: .message, text: "Pi: \(assistantMessage)"))
 
             if turnIndex.isMultiple(of: 4) {
@@ -114,24 +116,28 @@ nonisolated enum StructuredFeedProfilingFixture {
             modelIdentifier: modelIdentifier
         )
 
-        let isPostTurn = switch state.phase {
-        case .finalized, .finalizedDwell: true
-        default: false
-        }
-        let finalOutputDiagnostic: StructuredSessionFinalOutputDiagnostic? = if isPostTurn,
-           let assistantItem = state.activityItems.last(where: { $0.kind == .message && $0.text.hasPrefix("Pi: ") }) {
-            StructuredSessionFinalOutputDiagnostic(
-                trigger: .turnEnd,
-                providerEventSequence: max(1, state.providerEventSequence),
-                providerRuntimeLatencyMilliseconds: 6 + (state.turnIndex % 5),
-                serviceObservationLatencyMilliseconds: 11 + (state.turnIndex % 7),
-                expectedActivityItemID: assistantItem.id,
-                expectedActivityItemText: assistantItem.text,
-                expectedThinkingIndicatorVisible: false
-            )
-        } else {
-            nil
-        }
+        let isPostTurn =
+            switch state.phase {
+            case .finalized, .finalizedDwell: true
+            default: false
+            }
+        let finalOutputDiagnostic: StructuredSessionFinalOutputDiagnostic? =
+            if isPostTurn,
+                let assistantItem = state.activityItems.last(where: { $0.kind == .message && $0.text.hasPrefix("Pi: ") }
+                )
+            {
+                StructuredSessionFinalOutputDiagnostic(
+                    trigger: .turnEnd,
+                    providerEventSequence: max(1, state.providerEventSequence),
+                    providerRuntimeLatencyMilliseconds: 6 + (state.turnIndex % 5),
+                    serviceObservationLatencyMilliseconds: 11 + (state.turnIndex % 7),
+                    expectedActivityItemID: assistantItem.id,
+                    expectedActivityItemText: assistantItem.text,
+                    expectedThinkingIndicatorVisible: false
+                )
+            } else {
+                nil
+            }
 
         // Drive full Pi mutation mix on every advance for hang reproduction:
         // - providerFacts (liveAssistantDraftText + tokenUsage growth + event seq during drafting)
@@ -207,7 +213,7 @@ nonisolated enum StructuredFeedProfilingFixture {
                     kind: .progress,
                     text: "Planning streaming burst \(turnIndex)",
                     detailText: progressDetail(for: turnIndex)
-                )
+                ),
             ],
             providerEventSequence: state.providerEventSequence + 1
         )
@@ -231,7 +237,7 @@ nonisolated enum StructuredFeedProfilingFixture {
                     text: commandTitle(for: state.turnIndex),
                     detailText: commandOutput(for: state.turnIndex)
                 ),
-                SessionActivityItem(kind: .message, text: "Pi: \(assistantMessage)")
+                SessionActivityItem(kind: .message, text: "Pi: \(assistantMessage)"),
             ],
             providerEventSequence: state.providerEventSequence + 1
         )
@@ -326,13 +332,13 @@ nonisolated enum StructuredFeedProfilingFixture {
     private static func commandOutput(for turnIndex: Int) -> String {
         if turnIndex.isMultiple(of: 2) {
             return """
-            Test Suite 'StructuredFeedBurst\(turnIndex)' started
-            Test Case '-[StructuredFeedBurst\(turnIndex) testTailAppend]' passed (0.04 seconds)
-            Executed 1 test, with 0 failures in 0.04 seconds
-            """
+                Test Suite 'StructuredFeedBurst\(turnIndex)' started
+                Test Case '-[StructuredFeedBurst\(turnIndex) testTailAppend]' passed (0.04 seconds)
+                Executed 1 test, with 0 failures in 0.04 seconds
+                """
         }
 
-        return (0 ..< 14).map { index in
+        return (0..<14).map { index in
             "StreamingBurst\(turnIndex).swift | \(index + 1) insertions | chunk \(index)"
         }.joined(separator: "\n")
     }

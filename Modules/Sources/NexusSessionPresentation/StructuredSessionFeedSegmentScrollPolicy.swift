@@ -34,7 +34,9 @@ public func structuredSessionActivityRows(
         return Array(rows.suffix(visibleTailItemCount))
     }
 
-    guard let visibleSegments = structuredSessionVisibleFeedSegments(in: feed, visibleTailItemCount: visibleTailItemCount) else {
+    guard
+        let visibleSegments = structuredSessionVisibleFeedSegments(in: feed, visibleTailItemCount: visibleTailItemCount)
+    else {
         return feed.activityRows
     }
     if visibleSegments.isEmpty {
@@ -103,16 +105,18 @@ public func structuredSessionFeedScrollTarget(
 
     if let segments = presentation.feed.feedSegments, segments.isEmpty == false {
         if let last = segments.last,
-           case .agentTurn(let turn) = last,
-           let final = turn.finalAnswer,
-           final.isStreaming {
+            case .agentTurn(let turn) = last,
+            let final = turn.finalAnswer,
+            final.isStreaming
+        {
             return .activityRow(turn.id)
         }
         return .activityRow(segments.last!.id)
     }
 
     if let streamingRow = presentation.feed.activityRows.last,
-       streamingRow.conversationPresentation?.isStreaming == true {
+        streamingRow.conversationPresentation?.isStreaming == true
+    {
         return .activityRow(streamingRow.id)
     }
 
@@ -132,15 +136,17 @@ public func structuredSessionFeedScrollSnapshot(
         growthToken = nil
     } else if case .activityRow(let rowID) = target {
         if let segments = presentation.feed.feedSegments,
-           let last = segments.last,
-           case .agentTurn(let turn) = last,
-           turn.id == rowID,
-           let final = turn.finalAnswer,
-           final.isStreaming {
+            let last = segments.last,
+            case .agentTurn(let turn) = last,
+            turn.id == rowID,
+            let final = turn.finalAnswer,
+            final.isStreaming
+        {
             growthToken = structuredSessionLiveDraftScrollGrowthToken(for: final.text)
         } else if let row = presentation.feed.activityRows.last,
-                  row.id == rowID,
-                  row.conversationPresentation?.isStreaming == true {
+            row.id == rowID,
+            row.conversationPresentation?.isStreaming == true
+        {
             growthToken = structuredSessionLiveDraftScrollGrowthToken(for: row.text)
         } else {
             growthToken = nil
@@ -168,7 +174,8 @@ public func structuredSessionFeedFollowScrollToken(
     for presentation: FocusedStructuredSessionPresentation
 ) -> String {
     if structuredSessionEffectiveAgentTurnInProgress(for: presentation),
-       let anchorTurnID = structuredSessionFeedScrollAnchorTurnID(in: presentation.feed.feedSegments) {
+        let anchorTurnID = structuredSessionFeedScrollAnchorTurnID(in: presentation.feed.feedSegments)
+    {
         return "thinking-anchor-\(anchorTurnID.uuidString)"
     }
 
@@ -176,9 +183,10 @@ public func structuredSessionFeedFollowScrollToken(
         let last = segments.last
         let draftSuffix: String
         if let last,
-           case .agentTurn(let turn) = last,
-           let final = turn.finalAnswer,
-           final.isStreaming {
+            case .agentTurn(let turn) = last,
+            let final = turn.finalAnswer,
+            final.isStreaming
+        {
             draftSuffix = "-\(final.text.count)"
         } else {
             draftSuffix = ""
@@ -188,7 +196,8 @@ public func structuredSessionFeedFollowScrollToken(
 
     let rows = presentation.feed.activityRows
     let lastRow = rows.last
-    let draftSuffix = lastRow?.conversationPresentation?.isStreaming == true
+    let draftSuffix =
+        lastRow?.conversationPresentation?.isStreaming == true
         ? "-\(lastRow?.text.count ?? 0)"
         : ""
     return "\(rows.count)-\(lastRow?.id.uuidString ?? "none")\(draftSuffix)"
@@ -197,10 +206,11 @@ public func structuredSessionFeedFollowScrollToken(
 public func structuredSessionAutoScrollTrigger(for screen: SessionScreen) -> StructuredSessionAutoScrollTrigger {
     let lastScrollItemID: UUID?
     if let segments = structuredSessionAgentTurnFeedSegments(for: screen) {
-        let hasThinking = structuredSessionThinkingIndicator(
-            for: screen,
-            hasPendingApprovalRequests: screen.approvalRequests.contains { $0.state == .pending }
-        ) != nil
+        let hasThinking =
+            structuredSessionThinkingIndicator(
+                for: screen,
+                hasPendingApprovalRequests: screen.approvalRequests.contains { $0.state == .pending }
+            ) != nil
         if hasThinking, let anchorTurnID = structuredSessionFeedScrollAnchorTurnID(in: segments) {
             lastScrollItemID = anchorTurnID
         } else if let last = segments.last {

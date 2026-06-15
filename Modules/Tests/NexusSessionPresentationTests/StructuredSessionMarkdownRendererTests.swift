@@ -1,6 +1,7 @@
 import Foundation
-@testable import NexusSessionPresentation
 import Testing
+
+@testable import NexusSessionPresentation
 
 @MainActor
 private final class StructuredSessionMarkdownHydrationDeliveryCounter {
@@ -122,13 +123,13 @@ struct StructuredSessionMarkdownRendererTests {
     @Test func rendererParsesBlockMarkdownWithFullDocumentSyntax() {
         let renderer = StructuredSessionMarkdownRenderer(cacheLimit: 0)
         let markdown = """
-        ## Section
+            ## Section
 
-        - one
-        - two
+            - one
+            - two
 
-        `inline`
-        """
+            `inline`
+            """
 
         let rendered = renderer.render(markdown)
         let plain = String(rendered.characters)
@@ -141,15 +142,15 @@ struct StructuredSessionMarkdownRendererTests {
     @Test func rendererPreservesMultilineFencedCodeBlocksAsSegments() {
         let renderer = StructuredSessionMarkdownRenderer(cacheLimit: 0)
         let markdown = """
-        Before
+            Before
 
-        ```swift
-        print(1)
-        print(2)
-        ```
+            ```swift
+            print(1)
+            print(2)
+            ```
 
-        After
-        """
+            After
+            """
 
         let rendered = renderer.renderContent(markdown)
 
@@ -169,9 +170,11 @@ struct StructuredSessionMarkdownRendererTests {
 
     @Test func structuredSessionMarkdownDefersHydrationUntilAfterFirstLayoutTurnOnMacOS() {
         #if os(macOS)
-        #expect(StructuredSessionMarkdownTextInitialRenderPolicy.defersMarkdownHydrationUntilAfterFirstLayoutTurn)
+            #expect(StructuredSessionMarkdownTextInitialRenderPolicy.defersMarkdownHydrationUntilAfterFirstLayoutTurn)
         #else
-        #expect(StructuredSessionMarkdownTextInitialRenderPolicy.defersMarkdownHydrationUntilAfterFirstLayoutTurn == false)
+            #expect(
+                StructuredSessionMarkdownTextInitialRenderPolicy.defersMarkdownHydrationUntilAfterFirstLayoutTurn
+                    == false)
         #endif
     }
 
@@ -260,7 +263,7 @@ struct StructuredSessionMarkdownRendererTests {
         )
         let deliveryCounter = StructuredSessionMarkdownHydrationDeliveryCounter()
 
-        for index in 0 ..< 4 {
+        for index in 0..<4 {
             StructuredSessionMarkdownRowHydrationScheduler.scheduleHydration(
                 markdown: "**item \(index)**",
                 renderer: renderer
@@ -276,10 +279,10 @@ struct StructuredSessionMarkdownRendererTests {
         #expect(deliveryCounter.count == 4)
         let flushCount = await StructuredSessionMarkdownRowHydrationScheduler.deliveryFlushCountForTesting()
         #if os(macOS)
-        #expect(flushCount >= 2)
-        #expect(flushCount < 4)
+            #expect(flushCount >= 2)
+            #expect(flushCount < 4)
         #else
-        #expect(flushCount == 1)
+            #expect(flushCount == 1)
         #endif
     }
 
@@ -296,7 +299,7 @@ struct StructuredSessionMarkdownRendererTests {
         let deliveryCounter = StructuredSessionMarkdownHydrationDeliveryCounter()
         let jobCount = 12
 
-        for index in 0 ..< jobCount {
+        for index in 0..<jobCount {
             StructuredSessionMarkdownRowHydrationScheduler.scheduleHydration(
                 markdown: "**cap \(index)**",
                 renderer: renderer
@@ -312,10 +315,10 @@ struct StructuredSessionMarkdownRendererTests {
         #expect(deliveryCounter.count == jobCount)
         let flushCount = await StructuredSessionMarkdownRowHydrationScheduler.deliveryFlushCountForTesting()
         #if os(macOS)
-        #expect(flushCount >= 6)
-        #expect(flushCount < jobCount)
+            #expect(flushCount >= 6)
+            #expect(flushCount < jobCount)
         #else
-        #expect(flushCount == 1)
+            #expect(flushCount == 1)
         #endif
     }
 }

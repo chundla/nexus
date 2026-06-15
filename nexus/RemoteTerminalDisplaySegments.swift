@@ -1,18 +1,21 @@
 import Foundation
 import NexusDomain
 
-func renderedRemoteTerminalDisplaySegments(for line: TerminalLine, row: Int, screen: SessionScreen) -> [RemoteTerminalDisplaySegment] {
+func renderedRemoteTerminalDisplaySegments(for line: TerminalLine, row: Int, screen: SessionScreen)
+    -> [RemoteTerminalDisplaySegment]
+{
     let targetColumnCount = max(1, screen.terminalColumns)
     let cursorColumn = max(0, min(screen.cursorColumn, targetColumnCount - 1))
     var segments: [RemoteTerminalDisplaySegment] = []
 
-    for column in 0 ..< targetColumnCount {
+    for column in 0..<targetColumnCount {
         let sourceCell = column < line.cells.count ? line.cells[column] : TerminalCell(text: " ")
         let isCursor = screen.cursorVisible && row == screen.cursorRow && column == cursorColumn
 
         if let lastIndex = segments.indices.last,
-           segments[lastIndex].style == sourceCell.style,
-           segments[lastIndex].isCursor == isCursor {
+            segments[lastIndex].style == sourceCell.style,
+            segments[lastIndex].isCursor == isCursor
+        {
             segments[lastIndex].text.append(sourceCell.text)
             segments[lastIndex].columnCount += 1
         } else {

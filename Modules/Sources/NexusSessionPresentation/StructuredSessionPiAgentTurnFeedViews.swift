@@ -55,7 +55,8 @@ public struct StructuredSessionPiFeedSegmentView: View {
     public let disclosureState: StructuredSessionAgentTurnDisclosureState
     public let standaloneRow: (StructuredSessionActivityRow) -> AnyView
     public let onShowFullAssistantResponse: ((StructuredSessionAssistantFullResponsePresentation) -> Void)?
-    public let artifactActions: (StructuredSessionFeedArtifactPresentation) -> StructuredSessionFeedArtifactActionPresentation
+    public let artifactActions:
+        (StructuredSessionFeedArtifactPresentation) -> StructuredSessionFeedArtifactActionPresentation
     public let onArtifactDownload: ((StructuredSessionFeedArtifactPresentation) -> Void)?
     public let onArtifactOpenOnHost: ((StructuredSessionFeedArtifactPresentation) -> Void)?
 
@@ -66,13 +67,15 @@ public struct StructuredSessionPiFeedSegmentView: View {
         disclosureState: StructuredSessionAgentTurnDisclosureState,
         standaloneRow: @escaping (StructuredSessionActivityRow) -> AnyView,
         onShowFullAssistantResponse: ((StructuredSessionAssistantFullResponsePresentation) -> Void)? = nil,
-        artifactActions: @escaping (StructuredSessionFeedArtifactPresentation) -> StructuredSessionFeedArtifactActionPresentation = { artifact in
-            structuredSessionFeedArtifactActionPresentation(
-                for: artifact,
-                hasWriterAuthority: true,
-                usesHostArtifactFetch: false
-            )
-        },
+        artifactActions:
+            @escaping (StructuredSessionFeedArtifactPresentation) -> StructuredSessionFeedArtifactActionPresentation = {
+                artifact in
+                structuredSessionFeedArtifactActionPresentation(
+                    for: artifact,
+                    hasWriterAuthority: true,
+                    usesHostArtifactFetch: false
+                )
+            },
         onArtifactDownload: ((StructuredSessionFeedArtifactPresentation) -> Void)? = nil,
         onArtifactOpenOnHost: ((StructuredSessionFeedArtifactPresentation) -> Void)? = nil
     ) {
@@ -102,7 +105,8 @@ public struct StructuredSessionPiFeedSegmentView: View {
                     onOpenOnHost: { onArtifactOpenOnHost?(artifact) }
                 )
             } else {
-                standaloneRow(structuredSessionAnnotatedActivityRow(for: item, providerDisplayName: providerDisplayName))
+                standaloneRow(
+                    structuredSessionAnnotatedActivityRow(for: item, providerDisplayName: providerDisplayName))
             }
         }
     }
@@ -214,4 +218,3 @@ private func structuredSessionAnnotatedActivityRow(
         showsExpandedSystemCard: base.showsExpandedSystemCard
     )
 }
-

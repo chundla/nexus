@@ -52,8 +52,9 @@ public struct StructuredSessionFinalOutputLatencyTracker: Sendable {
         presentation: FocusedStructuredSessionPresentation?
     ) -> StructuredSessionFinalOutputLatencySample? {
         guard let screen,
-              screen.primarySurface == .structuredActivityFeed,
-              let diagnostic = screen.finalOutputDiagnostic else {
+            screen.primarySurface == .structuredActivityFeed,
+            let diagnostic = screen.finalOutputDiagnostic
+        else {
             currentMilestoneKey = nil
             observationReceivedAtNanoseconds = nil
             presentationVisibleAtNanoseconds = nil
@@ -76,19 +77,22 @@ public struct StructuredSessionFinalOutputLatencyTracker: Sendable {
             presentationVisibleAtNanoseconds = now
         }
 
-        let clientPresentationLatencyMilliseconds: Int? = if let observationReceivedAtNanoseconds,
-            let presentationVisibleAtNanoseconds {
-            Int(presentationVisibleAtNanoseconds.saturatingSubtract(observationReceivedAtNanoseconds) / 1_000_000)
-        } else {
-            nil
-        }
-        let totalVisibleLatencyMilliseconds: Int? = if let clientPresentationLatencyMilliseconds {
-            diagnostic.providerRuntimeLatencyMilliseconds
-                + (diagnostic.serviceObservationLatencyMilliseconds ?? 0)
-                + clientPresentationLatencyMilliseconds
-        } else {
-            nil
-        }
+        let clientPresentationLatencyMilliseconds: Int? =
+            if let observationReceivedAtNanoseconds,
+                let presentationVisibleAtNanoseconds
+            {
+                Int(presentationVisibleAtNanoseconds.saturatingSubtract(observationReceivedAtNanoseconds) / 1_000_000)
+            } else {
+                nil
+            }
+        let totalVisibleLatencyMilliseconds: Int? =
+            if let clientPresentationLatencyMilliseconds {
+                diagnostic.providerRuntimeLatencyMilliseconds
+                    + (diagnostic.serviceObservationLatencyMilliseconds ?? 0)
+                    + clientPresentationLatencyMilliseconds
+            } else {
+                nil
+            }
 
         return StructuredSessionFinalOutputLatencySample(
             trigger: diagnostic.trigger,
@@ -115,14 +119,15 @@ public struct StructuredSessionFinalOutputLatencyTracker: Sendable {
             let matchesText = diagnostic.expectedActivityItemText.map { row.text == $0 } ?? true
             return matchesID && matchesText
         })
-        let matchesThinkingIndicator = (presentation.feed.thinkingIndicator != nil) == diagnostic.expectedThinkingIndicatorVisible
+        let matchesThinkingIndicator =
+            (presentation.feed.thinkingIndicator != nil) == diagnostic.expectedThinkingIndicatorVisible
         let isVisible = matchingRow != nil && matchesThinkingIndicator
         return (isVisible, matchingRow?.text)
     }
 }
 
-private extension UInt64 {
-    func saturatingSubtract(_ other: UInt64) -> UInt64 {
+extension UInt64 {
+    fileprivate func saturatingSubtract(_ other: UInt64) -> UInt64 {
         self >= other ? self - other : 0
     }
 }

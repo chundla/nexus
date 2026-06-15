@@ -15,7 +15,8 @@ public struct StructuredSessionFeedRichMarkdownView: View {
         markdown: String,
         font: Font,
         color: Color,
-        codeBlockPolicy: StructuredSessionAssistantFullResponseCodeBlockPolicy = structuredSessionAssistantFullResponseCodeBlockPolicy()
+        codeBlockPolicy: StructuredSessionAssistantFullResponseCodeBlockPolicy =
+            structuredSessionAssistantFullResponseCodeBlockPolicy()
     ) {
         self.markdown = markdown
         self.font = font
@@ -61,7 +62,10 @@ public struct StructuredSessionFeedRichMarkdownView: View {
     ) -> some View {
         let policy = structuredSessionAssistantFullResponseDisplayMathPolicy()
         VStack(alignment: .leading, spacing: 12) {
-            ForEach(Array(structuredSessionAssistantFullResponseReaderSegments(in: markdown, policy: policy).enumerated()), id: \.offset) { _, segment in
+            ForEach(
+                Array(structuredSessionAssistantFullResponseReaderSegments(in: markdown, policy: policy).enumerated()),
+                id: \.offset
+            ) { _, segment in
                 if let chunk = segment.markdownChunk {
                     StructuredSessionFeedRichMarkdownView(
                         markdown: chunk,
@@ -131,8 +135,8 @@ private func structuredSessionFeedRichMarkdownCodeBlock(
 @available(macOS 12.0, iOS 15.0, *)
 private func structuredSessionFeedRichMarkdownCodeBlockBackgroundColor() -> Color {
     #if os(iOS)
-    Color(uiColor: .secondarySystemBackground)
+        Color(uiColor: .secondarySystemBackground)
     #else
-    Color(nsColor: .controlBackgroundColor)
+        Color(nsColor: .controlBackgroundColor)
     #endif
 }

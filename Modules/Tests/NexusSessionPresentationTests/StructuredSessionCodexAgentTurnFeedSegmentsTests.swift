@@ -1,7 +1,8 @@
 import Foundation
 import NexusDomain
-@testable import NexusSessionPresentation
 import Testing
+
+@testable import NexusSessionPresentation
 
 /// Codex **Agent Turn** composite feed segments (#237, ADR 0037).
 struct StructuredSessionCodexAgentTurnFeedSegmentsTests {
@@ -34,7 +35,7 @@ struct StructuredSessionCodexAgentTurnFeedSegmentsTests {
                     kind: .message,
                     text: "subagent: Looks good overall. Follow up on the retry path."
                 ),
-                SessionActivityItem(kind: .message, text: "Codex: Done")
+                SessionActivityItem(kind: .message, text: "Codex: Done"),
             ],
             isAgentTurnInProgress: false
         )
@@ -75,7 +76,7 @@ struct StructuredSessionCodexAgentTurnFeedSegmentsTests {
                 SessionActivityItem(kind: .message, text: "You: plan"),
                 SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Outline steps."),
                 SessionActivityItem(kind: .message, text: "thinking: Still weighing options."),
-                SessionActivityItem(kind: .message, text: "Codex: Here is the plan")
+                SessionActivityItem(kind: .message, text: "Codex: Here is the plan"),
             ]
         )
 
@@ -95,7 +96,7 @@ struct StructuredSessionCodexAgentTurnFeedSegmentsTests {
             transcript: "",
             activityItems: [
                 SessionActivityItem(kind: .message, text: "You: hi"),
-                SessionActivityItem(kind: .message, text: "Codex: hey")
+                SessionActivityItem(kind: .message, text: "Codex: hey"),
             ]
         )
 
@@ -103,7 +104,8 @@ struct StructuredSessionCodexAgentTurnFeedSegmentsTests {
         let segments = try #require(feed.feedSegments)
         #expect(segments.count == 2)
         guard case .userMessage = segments[0],
-              case .agentTurn = segments[1] else {
+            case .agentTurn = segments[1]
+        else {
             Issue.record("Expected user then agent turn segments")
             return
         }
@@ -118,13 +120,17 @@ struct StructuredSessionCodexAgentTurnFeedSegmentsTests {
                 SessionActivityItem(kind: .message, text: "You: run"),
                 SessionActivityItem(kind: .command, text: "command: ls"),
                 SessionActivityItem(kind: .message, text: "command: ok"),
-                SessionActivityItem(kind: .message, text: "Codex: finished")
+                SessionActivityItem(kind: .message, text: "Codex: finished"),
             ]
         )
 
         let segments = try #require(structuredSessionCodexFeedSegments(for: screen))
         #expect(segments.count == 2)
-        #expect(segments.contains { if case .standalone = $0 { return true }; return false } == false)
+        #expect(
+            segments.contains {
+                if case .standalone = $0 { return true }
+                return false
+            } == false)
         guard case .agentTurn(let turn) = segments[1] else {
             Issue.record("Expected composite agent turn")
             return

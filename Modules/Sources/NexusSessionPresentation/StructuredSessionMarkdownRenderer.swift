@@ -289,27 +289,21 @@ public final class StructuredSessionMarkdownRenderer: @unchecked Sendable {
         if text.contains("\n") {
             for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
                 let trimmed = line.trimmingCharacters(in: .whitespaces)
-                if trimmed.hasPrefix("#") ||
-                    trimmed.hasPrefix(">") ||
-                    trimmed.hasPrefix("- ") ||
-                    trimmed.hasPrefix("* ") ||
-                    trimmed.hasPrefix("+ ") ||
-                    trimmed.hasPrefix("1. ") {
+                if trimmed.hasPrefix("#") || trimmed.hasPrefix(">") || trimmed.hasPrefix("- ")
+                    || trimmed.hasPrefix("* ") || trimmed.hasPrefix("+ ") || trimmed.hasPrefix("1. ")
+                {
                     return true
                 }
-                if structuredSessionFeedMarkdownLineLooksLikeTableRow(trimmed) ||
-                    structuredSessionFeedMarkdownLineLooksLikeThematicBreak(trimmed) {
+                if structuredSessionFeedMarkdownLineLooksLikeTableRow(trimmed)
+                    || structuredSessionFeedMarkdownLineLooksLikeThematicBreak(trimmed)
+                {
                     return true
                 }
             }
         }
 
-        return text.contains("`") ||
-            text.contains("*") ||
-            text.contains("_") ||
-            text.contains("[") ||
-            text.contains("!") ||
-            text.contains("~")
+        return text.contains("`") || text.contains("*") || text.contains("_") || text.contains("[")
+            || text.contains("!") || text.contains("~")
     }
 
     private static func defaultParse(_ text: String) -> AttributedString {
@@ -353,19 +347,16 @@ public final class StructuredSessionMarkdownRenderer: @unchecked Sendable {
             return AttributedString(line)
         }
 
-        return (try? AttributedString(
-            markdown: line,
-            options: inlineMarkdownParsingOptions()
-        )) ?? AttributedString(line)
+        return
+            (try? AttributedString(
+                markdown: line,
+                options: inlineMarkdownParsingOptions()
+            )) ?? AttributedString(line)
     }
 
     private static func requiresInlineMarkdownParsing(_ text: String) -> Bool {
-        text.contains("`") ||
-            text.contains("*") ||
-            text.contains("_") ||
-            text.contains("[") ||
-            text.contains("!") ||
-            text.contains("~")
+        text.contains("`") || text.contains("*") || text.contains("_") || text.contains("[") || text.contains("!")
+            || text.contains("~")
     }
 
     static func structuredSessionFeedMarkdownLineLooksLikeTableRow(_ trimmedLine: String) -> Bool {
@@ -477,9 +468,9 @@ public enum StructuredSessionMarkdownRowHydrationScheduler {
     /// Limits SwiftUI row state updates per main-actor turn during feed paint/finalization (#225).
     private static var maxDeliveriesPerMainActorFlush: Int {
         #if os(iOS)
-        1
+            1
         #else
-        2
+            2
         #endif
     }
 
@@ -525,7 +516,7 @@ public enum StructuredSessionMarkdownRowHydrationScheduler {
 
     /// Waits until scheduled hydration work finishes; for tests only.
     public static func drainForTesting() async {
-        for _ in 0 ..< 512 {
+        for _ in 0..<512 {
             if await queue.hasPendingOrDraining() {
                 break
             }
@@ -557,18 +548,18 @@ public enum StructuredSessionMarkdownTextInitialRenderPolicy {
 }
 
 #if os(macOS)
-/// When false, `StructuredSessionMarkdownText` keeps plain text and skips row hydration (#225 startup).
-private struct StructuredSessionFeedMarkdownHydrationAllowedKey: EnvironmentKey {
-    static let defaultValue = true
-}
-
-@available(macOS 12.0, *)
-public extension EnvironmentValues {
-    var structuredSessionFeedMarkdownHydrationAllowed: Bool {
-        get { self[StructuredSessionFeedMarkdownHydrationAllowedKey.self] }
-        set { self[StructuredSessionFeedMarkdownHydrationAllowedKey.self] = newValue }
+    /// When false, `StructuredSessionMarkdownText` keeps plain text and skips row hydration (#225 startup).
+    private struct StructuredSessionFeedMarkdownHydrationAllowedKey: EnvironmentKey {
+        static let defaultValue = true
     }
-}
+
+    @available(macOS 12.0, *)
+    extension EnvironmentValues {
+        public var structuredSessionFeedMarkdownHydrationAllowed: Bool {
+            get { self[StructuredSessionFeedMarkdownHydrationAllowedKey.self] }
+            set { self[StructuredSessionFeedMarkdownHydrationAllowedKey.self] = newValue }
+        }
+    }
 #endif
 
 @available(macOS 12.0, iOS 15.0, *)
@@ -579,8 +570,9 @@ func structuredSessionMarkdownDisplayedContent(
     hasAppeared: Bool
 ) -> StructuredSessionRenderedText {
     if defersParseUntilAppear,
-       hasAppeared == false,
-       StructuredSessionMarkdownRenderer.requiresMarkdownParsing(markdown) {
+        hasAppeared == false,
+        StructuredSessionMarkdownRenderer.requiresMarkdownParsing(markdown)
+    {
         return .plain(markdown)
     }
     return renderer.renderContent(markdown)
@@ -597,9 +589,9 @@ enum StructuredSessionFeedTextSelectionPolicy {
 }
 
 @available(macOS 12.0, iOS 15.0, *)
-public extension View {
+extension View {
     @ViewBuilder
-    func structuredSessionFeedTextSelection() -> some View {
+    public func structuredSessionFeedTextSelection() -> some View {
         if StructuredSessionFeedTextSelectionPolicy.isEnabled {
             textSelection(.enabled)
         } else {
@@ -610,11 +602,11 @@ public extension View {
     /// Flatten per-row bubble chrome into one layer so scrolling does not
     /// re-rasterize every nested shape independently (iOS GPU offscreen passes).
     @ViewBuilder
-    func structuredSessionFeedRowCompositing() -> some View {
+    public func structuredSessionFeedRowCompositing() -> some View {
         #if os(iOS)
-        compositingGroup()
+            compositingGroup()
         #else
-        self
+            self
         #endif
     }
 }
@@ -647,7 +639,8 @@ public struct StructuredSessionIdleGatedAssistantFeedMarkdownText: View {
     public var body: some View {
         Group {
             if prefersPlainTextUntilIdle,
-               allowsInlineMarkdownHydration == false {
+                allowsInlineMarkdownHydration == false
+            {
                 Text(verbatim: markdown)
                     .font(font)
                     .foregroundColor(color)
@@ -676,7 +669,7 @@ public struct StructuredSessionMarkdownText: View {
     @State private var hasAppeared = false
     @State private var renderedContent: StructuredSessionRenderedText
     #if os(macOS)
-    @Environment(\.structuredSessionFeedMarkdownHydrationAllowed) private var feedMarkdownHydrationAllowed
+        @Environment(\.structuredSessionFeedMarkdownHydrationAllowed) private var feedMarkdownHydrationAllowed
     #endif
 
     public init(
@@ -685,7 +678,8 @@ public struct StructuredSessionMarkdownText: View {
         color: Color,
         renderer: StructuredSessionMarkdownRenderer = .shared,
         fixedVerticalSize: Bool = false,
-        defersInitialMarkdownParse: Bool = StructuredSessionMarkdownTextInitialRenderPolicy.defersMarkdownParseUntilFirstAppear
+        defersInitialMarkdownParse: Bool = StructuredSessionMarkdownTextInitialRenderPolicy
+            .defersMarkdownParseUntilFirstAppear
     ) {
         self.markdown = markdown
         self.font = font
@@ -728,7 +722,8 @@ public struct StructuredSessionMarkdownText: View {
             guard hasAppeared == false else { return }
             hasAppeared = true
             guard defersInitialMarkdownParse,
-                  StructuredSessionMarkdownRenderer.requiresMarkdownParsing(markdown) else {
+                StructuredSessionMarkdownRenderer.requiresMarkdownParsing(markdown)
+            else {
                 let next = structuredSessionMarkdownDisplayedContent(
                     markdown: markdown,
                     renderer: renderer,
@@ -740,15 +735,15 @@ public struct StructuredSessionMarkdownText: View {
                 return
             }
             #if os(macOS)
-            guard feedMarkdownHydrationAllowed else { return }
+                guard feedMarkdownHydrationAllowed else { return }
             #endif
             structuredSessionMarkdownTextScheduleRowHydration()
         }
         #if os(macOS)
-        .onChange(of: feedMarkdownHydrationAllowed) { allowed in
-            guard allowed, hasAppeared else { return }
-            structuredSessionMarkdownTextScheduleRowHydration()
-        }
+            .onChange(of: feedMarkdownHydrationAllowed) { allowed in
+                guard allowed, hasAppeared else { return }
+                structuredSessionMarkdownTextScheduleRowHydration()
+            }
         #endif
         .onChange(of: markdown) { newValue in
             let next = structuredSessionMarkdownDisplayedContent(
@@ -764,7 +759,8 @@ public struct StructuredSessionMarkdownText: View {
 
     private func structuredSessionMarkdownTextScheduleRowHydration() {
         guard defersInitialMarkdownParse,
-              StructuredSessionMarkdownRenderer.requiresMarkdownParsing(markdown) else {
+            StructuredSessionMarkdownRenderer.requiresMarkdownParsing(markdown)
+        else {
             return
         }
         let scheduleHydration = {

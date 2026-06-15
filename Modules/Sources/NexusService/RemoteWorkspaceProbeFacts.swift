@@ -1,392 +1,402 @@
 #if os(macOS)
-import Foundation
-import NexusDomain
+    import Foundation
+    import NexusDomain
 
-protocol RemoteWorkspaceProbeCollecting: Sendable {
-    func collect(workspace: Workspace, host: NexusDomain.Host) -> RemoteWorkspaceProbeCollection
-}
-
-enum RemoteWorkspaceProbeCollection: Equatable {
-    case collected(RemoteWorkspaceProbeFacts)
-    case transportFailed(String)
-    case rawProbeFailed(String)
-}
-
-enum RemoteWorkspacePathProbeFact: Equatable {
-    case notChecked
-    case available
-    case failed(String)
-}
-
-struct RemoteWorkspaceProbeWorkspaceFacts: Equatable {
-    let tmuxAvailable: Bool
-    let workspacePath: RemoteWorkspacePathProbeFact
-}
-
-struct RemoteProviderProbeFacts: Equatable {
-    let executable: String?
-    let version: String?
-    let resolutionDetail: String?
-    let probeDetail: String?
-}
-
-struct RemoteWorkspaceProbeFacts: Equatable {
-    let workspace: RemoteWorkspaceProbeWorkspaceFacts
-    let providerFacts: [ProviderID: RemoteProviderProbeFacts]
-
-    init(
-        workspace: RemoteWorkspaceProbeWorkspaceFacts,
-        providerFacts: [ProviderID: RemoteProviderProbeFacts]
-    ) {
-        self.workspace = workspace
-        self.providerFacts = providerFacts
+    protocol RemoteWorkspaceProbeCollecting: Sendable {
+        func collect(workspace: Workspace, host: NexusDomain.Host) -> RemoteWorkspaceProbeCollection
     }
 
-    init(
-        tmuxAvailable: Bool,
-        workspacePath: RemoteWorkspacePathProbeFact,
-        providerFacts: [ProviderID: RemoteProviderProbeFacts]
-    ) {
-        self.init(
-            workspace: RemoteWorkspaceProbeWorkspaceFacts(
-                tmuxAvailable: tmuxAvailable,
-                workspacePath: workspacePath
-            ),
-            providerFacts: providerFacts
-        )
-    }
-
-    var tmuxAvailable: Bool { workspace.tmuxAvailable }
-    var workspacePath: RemoteWorkspacePathProbeFact { workspace.workspacePath }
-}
-
-struct RemoteWorkspaceProbeCollector: RemoteWorkspaceProbeCollecting {
-    let commandRunner: any ProviderCommandRunning
-
-    init(commandRunner: any ProviderCommandRunning = SystemProviderCommandRunner()) {
-        self.commandRunner = commandRunner
-    }
-
-    func collect(workspace: Workspace, host: NexusDomain.Host) -> RemoteWorkspaceProbeCollection {
-        do {
-            let result = try commandRunner.run(
-                executable: "/usr/bin/ssh",
-                arguments: sshArguments(host: host, workspace: workspace),
-                currentDirectoryURL: nil
-            )
-
-            switch parse(stdout: result.stdout) {
-            case let .collected(facts):
-                return .collected(facts)
-            case let .invalid(detail):
-                if result.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    return .transportFailed(providerCommandFirstDiagnosticLine(stdout: result.stdout, stderr: result.stderr))
-                }
-                return .rawProbeFailed(detail)
-            }
-        } catch {
-            return .transportFailed(error.localizedDescription)
-        }
-    }
-
-    private enum ParseResult {
+    enum RemoteWorkspaceProbeCollection: Equatable {
         case collected(RemoteWorkspaceProbeFacts)
-        case invalid(String)
+        case transportFailed(String)
+        case rawProbeFailed(String)
     }
 
-    private func parse(stdout: String) -> ParseResult {
-        var protocolVersion: String?
-        var tmuxAvailable = false
-        var workspacePath: RemoteWorkspacePathProbeFact = .notChecked
-        var workspacePathDetail: String?
-        var providerFields: [ProviderID: [String: String]] = [:]
+    enum RemoteWorkspacePathProbeFact: Equatable {
+        case notChecked
+        case available
+        case failed(String)
+    }
 
-        for line in stdout.split(whereSeparator: \.isNewline).map(String.init) {
-            let parts = line.split(separator: "\t", maxSplits: 1, omittingEmptySubsequences: false)
-            guard parts.count == 2 else {
-                continue
-            }
+    struct RemoteWorkspaceProbeWorkspaceFacts: Equatable {
+        let tmuxAvailable: Bool
+        let workspacePath: RemoteWorkspacePathProbeFact
+    }
 
-            let key = String(parts[0])
-            let value = String(parts[1])
+    struct RemoteProviderProbeFacts: Equatable {
+        let executable: String?
+        let version: String?
+        let resolutionDetail: String?
+        let probeDetail: String?
+    }
 
-            if key == "protocol" {
-                protocolVersion = value
-                continue
-            }
+    struct RemoteWorkspaceProbeFacts: Equatable {
+        let workspace: RemoteWorkspaceProbeWorkspaceFacts
+        let providerFacts: [ProviderID: RemoteProviderProbeFacts]
 
-            if key == "tmuxAvailable" {
-                tmuxAvailable = value == "true"
-                continue
-            }
-
-            if key == "workspacePath" {
-                switch value {
-                case "available":
-                    workspacePath = .available
-                case "failed":
-                    workspacePath = .failed("")
-                default:
-                    workspacePath = .notChecked
-                }
-                continue
-            }
-
-            if key == "workspacePathDetail" {
-                workspacePathDetail = value
-                continue
-            }
-
-            guard key.hasPrefix("provider.") else {
-                continue
-            }
-
-            let components = key.split(separator: ".", maxSplits: 2, omittingEmptySubsequences: false)
-            guard components.count == 3,
-                  let providerID = ProviderID(rawValue: String(components[1])) else {
-                continue
-            }
-            providerFields[providerID, default: [:]][String(components[2])] = value
+        init(
+            workspace: RemoteWorkspaceProbeWorkspaceFacts,
+            providerFacts: [ProviderID: RemoteProviderProbeFacts]
+        ) {
+            self.workspace = workspace
+            self.providerFacts = providerFacts
         }
 
-        guard let protocolVersion else {
-            return .invalid("Remote probe did not emit a supported protocol envelope")
-        }
-
-        guard protocolVersion == "v1" else {
-            return .invalid("Unsupported remote probe protocol: \(protocolVersion)")
-        }
-
-        if case .failed = workspacePath {
-            workspacePath = .failed(workspacePathDetail ?? "")
-        }
-
-        return .collected(
-            RemoteWorkspaceProbeFacts(
+        init(
+            tmuxAvailable: Bool,
+            workspacePath: RemoteWorkspacePathProbeFact,
+            providerFacts: [ProviderID: RemoteProviderProbeFacts]
+        ) {
+            self.init(
                 workspace: RemoteWorkspaceProbeWorkspaceFacts(
                     tmuxAvailable: tmuxAvailable,
                     workspacePath: workspacePath
                 ),
-                providerFacts: providerFields.reduce(into: [:]) { partialResult, entry in
-                    let fields = entry.value
-                    partialResult[entry.key] = RemoteProviderProbeFacts(
-                        executable: fields["executable"],
-                        version: fields["version"],
-                        resolutionDetail: fields["resolutionDetail"],
-                        probeDetail: fields["probeDetail"]
-                    )
-                }
+                providerFacts: providerFacts
             )
-        )
-    }
-
-    private func sshArguments(host: NexusDomain.Host, workspace: Workspace) -> [String] {
-        var arguments = [
-            "-o", "BatchMode=yes",
-            "-o", "ConnectTimeout=5"
-        ]
-        if let port = host.port {
-            arguments += ["-p", String(port)]
-        }
-        arguments += [host.sshTarget, remoteCommand(workspace: workspace)]
-        return arguments
-    }
-
-    private func remoteCommand(workspace: Workspace) -> String {
-        "/bin/sh -lc \(shellQuoted(script(workspace: workspace)))"
-    }
-
-    private func script(workspace: Workspace) -> String {
-        """
-        emit_fact() {
-          printf '%s\t%s\n' "$1" "$2"
-        }
-        first_nonempty_line() {
-          printf '%s\n' "$1" | awk '{ gsub(/\r/, ""); sub(/^[[:space:]]+/, ""); sub(/[[:space:]]+$/, ""); if (length($0)) { print; exit } }'
-        }
-        resolve_command_path() {
-          command_name="$1"
-          shift
-          for shell in \(ShellSupport.remoteShellCandidateListScript()); do
-            [ -n "$shell" ] || continue
-            [ -x "$shell" ] || continue
-            case "${shell##*/}" in
-              csh|tcsh)
-                candidate="$("$shell" -i -c "if ( -f ~/.login ) source ~/.login; command -v $command_name" 2>/dev/null)" || candidate="$("$shell" -c "if ( -f ~/.login ) source ~/.login; command -v $command_name" 2>/dev/null)" || continue
-                ;;
-              fish)
-                candidate="$("$shell" -i -c "command -v $command_name" 2>/dev/null)" || candidate="$("$shell" -l -c "command -v $command_name" 2>/dev/null)" || candidate="$("$shell" -c "command -v $command_name" 2>/dev/null)" || continue
-                ;;
-              *)
-                candidate="$("$shell" -lic "command -v $command_name" 2>/dev/null)" || candidate="$("$shell" -lc "command -v $command_name" 2>/dev/null)" || continue
-                ;;
-            esac
-            [ -x "$candidate" ] || continue
-            printf '%s\n' "$candidate"
-            return 0
-          done
-          for candidate in "$@"; do
-            [ -x "$candidate" ] || continue
-            printf '%s\n' "$candidate"
-            return 0
-          done
-          return 1
-        }
-        collect_version() {
-          output="$("$1" --version 2>/dev/null)"
-          first_nonempty_line "$output"
-        }
-        collect_cli_provider() {
-          provider_key="$1"
-          command_name="$2"
-          not_found_marker="$3"
-          shift 3
-          executable="$(resolve_command_path "$command_name" "$@")" || executable=""
-          if [ -z "$executable" ]; then
-            emit_fact "provider.$provider_key.resolutionDetail" "$not_found_marker"
-            return 0
-          fi
-          emit_fact "provider.$provider_key.executable" "$executable"
-          version="$(collect_version "$executable")"
-          [ -n "$version" ] && emit_fact "provider.$provider_key.version" "$version"
-          output="$("$executable" --help 2>&1)"
-          status=$?
-          if [ "$status" -ne 0 ]; then
-            detail="$(first_nonempty_line "$output")"
-            emit_fact "provider.$provider_key.probeDetail" "${detail:-$not_found_marker}"
-          fi
-        }
-        collect_resolution_provider() {
-          provider_key="$1"
-          command_name="$2"
-          not_found_marker="$3"
-          shift 3
-          executable="$(resolve_command_path "$command_name" "$@")" || executable=""
-          if [ -z "$executable" ]; then
-            emit_fact "provider.$provider_key.resolutionDetail" "$not_found_marker"
-            return 0
-          fi
-          emit_fact "provider.$provider_key.executable" "$executable"
-          version="$(collect_version "$executable")"
-          [ -n "$version" ] && emit_fact "provider.$provider_key.version" "$version"
-        }
-        collect_bob_provider() {
-          provider_key="$1"
-          command_name="$2"
-          not_found_marker="$3"
-          shift 3
-          executable="$(resolve_command_path "$command_name" "$@")" || executable=""
-          if [ -z "$executable" ]; then
-            emit_fact "provider.$provider_key.resolutionDetail" "$not_found_marker"
-            return 0
-          fi
-          emit_fact "provider.$provider_key.executable" "$executable"
-          version="$(collect_version "$executable")"
-          [ -n "$version" ] && emit_fact "provider.$provider_key.version" "$version"
-          output="$("$executable" --list-sessions 2>&1)"
-          status=$?
-          if [ "$status" -ne 0 ]; then
-            detail="$(first_nonempty_line "$output")"
-            emit_fact "provider.$provider_key.probeDetail" "$detail"
-          fi
         }
 
-        emit_fact protocol v1
-        if command -v tmux >/dev/null 2>&1; then
-          emit_fact tmuxAvailable true
-        else
-          emit_fact tmuxAvailable false
-          exit 0
-        fi
-
-        workspace_check_output="$(cd \(shellQuoted(workspace.folderPath)) 2>&1 && pwd)"
-        workspace_check_status=$?
-        if [ "$workspace_check_status" -ne 0 ]; then
-          emit_fact workspacePath failed
-          emit_fact workspacePathDetail "$(first_nonempty_line "$workspace_check_output")"
-          exit 0
-        fi
-        emit_fact workspacePath available
-        cd \(shellQuoted(workspace.folderPath)) || exit 0
-
-        collect_cli_provider claude claude NEXUS_REMOTE_CLAUDE_NOT_FOUND \(fallbackCandidates(for: "claude"))
-        collect_resolution_provider codex codex NEXUS_REMOTE_CODEX_NOT_FOUND \(fallbackCandidates(for: "codex"))
-        collect_resolution_provider pi pi NEXUS_REMOTE_PI_NOT_FOUND \(fallbackCandidates(for: "pi"))
-        collect_bob_provider ibmBob bob NEXUS_REMOTE_BOB_NOT_FOUND \(fallbackCandidates(for: "bob"))
-        """
+        var tmuxAvailable: Bool { workspace.tmuxAvailable }
+        var workspacePath: RemoteWorkspacePathProbeFact { workspace.workspacePath }
     }
 
-    private func fallbackCandidates(for commandName: String) -> String {
-        [
-            "$HOME/.local/bin/\(commandName)",
-            "$HOME/bin/\(commandName)",
-            "$HOME/.volta/bin/\(commandName)",
-            "$HOME/.asdf/shims/\(commandName)",
-            "$HOME/.local/share/mise/shims/\(commandName)",
-            "$HOME/.nix-profile/bin/\(commandName)",
-            "$HOME/.bun/bin/\(commandName)",
-            "$HOME/.nvm/current/bin/\(commandName)",
-            "/opt/homebrew/bin/\(commandName)",
-            "/usr/local/bin/\(commandName)",
-            "/usr/bin/\(commandName)",
-            "/bin/\(commandName)"
-        ]
-        .map { "\"\($0)\"" }
-        .joined(separator: " ")
+    struct RemoteWorkspaceProbeCollector: RemoteWorkspaceProbeCollecting {
+        let commandRunner: any ProviderCommandRunning
+
+        init(commandRunner: any ProviderCommandRunning = SystemProviderCommandRunner()) {
+            self.commandRunner = commandRunner
+        }
+
+        func collect(workspace: Workspace, host: NexusDomain.Host) -> RemoteWorkspaceProbeCollection {
+            do {
+                let result = try commandRunner.run(
+                    executable: "/usr/bin/ssh",
+                    arguments: sshArguments(host: host, workspace: workspace),
+                    currentDirectoryURL: nil
+                )
+
+                switch parse(stdout: result.stdout) {
+                case .collected(let facts):
+                    return .collected(facts)
+                case .invalid(let detail):
+                    if result.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        return .transportFailed(
+                            providerCommandFirstDiagnosticLine(stdout: result.stdout, stderr: result.stderr))
+                    }
+                    return .rawProbeFailed(detail)
+                }
+            } catch {
+                return .transportFailed(error.localizedDescription)
+            }
+        }
+
+        private enum ParseResult {
+            case collected(RemoteWorkspaceProbeFacts)
+            case invalid(String)
+        }
+
+        private func parse(stdout: String) -> ParseResult {
+            var protocolVersion: String?
+            var tmuxAvailable = false
+            var workspacePath: RemoteWorkspacePathProbeFact = .notChecked
+            var workspacePathDetail: String?
+            var providerFields: [ProviderID: [String: String]] = [:]
+
+            for line in stdout.split(whereSeparator: \.isNewline).map(String.init) {
+                let parts = line.split(separator: "\t", maxSplits: 1, omittingEmptySubsequences: false)
+                guard parts.count == 2 else {
+                    continue
+                }
+
+                let key = String(parts[0])
+                let value = String(parts[1])
+
+                if key == "protocol" {
+                    protocolVersion = value
+                    continue
+                }
+
+                if key == "tmuxAvailable" {
+                    tmuxAvailable = value == "true"
+                    continue
+                }
+
+                if key == "workspacePath" {
+                    switch value {
+                    case "available":
+                        workspacePath = .available
+                    case "failed":
+                        workspacePath = .failed("")
+                    default:
+                        workspacePath = .notChecked
+                    }
+                    continue
+                }
+
+                if key == "workspacePathDetail" {
+                    workspacePathDetail = value
+                    continue
+                }
+
+                guard key.hasPrefix("provider.") else {
+                    continue
+                }
+
+                let components = key.split(separator: ".", maxSplits: 2, omittingEmptySubsequences: false)
+                guard components.count == 3,
+                    let providerID = ProviderID(rawValue: String(components[1]))
+                else {
+                    continue
+                }
+                providerFields[providerID, default: [:]][String(components[2])] = value
+            }
+
+            guard let protocolVersion else {
+                return .invalid("Remote probe did not emit a supported protocol envelope")
+            }
+
+            guard protocolVersion == "v1" else {
+                return .invalid("Unsupported remote probe protocol: \(protocolVersion)")
+            }
+
+            if case .failed = workspacePath {
+                workspacePath = .failed(workspacePathDetail ?? "")
+            }
+
+            return .collected(
+                RemoteWorkspaceProbeFacts(
+                    workspace: RemoteWorkspaceProbeWorkspaceFacts(
+                        tmuxAvailable: tmuxAvailable,
+                        workspacePath: workspacePath
+                    ),
+                    providerFacts: providerFields.reduce(into: [:]) { partialResult, entry in
+                        let fields = entry.value
+                        partialResult[entry.key] = RemoteProviderProbeFacts(
+                            executable: fields["executable"],
+                            version: fields["version"],
+                            resolutionDetail: fields["resolutionDetail"],
+                            probeDetail: fields["probeDetail"]
+                        )
+                    }
+                )
+            )
+        }
+
+        private func sshArguments(host: NexusDomain.Host, workspace: Workspace) -> [String] {
+            var arguments = [
+                "-o", "BatchMode=yes",
+                "-o", "ConnectTimeout=5",
+            ]
+            if let port = host.port {
+                arguments += ["-p", String(port)]
+            }
+            arguments += [host.sshTarget, remoteCommand(workspace: workspace)]
+            return arguments
+        }
+
+        private func remoteCommand(workspace: Workspace) -> String {
+            "/bin/sh -lc \(shellQuoted(script(workspace: workspace)))"
+        }
+
+        private func script(workspace: Workspace) -> String {
+            """
+            emit_fact() {
+              printf '%s\t%s\n' "$1" "$2"
+            }
+            first_nonempty_line() {
+              printf '%s\n' "$1" | awk '{ gsub(/\r/, ""); sub(/^[[:space:]]+/, ""); sub(/[[:space:]]+$/, ""); if (length($0)) { print; exit } }'
+            }
+            resolve_command_path() {
+              command_name="$1"
+              shift
+              for shell in \(ShellSupport.remoteShellCandidateListScript()); do
+                [ -n "$shell" ] || continue
+                [ -x "$shell" ] || continue
+                case "${shell##*/}" in
+                  csh|tcsh)
+                    candidate="$("$shell" -i -c "if ( -f ~/.login ) source ~/.login; command -v $command_name" 2>/dev/null)" || candidate="$("$shell" -c "if ( -f ~/.login ) source ~/.login; command -v $command_name" 2>/dev/null)" || continue
+                    ;;
+                  fish)
+                    candidate="$("$shell" -i -c "command -v $command_name" 2>/dev/null)" || candidate="$("$shell" -l -c "command -v $command_name" 2>/dev/null)" || candidate="$("$shell" -c "command -v $command_name" 2>/dev/null)" || continue
+                    ;;
+                  *)
+                    candidate="$("$shell" -lic "command -v $command_name" 2>/dev/null)" || candidate="$("$shell" -lc "command -v $command_name" 2>/dev/null)" || continue
+                    ;;
+                esac
+                [ -x "$candidate" ] || continue
+                printf '%s\n' "$candidate"
+                return 0
+              done
+              for candidate in "$@"; do
+                [ -x "$candidate" ] || continue
+                printf '%s\n' "$candidate"
+                return 0
+              done
+              return 1
+            }
+            collect_version() {
+              output="$("$1" --version 2>/dev/null)"
+              first_nonempty_line "$output"
+            }
+            collect_cli_provider() {
+              provider_key="$1"
+              command_name="$2"
+              not_found_marker="$3"
+              shift 3
+              executable="$(resolve_command_path "$command_name" "$@")" || executable=""
+              if [ -z "$executable" ]; then
+                emit_fact "provider.$provider_key.resolutionDetail" "$not_found_marker"
+                return 0
+              fi
+              emit_fact "provider.$provider_key.executable" "$executable"
+              version="$(collect_version "$executable")"
+              [ -n "$version" ] && emit_fact "provider.$provider_key.version" "$version"
+              output="$("$executable" --help 2>&1)"
+              status=$?
+              if [ "$status" -ne 0 ]; then
+                detail="$(first_nonempty_line "$output")"
+                emit_fact "provider.$provider_key.probeDetail" "${detail:-$not_found_marker}"
+              fi
+            }
+            collect_resolution_provider() {
+              provider_key="$1"
+              command_name="$2"
+              not_found_marker="$3"
+              shift 3
+              executable="$(resolve_command_path "$command_name" "$@")" || executable=""
+              if [ -z "$executable" ]; then
+                emit_fact "provider.$provider_key.resolutionDetail" "$not_found_marker"
+                return 0
+              fi
+              emit_fact "provider.$provider_key.executable" "$executable"
+              version="$(collect_version "$executable")"
+              [ -n "$version" ] && emit_fact "provider.$provider_key.version" "$version"
+            }
+            collect_bob_provider() {
+              provider_key="$1"
+              command_name="$2"
+              not_found_marker="$3"
+              shift 3
+              executable="$(resolve_command_path "$command_name" "$@")" || executable=""
+              if [ -z "$executable" ]; then
+                emit_fact "provider.$provider_key.resolutionDetail" "$not_found_marker"
+                return 0
+              fi
+              emit_fact "provider.$provider_key.executable" "$executable"
+              version="$(collect_version "$executable")"
+              [ -n "$version" ] && emit_fact "provider.$provider_key.version" "$version"
+              output="$("$executable" --list-sessions 2>&1)"
+              status=$?
+              if [ "$status" -ne 0 ]; then
+                detail="$(first_nonempty_line "$output")"
+                emit_fact "provider.$provider_key.probeDetail" "$detail"
+              fi
+            }
+
+            emit_fact protocol v1
+            if command -v tmux >/dev/null 2>&1; then
+              emit_fact tmuxAvailable true
+            else
+              emit_fact tmuxAvailable false
+              exit 0
+            fi
+
+            workspace_check_output="$(cd \(shellQuoted(workspace.folderPath)) 2>&1 && pwd)"
+            workspace_check_status=$?
+            if [ "$workspace_check_status" -ne 0 ]; then
+              emit_fact workspacePath failed
+              emit_fact workspacePathDetail "$(first_nonempty_line "$workspace_check_output")"
+              exit 0
+            fi
+            emit_fact workspacePath available
+            cd \(shellQuoted(workspace.folderPath)) || exit 0
+
+            collect_cli_provider claude claude NEXUS_REMOTE_CLAUDE_NOT_FOUND \(fallbackCandidates(for: "claude"))
+            collect_resolution_provider codex codex NEXUS_REMOTE_CODEX_NOT_FOUND \(fallbackCandidates(for: "codex"))
+            collect_resolution_provider pi pi NEXUS_REMOTE_PI_NOT_FOUND \(fallbackCandidates(for: "pi"))
+            collect_bob_provider ibmBob bob NEXUS_REMOTE_BOB_NOT_FOUND \(fallbackCandidates(for: "bob"))
+            """
+        }
+
+        private func fallbackCandidates(for commandName: String) -> String {
+            [
+                "$HOME/.local/bin/\(commandName)",
+                "$HOME/bin/\(commandName)",
+                "$HOME/.volta/bin/\(commandName)",
+                "$HOME/.asdf/shims/\(commandName)",
+                "$HOME/.local/share/mise/shims/\(commandName)",
+                "$HOME/.nix-profile/bin/\(commandName)",
+                "$HOME/.bun/bin/\(commandName)",
+                "$HOME/.nvm/current/bin/\(commandName)",
+                "/opt/homebrew/bin/\(commandName)",
+                "/usr/local/bin/\(commandName)",
+                "/usr/bin/\(commandName)",
+                "/bin/\(commandName)",
+            ]
+            .map { "\"\($0)\"" }
+            .joined(separator: " ")
+        }
+
+        private func shellQuoted(_ value: String) -> String {
+            "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+        }
     }
 
-    private func shellQuoted(_ value: String) -> String {
-        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
-    }
-}
-
-func providerCommandFirstDiagnosticLine(stdout: String, stderr: String) -> String {
-    [stderr, stdout]
-        .joined(separator: "\n")
-        .split(whereSeparator: \.isNewline)
-        .map(String.init)
-        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-        .first(where: { $0.isEmpty == false }) ?? ""
-}
-
-func classifyHostValidationFailure(detail: String) -> (state: HostValidationSnapshot.State, summary: String, code: String) {
-    let normalized = detail.lowercased()
-
-    if normalized.contains("permission denied")
-        || normalized.contains("could not resolve hostname")
-        || normalized.contains("bad configuration option")
-        || normalized.contains("no such host") {
-        return (.broken, "Host requires configuration repair", "sshConfigurationFailed")
+    func providerCommandFirstDiagnosticLine(stdout: String, stderr: String) -> String {
+        [stderr, stdout]
+            .joined(separator: "\n")
+            .split(whereSeparator: \.isNewline)
+            .map(String.init)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first(where: { $0.isEmpty == false }) ?? ""
     }
 
-    if normalized.contains("connection timed out")
-        || normalized.contains("operation timed out")
-        || normalized.contains("connection refused")
-        || normalized.contains("network is unreachable")
-        || normalized.contains("no route to host") {
-        return (.unavailable, "Host is currently unavailable", "sshUnavailable")
+    func classifyHostValidationFailure(detail: String) -> (
+        state: HostValidationSnapshot.State, summary: String, code: String
+    ) {
+        let normalized = detail.lowercased()
+
+        if normalized.contains("permission denied")
+            || normalized.contains("could not resolve hostname")
+            || normalized.contains("bad configuration option")
+            || normalized.contains("no such host")
+        {
+            return (.broken, "Host requires configuration repair", "sshConfigurationFailed")
+        }
+
+        if normalized.contains("connection timed out")
+            || normalized.contains("operation timed out")
+            || normalized.contains("connection refused")
+            || normalized.contains("network is unreachable")
+            || normalized.contains("no route to host")
+        {
+            return (.unavailable, "Host is currently unavailable", "sshUnavailable")
+        }
+
+        return (.broken, "Host validation failed", "sshValidationFailed")
     }
 
-    return (.broken, "Host validation failed", "sshValidationFailed")
-}
+    func classifyWorkspaceAvailabilityFailure(detail: String) -> (
+        state: WorkspaceAvailabilitySnapshot.State, summary: String, code: String
+    ) {
+        let normalized = detail.lowercased()
 
-func classifyWorkspaceAvailabilityFailure(detail: String) -> (state: WorkspaceAvailabilitySnapshot.State, summary: String, code: String) {
-    let normalized = detail.lowercased()
+        if normalized.contains("no such file")
+            || normalized.contains("not a directory")
+            || normalized.contains("permission denied")
+        {
+            return (.broken, "Workspace requires repair", "workspaceTargetBroken")
+        }
 
-    if normalized.contains("no such file")
-        || normalized.contains("not a directory")
-        || normalized.contains("permission denied") {
-        return (.broken, "Workspace requires repair", "workspaceTargetBroken")
+        if normalized.contains("connection timed out")
+            || normalized.contains("operation timed out")
+            || normalized.contains("connection refused")
+            || normalized.contains("network is unreachable")
+            || normalized.contains("no route to host")
+        {
+            return (.unavailable, "Workspace is currently unavailable", "workspaceUnavailable")
+        }
+
+        return (.broken, "Workspace availability check failed", "workspaceAvailabilityFailed")
     }
-
-    if normalized.contains("connection timed out")
-        || normalized.contains("operation timed out")
-        || normalized.contains("connection refused")
-        || normalized.contains("network is unreachable")
-        || normalized.contains("no route to host") {
-        return (.unavailable, "Workspace is currently unavailable", "workspaceUnavailable")
-    }
-
-    return (.broken, "Workspace availability check failed", "workspaceAvailabilityFailed")
-}
 #endif

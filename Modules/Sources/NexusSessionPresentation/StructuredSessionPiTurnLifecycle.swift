@@ -20,9 +20,11 @@ func structuredSessionPiProviderTurnAwaitingTurnEnd(
     activityItems: [SessionActivityItem],
     providerEvents: [SessionProviderEvent]
 ) -> Bool {
-    guard let lastUserIndex = activityItems.lastIndex(where: {
-        structuredSessionPiFeedSegmentIsPromptAnchoredUserMessage($0)
-    }) else {
+    guard
+        let lastUserIndex = activityItems.lastIndex(where: {
+            structuredSessionPiFeedSegmentIsPromptAnchoredUserMessage($0)
+        })
+    else {
         return false
     }
     let tail = activityItems[activityItems.index(after: lastUserIndex)...]

@@ -1,6 +1,7 @@
 import Foundation
-@testable import NexusSessionPresentation
 import Testing
+
+@testable import NexusSessionPresentation
 
 struct StructuredSessionAgentTurnToolPresentationTests {
     @Test func collapsedCommandLineFormatsReadAndSearch() {

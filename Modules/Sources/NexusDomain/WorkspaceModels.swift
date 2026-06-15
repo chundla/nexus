@@ -18,7 +18,8 @@ public struct Workspace: Codable, Equatable, Identifiable, Sendable {
     public let primaryGroupID: UUID
     public let remoteHostID: UUID?
 
-    public init(id: UUID, name: String, kind: Kind, folderPath: String, primaryGroupID: UUID, remoteHostID: UUID? = nil) {
+    public init(id: UUID, name: String, kind: Kind, folderPath: String, primaryGroupID: UUID, remoteHostID: UUID? = nil)
+    {
         self.id = id
         self.name = name
         self.kind = kind
@@ -156,7 +157,9 @@ public struct RemoteWorkspaceTargetOverview: Codable, Equatable, Sendable {
     public let hostValidation: HostValidationSnapshot?
     public let workspaceAvailability: WorkspaceAvailabilitySnapshot
 
-    public init(host: Host, hostValidation: HostValidationSnapshot?, workspaceAvailability: WorkspaceAvailabilitySnapshot) {
+    public init(
+        host: Host, hostValidation: HostValidationSnapshot?, workspaceAvailability: WorkspaceAvailabilitySnapshot
+    ) {
         self.host = host
         self.hostValidation = hostValidation
         self.workspaceAvailability = workspaceAvailability
@@ -277,8 +280,10 @@ public struct ProviderCapabilities: Codable, Equatable, Sendable {
     public let createNamedSession: ProviderCapability
 
     public init(
-        launchDefaultSession: ProviderCapability = ProviderCapability(action: .launchDefaultSession, isSupported: false, isEnabled: false),
-        createNamedSession: ProviderCapability = ProviderCapability(action: .createNamedSession, isSupported: false, isEnabled: false)
+        launchDefaultSession: ProviderCapability = ProviderCapability(
+            action: .launchDefaultSession, isSupported: false, isEnabled: false),
+        createNamedSession: ProviderCapability = ProviderCapability(
+            action: .createNamedSession, isSupported: false, isEnabled: false)
     ) {
         self.launchDefaultSession = launchDefaultSession
         self.createNamedSession = createNamedSession

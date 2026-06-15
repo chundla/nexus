@@ -172,7 +172,7 @@ public final class SessionScreenObservationAccumulator: @unchecked Sendable {
     public func apply(_ update: SessionScreenObservationUpdate) throws -> SessionScreen? {
         try withLock {
             switch update {
-            case let .screen(screen):
+            case .screen(let screen):
                 guard screen != currentScreenValue else {
                     return nil
                 }
@@ -180,13 +180,13 @@ public final class SessionScreenObservationAccumulator: @unchecked Sendable {
                 currentStructuredSnapshot = nil
                 return currentScreenValue
 
-            case let .structuredGap(currentRevision):
+            case .structuredGap(let currentRevision):
                 throw SessionScreenObservationGapError.structuredGap(
                     expectedRevision: currentStructuredSnapshot?.revision,
                     currentRevision: currentRevision
                 )
 
-            case let .structuredDelta(delta):
+            case .structuredDelta(let delta):
                 guard let snapshot = currentStructuredSnapshot else {
                     throw SessionScreenObservationGapError.structuredGap(
                         expectedRevision: nil,
@@ -262,45 +262,45 @@ private struct StructuredSessionObservationMutableState {
 
     mutating func apply(_ change: StructuredSessionObservationChange) {
         switch change {
-        case let .replaceSession(updatedSession):
+        case .replaceSession(let updatedSession):
             session = updatedSession
-        case let .setController(updatedController):
+        case .setController(let updatedController):
             controller = updatedController
-        case let .setTranscript(updatedTranscript):
+        case .setTranscript(let updatedTranscript):
             transcript = updatedTranscript
-        case let .setTerminalSize(columns, rows):
+        case .setTerminalSize(let columns, let rows):
             terminalColumns = columns
             terminalRows = rows
-        case let .appendActivityItems(items):
+        case .appendActivityItems(let items):
             activityItems.append(contentsOf: items)
-        case let .replaceActivityItem(item):
+        case .replaceActivityItem(let item):
             guard let index = activityItems.firstIndex(where: { $0.id == item.id }) else {
                 return
             }
             activityItems[index] = item
-        case let .replaceActivityItemRange(startIndex, items):
+        case .replaceActivityItemRange(let startIndex, let items):
             guard startIndex <= activityItems.count else {
                 activityItems = items
                 return
             }
             activityItems.replaceSubrange(startIndex..<activityItems.count, with: items)
-        case let .replaceActivityItems(items):
+        case .replaceActivityItems(let items):
             activityItems = items
-        case let .replaceApprovalRequests(updatedApprovalRequests):
+        case .replaceApprovalRequests(let updatedApprovalRequests):
             approvalRequests = updatedApprovalRequests
-        case let .replaceExtensionUI(updatedExtensionUI):
+        case .replaceExtensionUI(let updatedExtensionUI):
             extensionUI = updatedExtensionUI
-        case let .replaceSlashCommands(updatedSlashCommands):
+        case .replaceSlashCommands(let updatedSlashCommands):
             slashCommands = updatedSlashCommands
-        case let .appendProviderEvents(events):
+        case .appendProviderEvents(let events):
             providerEvents.append(contentsOf: events)
-        case let .replaceProviderEvents(events):
+        case .replaceProviderEvents(let events):
             providerEvents = events
-        case let .replaceProviderFacts(updatedProviderFacts):
+        case .replaceProviderFacts(let updatedProviderFacts):
             providerFacts = updatedProviderFacts
-        case let .replaceFinalOutputDiagnostic(updatedFinalOutputDiagnostic):
+        case .replaceFinalOutputDiagnostic(let updatedFinalOutputDiagnostic):
             finalOutputDiagnostic = updatedFinalOutputDiagnostic
-        case let .setAgentTurnInProgress(updatedIsAgentTurnInProgress):
+        case .setAgentTurnInProgress(let updatedIsAgentTurnInProgress):
             isAgentTurnInProgress = updatedIsAgentTurnInProgress
         }
     }

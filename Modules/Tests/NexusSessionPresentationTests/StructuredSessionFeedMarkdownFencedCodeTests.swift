@@ -1,18 +1,19 @@
 import Foundation
-@testable import NexusSessionPresentation
 import Testing
+
+@testable import NexusSessionPresentation
 
 struct StructuredSessionFeedMarkdownFencedCodeTests {
     @Test func feedMarkdownParseSplitsProseAndFencedBlocks() {
         let markdown = """
-        Before
+            Before
 
-        ```swift
-        let x = 1
-        ```
+            ```swift
+            let x = 1
+            ```
 
-        After
-        """
+            After
+            """
         let result = structuredSessionFeedMarkdownParse(markdown)
 
         #expect(result.segments.count == 3)
@@ -25,7 +26,7 @@ struct StructuredSessionFeedMarkdownFencedCodeTests {
 
     @Test func feedMarkdownParseBoundsCapFencedBlockCount() {
         var markdown = ""
-        for index in 0 ..< 5 {
+        for index in 0..<5 {
             markdown += "```txt\nblock\(index)\n```\n\n"
         }
         let bounds = StructuredSessionFeedMarkdownParseBounds(maxFencedBlocks: 2, maxScannedLines: 10_000)
@@ -37,7 +38,7 @@ struct StructuredSessionFeedMarkdownFencedCodeTests {
 
     @Test func feedMarkdownParseBoundsCapScannedLines() {
         let lineCount = 50
-        let markdown = (0 ..< lineCount).map { "line \($0)" }.joined(separator: "\n")
+        let markdown = (0..<lineCount).map { "line \($0)" }.joined(separator: "\n")
         let bounds = StructuredSessionFeedMarkdownParseBounds(maxFencedBlocks: 32, maxScannedLines: 20)
         let result = structuredSessionFeedMarkdownParse(markdown, bounds: bounds)
 
@@ -54,11 +55,11 @@ struct StructuredSessionFeedMarkdownFencedCodeTests {
     @Test func rendererReturnsSegmentsWhenMarkdownContainsFences() {
         let renderer = StructuredSessionMarkdownRenderer(cacheLimit: 0)
         let markdown = """
-        Intro
-        ```bash
-        git status
-        ```
-        """
+            Intro
+            ```bash
+            git status
+            ```
+            """
         let rendered = renderer.renderContent(markdown)
 
         guard case .segments(let segments) = rendered else {

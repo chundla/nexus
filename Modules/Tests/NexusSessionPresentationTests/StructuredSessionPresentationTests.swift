@@ -1,21 +1,22 @@
 import Foundation
 import NexusDomain
-@testable import NexusSessionPresentation
 import Testing
+
+@testable import NexusSessionPresentation
 
 struct StructuredSessionPresentationTests {
     @Test func structuredSessionDefaultActivityRowChunkSizeUsesSingleRowSealedChunksOnMacOS() {
         #if os(macOS)
-        #expect(structuredSessionDefaultActivityRowChunkSize == 1)
-        #expect(structuredSessionDefaultLiveTailActivityRowChunkSize == 16)
+            #expect(structuredSessionDefaultActivityRowChunkSize == 1)
+            #expect(structuredSessionDefaultLiveTailActivityRowChunkSize == 16)
         #else
-        #expect(structuredSessionDefaultActivityRowChunkSize == 40)
-        #expect(structuredSessionDefaultLiveTailActivityRowChunkSize == 8)
+            #expect(structuredSessionDefaultActivityRowChunkSize == 40)
+            #expect(structuredSessionDefaultLiveTailActivityRowChunkSize == 8)
         #endif
     }
 
     @Test func structuredSessionActivityRowChunksSealOneRowPerChunkOnMacOS() {
-        let rows = (0 ..< 5).map { index in
+        let rows = (0..<5).map { index in
             StructuredSessionActivityRow(
                 id: UUID(),
                 title: "Message",
@@ -26,10 +27,10 @@ struct StructuredSessionPresentationTests {
         }
         let chunks = structuredSessionActivityRowChunks(for: rows)
         #if os(macOS)
-        #expect(chunks.count == 5)
-        #expect(chunks.allSatisfy { $0.rows.count == 1 })
+            #expect(chunks.count == 5)
+            #expect(chunks.allSatisfy { $0.rows.count == 1 })
         #else
-        #expect(chunks.count >= 1)
+            #expect(chunks.count >= 1)
         #endif
     }
 
@@ -53,43 +54,66 @@ struct StructuredSessionPresentationTests {
                 SessionActivityItem(kind: .command, text: "git status"),
                 SessionActivityItem(kind: .diff, text: "Edited ContentView.swift"),
                 SessionActivityItem(kind: .error, text: "Provider request failed"),
-                SessionActivityItem(kind: .completion, text: "Turn complete")
+                SessionActivityItem(kind: .completion, text: "Turn complete"),
             ]
         )
 
-        #expect(structuredSessionActivityRows(for: screen) == [
-            StructuredSessionActivityRow(id: screen.activityItems[0].id, title: "Status", systemImage: "dot.radiowaves.left.and.right", text: "Connected", emphasis: .neutral),
-            StructuredSessionActivityRow(id: screen.activityItems[1].id, title: "Message", systemImage: "message", text: "Pi: hello", emphasis: .accent),
-            StructuredSessionActivityRow(id: screen.activityItems[2].id, title: "Approval Request", systemImage: "hand.raised", text: "Approval Request: Deploy to production?", emphasis: .accent),
-            StructuredSessionActivityRow(id: screen.activityItems[3].id, title: "Approval Decision", systemImage: "checkmark.shield", text: "Approved: Deploy to production?", emphasis: .success),
-            StructuredSessionActivityRow(id: screen.activityItems[4].id, title: "Progress", systemImage: "hourglass", text: "Gathering context", emphasis: .accent),
-            StructuredSessionActivityRow(id: screen.activityItems[5].id, title: "Command", systemImage: "terminal", text: "git status", emphasis: .neutral),
-            StructuredSessionActivityRow(id: screen.activityItems[6].id, title: "Diff", systemImage: "square.and.pencil", text: "Edited ContentView.swift", emphasis: .accent),
-            StructuredSessionActivityRow(id: screen.activityItems[7].id, title: "Error", systemImage: "exclamationmark.triangle", text: "Provider request failed", emphasis: .critical),
-            StructuredSessionActivityRow(id: screen.activityItems[8].id, title: "Completion", systemImage: "checkmark.circle", text: "Turn complete", emphasis: .success)
-        ])
+        #expect(
+            structuredSessionActivityRows(for: screen) == [
+                StructuredSessionActivityRow(
+                    id: screen.activityItems[0].id, title: "Status", systemImage: "dot.radiowaves.left.and.right",
+                    text: "Connected", emphasis: .neutral),
+                StructuredSessionActivityRow(
+                    id: screen.activityItems[1].id, title: "Message", systemImage: "message", text: "Pi: hello",
+                    emphasis: .accent),
+                StructuredSessionActivityRow(
+                    id: screen.activityItems[2].id, title: "Approval Request", systemImage: "hand.raised",
+                    text: "Approval Request: Deploy to production?", emphasis: .accent),
+                StructuredSessionActivityRow(
+                    id: screen.activityItems[3].id, title: "Approval Decision", systemImage: "checkmark.shield",
+                    text: "Approved: Deploy to production?", emphasis: .success),
+                StructuredSessionActivityRow(
+                    id: screen.activityItems[4].id, title: "Progress", systemImage: "hourglass",
+                    text: "Gathering context", emphasis: .accent),
+                StructuredSessionActivityRow(
+                    id: screen.activityItems[5].id, title: "Command", systemImage: "terminal", text: "git status",
+                    emphasis: .neutral),
+                StructuredSessionActivityRow(
+                    id: screen.activityItems[6].id, title: "Diff", systemImage: "square.and.pencil",
+                    text: "Edited ContentView.swift", emphasis: .accent),
+                StructuredSessionActivityRow(
+                    id: screen.activityItems[7].id, title: "Error", systemImage: "exclamationmark.triangle",
+                    text: "Provider request failed", emphasis: .critical),
+                StructuredSessionActivityRow(
+                    id: screen.activityItems[8].id, title: "Completion", systemImage: "checkmark.circle",
+                    text: "Turn complete", emphasis: .success),
+            ])
     }
 
     @Test func structuredSessionDetailTextPreviewLeavesShortOutputUnchanged() {
         let text = "first line\nsecond line"
 
-        #expect(structuredSessionDetailTextPreview(for: text) == StructuredSessionDetailTextPreview(
-            text: text,
-            isTruncated: false
-        ))
+        #expect(
+            structuredSessionDetailTextPreview(for: text)
+                == StructuredSessionDetailTextPreview(
+                    text: text,
+                    isTruncated: false
+                ))
     }
 
     @Test func structuredSessionDetailTextPreviewTruncatesLongOutputByLineCount() {
-        let text = (1 ... 16).map { "line \($0)" }.joined(separator: "\n")
+        let text = (1...16).map { "line \($0)" }.joined(separator: "\n")
 
-        #expect(structuredSessionDetailTextPreview(for: text, maximumLines: 12) == StructuredSessionDetailTextPreview(
-            text: (1 ... 12).map { "line \($0)" }.joined(separator: "\n"),
-            isTruncated: true
-        ))
+        #expect(
+            structuredSessionDetailTextPreview(for: text, maximumLines: 12)
+                == StructuredSessionDetailTextPreview(
+                    text: (1...12).map { "line \($0)" }.joined(separator: "\n"),
+                    isTruncated: true
+                ))
     }
 
     @Test func structuredSessionActivityRowsStoreDetailPreviewsInsteadOfFullOutput() throws {
-        let fullDetail = (1 ... 16).map { "line \($0)" }.joined(separator: "\n")
+        let fullDetail = (1...16).map { "line \($0)" }.joined(separator: "\n")
         let session = Session(
             id: UUID(),
             workspaceID: UUID(),
@@ -106,7 +130,7 @@ struct StructuredSessionPresentationTests {
         )
 
         let row = try #require(structuredSessionActivityRows(for: screen).first)
-        #expect(row.detailText == (1 ... 12).map { "line \($0)" }.joined(separator: "\n"))
+        #expect(row.detailText == (1...12).map { "line \($0)" }.joined(separator: "\n"))
         #expect(row.isDetailTextTruncated)
     }
 
@@ -134,7 +158,7 @@ struct StructuredSessionPresentationTests {
         let longStatus = String(repeating: "A", count: 81)
         let rows = structuredSessionActivityRows(for: [
             SessionActivityItem(kind: .status, text: longStatus),
-            SessionActivityItem(kind: .progress, text: "Planning", detailText: "step 1\nstep 2")
+            SessionActivityItem(kind: .progress, text: "Planning", detailText: "step 1\nstep 2"),
         ])
 
         #expect(rows.map(\.showsExpandedSystemCard) == [true, true])
@@ -156,11 +180,11 @@ struct StructuredSessionPresentationTests {
             transcript: "",
             activityItems: [
                 SessionActivityItem(kind: .message, text: "You: Ship it"),
-                SessionActivityItem(kind: .message, text: "Pi: On it")
+                SessionActivityItem(kind: .message, text: "Pi: On it"),
             ],
             approvalRequests: [
                 SessionApprovalRequest(id: pendingApprovalID, title: "Deploy", text: "Deploy now?", state: .pending),
-                SessionApprovalRequest(title: "Cleanup", text: "Delete temp files?", state: .approved)
+                SessionApprovalRequest(title: "Cleanup", text: "Delete temp files?", state: .approved),
             ],
             extensionUI: SessionExtensionUIState(
                 title: "Plan",
@@ -186,11 +210,13 @@ struct StructuredSessionPresentationTests {
             isAgentTurnInProgress: true
         )
 
-        #expect(structuredSessionAutoScrollTrigger(for: screen) == StructuredSessionAutoScrollTrigger(
-            lastActivityRowID: structuredSessionAgentTurnFeedSegments(for: screen)?.last?.id,
-            pendingApprovalRequestIDs: [pendingApprovalID],
-            pendingDialogIDs: ["dialog-1"]
-        ))
+        #expect(
+            structuredSessionAutoScrollTrigger(for: screen)
+                == StructuredSessionAutoScrollTrigger(
+                    lastActivityRowID: structuredSessionAgentTurnFeedSegments(for: screen)?.last?.id,
+                    pendingApprovalRequestIDs: [pendingApprovalID],
+                    pendingDialogIDs: ["dialog-1"]
+                ))
     }
 
     @Test func structuredSessionAutoScrollTriggerIgnoresExtensionNotificationChurn() {
@@ -223,7 +249,9 @@ struct StructuredSessionPresentationTests {
             isAgentTurnInProgress: false
         )
 
-        #expect(structuredSessionAutoScrollTrigger(for: base) == structuredSessionAutoScrollTrigger(for: churnedNotifications))
+        #expect(
+            structuredSessionAutoScrollTrigger(for: base)
+                == structuredSessionAutoScrollTrigger(for: churnedNotifications))
     }
 
     @Test func structuredSessionAutoScrollTriggerIgnoresNonFeedPresentationChanges() {
@@ -242,7 +270,9 @@ struct StructuredSessionPresentationTests {
             primarySurface: .structuredActivityFeed,
             transcript: "base transcript",
             activityItems: [SessionActivityItem(id: activityID, kind: .message, text: "Codex: Ready")],
-            approvalRequests: [SessionApprovalRequest(id: approvalID, title: "Deploy", text: "Deploy?", state: .pending)],
+            approvalRequests: [
+                SessionApprovalRequest(id: approvalID, title: "Deploy", text: "Deploy?", state: .pending)
+            ],
             extensionUI: SessionExtensionUIState(
                 title: "Base",
                 pendingDialogs: [SessionExtensionUIDialog(id: "dialog-1", kind: .confirm, title: "Continue")],
@@ -261,7 +291,7 @@ struct StructuredSessionPresentationTests {
             activityItems: [SessionActivityItem(id: activityID, kind: .message, text: "Codex: Updated body")],
             approvalRequests: [
                 SessionApprovalRequest(id: approvalID, title: "Deploy", text: "Deploy later?", state: .pending),
-                SessionApprovalRequest(title: "Cleanup", text: "Delete temp files?", state: .approved)
+                SessionApprovalRequest(title: "Cleanup", text: "Delete temp files?", state: .approved),
             ],
             extensionUI: SessionExtensionUIState(
                 title: "Updated",
@@ -283,7 +313,9 @@ struct StructuredSessionPresentationTests {
             isAgentTurnInProgress: true
         )
 
-        #expect(structuredSessionAutoScrollTrigger(for: baseScreen) == structuredSessionAutoScrollTrigger(for: updatedScreen))
+        #expect(
+            structuredSessionAutoScrollTrigger(for: baseScreen)
+                == structuredSessionAutoScrollTrigger(for: updatedScreen))
     }
 
     @Test func structuredSessionAutoScrollAnimationUsesImmediateScrollForAppendedActivityRows() {
@@ -319,7 +351,7 @@ struct StructuredSessionPresentationTests {
         #expect(structuredSessionAutoScrollAnimation(previous: previous, current: current) == .animated)
     }
 
-    @Test func structuredSessionAutoScrollCoordinatorCoalescesRapidRequestsIntoOneScroll() {
+    @Test func structuredSessionAutoScrollCoordinatorCoalescesRapidRequestsIntoOneScroll() throws {
         var scheduled: [() -> Void] = []
         let coordinator = StructuredSessionAutoScrollCoordinator { work in
             scheduled.append(work)
@@ -336,13 +368,13 @@ struct StructuredSessionPresentationTests {
         #expect(scheduled.count == 1)
         #expect(performed.isEmpty)
 
-        let flush = try! #require(scheduled.first)
+        let flush = try #require(scheduled.first)
         flush()
 
         #expect(performed == [.animated])
     }
 
-    @Test func structuredSessionAutoScrollCoordinatorSchedulesAnotherFlushAfterRunningPendingScroll() {
+    @Test func structuredSessionAutoScrollCoordinatorSchedulesAnotherFlushAfterRunningPendingScroll() throws {
         var scheduled: [() -> Void] = []
         let coordinator = StructuredSessionAutoScrollCoordinator { work in
             scheduled.append(work)
@@ -352,7 +384,7 @@ struct StructuredSessionPresentationTests {
         coordinator.request(.immediate) { animation in
             performed.append(animation)
         }
-        let firstFlush = try! #require(scheduled.first)
+        let firstFlush = try #require(scheduled.first)
         firstFlush()
 
         coordinator.request(.animated) { animation in
@@ -360,7 +392,7 @@ struct StructuredSessionPresentationTests {
         }
 
         #expect(scheduled.count == 2)
-        let secondFlush = try! #require(scheduled.last)
+        let secondFlush = try #require(scheduled.last)
         secondFlush()
 
         #expect(performed == [.immediate, .animated])
@@ -379,11 +411,13 @@ struct StructuredSessionPresentationTests {
             transcript: ""
         )
 
-        #expect(structuredSessionPresentationCopy(for: codexScreen) == StructuredSessionPresentationCopy(
-            emptyStateTitle: "No Session activity yet",
-            emptyStateDescription: "Send a prompt to start the Codex Session.",
-            composerPlaceholder: "Send a prompt to Codex"
-        ))
+        #expect(
+            structuredSessionPresentationCopy(for: codexScreen)
+                == StructuredSessionPresentationCopy(
+                    emptyStateTitle: "No Session activity yet",
+                    emptyStateDescription: "Send a prompt to start the Codex Session.",
+                    composerPlaceholder: "Send a prompt to Codex"
+                ))
     }
 
     @Test func structuredSessionStatusBarPresentationFormatsTokenUsageFromProviderEvents() {
@@ -405,15 +439,19 @@ struct StructuredSessionPresentationTests {
                     type: "response",
                     family: .response,
                     command: "get_session_stats",
-                    rawPayload: #"{"type":"response","command":"get_session_stats","success":true,"data":{"contextUsage":{"tokens":60000,"contextWindow":200000,"percent":30}}}"#
+                    rawPayload:
+                        #"{"type":"response","command":"get_session_stats","success":true,"data":{"contextUsage":{"tokens":60000,"contextWindow":200000,"percent":30}}}"#
                 )
             ]
         )
 
-        #expect(structuredSessionStatusBarPresentation(for: screen, workspaceLocation: "/tmp/nexus") == StructuredSessionStatusBarPresentation(
-            workspaceLocation: "/tmp/nexus",
-            tokenUsage: StructuredSessionTokenUsagePresentation(usedTokens: 60000, totalTokens: 200000, percent: 30)
-        ))
+        #expect(
+            structuredSessionStatusBarPresentation(for: screen, workspaceLocation: "/tmp/nexus")
+                == StructuredSessionStatusBarPresentation(
+                    workspaceLocation: "/tmp/nexus",
+                    tokenUsage: StructuredSessionTokenUsagePresentation(
+                        usedTokens: 60000, totalTokens: 200000, percent: 30)
+                ))
     }
 
     @Test func structuredSessionStatusBarPresentationFallsBackToKnownContextWindowForPiModels() {
@@ -435,7 +473,8 @@ struct StructuredSessionPresentationTests {
                     type: "response",
                     family: .response,
                     command: "get_state",
-                    rawPayload: #"{"type":"response","command":"get_state","success":true,"data":{"model":{"provider":"openai","id":"gpt-5.1-codex-max","name":"GPT-5.1 Codex Max"}}}"#
+                    rawPayload:
+                        #"{"type":"response","command":"get_state","success":true,"data":{"model":{"provider":"openai","id":"gpt-5.1-codex-max","name":"GPT-5.1 Codex Max"}}}"#
                 )
             ]
         )
@@ -443,7 +482,9 @@ struct StructuredSessionPresentationTests {
         let presentation = structuredSessionStatusBarPresentation(for: screen, workspaceLocation: "/tmp/nexus")
 
         #expect(presentation.workspaceLocation == "/tmp/nexus")
-        #expect(presentation.tokenUsage == StructuredSessionTokenUsagePresentation(usedTokens: 0, totalTokens: 272000, percent: 0))
+        #expect(
+            presentation.tokenUsage
+                == StructuredSessionTokenUsagePresentation(usedTokens: 0, totalTokens: 272000, percent: 0))
         #expect(presentation.tokenUsageText == "0/272k 0%")
     }
 
@@ -465,12 +506,15 @@ struct StructuredSessionPresentationTests {
                     providerID: .codex,
                     type: "response",
                     family: .response,
-                    rawPayload: #"{"id":"nexus-codex-thread-start","result":{"thread":{"id":"codex-thread-1"},"model":"gpt-5.5"}}"#
+                    rawPayload:
+                        #"{"id":"nexus-codex-thread-start","result":{"thread":{"id":"codex-thread-1"},"model":"gpt-5.5"}}"#
                 )
             ]
         )
 
-        #expect(structuredSessionStatusBarPresentation(for: screen, workspaceLocation: "/tmp/nexus").tokenUsageText == "0/272k 0%")
+        #expect(
+            structuredSessionStatusBarPresentation(for: screen, workspaceLocation: "/tmp/nexus").tokenUsageText
+                == "0/272k 0%")
     }
 
     @Test func structuredSessionStatusBarPresentationUsesProviderFactsWithoutReparsingRawEvents() {
@@ -492,7 +536,8 @@ struct StructuredSessionPresentationTests {
                     type: "response",
                     family: .response,
                     command: "get_session_stats",
-                    rawPayload: #"{"type":"response","command":"get_session_stats","success":true,"data":{"contextUsage":{"tokens":1,"contextWindow":2,"percent":50}}}"#
+                    rawPayload:
+                        #"{"type":"response","command":"get_session_stats","success":true,"data":{"contextUsage":{"tokens":1,"contextWindow":2,"percent":50}}}"#
                 )
             ],
             providerFacts: StructuredSessionProviderFacts(
@@ -503,11 +548,13 @@ struct StructuredSessionPresentationTests {
             )
         )
 
-        #expect(structuredSessionStatusBarPresentation(for: screen, workspaceLocation: "/tmp/nexus").tokenUsage == StructuredSessionTokenUsagePresentation(
-            usedTokens: 60000,
-            totalTokens: 200000,
-            percent: 30
-        ))
+        #expect(
+            structuredSessionStatusBarPresentation(for: screen, workspaceLocation: "/tmp/nexus").tokenUsage
+                == StructuredSessionTokenUsagePresentation(
+                    usedTokens: 60000,
+                    totalTokens: 200000,
+                    percent: 30
+                ))
     }
 
     @Test func structuredSessionStatusBarPresentationInfersContextWindowFromProviderFactsModelIdentifier() {
@@ -525,7 +572,9 @@ struct StructuredSessionPresentationTests {
             providerFacts: StructuredSessionProviderFacts(modelIdentifier: "openai/gpt-5.1-codex-max")
         )
 
-        #expect(structuredSessionStatusBarPresentation(for: screen, workspaceLocation: "/tmp/nexus").tokenUsageText == "0/272k 0%")
+        #expect(
+            structuredSessionStatusBarPresentation(for: screen, workspaceLocation: "/tmp/nexus").tokenUsageText
+                == "0/272k 0%")
     }
 
     @Test func structuredSessionTokenUsagePresenterOnlyParsesNewProviderEventsAcrossAppendOnlyUpdates() {
@@ -564,23 +613,26 @@ struct StructuredSessionPresentationTests {
                 return nil
             },
             inferredContextWindowResolver: { _ in
-                Issue.record("Expected append-only provider event updates to avoid falling back to inferred context windows")
+                Issue.record(
+                    "Expected append-only provider event updates to avoid falling back to inferred context windows")
                 return nil
             }
         )
 
-        let initialPresentation = presenter.presentation(for: SessionScreen(
-            session: session,
-            primarySurface: .structuredActivityFeed,
-            transcript: "",
-            providerEvents: [usageEvent]
-        ))
-        let updatedPresentation = presenter.presentation(for: SessionScreen(
-            session: session,
-            primarySurface: .structuredActivityFeed,
-            transcript: "",
-            providerEvents: [usageEvent, appendedEvent]
-        ))
+        let initialPresentation = presenter.presentation(
+            for: SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                transcript: "",
+                providerEvents: [usageEvent]
+            ))
+        let updatedPresentation = presenter.presentation(
+            for: SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                transcript: "",
+                providerEvents: [usageEvent, appendedEvent]
+            ))
 
         #expect(initialPresentation == usage)
         #expect(updatedPresentation == usage)
@@ -616,18 +668,20 @@ struct StructuredSessionPresentationTests {
             }
         )
 
-        let initialPresentation = presenter.presentation(for: SessionScreen(
-            session: session,
-            primarySurface: .structuredActivityFeed,
-            transcript: "",
-            activityItems: [usageItem]
-        ))
-        let updatedPresentation = presenter.presentation(for: SessionScreen(
-            session: session,
-            primarySurface: .structuredActivityFeed,
-            transcript: "",
-            activityItems: [usageItem, appendedItem]
-        ))
+        let initialPresentation = presenter.presentation(
+            for: SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                transcript: "",
+                activityItems: [usageItem]
+            ))
+        let updatedPresentation = presenter.presentation(
+            for: SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                transcript: "",
+                activityItems: [usageItem, appendedItem]
+            ))
 
         #expect(initialPresentation == usage)
         #expect(updatedPresentation == usage)
@@ -670,30 +724,40 @@ struct StructuredSessionPresentationTests {
                 }
             },
             activityItemUsageParser: { _ in
-                Issue.record("Expected provider event rebuilds to avoid activity-item fallback when usage still exists in provider events")
+                Issue.record(
+                    "Expected provider event rebuilds to avoid activity-item fallback when usage still exists in provider events"
+                )
                 return nil
             },
             inferredContextWindowResolver: { _ in
-                Issue.record("Expected provider event rebuilds to avoid inferred-context fallback when usage still exists in provider events")
+                Issue.record(
+                    "Expected provider event rebuilds to avoid inferred-context fallback when usage still exists in provider events"
+                )
                 return nil
             }
         )
 
-        let initialPresentation = presenter.presentation(for: SessionScreen(
-            session: session,
-            primarySurface: .structuredActivityFeed,
-            transcript: "",
-            providerEvents: [initialEvent]
-        ))
-        let updatedPresentation = presenter.presentation(for: SessionScreen(
-            session: session,
-            primarySurface: .structuredActivityFeed,
-            transcript: "",
-            providerEvents: [updatedEvent]
-        ))
+        let initialPresentation = presenter.presentation(
+            for: SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                transcript: "",
+                providerEvents: [initialEvent]
+            ))
+        let updatedPresentation = presenter.presentation(
+            for: SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                transcript: "",
+                providerEvents: [updatedEvent]
+            ))
 
-        #expect(initialPresentation == StructuredSessionTokenUsagePresentation(usedTokens: 10000, totalTokens: 200000, percent: 5))
-        #expect(updatedPresentation == StructuredSessionTokenUsagePresentation(usedTokens: 60000, totalTokens: 200000, percent: 30))
+        #expect(
+            initialPresentation
+                == StructuredSessionTokenUsagePresentation(usedTokens: 10000, totalTokens: 200000, percent: 5))
+        #expect(
+            updatedPresentation
+                == StructuredSessionTokenUsagePresentation(usedTokens: 60000, totalTokens: 200000, percent: 30))
         #expect(parsedPayloads == ["usage-1", "usage-2"])
     }
 
@@ -733,32 +797,42 @@ struct StructuredSessionPresentationTests {
                 text: "Gathering context"
             )
         )
-        #expect(presentation.feed.copy == StructuredSessionPresentationCopy(
-            emptyStateTitle: "No Session activity yet",
-            emptyStateDescription: "Send a prompt to start the Codex Session.",
-            composerPlaceholder: "Send a prompt to Codex"
-        ))
+        #expect(
+            presentation.feed.copy
+                == StructuredSessionPresentationCopy(
+                    emptyStateTitle: "No Session activity yet",
+                    emptyStateDescription: "Send a prompt to start the Codex Session.",
+                    composerPlaceholder: "Send a prompt to Codex"
+                ))
         #expect(presentation.feed.activityRows == [expectedRow])
         #expect(presentation.feed.pendingApprovalRequests == [pendingRequest])
         #expect(presentation.feed.thinkingIndicator == nil)
         #expect(presentation.feed.feedSegments?.count == 1)
-        #expect(presentation.composer == StructuredSessionComposerPresentation(
-            placeholder: "Send a prompt to Codex",
-            isEnabled: false,
-            disabledReason: "Take Controller to send a prompt from this iPhone."
-        ))
-        #expect(presentation.sendAffordance == StructuredSessionComposerSendAffordance(
-            isVisible: false,
-            isEnabled: false
-        ))
-        #expect(presentation.approvalRequest == StructuredSessionApprovalRequestPresentation(
-            actionsAreEnabled: false,
-            disabledReason: "Take Controller to respond to Approval Requests from this iPhone."
-        ))
-        #expect(presentation.slashCommandMenu == StructuredSessionSlashCommandMenuPresentation(
-            isVisible: false,
-            commands: []
-        ))
+        #expect(
+            presentation.composer
+                == StructuredSessionComposerPresentation(
+                    placeholder: "Send a prompt to Codex",
+                    isEnabled: false,
+                    disabledReason: "Take Controller to send a prompt from this iPhone."
+                ))
+        #expect(
+            presentation.sendAffordance
+                == StructuredSessionComposerSendAffordance(
+                    isVisible: false,
+                    isEnabled: false
+                ))
+        #expect(
+            presentation.approvalRequest
+                == StructuredSessionApprovalRequestPresentation(
+                    actionsAreEnabled: false,
+                    disabledReason: "Take Controller to respond to Approval Requests from this iPhone."
+                ))
+        #expect(
+            presentation.slashCommandMenu
+                == StructuredSessionSlashCommandMenuPresentation(
+                    isVisible: false,
+                    commands: []
+                ))
     }
 
     @Test func structuredSessionFeedPresenterAppendsOnlyNewStructuredSessionRowsAcrossLiveUpdates() {
@@ -789,21 +863,23 @@ struct StructuredSessionPresentationTests {
             }
         }
 
-        let firstPresentation = presenter.presentation(for: SessionScreen(
-            session: session,
-            primarySurface: .structuredActivityFeed,
-            transcript: "",
-            activityItems: [firstActivity, secondActivity],
-            approvalRequests: [pendingRequest]
-        ))
-        let secondPresentation = presenter.presentation(for: SessionScreen(
-            session: session,
-            primarySurface: .structuredActivityFeed,
-            transcript: "",
-            activityItems: [firstActivity, secondActivity, thirdActivity],
-            approvalRequests: [pendingRequest],
-            isAgentTurnInProgress: true
-        ))
+        let firstPresentation = presenter.presentation(
+            for: SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                transcript: "",
+                activityItems: [firstActivity, secondActivity],
+                approvalRequests: [pendingRequest]
+            ))
+        let secondPresentation = presenter.presentation(
+            for: SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                transcript: "",
+                activityItems: [firstActivity, secondActivity, thirdActivity],
+                approvalRequests: [pendingRequest],
+                isAgentTurnInProgress: true
+            ))
 
         #expect(firstPresentation.activityRows.map(\.id) == [firstActivity.id, secondActivity.id])
         #expect(secondPresentation.activityRows.map(\.id) == [firstActivity.id, secondActivity.id, thirdActivity.id])
@@ -828,21 +904,23 @@ struct StructuredSessionPresentationTests {
         ]
         let presenter = StructuredSessionFeedPresenter()
 
-        _ = presenter.presentation(for: SessionScreen(
-            session: session,
-            primarySurface: .structuredActivityFeed,
-            transcript: "",
-            activityItems: items
-        ))
-
-        for index in 2...6 {
-            items.append(SessionActivityItem(kind: .message, text: "Pi: \(index)"))
-            _ = presenter.presentation(for: SessionScreen(
+        _ = presenter.presentation(
+            for: SessionScreen(
                 session: session,
                 primarySurface: .structuredActivityFeed,
                 transcript: "",
                 activityItems: items
             ))
+
+        for index in 2...6 {
+            items.append(SessionActivityItem(kind: .message, text: "Pi: \(index)"))
+            _ = presenter.presentation(
+                for: SessionScreen(
+                    session: session,
+                    primarySurface: .structuredActivityFeed,
+                    transcript: "",
+                    activityItems: items
+                ))
         }
 
         #expect(presenter.activityRowFullRebuildCount == 1)
@@ -850,7 +928,9 @@ struct StructuredSessionPresentationTests {
         #expect(presenter.activityRowTailRebuildCount == 0)
     }
 
-    @Test func structuredSessionFeedPresenterStreamsLivePiAssistantDraftAndReusesItsRowIdentityWhenTurnFinalizes() throws {
+    @Test func structuredSessionFeedPresenterStreamsLivePiAssistantDraftAndReusesItsRowIdentityWhenTurnFinalizes()
+        throws
+    {
         let session = Session(
             id: UUID(),
             workspaceID: UUID(),
@@ -862,75 +942,83 @@ struct StructuredSessionPresentationTests {
         let finalizedAssistantMessage = SessionActivityItem(kind: .message, text: "Pi: world")
         let presenter = StructuredSessionFeedPresenter()
 
-        let firstDraftPresentation = presenter.presentation(for: SessionScreen(
-            session: session,
-            primarySurface: .structuredActivityFeed,
-            transcript: "",
-            activityItems: [userPrompt],
-            providerEvents: [
-                SessionProviderEvent(
-                    sequence: 0,
-                    providerID: .pi,
-                    type: "message_update",
-                    family: .message,
-                    rawPayload: #"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"wor"}}"#
-                )
-            ],
-            isAgentTurnInProgress: true
-        ))
-        let streamedDraftPresentation = presenter.presentation(for: SessionScreen(
-            session: session,
-            primarySurface: .structuredActivityFeed,
-            transcript: "",
-            activityItems: [userPrompt],
-            providerEvents: [
-                SessionProviderEvent(
-                    sequence: 0,
-                    providerID: .pi,
-                    type: "message_update",
-                    family: .message,
-                    rawPayload: #"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"wor"}}"#
-                ),
-                SessionProviderEvent(
-                    sequence: 1,
-                    providerID: .pi,
-                    type: "message_update",
-                    family: .message,
-                    rawPayload: #"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"ld"}}"#
-                )
-            ],
-            isAgentTurnInProgress: true
-        ))
-        let finalizedPresentation = presenter.presentation(for: SessionScreen(
-            session: session,
-            primarySurface: .structuredActivityFeed,
-            transcript: "",
-            activityItems: [userPrompt, finalizedAssistantMessage],
-            providerEvents: [
-                SessionProviderEvent(
-                    sequence: 0,
-                    providerID: .pi,
-                    type: "message_update",
-                    family: .message,
-                    rawPayload: #"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"wor"}}"#
-                ),
-                SessionProviderEvent(
-                    sequence: 1,
-                    providerID: .pi,
-                    type: "message_update",
-                    family: .message,
-                    rawPayload: #"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"ld"}}"#
-                ),
-                SessionProviderEvent(
-                    sequence: 2,
-                    providerID: .pi,
-                    type: "turn_end",
-                    family: .turn,
-                    rawPayload: #"{"type":"turn_end","message":{"content":[{"type":"text","text":"world"}]}}"#
-                )
-            ],
-            isAgentTurnInProgress: false
-        ))
+        let firstDraftPresentation = presenter.presentation(
+            for: SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                transcript: "",
+                activityItems: [userPrompt],
+                providerEvents: [
+                    SessionProviderEvent(
+                        sequence: 0,
+                        providerID: .pi,
+                        type: "message_update",
+                        family: .message,
+                        rawPayload:
+                            #"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"wor"}}"#
+                    )
+                ],
+                isAgentTurnInProgress: true
+            ))
+        let streamedDraftPresentation = presenter.presentation(
+            for: SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                transcript: "",
+                activityItems: [userPrompt],
+                providerEvents: [
+                    SessionProviderEvent(
+                        sequence: 0,
+                        providerID: .pi,
+                        type: "message_update",
+                        family: .message,
+                        rawPayload:
+                            #"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"wor"}}"#
+                    ),
+                    SessionProviderEvent(
+                        sequence: 1,
+                        providerID: .pi,
+                        type: "message_update",
+                        family: .message,
+                        rawPayload:
+                            #"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"ld"}}"#
+                    ),
+                ],
+                isAgentTurnInProgress: true
+            ))
+        let finalizedPresentation = presenter.presentation(
+            for: SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                transcript: "",
+                activityItems: [userPrompt, finalizedAssistantMessage],
+                providerEvents: [
+                    SessionProviderEvent(
+                        sequence: 0,
+                        providerID: .pi,
+                        type: "message_update",
+                        family: .message,
+                        rawPayload:
+                            #"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"wor"}}"#
+                    ),
+                    SessionProviderEvent(
+                        sequence: 1,
+                        providerID: .pi,
+                        type: "message_update",
+                        family: .message,
+                        rawPayload:
+                            #"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"ld"}}"#
+                    ),
+                    SessionProviderEvent(
+                        sequence: 2,
+                        providerID: .pi,
+                        type: "turn_end",
+                        family: .turn,
+                        rawPayload: #"{"type":"turn_end","message":{"content":[{"type":"text","text":"world"}]}}"#
+                    ),
+                ],
+                isAgentTurnInProgress: false
+            ))
 
         #expect(firstDraftPresentation.activityRows.map(\.text) == ["You: hello"])
         #expect(firstDraftPresentation.thinkingIndicator == StructuredSessionThinkingIndicator(text: "Thinking…"))
@@ -949,12 +1037,12 @@ struct StructuredSessionPresentationTests {
 
     @Test func structuredSessionFeedPresenterDefersAssistantMarkdownPrewarmUntilAfterPresentationReturns() async {
         let markdownBody = """
-        ### Burst
-        - item one
-        ```swift
-        let x = 1
-        ```
-        """
+            ### Burst
+            - item one
+            ```swift
+            let x = 1
+            ```
+            """
         let session = Session(
             id: UUID(),
             workspaceID: UUID(),
@@ -981,16 +1069,16 @@ struct StructuredSessionPresentationTests {
 
         let metrics = StructuredSessionMarkdownRenderer.shared.metricsSnapshot()
         #if os(macOS)
-        #expect(metrics.parseCount == 0)
-        #expect(metrics.cacheMissCount == 0)
+            #expect(metrics.parseCount == 0)
+            #expect(metrics.cacheMissCount == 0)
         #else
-        #expect(metrics.parseCount >= 1)
-        #expect(metrics.cacheMissCount >= 1)
+            #expect(metrics.parseCount >= 1)
+            #expect(metrics.cacheMissCount >= 1)
         #endif
     }
 
     @Test func structuredSessionFeedPresenterPrewarmsFullAssistantMarkdownForLongFinalizedResponses() async {
-        let longBody = (0 ..< 20).map { _ in "- " + String(repeating: "a", count: 68) }.joined(separator: "\n")
+        let longBody = (0..<20).map { _ in "- " + String(repeating: "a", count: 68) }.joined(separator: "\n")
         let session = Session(
             id: UUID(),
             workspaceID: UUID(),
@@ -1013,17 +1101,17 @@ struct StructuredSessionPresentationTests {
 
         let metricsAfterRebuild = StructuredSessionMarkdownRenderer.shared.metricsSnapshot()
         #if os(macOS)
-        #expect(metricsAfterRebuild.parseCount == 0)
+            #expect(metricsAfterRebuild.parseCount == 0)
         #else
-        #expect(metricsAfterRebuild.cacheMissCount >= 1)
+            #expect(metricsAfterRebuild.cacheMissCount >= 1)
         #endif
         _ = StructuredSessionMarkdownRenderer.shared.renderContent(longBody)
         let metricsAfterSecondRender = StructuredSessionMarkdownRenderer.shared.metricsSnapshot()
         #if os(macOS)
-        #expect(metricsAfterSecondRender.cacheMissCount == 1)
-        #expect(metricsAfterSecondRender.cacheHitCount == 0)
+            #expect(metricsAfterSecondRender.cacheMissCount == 1)
+            #expect(metricsAfterSecondRender.cacheHitCount == 0)
         #else
-        #expect(metricsAfterSecondRender.cacheHitCount == metricsAfterRebuild.cacheHitCount + 1)
+            #expect(metricsAfterSecondRender.cacheHitCount == metricsAfterRebuild.cacheHitCount + 1)
         #endif
     }
 
@@ -1047,7 +1135,8 @@ struct StructuredSessionPresentationTests {
                     providerID: .pi,
                     type: "message_update",
                     family: .message,
-                    rawPayload: #"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"stale"}}"#
+                    rawPayload:
+                        #"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"stale"}}"#
                 )
             ],
             providerFacts: StructuredSessionProviderFacts(
@@ -1124,39 +1213,45 @@ struct StructuredSessionPresentationTests {
             }
         }
 
-        let firstPresentation = presenter.presentation(for: SessionScreen(
-            session: session,
-            primarySurface: .structuredActivityFeed,
-            transcript: "",
-            activityItems: [firstActivity, secondActivity, thirdActivity]
-        ))
-        let secondPresentation = presenter.presentation(for: SessionScreen(
-            session: session,
-            primarySurface: .structuredActivityFeed,
-            transcript: "",
-            activityItems: [firstActivity, secondActivity, thirdActivity, fourthActivity]
-        ))
-        let thirdPresentation = presenter.presentation(for: SessionScreen(
-            session: session,
-            primarySurface: .structuredActivityFeed,
-            transcript: "",
-            activityItems: [firstActivity, secondActivity, thirdActivity, fourthActivity, fifthActivity]
-        ))
+        let firstPresentation = presenter.presentation(
+            for: SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                transcript: "",
+                activityItems: [firstActivity, secondActivity, thirdActivity]
+            ))
+        let secondPresentation = presenter.presentation(
+            for: SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                transcript: "",
+                activityItems: [firstActivity, secondActivity, thirdActivity, fourthActivity]
+            ))
+        let thirdPresentation = presenter.presentation(
+            for: SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                transcript: "",
+                activityItems: [firstActivity, secondActivity, thirdActivity, fourthActivity, fifthActivity]
+            ))
 
         #expect(firstPresentation.activityRowChunks.map(\.id) == [0, 2])
-        #expect(firstPresentation.activityRowChunks.map { $0.rows.map(\.id) } == [
-            [firstActivity.id, secondActivity.id],
-            [thirdActivity.id]
-        ])
-        #expect(secondPresentation.activityRowChunks.map { $0.rows.map(\.id) } == [
-            [firstActivity.id, secondActivity.id],
-            [thirdActivity.id, fourthActivity.id]
-        ])
-        #expect(thirdPresentation.activityRowChunks.map { $0.rows.map(\.id) } == [
-            [firstActivity.id, secondActivity.id],
-            [thirdActivity.id, fourthActivity.id],
-            [fifthActivity.id]
-        ])
+        #expect(
+            firstPresentation.activityRowChunks.map { $0.rows.map(\.id) } == [
+                [firstActivity.id, secondActivity.id],
+                [thirdActivity.id],
+            ])
+        #expect(
+            secondPresentation.activityRowChunks.map { $0.rows.map(\.id) } == [
+                [firstActivity.id, secondActivity.id],
+                [thirdActivity.id, fourthActivity.id],
+            ])
+        #expect(
+            thirdPresentation.activityRowChunks.map { $0.rows.map(\.id) } == [
+                [firstActivity.id, secondActivity.id],
+                [thirdActivity.id, fourthActivity.id],
+                [fifthActivity.id],
+            ])
         #expect(secondPresentation.activityRowChunks[0] == firstPresentation.activityRowChunks[0])
         #expect(thirdPresentation.activityRowChunks[0] == secondPresentation.activityRowChunks[0])
         #expect(thirdPresentation.activityRowChunks[1] == secondPresentation.activityRowChunks[1])
@@ -1192,39 +1287,53 @@ struct StructuredSessionPresentationTests {
             }
         }
 
-        let firstPresentation = presenter.presentation(for: SessionScreen(
-            session: session,
-            primarySurface: .structuredActivityFeed,
-            transcript: "",
-            activityItems: [firstActivity, secondActivity, thirdActivity, fourthActivity, fifthActivity, sixthActivity]
-        ))
-        let secondPresentation = presenter.presentation(for: SessionScreen(
-            session: session,
-            primarySurface: .structuredActivityFeed,
-            transcript: "",
-            activityItems: [firstActivity, secondActivity, thirdActivity, fourthActivity, fifthActivity, sixthActivity, seventhActivity]
-        ))
-        let thirdPresentation = presenter.presentation(for: SessionScreen(
-            session: session,
-            primarySurface: .structuredActivityFeed,
-            transcript: "",
-            activityItems: [firstActivity, secondActivity, thirdActivity, fourthActivity, fifthActivity, sixthActivity, seventhActivity, eighthActivity]
-        ))
+        let firstPresentation = presenter.presentation(
+            for: SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                transcript: "",
+                activityItems: [
+                    firstActivity, secondActivity, thirdActivity, fourthActivity, fifthActivity, sixthActivity,
+                ]
+            ))
+        let secondPresentation = presenter.presentation(
+            for: SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                transcript: "",
+                activityItems: [
+                    firstActivity, secondActivity, thirdActivity, fourthActivity, fifthActivity, sixthActivity,
+                    seventhActivity,
+                ]
+            ))
+        let thirdPresentation = presenter.presentation(
+            for: SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                transcript: "",
+                activityItems: [
+                    firstActivity, secondActivity, thirdActivity, fourthActivity, fifthActivity, sixthActivity,
+                    seventhActivity, eighthActivity,
+                ]
+            ))
 
-        #expect(firstPresentation.activityRowChunks.map { $0.rows.map(\.id) } == [
-            [firstActivity.id, secondActivity.id, thirdActivity.id, fourthActivity.id],
-            [fifthActivity.id, sixthActivity.id]
-        ])
-        #expect(secondPresentation.activityRowChunks.map { $0.rows.map(\.id) } == [
-            [firstActivity.id, secondActivity.id, thirdActivity.id, fourthActivity.id],
-            [fifthActivity.id, sixthActivity.id],
-            [seventhActivity.id]
-        ])
-        #expect(thirdPresentation.activityRowChunks.map { $0.rows.map(\.id) } == [
-            [firstActivity.id, secondActivity.id, thirdActivity.id, fourthActivity.id],
-            [fifthActivity.id, sixthActivity.id],
-            [seventhActivity.id, eighthActivity.id]
-        ])
+        #expect(
+            firstPresentation.activityRowChunks.map { $0.rows.map(\.id) } == [
+                [firstActivity.id, secondActivity.id, thirdActivity.id, fourthActivity.id],
+                [fifthActivity.id, sixthActivity.id],
+            ])
+        #expect(
+            secondPresentation.activityRowChunks.map { $0.rows.map(\.id) } == [
+                [firstActivity.id, secondActivity.id, thirdActivity.id, fourthActivity.id],
+                [fifthActivity.id, sixthActivity.id],
+                [seventhActivity.id],
+            ])
+        #expect(
+            thirdPresentation.activityRowChunks.map { $0.rows.map(\.id) } == [
+                [firstActivity.id, secondActivity.id, thirdActivity.id, fourthActivity.id],
+                [fifthActivity.id, sixthActivity.id],
+                [seventhActivity.id, eighthActivity.id],
+            ])
         #expect(secondPresentation.activityRowChunks[0] == firstPresentation.activityRowChunks[0])
         #expect(secondPresentation.activityRowChunks[1] == firstPresentation.activityRowChunks[1])
         #expect(thirdPresentation.activityRowChunks[0] == secondPresentation.activityRowChunks[0])
@@ -1270,32 +1379,37 @@ struct StructuredSessionPresentationTests {
             }
         }
 
-        let initialPresentation = presenter.presentation(for: SessionScreen(
-            session: session,
-            primarySurface: .structuredActivityFeed,
-            transcript: "",
-            activityItems: [firstActivity, secondActivity, originalThirdActivity]
-        ))
-        let updatedPresentation = presenter.presentation(for: SessionScreen(
-            session: session,
-            primarySurface: .structuredActivityFeed,
-            transcript: "",
-            activityItems: [firstActivity, secondActivity, updatedThirdActivity]
-        ))
+        let initialPresentation = presenter.presentation(
+            for: SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                transcript: "",
+                activityItems: [firstActivity, secondActivity, originalThirdActivity]
+            ))
+        let updatedPresentation = presenter.presentation(
+            for: SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                transcript: "",
+                activityItems: [firstActivity, secondActivity, updatedThirdActivity]
+            ))
 
-        #expect(initialPresentation.activityRowChunks.map { $0.rows.map(\.id) } == [
-            [firstActivity.id, secondActivity.id],
-            [thirdActivityID]
-        ])
-        #expect(updatedPresentation.activityRowChunks.map { $0.rows.map(\.id) } == [
-            [firstActivity.id, secondActivity.id],
-            [thirdActivityID]
-        ])
+        #expect(
+            initialPresentation.activityRowChunks.map { $0.rows.map(\.id) } == [
+                [firstActivity.id, secondActivity.id],
+                [thirdActivityID],
+            ])
+        #expect(
+            updatedPresentation.activityRowChunks.map { $0.rows.map(\.id) } == [
+                [firstActivity.id, secondActivity.id],
+                [thirdActivityID],
+            ])
         #expect(updatedPresentation.activityRows.last?.detailText == "line 1\nline 2")
-        #expect(builtItems == [
-            ["Pi: First|", "Thinking|", "git diff|line 1"],
-            ["git diff|line 1\nline 2"]
-        ])
+        #expect(
+            builtItems == [
+                ["Pi: First|", "Thinking|", "git diff|line 1"],
+                ["git diff|line 1\nline 2"],
+            ])
     }
 
     @Test func structuredSessionFeedPresenterRebuildsWhenStructuredSessionHistoryChangesInPlace() {
@@ -1326,18 +1440,20 @@ struct StructuredSessionPresentationTests {
             }
         }
 
-        _ = presenter.presentation(for: SessionScreen(
-            session: session,
-            primarySurface: .structuredActivityFeed,
-            transcript: "",
-            activityItems: [originalActivity, unchangedActivity]
-        ))
-        let updatedPresentation = presenter.presentation(for: SessionScreen(
-            session: session,
-            primarySurface: .structuredActivityFeed,
-            transcript: "",
-            activityItems: [updatedActivity, unchangedActivity]
-        ))
+        _ = presenter.presentation(
+            for: SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                transcript: "",
+                activityItems: [originalActivity, unchangedActivity]
+            ))
+        let updatedPresentation = presenter.presentation(
+            for: SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                transcript: "",
+                activityItems: [updatedActivity, unchangedActivity]
+            ))
 
         #expect(updatedPresentation.activityRows.map(\.text) == ["Pi: Revised draft", "Thinking"])
         #expect(builtItemTexts == [["Pi: First draft", "Thinking"], ["Pi: Revised draft", "Thinking"]])
@@ -1358,18 +1474,19 @@ struct StructuredSessionPresentationTests {
                 SessionActivityItem(kind: .message, text: "You: Ship it"),
                 SessionActivityItem(kind: .message, text: "Planner: Check git status"),
                 SessionActivityItem(kind: .message, text: "Still working"),
-                SessionActivityItem(kind: .command, text: "git status")
+                SessionActivityItem(kind: .command, text: "git status"),
             ]
         )
 
         let presentation = StructuredSessionFeedPresenter().presentation(for: screen)
 
-        #expect(presentation.activityRows.map(\.conversationPresentation) == [
-            StructuredSessionConversationPresentation(role: .user, text: "Ship it"),
-            StructuredSessionConversationPresentation(role: .assistant(label: "Planner"), text: "Check git status"),
-            StructuredSessionConversationPresentation(role: .assistant(label: "Codex"), text: "Still working"),
-            StructuredSessionConversationPresentation(role: .command, text: "git status")
-        ])
+        #expect(
+            presentation.activityRows.map(\.conversationPresentation) == [
+                StructuredSessionConversationPresentation(role: .user, text: "Ship it"),
+                StructuredSessionConversationPresentation(role: .assistant(label: "Planner"), text: "Check git status"),
+                StructuredSessionConversationPresentation(role: .assistant(label: "Codex"), text: "Still working"),
+                StructuredSessionConversationPresentation(role: .command, text: "git status"),
+            ])
     }
 
     @Test func focusedStructuredSessionPresenterKeepsFeedStableDuringChromeOnlyExtensionUpdates() throws {
@@ -1411,7 +1528,9 @@ struct StructuredSessionPresentationTests {
         let updatedPresentation = try #require(presenter.presentation(for: updatedScreen))
 
         #expect(initialPresentation == updatedPresentation)
-        #expect(focusedStructuredSessionChromePresentation(for: initialScreen) != focusedStructuredSessionChromePresentation(for: updatedScreen))
+        #expect(
+            focusedStructuredSessionChromePresentation(for: initialScreen)
+                != focusedStructuredSessionChromePresentation(for: updatedScreen))
     }
 
     @Test func structuredSessionConversationPresentationClassifiesSharedMessageRowsAndFallsBackToProviderLabel() {
@@ -1448,18 +1567,24 @@ struct StructuredSessionPresentationTests {
             emphasis: .accent
         )
 
-        #expect(structuredSessionConversationPresentation(for: userRow, screen: screen) == StructuredSessionConversationPresentation(
-            role: .user,
-            text: "Ship it"
-        ))
-        #expect(structuredSessionConversationPresentation(for: assistantRow, screen: screen) == StructuredSessionConversationPresentation(
-            role: .assistant(label: "Planner"),
-            text: "Check git status"
-        ))
-        #expect(structuredSessionConversationPresentation(for: fallbackRow, screen: screen) == StructuredSessionConversationPresentation(
-            role: .assistant(label: "Codex"),
-            text: "Still working"
-        ))
+        #expect(
+            structuredSessionConversationPresentation(for: userRow, screen: screen)
+                == StructuredSessionConversationPresentation(
+                    role: .user,
+                    text: "Ship it"
+                ))
+        #expect(
+            structuredSessionConversationPresentation(for: assistantRow, screen: screen)
+                == StructuredSessionConversationPresentation(
+                    role: .assistant(label: "Planner"),
+                    text: "Check git status"
+                ))
+        #expect(
+            structuredSessionConversationPresentation(for: fallbackRow, screen: screen)
+                == StructuredSessionConversationPresentation(
+                    role: .assistant(label: "Codex"),
+                    text: "Still working"
+                ))
     }
 
     @Test func structuredSessionFeedPresentationShowsThinkingIndicatorWhileAgentTurnIsInProgress() {
@@ -1478,7 +1603,9 @@ struct StructuredSessionPresentationTests {
             isAgentTurnInProgress: true
         )
 
-        #expect(structuredSessionFeedPresentation(for: screen).thinkingIndicator == StructuredSessionThinkingIndicator(text: "Thinking…"))
+        #expect(
+            structuredSessionFeedPresentation(for: screen).thinkingIndicator
+                == StructuredSessionThinkingIndicator(text: "Thinking…"))
     }
 
     @Test func structuredSessionComposerPresentationKeepsViewerPromptVisibleButDisabledUntilControllerTaken() {
@@ -1494,14 +1621,18 @@ struct StructuredSessionPresentationTests {
             transcript: ""
         )
 
-        #expect(structuredSessionComposerPresentation(for: codexScreen, hasWriterAuthority: false) == StructuredSessionComposerPresentation(
-            placeholder: "Send a prompt to Codex",
-            isEnabled: false,
-            disabledReason: "Take Controller to send a prompt from this iPhone."
-        ))
+        #expect(
+            structuredSessionComposerPresentation(for: codexScreen, hasWriterAuthority: false)
+                == StructuredSessionComposerPresentation(
+                    placeholder: "Send a prompt to Codex",
+                    isEnabled: false,
+                    disabledReason: "Take Controller to send a prompt from this iPhone."
+                ))
     }
 
-    @Test func structuredSessionComposerPresentationUsesPiCopyWhileKeepingViewerPromptVisibleButDisabledUntilControllerTaken() {
+    @Test
+    func structuredSessionComposerPresentationUsesPiCopyWhileKeepingViewerPromptVisibleButDisabledUntilControllerTaken()
+    {
         let piScreen = SessionScreen(
             session: Session(
                 id: UUID(),
@@ -1514,11 +1645,13 @@ struct StructuredSessionPresentationTests {
             transcript: ""
         )
 
-        #expect(structuredSessionComposerPresentation(for: piScreen, hasWriterAuthority: false) == StructuredSessionComposerPresentation(
-            placeholder: "Send a prompt to Pi",
-            isEnabled: false,
-            disabledReason: "Take Controller to send a prompt from this iPhone."
-        ))
+        #expect(
+            structuredSessionComposerPresentation(for: piScreen, hasWriterAuthority: false)
+                == StructuredSessionComposerPresentation(
+                    placeholder: "Send a prompt to Pi",
+                    isEnabled: false,
+                    disabledReason: "Take Controller to send a prompt from this iPhone."
+                ))
     }
 
     @Test func structuredSessionComposerSendAffordanceAppearsAfterTheFirstSendableCharacter() {
@@ -1528,14 +1661,16 @@ struct StructuredSessionPresentationTests {
             disabledReason: nil
         )
 
-        #expect(structuredSessionComposerSendAffordance(
-            for: "H",
-            composer: composer,
-            isPerformingAction: false
-        ) == StructuredSessionComposerSendAffordance(
-            isVisible: true,
-            isEnabled: true
-        ))
+        #expect(
+            structuredSessionComposerSendAffordance(
+                for: "H",
+                composer: composer,
+                isPerformingAction: false
+            )
+                == StructuredSessionComposerSendAffordance(
+                    isVisible: true,
+                    isEnabled: true
+                ))
     }
 
     @Test func structuredSessionComposerSendAffordanceStaysHiddenForWhitespaceOnlyDrafts() {
@@ -1545,21 +1680,25 @@ struct StructuredSessionPresentationTests {
             disabledReason: nil
         )
 
-        #expect(structuredSessionComposerSendAffordance(
-            for: " \n ",
-            composer: composer,
-            isPerformingAction: false
-        ) == StructuredSessionComposerSendAffordance(
-            isVisible: false,
-            isEnabled: false
-        ))
+        #expect(
+            structuredSessionComposerSendAffordance(
+                for: " \n ",
+                composer: composer,
+                isPerformingAction: false
+            )
+                == StructuredSessionComposerSendAffordance(
+                    isVisible: false,
+                    isEnabled: false
+                ))
     }
 
     @Test func structuredSessionApprovalRequestPresentationKeepsViewerActionsVisibleButDisabledUntilControllerTaken() {
-        #expect(structuredSessionApprovalRequestPresentation(hasWriterAuthority: false) == StructuredSessionApprovalRequestPresentation(
-            actionsAreEnabled: false,
-            disabledReason: "Take Controller to respond to Approval Requests from this iPhone."
-        ))
+        #expect(
+            structuredSessionApprovalRequestPresentation(hasWriterAuthority: false)
+                == StructuredSessionApprovalRequestPresentation(
+                    actionsAreEnabled: false,
+                    disabledReason: "Take Controller to respond to Approval Requests from this iPhone."
+                ))
     }
 
     @Test func structuredSessionSlashCommandMenuAppearsAsSoonAsSlashIsTyped() {
@@ -1637,7 +1776,7 @@ struct StructuredSessionPresentationTests {
                     source: .skill,
                     location: .project,
                     path: "/tmp/project/.pi/skills/tdd/SKILL.md"
-                )
+                ),
             ]
         )
         let menu = structuredSessionSlashCommandMenuPresentation(for: "/skill:", screen: screen)
@@ -1672,13 +1811,20 @@ struct StructuredSessionPresentationTests {
                     source: .skill,
                     location: .project,
                     path: "/tmp/project/.pi/skills/tdd/SKILL.md"
-                )
+                ),
             ]
         )
 
-        #expect(structuredSessionSlashCommandMenuPresentation(for: "/", screen: screen).commands.map(\.displayText).contains("/model <provider>/<model>"))
-        #expect(structuredSessionSlashCommandMenuPresentation(for: "/", screen: screen).commands.contains(where: { $0.displayText.contains("Claude Sonnet 4") }) == false)
-        #expect(structuredSessionSlashCommandMenuPresentation(for: "/model anth", screen: screen).commands.map(\.displayText) == ["/model anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4"])
+        #expect(
+            structuredSessionSlashCommandMenuPresentation(for: "/", screen: screen).commands.map(\.displayText)
+                .contains("/model <provider>/<model>"))
+        #expect(
+            structuredSessionSlashCommandMenuPresentation(for: "/", screen: screen).commands.contains(where: {
+                $0.displayText.contains("Claude Sonnet 4")
+            }) == false)
+        #expect(
+            structuredSessionSlashCommandMenuPresentation(for: "/model anth", screen: screen).commands.map(
+                \.displayText) == ["/model anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4"])
     }
 
     @Test func structuredSessionSlashCommandMenuUsesLivePiThinkingCommandsOnlyAfterThinkingPrefix() {
@@ -1703,9 +1849,16 @@ struct StructuredSessionPresentationTests {
             ]
         )
 
-        #expect(structuredSessionSlashCommandMenuPresentation(for: "/", screen: screen).commands.map(\.displayText).contains("/thinking <level>"))
-        #expect(structuredSessionSlashCommandMenuPresentation(for: "/", screen: screen).commands.contains(where: { $0.displayText == "/thinking high" }) == false)
-        #expect(structuredSessionSlashCommandMenuPresentation(for: "/thinking h", screen: screen).commands.map(\.displayText) == ["/thinking high"])
+        #expect(
+            structuredSessionSlashCommandMenuPresentation(for: "/", screen: screen).commands.map(\.displayText)
+                .contains("/thinking <level>"))
+        #expect(
+            structuredSessionSlashCommandMenuPresentation(for: "/", screen: screen).commands.contains(where: {
+                $0.displayText == "/thinking high"
+            }) == false)
+        #expect(
+            structuredSessionSlashCommandMenuPresentation(for: "/thinking h", screen: screen).commands.map(
+                \.displayText) == ["/thinking high"])
     }
 
     @Test func structuredSessionSlashCommandMenuUsesStaticPiQueueControlsAndLiveModeSuggestions() {
@@ -1730,14 +1883,17 @@ struct StructuredSessionPresentationTests {
             ]
         )
 
-        let rootCommands = structuredSessionSlashCommandMenuPresentation(for: "/", screen: screen).commands.map(\.displayText)
+        let rootCommands = structuredSessionSlashCommandMenuPresentation(for: "/", screen: screen).commands.map(
+            \.displayText)
 
         #expect(rootCommands.contains("/steer <message>"))
         #expect(rootCommands.contains("/follow-up <message>"))
         #expect(rootCommands.contains("/abort"))
         #expect(rootCommands.contains("/steering-mode <mode>"))
         #expect(rootCommands.contains("/follow-up-mode <mode>"))
-        #expect(structuredSessionSlashCommandMenuPresentation(for: "/steering-mode o", screen: screen).commands.map(\.displayText) == ["/steering-mode one-at-a-time"])
+        #expect(
+            structuredSessionSlashCommandMenuPresentation(for: "/steering-mode o", screen: screen).commands.map(
+                \.displayText) == ["/steering-mode one-at-a-time"])
     }
 
     @Test func structuredSessionSlashCommandMenuUsesStaticPiCompactionAndRetryControls() {
@@ -1752,7 +1908,8 @@ struct StructuredSessionPresentationTests {
             transcript: ""
         )
 
-        let rootCommands = structuredSessionSlashCommandMenuPresentation(for: "/", screen: screen).commands.map(\.displayText)
+        let rootCommands = structuredSessionSlashCommandMenuPresentation(for: "/", screen: screen).commands.map(
+            \.displayText)
 
         #expect(rootCommands.contains("/cycle-model"))
         #expect(rootCommands.contains("/cycle-thinking-level"))
@@ -1784,8 +1941,13 @@ struct StructuredSessionPresentationTests {
             ]
         )
 
-        #expect(structuredSessionSlashCommandMenuPresentation(for: "/", screen: screen).commands.contains(where: { $0.displayText.contains("GPT-5.5") }) == false)
-        #expect(structuredSessionSlashCommandMenuPresentation(for: "/model g", screen: screen).commands.map(\.displayText) == ["/model gpt-5.5 — GPT-5.5"])
+        #expect(
+            structuredSessionSlashCommandMenuPresentation(for: "/", screen: screen).commands.contains(where: {
+                $0.displayText.contains("GPT-5.5")
+            }) == false)
+        #expect(
+            structuredSessionSlashCommandMenuPresentation(for: "/model g", screen: screen).commands.map(\.displayText)
+                == ["/model gpt-5.5 — GPT-5.5"])
     }
 
     @Test func structuredSessionSlashCommandMenuUsesLiveBobCommandArgumentHintsFromSessionScreen() throws {
@@ -1858,7 +2020,7 @@ struct StructuredSessionPresentationTests {
         #expect(short.usesBoundedViewport == false)
 
         let long = structuredSessionFeedStreamingAssistantDisplayPolicy(
-            for: (0 ..< 20).map { _ in String(repeating: "a", count: 70) }.joined(separator: "\n"),
+            for: (0..<20).map { _ in String(repeating: "a", count: 70) }.joined(separator: "\n"),
             charactersPerLine: 72
         )
         #expect(long.usesBoundedViewport)
@@ -1866,7 +2028,7 @@ struct StructuredSessionPresentationTests {
     }
 
     @Test func structuredSessionFeedStreamingAssistantDisplayTextTrimsLongLiveDrafts() {
-        let longBody = (0 ..< 20).map { _ in String(repeating: "a", count: 70) }.joined(separator: "\n")
+        let longBody = (0..<20).map { _ in String(repeating: "a", count: 70) }.joined(separator: "\n")
         let policy = structuredSessionFeedStreamingAssistantDisplayPolicy(for: longBody, charactersPerLine: 72)
         let display = structuredSessionFeedStreamingAssistantDisplayText(for: longBody, policy: policy)
         #expect(display.count < longBody.count)
@@ -1886,15 +2048,15 @@ struct StructuredSessionPresentationTests {
         #expect(structuredSessionShouldCollapseStreamingMarkdownPreview(charBomb, charactersPerLine: 72) == true)
 
         // Wrapped lines at macOS width (72 chars/line, >18 lines)
-        let macLong = (0 ..< 20).map { _ in String(repeating: "m", count: 70) }.joined(separator: "\n")
+        let macLong = (0..<20).map { _ in String(repeating: "m", count: 70) }.joined(separator: "\n")
         #expect(structuredSessionShouldCollapseStreamingMarkdownPreview(macLong, charactersPerLine: 72) == true)
 
         // Wrapped lines at iOS width (56 chars/line)
-        let iosLong = (0 ..< 20).map { _ in String(repeating: "i", count: 50) }.joined(separator: "\n")
+        let iosLong = (0..<20).map { _ in String(repeating: "i", count: 50) }.joined(separator: "\n")
         #expect(structuredSessionShouldCollapseStreamingMarkdownPreview(iosLong, charactersPerLine: 56) == true)
 
         // Boundary: exactly 18 lines at width does not trigger (strict > 18)
-        let macBoundary = (0 ..< 18).map { _ in String(repeating: "b", count: 72) }.joined(separator: "\n")
+        let macBoundary = (0..<18).map { _ in String(repeating: "b", count: 72) }.joined(separator: "\n")
         #expect(structuredSessionShouldCollapseStreamingMarkdownPreview(macBoundary, charactersPerLine: 72) == false)
     }
 
@@ -1903,25 +2065,27 @@ struct StructuredSessionPresentationTests {
         #expect(structuredSessionShouldCollapseDetailPreview("short output", charactersPerLine: 60) == false)
 
         // >10 wrapped lines triggers (mac 84 or iOS 60)
-        let detailLong = (0 ..< 12).map { "line \($0)" }.joined(separator: "\n")
+        let detailLong = (0..<12).map { "line \($0)" }.joined(separator: "\n")
         #expect(structuredSessionShouldCollapseDetailPreview(detailLong, charactersPerLine: 84) == true)
         #expect(structuredSessionShouldCollapseDetailPreview(detailLong, charactersPerLine: 60) == true)
     }
 
     @Test func structuredSessionFeedAgentTurnFinalAnswerNeverUsesCollapsedPreview() {
-        let long = (0 ..< 20).map { _ in String(repeating: "a", count: 70) }.joined(separator: "\n")
+        let long = (0..<20).map { _ in String(repeating: "a", count: 70) }.joined(separator: "\n")
         let policy = structuredSessionFeedAgentTurnFinalAnswerMarkdownDisplayPolicy(for: long, charactersPerLine: 72)
         #expect(policy.showsCollapsedPreview == false)
     }
 
     @Test func structuredSessionFeedAssistantMarkdownDisplayPolicyBoundsLongFinalizedResponses() {
         let short = structuredSessionFeedAssistantMarkdownDisplayPolicy(for: "Done.", charactersPerLine: 72)
-        #expect(short == StructuredSessionFeedAssistantMarkdownDisplayPolicy(
-            showsCollapsedPreview: false,
-            previewLineLimit: structuredSessionFeedAssistantMarkdownPreviewLineLimit
-        ))
+        #expect(
+            short
+                == StructuredSessionFeedAssistantMarkdownDisplayPolicy(
+                    showsCollapsedPreview: false,
+                    previewLineLimit: structuredSessionFeedAssistantMarkdownPreviewLineLimit
+                ))
 
-        let long = (0 ..< 20).map { _ in String(repeating: "a", count: 70) }.joined(separator: "\n")
+        let long = (0..<20).map { _ in String(repeating: "a", count: 70) }.joined(separator: "\n")
         let policy = structuredSessionFeedAssistantMarkdownDisplayPolicy(for: long, charactersPerLine: 72)
         #expect(policy.showsCollapsedPreview)
         #expect(policy.previewLineLimit == 18)
@@ -1995,13 +2159,17 @@ struct StructuredSessionPresentationTests {
         let short = structuredSessionFeedAssistantMarkdownBoundedPreviewText(for: "Done.")
         #expect(short == "Done.")
 
-        let long = (0 ..< 25).map { "line \($0) " + String(repeating: "z", count: 50) }.joined(separator: "\n")
+        let long = (0..<25).map { "line \($0) " + String(repeating: "z", count: 50) }.joined(separator: "\n")
         let bounded = structuredSessionFeedAssistantMarkdownBoundedPreviewText(for: long)
-        #expect(bounded.split(separator: "\n", omittingEmptySubsequences: false).count <= structuredSessionFeedAssistantMarkdownPreviewLineLimit)
+        #expect(
+            bounded.split(separator: "\n", omittingEmptySubsequences: false).count
+                <= structuredSessionFeedAssistantMarkdownPreviewLineLimit)
         #expect(bounded.count < long.count)
     }
 
-    @Test func structuredSessionFeedPresenterFinalizeKeepsNonEmptyAssistantBodyWhenLongResponseUsesBoundedPreview() throws {
+    @Test func structuredSessionFeedPresenterFinalizeKeepsNonEmptyAssistantBodyWhenLongResponseUsesBoundedPreview()
+        throws
+    {
         let session = Session(
             id: UUID(),
             workspaceID: UUID(),
@@ -2010,28 +2178,30 @@ struct StructuredSessionPresentationTests {
             state: .ready
         )
         let userPrompt = SessionActivityItem(kind: .message, text: "You: summarize")
-        let longBody = (0 ..< 20).map { "line \($0) " + String(repeating: "x", count: 60) }.joined(separator: "\n")
+        let longBody = (0..<20).map { "line \($0) " + String(repeating: "x", count: 60) }.joined(separator: "\n")
         let finalizedAssistantMessage = SessionActivityItem(kind: .message, text: "Pi: \(longBody)")
         let presenter = StructuredSessionFeedPresenter()
 
-        let draftPresentation = presenter.presentation(for: SessionScreen(
-            session: session,
-            primarySurface: .structuredActivityFeed,
-            transcript: "",
-            activityItems: [userPrompt],
-            providerFacts: StructuredSessionProviderFacts(liveAssistantDraftText: String(longBody.prefix(80))),
-            isAgentTurnInProgress: true
-        ))
+        let draftPresentation = presenter.presentation(
+            for: SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                transcript: "",
+                activityItems: [userPrompt],
+                providerFacts: StructuredSessionProviderFacts(liveAssistantDraftText: String(longBody.prefix(80))),
+                isAgentTurnInProgress: true
+            ))
         #expect(draftPresentation.activityRows.map(\.text) == ["You: summarize"])
         #expect(draftPresentation.thinkingIndicator != nil)
 
-        let finalizedPresentation = presenter.presentation(for: SessionScreen(
-            session: session,
-            primarySurface: .structuredActivityFeed,
-            transcript: "",
-            activityItems: [userPrompt, finalizedAssistantMessage],
-            isAgentTurnInProgress: false
-        ))
+        let finalizedPresentation = presenter.presentation(
+            for: SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                transcript: "",
+                activityItems: [userPrompt, finalizedAssistantMessage],
+                isAgentTurnInProgress: false
+            ))
 
         let finalizedRow = try #require(finalizedPresentation.activityRows.last)
         let conversation = try #require(finalizedRow.conversationPresentation)
@@ -2040,7 +2210,8 @@ struct StructuredSessionPresentationTests {
         let policy = structuredSessionFeedAssistantMarkdownDisplayPolicy(for: conversation.text, charactersPerLine: 72)
         #expect(policy.showsCollapsedPreview)
 
-        let iosPolicy = structuredSessionFeedAssistantMarkdownDisplayPolicy(for: conversation.text, charactersPerLine: 56)
+        let iosPolicy = structuredSessionFeedAssistantMarkdownDisplayPolicy(
+            for: conversation.text, charactersPerLine: 56)
         #expect(iosPolicy.showsCollapsedPreview)
     }
 
@@ -2062,7 +2233,8 @@ struct StructuredSessionPresentationTests {
                 systemImage: "message",
                 text: "Pi: old",
                 emphasis: .accent,
-                conversationPresentation: StructuredSessionConversationPresentation(role: .assistant(label: "Pi"), text: "old")
+                conversationPresentation: StructuredSessionConversationPresentation(
+                    role: .assistant(label: "Pi"), text: "old")
             ),
             StructuredSessionActivityRow(
                 id: UUID(),
@@ -2070,7 +2242,8 @@ struct StructuredSessionPresentationTests {
                 systemImage: "message",
                 text: "Pi: streaming",
                 emphasis: .accent,
-                conversationPresentation: StructuredSessionConversationPresentation(role: .assistant(label: "Pi"), text: "streaming", isStreaming: true)
+                conversationPresentation: StructuredSessionConversationPresentation(
+                    role: .assistant(label: "Pi"), text: "streaming", isStreaming: true)
             ),
             StructuredSessionActivityRow(
                 id: latestAssistantID,
@@ -2078,14 +2251,16 @@ struct StructuredSessionPresentationTests {
                 systemImage: "message",
                 text: "Pi: latest",
                 emphasis: .accent,
-                conversationPresentation: StructuredSessionConversationPresentation(role: .assistant(label: "Pi"), text: "latest")
-            )
+                conversationPresentation: StructuredSessionConversationPresentation(
+                    role: .assistant(label: "Pi"), text: "latest")
+            ),
         ]
 
         #expect(structuredSessionLatestFinalizedAssistantActivityRowID(in: rows) == latestAssistantID)
     }
 
-    @Test func structuredSessionFeedAssistantAutoExpandedLatestResponsePrefersPlainTextOnlyForImplicitLatestExpansion() {
+    @Test func structuredSessionFeedAssistantAutoExpandedLatestResponsePrefersPlainTextOnlyForImplicitLatestExpansion()
+    {
         let longResponsePolicy = StructuredSessionFeedAssistantMarkdownDisplayPolicy(
             showsCollapsedPreview: true,
             previewLineLimit: structuredSessionFeedAssistantMarkdownPreviewLineLimit
@@ -2126,11 +2301,13 @@ struct StructuredSessionPresentationTests {
 
     @Test func structuredSessionLatestAssistantInlineMarkdownIdleGatePolicyMatchesPlatformExpectations() {
         #if os(iOS)
-        #expect(StructuredSessionLatestAssistantInlineMarkdownIdleGatePolicy.usesIdleGatedInlineMarkdownHydration)
-        #expect(StructuredSessionLatestAssistantInlineMarkdownIdleGatePolicy.scrollIdleInterval == 0.15)
+            #expect(StructuredSessionLatestAssistantInlineMarkdownIdleGatePolicy.usesIdleGatedInlineMarkdownHydration)
+            #expect(StructuredSessionLatestAssistantInlineMarkdownIdleGatePolicy.scrollIdleInterval == 0.15)
         #else
-        #expect(StructuredSessionLatestAssistantInlineMarkdownIdleGatePolicy.usesIdleGatedInlineMarkdownHydration == false)
-        #expect(StructuredSessionLatestAssistantInlineMarkdownIdleGatePolicy.scrollIdleInterval == 0)
+            #expect(
+                StructuredSessionLatestAssistantInlineMarkdownIdleGatePolicy.usesIdleGatedInlineMarkdownHydration
+                    == false)
+            #expect(StructuredSessionLatestAssistantInlineMarkdownIdleGatePolicy.scrollIdleInterval == 0)
         #endif
     }
 
@@ -2147,35 +2324,35 @@ struct StructuredSessionPresentationTests {
         #expect(prefersPlain)
 
         #if os(iOS)
-        #expect(
-            structuredSessionFeedAllowsLatestAssistantInlineMarkdownHydration(
-                prefersPlainTextInitialRender: prefersPlain,
-                feedReaderIsScrollIdle: false,
-                feedTailIsStableForInlineMarkdown: true
-            ) == false
-        )
-        #expect(
-            structuredSessionFeedAllowsLatestAssistantInlineMarkdownHydration(
-                prefersPlainTextInitialRender: prefersPlain,
-                feedReaderIsScrollIdle: true,
-                feedTailIsStableForInlineMarkdown: false
-            ) == false
-        )
-        #expect(
-            structuredSessionFeedAllowsLatestAssistantInlineMarkdownHydration(
-                prefersPlainTextInitialRender: prefersPlain,
-                feedReaderIsScrollIdle: true,
-                feedTailIsStableForInlineMarkdown: true
+            #expect(
+                structuredSessionFeedAllowsLatestAssistantInlineMarkdownHydration(
+                    prefersPlainTextInitialRender: prefersPlain,
+                    feedReaderIsScrollIdle: false,
+                    feedTailIsStableForInlineMarkdown: true
+                ) == false
             )
-        )
+            #expect(
+                structuredSessionFeedAllowsLatestAssistantInlineMarkdownHydration(
+                    prefersPlainTextInitialRender: prefersPlain,
+                    feedReaderIsScrollIdle: true,
+                    feedTailIsStableForInlineMarkdown: false
+                ) == false
+            )
+            #expect(
+                structuredSessionFeedAllowsLatestAssistantInlineMarkdownHydration(
+                    prefersPlainTextInitialRender: prefersPlain,
+                    feedReaderIsScrollIdle: true,
+                    feedTailIsStableForInlineMarkdown: true
+                )
+            )
         #else
-        #expect(
-            structuredSessionFeedAllowsLatestAssistantInlineMarkdownHydration(
-                prefersPlainTextInitialRender: prefersPlain,
-                feedReaderIsScrollIdle: false,
-                feedTailIsStableForInlineMarkdown: false
+            #expect(
+                structuredSessionFeedAllowsLatestAssistantInlineMarkdownHydration(
+                    prefersPlainTextInitialRender: prefersPlain,
+                    feedReaderIsScrollIdle: false,
+                    feedTailIsStableForInlineMarkdown: false
+                )
             )
-        )
         #endif
     }
 
@@ -2203,14 +2380,16 @@ struct StructuredSessionPresentationTests {
     }
 
     @Test func structuredSessionFeedTailIsStableForInlineMarkdownWhenFollowTokenMatches() {
-        #expect(structuredSessionFeedTailIsStableForInlineMarkdown(
-            feedFollowScrollToken: "12-abc",
-            lastStableFeedFollowScrollToken: "12-abc"
-        ))
-        #expect(structuredSessionFeedTailIsStableForInlineMarkdown(
-            feedFollowScrollToken: "13-abc",
-            lastStableFeedFollowScrollToken: "12-abc"
-        ) == false)
+        #expect(
+            structuredSessionFeedTailIsStableForInlineMarkdown(
+                feedFollowScrollToken: "12-abc",
+                lastStableFeedFollowScrollToken: "12-abc"
+            ))
+        #expect(
+            structuredSessionFeedTailIsStableForInlineMarkdown(
+                feedFollowScrollToken: "13-abc",
+                lastStableFeedFollowScrollToken: "12-abc"
+            ) == false)
     }
 
     // MARK: - Feed scroll policy (#211)
@@ -2248,7 +2427,8 @@ struct StructuredSessionPresentationTests {
         let presentation = FocusedStructuredSessionPresentation(
             session: session,
             feed: StructuredSessionFeedPresentation(
-                copy: structuredSessionPresentationCopy(for: SessionScreen(session: session, primarySurface: .structuredActivityFeed, transcript: "")),
+                copy: structuredSessionPresentationCopy(
+                    for: SessionScreen(session: session, primarySurface: .structuredActivityFeed, transcript: "")),
                 activityRows: [],
                 pendingApprovalRequests: [],
                 thinkingIndicator: nil
@@ -2274,7 +2454,8 @@ struct StructuredSessionPresentationTests {
             emphasis: .accent
         )
         let feed = StructuredSessionFeedPresentation(
-            copy: structuredSessionPresentationCopy(for: SessionScreen(session: session, primarySurface: .structuredActivityFeed, transcript: "")),
+            copy: structuredSessionPresentationCopy(
+                for: SessionScreen(session: session, primarySurface: .structuredActivityFeed, transcript: "")),
             activityRows: [row],
             pendingApprovalRequests: [],
             thinkingIndicator: nil
@@ -2284,7 +2465,8 @@ struct StructuredSessionPresentationTests {
             pendingApprovalRequestIDs: [],
             pendingDialogIDs: []
         )
-        let presentation = FocusedStructuredSessionPresentation(session: session, feed: feed, autoScrollTrigger: trigger)
+        let presentation = FocusedStructuredSessionPresentation(
+            session: session, feed: feed, autoScrollTrigger: trigger)
         let snapshot = structuredSessionFeedScrollSnapshot(for: presentation)
 
         // Dwell-stable feed: same rows and trigger as live metadata churn (#208) would still publish.
@@ -2295,18 +2477,20 @@ struct StructuredSessionPresentationTests {
                 isPinnedToBottom: true
             ) == .none
         )
-        #expect(structuredSessionShouldRequestBottomScroll(
-            previous: snapshot,
-            current: snapshot,
-            isPinnedToBottom: true
-        ) == false)
+        #expect(
+            structuredSessionShouldRequestBottomScroll(
+                previous: snapshot,
+                current: snapshot,
+                isPinnedToBottom: true
+            ) == false)
     }
 
     @Test func structuredSessionBottomScrollIntentRequestsAnimatedScrollWhenPendingChromeChangesWhilePinned() {
         let activityID = UUID()
         let session = Session(id: UUID(), workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready)
         let feed = StructuredSessionFeedPresentation(
-            copy: structuredSessionPresentationCopy(for: SessionScreen(session: session, primarySurface: .structuredActivityFeed, transcript: "")),
+            copy: structuredSessionPresentationCopy(
+                for: SessionScreen(session: session, primarySurface: .structuredActivityFeed, transcript: "")),
             activityRows: [
                 StructuredSessionActivityRow(
                     id: activityID,
@@ -2319,24 +2503,26 @@ struct StructuredSessionPresentationTests {
             pendingApprovalRequests: [],
             thinkingIndicator: nil
         )
-        let previous = structuredSessionFeedScrollSnapshot(for: FocusedStructuredSessionPresentation(
-            session: session,
-            feed: feed,
-            autoScrollTrigger: StructuredSessionAutoScrollTrigger(
-                lastActivityRowID: activityID,
-                pendingApprovalRequestIDs: [],
-                pendingDialogIDs: []
-            )
-        ))
-        let current = structuredSessionFeedScrollSnapshot(for: FocusedStructuredSessionPresentation(
-            session: session,
-            feed: feed,
-            autoScrollTrigger: StructuredSessionAutoScrollTrigger(
-                lastActivityRowID: activityID,
-                pendingApprovalRequestIDs: [UUID()],
-                pendingDialogIDs: ["dialog-1"]
-            )
-        ))
+        let previous = structuredSessionFeedScrollSnapshot(
+            for: FocusedStructuredSessionPresentation(
+                session: session,
+                feed: feed,
+                autoScrollTrigger: StructuredSessionAutoScrollTrigger(
+                    lastActivityRowID: activityID,
+                    pendingApprovalRequestIDs: [],
+                    pendingDialogIDs: []
+                )
+            ))
+        let current = structuredSessionFeedScrollSnapshot(
+            for: FocusedStructuredSessionPresentation(
+                session: session,
+                feed: feed,
+                autoScrollTrigger: StructuredSessionAutoScrollTrigger(
+                    lastActivityRowID: activityID,
+                    pendingApprovalRequestIDs: [UUID()],
+                    pendingDialogIDs: ["dialog-1"]
+                )
+            ))
 
         #expect(
             structuredSessionBottomScrollIntent(previous: previous, current: current, isPinnedToBottom: true)
@@ -2359,7 +2545,8 @@ struct StructuredSessionPresentationTests {
             return FocusedStructuredSessionPresentation(
                 session: session,
                 feed: StructuredSessionFeedPresentation(
-                    copy: structuredSessionPresentationCopy(for: SessionScreen(session: session, primarySurface: .structuredActivityFeed, transcript: "")),
+                    copy: structuredSessionPresentationCopy(
+                        for: SessionScreen(session: session, primarySurface: .structuredActivityFeed, transcript: "")),
                     activityRows: [row],
                     pendingApprovalRequests: [],
                     thinkingIndicator: nil
@@ -2376,17 +2563,22 @@ struct StructuredSessionPresentationTests {
         let current = structuredSessionFeedScrollSnapshot(for: presentation(lastRowID: secondID))
 
         #expect(
-            structuredSessionBottomScrollIntent(previous: previous, current: current, isPinnedToBottom: true) == .immediate
+            structuredSessionBottomScrollIntent(previous: previous, current: current, isPinnedToBottom: true)
+                == .immediate
         )
-        #expect(structuredSessionShouldRequestBottomScroll(previous: previous, current: current, isPinnedToBottom: true))
-        #expect(structuredSessionShouldRequestBottomScroll(previous: previous, current: current, isPinnedToBottom: false) == false)
+        #expect(
+            structuredSessionShouldRequestBottomScroll(previous: previous, current: current, isPinnedToBottom: true))
+        #expect(
+            structuredSessionShouldRequestBottomScroll(previous: previous, current: current, isPinnedToBottom: false)
+                == false)
     }
 
     @Test func structuredSessionFeedScrollSnapshotIfScrollPolicyChangedSkipsEqualSnapshots() {
         let activityID = UUID()
         let session = Session(id: UUID(), workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready)
         let feed = StructuredSessionFeedPresentation(
-            copy: structuredSessionPresentationCopy(for: SessionScreen(session: session, primarySurface: .structuredActivityFeed, transcript: "")),
+            copy: structuredSessionPresentationCopy(
+                for: SessionScreen(session: session, primarySurface: .structuredActivityFeed, transcript: "")),
             activityRows: [
                 StructuredSessionActivityRow(
                     id: activityID,
@@ -2434,7 +2626,8 @@ struct StructuredSessionPresentationTests {
             let presentation = FocusedStructuredSessionPresentation(
                 session: session,
                 feed: StructuredSessionFeedPresentation(
-                    copy: structuredSessionPresentationCopy(for: SessionScreen(session: session, primarySurface: .structuredActivityFeed, transcript: "")),
+                    copy: structuredSessionPresentationCopy(
+                        for: SessionScreen(session: session, primarySurface: .structuredActivityFeed, transcript: "")),
                     activityRows: [row],
                     pendingApprovalRequests: [],
                     thinkingIndicator: nil
@@ -2491,7 +2684,8 @@ struct StructuredSessionPresentationTests {
             let presentation = FocusedStructuredSessionPresentation(
                 session: session,
                 feed: StructuredSessionFeedPresentation(
-                    copy: structuredSessionPresentationCopy(for: SessionScreen(session: session, primarySurface: .structuredActivityFeed, transcript: "")),
+                    copy: structuredSessionPresentationCopy(
+                        for: SessionScreen(session: session, primarySurface: .structuredActivityFeed, transcript: "")),
                     activityRows: [row],
                     pendingApprovalRequests: [],
                     thinkingIndicator: nil
@@ -2596,7 +2790,8 @@ struct StructuredSessionPresentationTests {
                 )
             )
             let feed = StructuredSessionFeedPresentation(
-                copy: structuredSessionPresentationCopy(for: SessionScreen(session: session, primarySurface: .structuredActivityFeed, transcript: "")),
+                copy: structuredSessionPresentationCopy(
+                    for: SessionScreen(session: session, primarySurface: .structuredActivityFeed, transcript: "")),
                 activityRows: [row],
                 pendingApprovalRequests: [],
                 thinkingIndicator: nil
@@ -2604,7 +2799,8 @@ struct StructuredSessionPresentationTests {
             return FocusedStructuredSessionPresentation(
                 session: session,
                 feed: feed,
-                autoScrollTrigger: StructuredSessionAutoScrollTrigger(lastActivityRowID: rowID, pendingApprovalRequestIDs: [], pendingDialogIDs: [])
+                autoScrollTrigger: StructuredSessionAutoScrollTrigger(
+                    lastActivityRowID: rowID, pendingApprovalRequestIDs: [], pendingDialogIDs: [])
             )
         }
         let short = structuredSessionFeedFollowScrollToken(for: presentation(text: "a"))

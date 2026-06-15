@@ -5,8 +5,9 @@ import NexusIPC
 import NexusSessionPresentation
 import Observation
 import SwiftUI
-@testable import NexusService
 import Testing
+
+@testable import NexusService
 @testable import nexus
 
 struct nexusTests {
@@ -124,7 +125,7 @@ struct nexusTests {
             TerminalCell(text: "a", style: accent),
             TerminalCell(text: "b", style: accent),
             TerminalCell(text: "c"),
-            TerminalCell(text: "d")
+            TerminalCell(text: "d"),
         ])
         let screen = SessionScreen(
             session: Session(
@@ -141,17 +142,18 @@ struct nexusTests {
             cursorVisible: false
         )
 
-        #expect(renderedRemoteTerminalDisplaySegments(for: line, row: 0, screen: screen) == [
-            RemoteTerminalDisplaySegment(text: "ab", style: accent, columnCount: 2),
-            RemoteTerminalDisplaySegment(text: "cd", style: TerminalStyle(), columnCount: 2)
-        ])
+        #expect(
+            renderedRemoteTerminalDisplaySegments(for: line, row: 0, screen: screen) == [
+                RemoteTerminalDisplaySegment(text: "ab", style: accent, columnCount: 2),
+                RemoteTerminalDisplaySegment(text: "cd", style: TerminalStyle(), columnCount: 2),
+            ])
     }
 
     @MainActor
     @Test func remoteTerminalDisplaySegmentsSplitCursorIntoItsOwnSegmentWhilePaddingToViewportWidth() {
         let line = TerminalLine(cells: [
             TerminalCell(text: "h"),
-            TerminalCell(text: "i")
+            TerminalCell(text: "i"),
         ])
         let screen = SessionScreen(
             session: Session(
@@ -170,11 +172,12 @@ struct nexusTests {
             cursorVisible: true
         )
 
-        #expect(renderedRemoteTerminalDisplaySegments(for: line, row: 0, screen: screen) == [
-            RemoteTerminalDisplaySegment(text: "hi", style: TerminalStyle(), columnCount: 2),
-            RemoteTerminalDisplaySegment(text: " ", style: TerminalStyle(), columnCount: 1, isCursor: true),
-            RemoteTerminalDisplaySegment(text: " ", style: TerminalStyle(), columnCount: 1)
-        ])
+        #expect(
+            renderedRemoteTerminalDisplaySegments(for: line, row: 0, screen: screen) == [
+                RemoteTerminalDisplaySegment(text: "hi", style: TerminalStyle(), columnCount: 2),
+                RemoteTerminalDisplaySegment(text: " ", style: TerminalStyle(), columnCount: 1, isCursor: true),
+                RemoteTerminalDisplaySegment(text: " ", style: TerminalStyle(), columnCount: 1),
+            ])
     }
 
     @MainActor
@@ -292,7 +295,7 @@ struct nexusTests {
             transcript: "",
             activityItems: [
                 SessionActivityItem(kind: .message, text: "You: Ship it"),
-                SessionActivityItem(kind: .message, text: "Still working")
+                SessionActivityItem(kind: .message, text: "Still working"),
             ],
             approvalRequests: [pendingRequest, approvedRequest]
         )
@@ -307,18 +310,23 @@ struct nexusTests {
         #expect(presentation.feed.pendingApprovalRequests == [pendingRequest])
         #expect(presentation.composer.placeholder == "Send a prompt to Codex")
         #expect(presentation.slashCommandMenu.isVisible)
-        #expect(structuredSessionConversationPresentation(for: presentation.feed.activityRows[0], screen: screen) == StructuredSessionConversationPresentation(
-            role: .user,
-            text: "Ship it"
-        ))
-        #expect(structuredSessionConversationPresentation(for: presentation.feed.activityRows[1], screen: screen) == StructuredSessionConversationPresentation(
-            role: .assistant(label: "Codex"),
-            text: "Still working"
-        ))
+        #expect(
+            structuredSessionConversationPresentation(for: presentation.feed.activityRows[0], screen: screen)
+                == StructuredSessionConversationPresentation(
+                    role: .user,
+                    text: "Ship it"
+                ))
+        #expect(
+            structuredSessionConversationPresentation(for: presentation.feed.activityRows[1], screen: screen)
+                == StructuredSessionConversationPresentation(
+                    role: .assistant(label: "Codex"),
+                    text: "Still working"
+                ))
     }
 
     @MainActor
-    @Test func remoteStructuredSessionPresentationKeepsIPhoneStructuredConversationPolicyBehindTheSharedRootPresentation() {
+    @Test
+    func remoteStructuredSessionPresentationKeepsIPhoneStructuredConversationPolicyBehindTheSharedRootPresentation() {
         let pendingRequest = SessionApprovalRequest(title: "Deploy", text: "Deploy to production?", state: .pending)
         let approvedRequest = SessionApprovalRequest(title: "Cleanup", text: "Delete temp files?", state: .approved)
         let screen = SessionScreen(
@@ -333,7 +341,7 @@ struct nexusTests {
             transcript: "",
             activityItems: [
                 SessionActivityItem(kind: .message, text: "You: Ship it"),
-                SessionActivityItem(kind: .message, text: "Still working")
+                SessionActivityItem(kind: .message, text: "Still working"),
             ],
             approvalRequests: [pendingRequest, approvedRequest]
         )
@@ -346,23 +354,31 @@ struct nexusTests {
         )
 
         #expect(presentation.feed.pendingApprovalRequests == [pendingRequest])
-        #expect(presentation.composer == StructuredSessionComposerPresentation(
-            placeholder: "Send a prompt to Codex",
-            isEnabled: false,
-            disabledReason: "Take Controller to send a prompt from this iPhone."
-        ))
-        #expect(presentation.approvalRequest == StructuredSessionApprovalRequestPresentation(
-            actionsAreEnabled: false,
-            disabledReason: "Take Controller to respond to Approval Requests from this iPhone."
-        ))
-        #expect(structuredSessionConversationPresentation(for: presentation.feed.activityRows[0], screen: screen) == StructuredSessionConversationPresentation(
-            role: .user,
-            text: "Ship it"
-        ))
-        #expect(structuredSessionConversationPresentation(for: presentation.feed.activityRows[1], screen: screen) == StructuredSessionConversationPresentation(
-            role: .assistant(label: "Codex"),
-            text: "Still working"
-        ))
+        #expect(
+            presentation.composer
+                == StructuredSessionComposerPresentation(
+                    placeholder: "Send a prompt to Codex",
+                    isEnabled: false,
+                    disabledReason: "Take Controller to send a prompt from this iPhone."
+                ))
+        #expect(
+            presentation.approvalRequest
+                == StructuredSessionApprovalRequestPresentation(
+                    actionsAreEnabled: false,
+                    disabledReason: "Take Controller to respond to Approval Requests from this iPhone."
+                ))
+        #expect(
+            structuredSessionConversationPresentation(for: presentation.feed.activityRows[0], screen: screen)
+                == StructuredSessionConversationPresentation(
+                    role: .user,
+                    text: "Ship it"
+                ))
+        #expect(
+            structuredSessionConversationPresentation(for: presentation.feed.activityRows[1], screen: screen)
+                == StructuredSessionConversationPresentation(
+                    role: .assistant(label: "Codex"),
+                    text: "Still working"
+                ))
     }
 
     @MainActor
@@ -404,16 +420,18 @@ struct nexusTests {
             activityItems: [SessionActivityItem(kind: .status, text: "Codex shared Session stream connected")]
         )
 
-        #expect(remoteSessionSurfacePresentation(for: screen, isReady: true) == RemoteSessionSurfacePresentation(
-            surfaceSupport: .supported,
-            showsTerminal: false,
-            showsStructuredActivity: true,
-            showsAttachment: true,
-            showsInput: false,
-            relaunchIsEnabled: true,
-            relaunchDisabledReason: nil,
-            unsupportedCopy: nil
-        ))
+        #expect(
+            remoteSessionSurfacePresentation(for: screen, isReady: true)
+                == RemoteSessionSurfacePresentation(
+                    surfaceSupport: .supported,
+                    showsTerminal: false,
+                    showsStructuredActivity: true,
+                    showsAttachment: true,
+                    showsInput: false,
+                    relaunchIsEnabled: true,
+                    relaunchDisabledReason: nil,
+                    unsupportedCopy: nil
+                ))
     }
 
     @MainActor
@@ -431,16 +449,18 @@ struct nexusTests {
             activityItems: [SessionActivityItem(kind: .status, text: "Pi shared Session stream connected")]
         )
 
-        #expect(remoteSessionSurfacePresentation(for: screen, isReady: true) == RemoteSessionSurfacePresentation(
-            surfaceSupport: .supported,
-            showsTerminal: false,
-            showsStructuredActivity: true,
-            showsAttachment: true,
-            showsInput: false,
-            relaunchIsEnabled: true,
-            relaunchDisabledReason: nil,
-            unsupportedCopy: nil
-        ))
+        #expect(
+            remoteSessionSurfacePresentation(for: screen, isReady: true)
+                == RemoteSessionSurfacePresentation(
+                    surfaceSupport: .supported,
+                    showsTerminal: false,
+                    showsStructuredActivity: true,
+                    showsAttachment: true,
+                    showsInput: false,
+                    relaunchIsEnabled: true,
+                    relaunchDisabledReason: nil,
+                    unsupportedCopy: nil
+                ))
     }
 
     @MainActor
@@ -457,16 +477,18 @@ struct nexusTests {
             transcript: "Codex remote ready"
         )
 
-        #expect(remoteSessionSurfacePresentation(for: screen, isReady: true) == RemoteSessionSurfacePresentation(
-            surfaceSupport: .supported,
-            showsTerminal: true,
-            showsStructuredActivity: false,
-            showsAttachment: true,
-            showsInput: true,
-            relaunchIsEnabled: true,
-            relaunchDisabledReason: nil,
-            unsupportedCopy: nil
-        ))
+        #expect(
+            remoteSessionSurfacePresentation(for: screen, isReady: true)
+                == RemoteSessionSurfacePresentation(
+                    surfaceSupport: .supported,
+                    showsTerminal: true,
+                    showsStructuredActivity: false,
+                    showsAttachment: true,
+                    showsInput: true,
+                    relaunchIsEnabled: true,
+                    relaunchDisabledReason: nil,
+                    unsupportedCopy: nil
+                ))
     }
 
     @MainActor
@@ -481,10 +503,12 @@ struct nexusTests {
             prelaunchPrimarySurface: .structuredActivityFeed
         )
 
-        #expect(launchState == RemoteProviderActionState(
-            isEnabled: true,
-            disabledReason: nil
-        ))
+        #expect(
+            launchState
+                == RemoteProviderActionState(
+                    isEnabled: true,
+                    disabledReason: nil
+                ))
     }
 
     @MainActor
@@ -499,10 +523,12 @@ struct nexusTests {
             prelaunchPrimarySurface: .structuredActivityFeed
         )
 
-        #expect(createState == RemoteProviderActionState(
-            isEnabled: true,
-            disabledReason: nil
-        ))
+        #expect(
+            createState
+                == RemoteProviderActionState(
+                    isEnabled: true,
+                    disabledReason: nil
+                ))
     }
 
     @MainActor
@@ -517,10 +543,12 @@ struct nexusTests {
             prelaunchPrimarySurface: .structuredActivityFeed
         )
 
-        #expect(launchState == RemoteProviderActionState(
-            isEnabled: true,
-            disabledReason: nil
-        ))
+        #expect(
+            launchState
+                == RemoteProviderActionState(
+                    isEnabled: true,
+                    disabledReason: nil
+                ))
     }
 
     @MainActor
@@ -535,19 +563,23 @@ struct nexusTests {
             ),
             primarySurface: .structuredActivityFeed,
             transcript: "",
-            activityItems: [SessionActivityItem(kind: .status, text: "IBM Bob Session ready. Send a prompt to start IBM Bob.")]
+            activityItems: [
+                SessionActivityItem(kind: .status, text: "IBM Bob Session ready. Send a prompt to start IBM Bob.")
+            ]
         )
 
-        #expect(remoteSessionSurfacePresentation(for: screen, isReady: true) == RemoteSessionSurfacePresentation(
-            surfaceSupport: .supported,
-            showsTerminal: false,
-            showsStructuredActivity: true,
-            showsAttachment: true,
-            showsInput: false,
-            relaunchIsEnabled: true,
-            relaunchDisabledReason: nil,
-            unsupportedCopy: nil
-        ))
+        #expect(
+            remoteSessionSurfacePresentation(for: screen, isReady: true)
+                == RemoteSessionSurfacePresentation(
+                    surfaceSupport: .supported,
+                    showsTerminal: false,
+                    showsStructuredActivity: true,
+                    showsAttachment: true,
+                    showsInput: false,
+                    relaunchIsEnabled: true,
+                    relaunchDisabledReason: nil,
+                    unsupportedCopy: nil
+                ))
     }
 
     @MainActor
@@ -562,10 +594,12 @@ struct nexusTests {
             prelaunchPrimarySurface: .structuredActivityFeed
         )
 
-        #expect(launchState == RemoteProviderActionState(
-            isEnabled: true,
-            disabledReason: nil
-        ))
+        #expect(
+            launchState
+                == RemoteProviderActionState(
+                    isEnabled: true,
+                    disabledReason: nil
+                ))
     }
 
     @MainActor
@@ -580,10 +614,12 @@ struct nexusTests {
             prelaunchPrimarySurface: .structuredActivityFeed
         )
 
-        #expect(createState == RemoteProviderActionState(
-            isEnabled: true,
-            disabledReason: nil
-        ))
+        #expect(
+            createState
+                == RemoteProviderActionState(
+                    isEnabled: true,
+                    disabledReason: nil
+                ))
     }
 
     @MainActor
@@ -599,10 +635,12 @@ struct nexusTests {
             prelaunchPrimarySurface: .structuredActivityFeed
         )
 
-        #expect(launchState == RemoteProviderActionState(
-            isEnabled: false,
-            disabledReason: "Codex requires signing in on the paired Mac before launch."
-        ))
+        #expect(
+            launchState
+                == RemoteProviderActionState(
+                    isEnabled: false,
+                    disabledReason: "Codex requires signing in on the paired Mac before launch."
+                ))
     }
 
     @MainActor
@@ -620,16 +658,18 @@ struct nexusTests {
             transcript: ""
         )
 
-        #expect(remoteSessionSurfacePresentation(for: screen, isReady: false) == RemoteSessionSurfacePresentation(
-            surfaceSupport: .supported,
-            showsTerminal: false,
-            showsStructuredActivity: true,
-            showsAttachment: false,
-            showsInput: false,
-            relaunchIsEnabled: true,
-            relaunchDisabledReason: nil,
-            unsupportedCopy: nil
-        ))
+        #expect(
+            remoteSessionSurfacePresentation(for: screen, isReady: false)
+                == RemoteSessionSurfacePresentation(
+                    surfaceSupport: .supported,
+                    showsTerminal: false,
+                    showsStructuredActivity: true,
+                    showsAttachment: false,
+                    showsInput: false,
+                    relaunchIsEnabled: true,
+                    relaunchDisabledReason: nil,
+                    unsupportedCopy: nil
+                ))
     }
 
     @Test func workspaceProviderCardNamedSessionSummaryUsesNamedSessionCopy() {
@@ -711,7 +751,8 @@ struct nexusTests {
 
         _ = try await firstClient.setRemoteAccessEnabled(true)
         let pairing = try await firstClient.startPairing()
-        let pairedDevice = try await firstClient.completePairing(pairingCode: pairing.code, deviceName: "Chris’s iPhone")
+        let pairedDevice = try await firstClient.completePairing(
+            pairingCode: pairing.code, deviceName: "Chris’s iPhone")
         let firstDevices = try await firstClient.listPairedDevices()
 
         #expect(firstDevices == [pairedDevice])
@@ -855,7 +896,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    "cd '/srv/api' && pwd"
+                    "cd '/srv/api' && pwd",
                 ]
             ): .success(stdout: "/srv/api\n")
         ])
@@ -866,7 +907,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    remoteClaudeProbeScript("/srv/api")
+                    remoteClaudeProbeScript("/srv/api"),
                 ]
             ): .success(stdout: "/usr/local/bin/claude\n9.9.9 (Claude Code)\n"),
             StubCommandRunner.Invocation(
@@ -875,9 +916,9 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    remoteCodexProbeScript("/srv/api")
+                    remoteCodexProbeScript("/srv/api"),
                 ]
-            ): .success(stdout: "/usr/local/bin/codex\n1.2.3\n")
+            ): .success(stdout: "/usr/local/bin/codex\n1.2.3\n"),
         ])
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
@@ -919,7 +960,9 @@ struct nexusTests {
         #expect(remoteTarget.hostValidation?.state == .available)
         #expect(remoteTarget.workspaceAvailability.state == .available)
         #expect(remoteTarget.workspaceAvailability.summary == "Workspace is available")
-        let remotePathDiagnostic = remoteTarget.workspaceAvailability.diagnostics.first(where: { $0.code == "remotePath" })
+        let remotePathDiagnostic = remoteTarget.workspaceAvailability.diagnostics.first(where: {
+            $0.code == "remotePath"
+        })
         #expect(remotePathDiagnostic?.message == "Validated remote path /srv/api on Build Server.")
         #expect(claudeCard.health.state == .available)
         #expect(claudeCard.health.summary == "Claude 9.9.9 (Claude Code) is available")
@@ -947,13 +990,17 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: [
                     "claude": "/tmp/fake-claude",
-                    "codex": "/tmp/fake-codex"
+                    "codex": "/tmp/fake-codex",
                 ]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(stdout: "Usage: codex\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(
+                        stdout: "1.2.3\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
+                        stdout: "Usage: codex\n"),
                 ]),
                 codexReadinessProbe: NoOpCodexReadinessProbe()
             )
@@ -1003,8 +1050,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: resolver,
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
@@ -1046,7 +1095,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    "cd '/srv/api' && pwd"
+                    "cd '/srv/api' && pwd",
                 ]
             ): .success(stdout: "/srv/api\n")
         ])
@@ -1057,7 +1106,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    remoteClaudeProbeScript("/srv/api")
+                    remoteClaudeProbeScript("/srv/api"),
                 ]
             ): .success(stdout: "/usr/local/bin/claude\n9.9.9 (Claude Code)\n")
         ])
@@ -1114,7 +1163,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    "cd '/srv/api' && pwd"
+                    "cd '/srv/api' && pwd",
                 ]
             ): .success(stdout: "/srv/api\n")
         ])
@@ -1125,7 +1174,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    remoteClaudeProbeScript("/srv/api")
+                    remoteClaudeProbeScript("/srv/api"),
                 ]
             ): .success(stdout: "", stderr: "NEXUS_REMOTE_CLAUDE_NOT_FOUND\n", exitStatus: 1)
         ])
@@ -1178,7 +1227,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    "cd '/srv/api' && pwd"
+                    "cd '/srv/api' && pwd",
                 ]
             ): .success(stdout: "/srv/api\n")
         ])
@@ -1189,7 +1238,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    remoteClaudeProbeScript("/srv/api")
+                    remoteClaudeProbeScript("/srv/api"),
                 ]
             ): .success(stdout: "", stderr: "NEXUS_REMOTE_CLAUDE_NOT_FOUND\n", exitStatus: 1)
         ])
@@ -1231,7 +1280,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    remoteClaudeProbeScript("/srv/api")
+                    remoteClaudeProbeScript("/srv/api"),
                 ]
             ): .success(stdout: "/usr/local/bin/claude\n9.9.9 (Claude Code)\n")
         ])
@@ -1258,7 +1307,8 @@ struct nexusTests {
         )
         let secondClient = try NexusIPCClient.connect(to: secondService.listenerEndpoint)
 
-        let session = try await secondClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let session = try await secondClient.launchOrResumeDefaultSession(
+            workspaceID: workspace.id, providerID: .claude)
         let screen = try await secondClient.getSessionScreen(sessionID: session.id)
         let refreshedDetail = try await secondClient.getProviderDetail(workspaceID: workspace.id, providerID: .claude)
 
@@ -1278,8 +1328,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             )
         )
@@ -1301,8 +1353,12 @@ struct nexusTests {
         #expect(remoteTarget.hostValidation == nil)
         #expect(remoteTarget.workspaceAvailability.state == .blocked)
         #expect(remoteTarget.workspaceAvailability.summary == "Workspace Availability is blocked by Host Validation")
-        let availabilityDiagnostic = remoteTarget.workspaceAvailability.diagnostics.first(where: { $0.code == "hostValidationBlocked" })
-        #expect(availabilityDiagnostic?.message == "Workspace Availability is blocked until Host Validation runs for Build Server.")
+        let availabilityDiagnostic = remoteTarget.workspaceAvailability.diagnostics.first(where: {
+            $0.code == "hostValidationBlocked"
+        })
+        #expect(
+            availabilityDiagnostic?.message
+                == "Workspace Availability is blocked until Host Validation runs for Build Server.")
         #expect(claudeCard.health.state == .blocked)
         #expect(claudeCard.health.summary == "Provider Health is blocked by Host Validation")
         let healthDiagnostic = claudeCard.health.diagnostics.first(where: { $0.code == "hostValidationBlocked" })
@@ -1317,7 +1373,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    "cd '/srv/missing' && pwd"
+                    "cd '/srv/missing' && pwd",
                 ]
             ): .success(stdout: "", stderr: "bash: cd: /srv/missing: No such file or directory\n", exitStatus: 1)
         ])
@@ -1328,8 +1384,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
@@ -1365,7 +1423,9 @@ struct nexusTests {
         #expect(claudeCard.health.state == .blocked)
         #expect(claudeCard.health.summary == "Provider Health is blocked by Workspace Availability")
         let healthDiagnostic = claudeCard.health.diagnostics.first(where: { $0.code == "workspaceAvailabilityBlocked" })
-        #expect(healthDiagnostic?.message == "Provider Health for Claude is blocked by Workspace Availability: Workspace requires repair.")
+        #expect(
+            healthDiagnostic?.message
+                == "Provider Health for Claude is blocked by Workspace Availability: Workspace requires repair.")
     }
 
     @Test func remoteWorkspaceOverviewClassifiesTransientWorkspaceAvailabilityFailuresAsUnavailable() async throws {
@@ -1376,9 +1436,10 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    "cd '/srv/api' && pwd"
+                    "cd '/srv/api' && pwd",
                 ]
-            ): .success(stdout: "", stderr: "ssh: connect to host build-box port 22: Operation timed out\n", exitStatus: 255)
+            ): .success(
+                stdout: "", stderr: "ssh: connect to host build-box port 22: Operation timed out\n", exitStatus: 255)
         ])
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
@@ -1387,8 +1448,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
@@ -1426,14 +1489,19 @@ struct nexusTests {
         let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests()
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
         _ = try await client.createWorkspaceGroup(name: "Solo Group")
-        let workspace = try await client.createLocalWorkspace(name: nil, folderPath: "/tmp/provider-overview-workspace", primaryGroupID: nil)
+        let workspace = try await client.createLocalWorkspace(
+            name: nil, folderPath: "/tmp/provider-overview-workspace", primaryGroupID: nil)
 
         let overview = try await client.getWorkspaceOverview(workspaceID: workspace.id)
 
         #expect(overview.workspace == workspace)
         #expect(overview.providerCards.map(\.provider.id) == [.codex, .claude, .ibmBob, .pi])
-        #expect(overview.providerCards.map(\.defaultSession.state) == [.notCreated, .notCreated, .notCreated, .notCreated])
-        #expect(overview.providerCards.filter { [.ibmBob, .pi].contains($0.provider.id) }.map(\.health.state) == [.notChecked, .notChecked])
+        #expect(
+            overview.providerCards.map(\.defaultSession.state) == [.notCreated, .notCreated, .notCreated, .notCreated])
+        #expect(
+            overview.providerCards.filter { [.ibmBob, .pi].contains($0.provider.id) }.map(\.health.state) == [
+                .notChecked, .notChecked,
+            ])
     }
 
     @Test func workspaceOverviewShowsLaunchableClaudeHealthFromServiceOwnedAdapter() async throws {
@@ -1448,8 +1516,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: StubSessionRuntimeManager()
@@ -1485,8 +1555,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(stdout: "Usage: codex\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(
+                        stdout: "1.2.3\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
+                        stdout: "Usage: codex\n"),
                 ]),
                 codexReadinessProbe: NoOpCodexReadinessProbe()
             ),
@@ -1541,22 +1613,27 @@ struct nexusTests {
         #expect(claudeCard.health.resolvedExecutable == nil)
         #expect(claudeCard.health.version == nil)
         #expect(claudeCard.health.launchability == .notLaunchable)
-        #expect(claudeCard.health.diagnostics.contains(where: {
-            $0 == ProviderHealthDiagnostic(
-                severity: .error,
-                code: "executableNotFound",
-                message: "Claude executable was not found in the service search paths."
-            )
-        }))
-        #expect(claudeCard.health.diagnostics.contains(where: {
-            $0.code == "searchedDirectories" && $0.message.contains("/tmp/search-a")
-        }))
-        #expect(claudeCard.health.diagnostics.contains(where: {
-            $0.code == "homeDirectories" && $0.message.contains("/tmp/home")
-        }))
-        #expect(claudeCard.health.diagnostics.contains(where: {
-            $0.code == "pathEnvironment" && $0.message.contains("/tmp/search-a:/tmp/search-b")
-        }))
+        #expect(
+            claudeCard.health.diagnostics.contains(where: {
+                $0
+                    == ProviderHealthDiagnostic(
+                        severity: .error,
+                        code: "executableNotFound",
+                        message: "Claude executable was not found in the service search paths."
+                    )
+            }))
+        #expect(
+            claudeCard.health.diagnostics.contains(where: {
+                $0.code == "searchedDirectories" && $0.message.contains("/tmp/search-a")
+            }))
+        #expect(
+            claudeCard.health.diagnostics.contains(where: {
+                $0.code == "homeDirectories" && $0.message.contains("/tmp/home")
+            }))
+        #expect(
+            claudeCard.health.diagnostics.contains(where: {
+                $0.code == "pathEnvironment" && $0.message.contains("/tmp/search-a:/tmp/search-b")
+            }))
     }
 
     @Test func launchOrResumeDefaultSessionCreatesAndReusesCodexSessionOverIPC() async throws {
@@ -1571,8 +1648,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(stdout: "Usage: codex\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(
+                        stdout: "1.2.3\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
+                        stdout: "Usage: codex\n"),
                 ]),
                 codexReadinessProbe: NoOpCodexReadinessProbe()
             ),
@@ -1613,8 +1692,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: StubSessionRuntimeManager()
@@ -1628,7 +1709,8 @@ struct nexusTests {
         )
 
         let firstSession = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
-        let secondSession = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let secondSession = try await client.launchOrResumeDefaultSession(
+            workspaceID: workspace.id, providerID: .claude)
         let overview = try await client.getWorkspaceOverview(workspaceID: workspace.id)
         let claudeCard = try #require(overview.providerCards.first(where: { $0.provider.id == .claude }))
 
@@ -1655,8 +1737,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": resolvedExecutable]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: resolvedExecutable, arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: resolvedExecutable, arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: resolvedExecutable, arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: resolvedExecutable, arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(launchTranscriptForExecutable: { $0 })
@@ -1692,8 +1776,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/provider-module-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/provider-module-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/provider-module-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/provider-module-claude", arguments: ["--version"]):
+                        .success(stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/provider-module-claude", arguments: ["--help"]):
+                        .success(stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(
@@ -1728,7 +1814,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    "cd '/srv/api' && pwd"
+                    "cd '/srv/api' && pwd",
                 ]
             ): .success(stdout: "/srv/api\n")
         ])
@@ -1736,7 +1822,8 @@ struct nexusTests {
             launchTranscriptForConfiguration: { configuration, session, _ in
                 let runtimeIdentifier = configuration.remoteRuntimeIdentifier ?? "missing"
                 let sessionName = session.name ?? "default"
-                return "\(configuration.executable) @ \(configuration.workingDirectory) session:\(runtimeIdentifier) named:\(sessionName)"
+                return
+                    "\(configuration.executable) @ \(configuration.workingDirectory) session:\(runtimeIdentifier) named:\(sessionName)"
             }
         )
         let providerHealthRunner = StubCommandRunner(results: [
@@ -1746,7 +1833,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    remoteClaudeProbeScript("/srv/api")
+                    remoteClaudeProbeScript("/srv/api"),
                 ]
             ): .success(stdout: "/usr/local/bin/claude\n9.9.9 (Claude Code)\n")
         ])
@@ -1778,13 +1865,17 @@ struct nexusTests {
             primaryGroupID: group.id
         )
 
-        let namedSession = try await client.createNamedSession(workspaceID: workspace.id, providerID: .claude, name: "Review")
+        let namedSession = try await client.createNamedSession(
+            workspaceID: workspace.id, providerID: .claude, name: "Review")
         let screen = try await client.getSessionScreen(sessionID: namedSession.id)
         let detail = try await client.getProviderDetail(workspaceID: workspace.id, providerID: .claude)
 
         #expect(namedSession.state == .ready)
         #expect(namedSession.name == "Review")
-        #expect(screen.transcript == "/usr/local/bin/claude @ /srv/api session:nexus-\(namedSession.id.uuidString.lowercased())-runtime-1 named:Review")
+        #expect(
+            screen.transcript
+                == "/usr/local/bin/claude @ /srv/api session:nexus-\(namedSession.id.uuidString.lowercased())-runtime-1 named:Review"
+        )
         #expect(detail.health.summary == "Claude 9.9.9 (Claude Code) is available")
         #expect(detail.health.resolvedExecutable == "/usr/local/bin/claude")
         #expect(detail.alternateSessions.map(\.id) == [namedSession.id])
@@ -1802,7 +1893,7 @@ struct nexusTests {
                     "-o", "ConnectTimeout=5",
                     "-p", "2222",
                     "build-box",
-                    "cd '/srv/api' && pwd"
+                    "cd '/srv/api' && pwd",
                 ]
             ): .success(stdout: "/srv/api\n")
         ])
@@ -1814,14 +1905,15 @@ struct nexusTests {
                     "-o", "ConnectTimeout=5",
                     "-p", "2222",
                     "build-box",
-                    remoteClaudeProbeScript("/srv/api")
+                    remoteClaudeProbeScript("/srv/api"),
                 ]
             ): .success(stdout: "/usr/local/bin/claude\n9.9.9 (Claude Code)\n")
         ])
         let runtimeManager = StubSessionRuntimeManager(
             launchTranscriptForConfiguration: { configuration, session, _ in
                 let hostTarget = configuration.remoteHost.map { "\($0.sshTarget):\($0.port ?? 22)" } ?? "local"
-                return "ssh \(hostTarget) \(configuration.workingDirectory) \(configuration.executable) session:\(configuration.remoteRuntimeIdentifier ?? "missing")"
+                return
+                    "ssh \(hostTarget) \(configuration.workingDirectory) \(configuration.executable) session:\(configuration.remoteRuntimeIdentifier ?? "missing")"
             }
         )
         let service = try NexusService.bootstrapForTests(
@@ -1858,7 +1950,10 @@ struct nexusTests {
 
         #expect(session.state == .ready)
         #expect(screen.session.state == .ready)
-        #expect(screen.transcript == "ssh build-box:2222 /srv/api /usr/local/bin/claude session:nexus-\(session.id.uuidString.lowercased())-runtime-1")
+        #expect(
+            screen.transcript
+                == "ssh build-box:2222 /srv/api /usr/local/bin/claude session:nexus-\(session.id.uuidString.lowercased())-runtime-1"
+        )
         #expect(detail.defaultSession?.id == session.id)
         #expect(detail.defaultSession?.state == .ready)
     }
@@ -1875,7 +1970,7 @@ struct nexusTests {
                     "-o", "ConnectTimeout=5",
                     "-p", "2222",
                     "build-box",
-                    "cd '/srv/api' && pwd"
+                    "cd '/srv/api' && pwd",
                 ]
             ): .success(stdout: "/srv/api\n")
         ])
@@ -1887,14 +1982,15 @@ struct nexusTests {
                     "-o", "ConnectTimeout=5",
                     "-p", "2222",
                     "build-box",
-                    remoteCodexProbeScript("/srv/api")
+                    remoteCodexProbeScript("/srv/api"),
                 ]
             ): .success(stdout: "/usr/local/bin/codex\n1.2.3\n")
         ])
         let runtimeManager = StubSessionRuntimeManager(
             launchTranscriptForConfiguration: { configuration, session, _ in
                 let hostTarget = configuration.remoteHost.map { "\($0.sshTarget):\($0.port ?? 22)" } ?? "local"
-                return "ssh \(hostTarget) \(configuration.workingDirectory) \(configuration.executable) session:\(configuration.remoteRuntimeIdentifier ?? "missing")"
+                return
+                    "ssh \(hostTarget) \(configuration.workingDirectory) \(configuration.executable) session:\(configuration.remoteRuntimeIdentifier ?? "missing")"
             }
         )
         let service = try NexusService.bootstrapForTests(
@@ -1933,7 +2029,10 @@ struct nexusTests {
         #expect(firstSession.state == .ready)
         #expect(secondSession == firstSession)
         #expect(screen.session.state == .ready)
-        #expect(screen.transcript == "ssh build-box:2222 /srv/api /usr/local/bin/codex session:nexus-\(firstSession.id.uuidString.lowercased())-runtime-1")
+        #expect(
+            screen.transcript
+                == "ssh build-box:2222 /srv/api /usr/local/bin/codex session:nexus-\(firstSession.id.uuidString.lowercased())-runtime-1"
+        )
         #expect(detail.defaultSession?.id == firstSession.id)
         #expect(detail.defaultSession?.state == .ready)
     }
@@ -1949,7 +2048,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    "cd '/srv/api' && pwd"
+                    "cd '/srv/api' && pwd",
                 ]
             ): .success(stdout: "/srv/api\n")
         ])
@@ -1960,7 +2059,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    remoteCodexProbeScript("/srv/api")
+                    remoteCodexProbeScript("/srv/api"),
                 ]
             ): .success(stdout: "/usr/local/bin/codex\n1.2.3\n")
         ])
@@ -2003,7 +2102,10 @@ struct nexusTests {
 
         #expect(session.state == .ready)
         #expect(session.name == "Review")
-        #expect(screen.transcript == "/usr/local/bin/codex @ /srv/api session:nexus-\(session.id.uuidString.lowercased())-runtime-1 named:Review")
+        #expect(
+            screen.transcript
+                == "/usr/local/bin/codex @ /srv/api session:nexus-\(session.id.uuidString.lowercased())-runtime-1 named:Review"
+        )
         #expect(detail.alternateSessions.map(\.id) == [session.id])
     }
 
@@ -2018,7 +2120,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    "cd '/srv/api' && pwd"
+                    "cd '/srv/api' && pwd",
                 ]
             ): .success(stdout: "/srv/api\n")
         ])
@@ -2029,7 +2131,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    remoteCodexProbeScript("/srv/api")
+                    remoteCodexProbeScript("/srv/api"),
                 ]
             ): .success(stdout: "", stderr: "NEXUS_REMOTE_CODEX_NOT_FOUND\n", exitStatus: 1)
         ])
@@ -2060,14 +2162,16 @@ struct nexusTests {
             primaryGroupID: group.id
         )
 
-        let failedSession = try await firstClient.createNamedSession(workspaceID: workspace.id, providerID: .codex, name: "Review")
+        let failedSession = try await firstClient.createNamedSession(
+            workspaceID: workspace.id, providerID: .codex, name: "Review")
         let failedDetail = try await firstClient.getProviderDetail(workspaceID: workspace.id, providerID: .codex)
         let failedScreen = try await firstClient.getSessionScreen(sessionID: failedSession.id)
 
         #expect(failedSession.state == .failed)
         #expect(failedDetail.failedSessions.map(\.id) == [failedSession.id])
         #expect(failedScreen.session.state == .failed)
-        #expect(failedScreen.transcript == "Codex executable was not found in the remote shell environments Nexus checked.")
+        #expect(
+            failedScreen.transcript == "Codex executable was not found in the remote shell environments Nexus checked.")
 
         let recoveredHealthRunner = StubCommandRunner(results: [
             StubCommandRunner.Invocation(
@@ -2076,7 +2180,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    remoteCodexProbeScript("/srv/api")
+                    remoteCodexProbeScript("/srv/api"),
                 ]
             ): .success(stdout: "/usr/local/bin/codex\n1.2.3\n")
         ])
@@ -2123,7 +2227,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    "cd '/srv/api' && pwd"
+                    "cd '/srv/api' && pwd",
                 ]
             ): .success(stdout: "/srv/api\n")
         ])
@@ -2134,7 +2238,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    legacyRemoteClaudeProbeScript("/srv/api")
+                    legacyRemoteClaudeProbeScript("/srv/api"),
                 ]
             ): .success(stdout: "", stderr: "NEXUS_REMOTE_CLAUDE_NOT_FOUND\n", exitStatus: 1),
             StubCommandRunner.Invocation(
@@ -2143,9 +2247,9 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    remoteClaudeProbeScript("/srv/api")
+                    remoteClaudeProbeScript("/srv/api"),
                 ]
-            ): .success(stdout: "/home/chundla/.local/bin/claude\n9.9.9 (Claude Code)\n")
+            ): .success(stdout: "/home/chundla/.local/bin/claude\n9.9.9 (Claude Code)\n"),
         ])
         let runtimeManager = StubSessionRuntimeManager(
             launchTranscriptForConfiguration: { configuration, session, _ in
@@ -2185,7 +2289,10 @@ struct nexusTests {
         let detail = try await client.getProviderDetail(workspaceID: workspace.id, providerID: .claude)
 
         #expect(session.state == .ready)
-        #expect(screen.transcript == "/home/chundla/.local/bin/claude @ /srv/api session:nexus-\(session.id.uuidString.lowercased())-runtime-1")
+        #expect(
+            screen.transcript
+                == "/home/chundla/.local/bin/claude @ /srv/api session:nexus-\(session.id.uuidString.lowercased())-runtime-1"
+        )
         #expect(detail.health.state == .available)
         #expect(detail.health.resolvedExecutable == "/home/chundla/.local/bin/claude")
     }
@@ -2201,35 +2308,45 @@ struct nexusTests {
         let builder = RemoteSessionCommandBuilder()
 
         let launchArguments = builder.launchArguments(configuration: configuration)
-        #expect(launchArguments.prefix(8) == [
-            "-tt",
-            "-o", "BatchMode=yes",
-            "-o", "ConnectTimeout=5",
-            "-p", "2222",
-            "build-box"
-        ])
+        #expect(
+            launchArguments.prefix(8) == [
+                "-tt",
+                "-o", "BatchMode=yes",
+                "-o", "ConnectTimeout=5",
+                "-p", "2222",
+                "build-box",
+            ])
         let remoteLaunchCommand = try #require(launchArguments.last)
         #expect(remoteLaunchCommand.contains("cd '/srv/api'"))
         #expect(remoteLaunchCommand.contains("NEXUS_REMOTE_SHELL=\"$(for shell in \"${SHELL:-}\""))
         #expect(remoteLaunchCommand.contains("case \"${NEXUS_REMOTE_SHELL##*/}\" in csh|tcsh)"))
-        #expect(remoteLaunchCommand.contains("fish) exec tmux new-session -s 'nexus-01234567-89ab-cdef-0123-456789abcdef-runtime-2' \"$NEXUS_REMOTE_SHELL\" -i -c"))
-        #expect(remoteLaunchCommand.contains("*) exec tmux new-session -s 'nexus-01234567-89ab-cdef-0123-456789abcdef-runtime-2' \"$NEXUS_REMOTE_SHELL\" -lic"))
+        #expect(
+            remoteLaunchCommand.contains(
+                "fish) exec tmux new-session -s 'nexus-01234567-89ab-cdef-0123-456789abcdef-runtime-2' \"$NEXUS_REMOTE_SHELL\" -i -c"
+            ))
+        #expect(
+            remoteLaunchCommand.contains(
+                "*) exec tmux new-session -s 'nexus-01234567-89ab-cdef-0123-456789abcdef-runtime-2' \"$NEXUS_REMOTE_SHELL\" -lic"
+            ))
         #expect(remoteLaunchCommand.contains("/usr/local/bin/claude"))
-        #expect(builder.recoverArguments(configuration: configuration) == [
-            "-tt",
-            "-o", "BatchMode=yes",
-            "-o", "ConnectTimeout=5",
-            "-p", "2222",
-            "build-box",
-            "tmux has-session -t 'nexus-01234567-89ab-cdef-0123-456789abcdef-runtime-2' 2>/dev/null || { echo 'NEXUS_REMOTE_RUNTIME_NOT_FOUND' >&2; exit 1; }; exec tmux attach-session -t 'nexus-01234567-89ab-cdef-0123-456789abcdef-runtime-2'"
-        ])
-        #expect(builder.stopArguments(runtimeIdentifier: "nexus-01234567-89ab-cdef-0123-456789abcdef-runtime-2", host: host) == [
-            "-o", "BatchMode=yes",
-            "-o", "ConnectTimeout=5",
-            "-p", "2222",
-            "build-box",
-            "tmux kill-session -t 'nexus-01234567-89ab-cdef-0123-456789abcdef-runtime-2'"
-        ])
+        #expect(
+            builder.recoverArguments(configuration: configuration) == [
+                "-tt",
+                "-o", "BatchMode=yes",
+                "-o", "ConnectTimeout=5",
+                "-p", "2222",
+                "build-box",
+                "tmux has-session -t 'nexus-01234567-89ab-cdef-0123-456789abcdef-runtime-2' 2>/dev/null || { echo 'NEXUS_REMOTE_RUNTIME_NOT_FOUND' >&2; exit 1; }; exec tmux attach-session -t 'nexus-01234567-89ab-cdef-0123-456789abcdef-runtime-2'",
+            ])
+        #expect(
+            builder.stopArguments(runtimeIdentifier: "nexus-01234567-89ab-cdef-0123-456789abcdef-runtime-2", host: host)
+                == [
+                    "-o", "BatchMode=yes",
+                    "-o", "ConnectTimeout=5",
+                    "-p", "2222",
+                    "build-box",
+                    "tmux kill-session -t 'nexus-01234567-89ab-cdef-0123-456789abcdef-runtime-2'",
+                ])
     }
 
     @Test func remoteDefaultSessionRelaunchesWithFreshRuntimeIdentifierWhileKeepingSessionLane() async throws {
@@ -2243,7 +2360,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    "cd '/srv/api' && pwd"
+                    "cd '/srv/api' && pwd",
                 ]
             ): .success(stdout: "/srv/api\n")
         ])
@@ -2254,7 +2371,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    remoteClaudeProbeScript("/srv/api")
+                    remoteClaudeProbeScript("/srv/api"),
                 ]
             ): .success(stdout: "/usr/local/bin/claude\n9.9.9 (Claude Code)\n")
         ])
@@ -2295,7 +2412,8 @@ struct nexusTests {
         let firstScreen = try await client.getSessionScreen(sessionID: firstSession.id)
         _ = try await client.stopSession(sessionID: firstSession.id)
 
-        let relaunchedSession = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let relaunchedSession = try await client.launchOrResumeDefaultSession(
+            workspaceID: workspace.id, providerID: .claude)
         let relaunchedScreen = try await client.getSessionScreen(sessionID: relaunchedSession.id)
 
         #expect(firstSession.id == relaunchedSession.id)
@@ -2314,7 +2432,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    "cd '/srv/api' && pwd"
+                    "cd '/srv/api' && pwd",
                 ]
             ): .success(stdout: "/srv/api\n")
         ])
@@ -2325,7 +2443,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    remoteClaudeProbeScript("/srv/api")
+                    remoteClaudeProbeScript("/srv/api"),
                 ]
             ): .success(stdout: "/usr/local/bin/claude\n9.9.9 (Claude Code)\n")
         ])
@@ -2361,7 +2479,8 @@ struct nexusTests {
             primaryGroupID: group.id
         )
 
-        let launchedSession = try await firstClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let launchedSession = try await firstClient.launchOrResumeDefaultSession(
+            workspaceID: workspace.id, providerID: .claude)
         let restartedService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
@@ -2385,7 +2504,8 @@ struct nexusTests {
         let restartedClient = try NexusIPCClient.connect(to: restartedService.listenerEndpoint)
 
         let interruptedScreen = try await restartedClient.getSessionScreen(sessionID: launchedSession.id)
-        let recoveredSession = try await restartedClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let recoveredSession = try await restartedClient.launchOrResumeDefaultSession(
+            workspaceID: workspace.id, providerID: .claude)
         let recoveredScreen = try await restartedClient.getSessionScreen(sessionID: launchedSession.id)
 
         #expect(interruptedScreen.session.state == .interrupted)
@@ -2406,7 +2526,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    "cd '/srv/api' && pwd"
+                    "cd '/srv/api' && pwd",
                 ]
             ): .success(stdout: "/srv/api\n")
         ])
@@ -2417,7 +2537,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    remoteClaudeProbeScript("/srv/api")
+                    remoteClaudeProbeScript("/srv/api"),
                 ]
             ): .success(stdout: "/usr/local/bin/claude\n9.9.9 (Claude Code)\n")
         ])
@@ -2453,7 +2573,8 @@ struct nexusTests {
             primaryGroupID: group.id
         )
 
-        let launchedSession = try await firstClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let launchedSession = try await firstClient.launchOrResumeDefaultSession(
+            workspaceID: workspace.id, providerID: .claude)
         let restartedService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
@@ -2476,7 +2597,8 @@ struct nexusTests {
         )
         let restartedClient = try NexusIPCClient.connect(to: restartedService.listenerEndpoint)
 
-        let recoveredSession = try await restartedClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let recoveredSession = try await restartedClient.launchOrResumeDefaultSession(
+            workspaceID: workspace.id, providerID: .claude)
         let recoveredScreen = try await restartedClient.getSessionScreen(sessionID: launchedSession.id)
 
         #expect(recoveredSession.id == launchedSession.id)
@@ -2494,7 +2616,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    "cd '/srv/api' && pwd"
+                    "cd '/srv/api' && pwd",
                 ]
             ): .success(stdout: "/srv/api\n")
         ])
@@ -2505,7 +2627,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    remoteClaudeProbeScript("/srv/api")
+                    remoteClaudeProbeScript("/srv/api"),
                 ]
             ): .success(stdout: "/usr/local/bin/claude\n9.9.9 (Claude Code)\n")
         ])
@@ -2541,7 +2663,8 @@ struct nexusTests {
             primaryGroupID: group.id
         )
 
-        let launchedSession = try await firstClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let launchedSession = try await firstClient.launchOrResumeDefaultSession(
+            workspaceID: workspace.id, providerID: .claude)
         let restartedService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
@@ -2559,7 +2682,9 @@ struct nexusTests {
             sessionRuntimeManager: StubSessionRuntimeManager(
                 launchBehavior: { configuration, _, _ in
                     if configuration.remoteRuntimeLaunchMode == .attachExisting {
-                        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "NEXUS_REMOTE_RUNTIME_NOT_FOUND"])
+                        throw NSError(
+                            domain: "Test", code: 1,
+                            userInfo: [NSLocalizedDescriptionKey: "NEXUS_REMOTE_RUNTIME_NOT_FOUND"])
                     }
                 },
                 launchTranscriptForConfiguration: { configuration, _, _ in
@@ -2569,14 +2694,19 @@ struct nexusTests {
         )
         let restartedClient = try NexusIPCClient.connect(to: restartedService.listenerEndpoint)
 
-        let recoveryAttempt = try await restartedClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let recoveryAttempt = try await restartedClient.launchOrResumeDefaultSession(
+            workspaceID: workspace.id, providerID: .claude)
         let failedScreen = try await restartedClient.getSessionScreen(sessionID: launchedSession.id)
-        let relaunchedSession = try await restartedClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let relaunchedSession = try await restartedClient.launchOrResumeDefaultSession(
+            workspaceID: workspace.id, providerID: .claude)
         let relaunchedScreen = try await restartedClient.getSessionScreen(sessionID: launchedSession.id)
 
         #expect(recoveryAttempt.id == launchedSession.id)
         #expect(recoveryAttempt.state == .failed)
-        #expect(recoveryAttempt.failureMessage == "Known remote runtime 'nexus-\(launchedSession.id.uuidString.lowercased())-runtime-1' is no longer available on Build Server. Relaunch to create a new remote runtime.")
+        #expect(
+            recoveryAttempt.failureMessage
+                == "Known remote runtime 'nexus-\(launchedSession.id.uuidString.lowercased())-runtime-1' is no longer available on Build Server. Relaunch to create a new remote runtime."
+        )
         #expect(failedScreen.session.state == .failed)
         #expect(relaunchedSession.id == launchedSession.id)
         #expect(relaunchedSession.state == .ready)
@@ -2594,7 +2724,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    "cd '/srv/api' && pwd"
+                    "cd '/srv/api' && pwd",
                 ]
             ): .success(stdout: "/srv/api\n")
         ])
@@ -2605,7 +2735,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    remoteClaudeProbeScript("/srv/api")
+                    remoteClaudeProbeScript("/srv/api"),
                 ]
             ): .success(stdout: "/usr/local/bin/claude\n9.9.9 (Claude Code)\n")
         ])
@@ -2641,7 +2771,8 @@ struct nexusTests {
             primaryGroupID: group.id
         )
 
-        let launchedSession = try await firstClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let launchedSession = try await firstClient.launchOrResumeDefaultSession(
+            workspaceID: workspace.id, providerID: .claude)
         let restartedService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
@@ -2659,18 +2790,24 @@ struct nexusTests {
             sessionRuntimeManager: StubSessionRuntimeManager(
                 launchBehavior: { configuration, _, _ in
                     if configuration.remoteRuntimeLaunchMode == .attachExisting {
-                        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "NEXUS_REMOTE_RUNTIME_NOT_FOUND"])
+                        throw NSError(
+                            domain: "Test", code: 1,
+                            userInfo: [NSLocalizedDescriptionKey: "NEXUS_REMOTE_RUNTIME_NOT_FOUND"])
                     }
                 }
             )
         )
         let restartedClient = try NexusIPCClient.connect(to: restartedService.listenerEndpoint)
 
-        let recoveryAttempt = try await restartedClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let recoveryAttempt = try await restartedClient.launchOrResumeDefaultSession(
+            workspaceID: workspace.id, providerID: .claude)
 
         #expect(recoveryAttempt.id == launchedSession.id)
         #expect(recoveryAttempt.state == .failed)
-        #expect(recoveryAttempt.failureMessage == "Known remote runtime 'nexus-\(launchedSession.id.uuidString.lowercased())-runtime-1' is no longer available on Build Server. Relaunch to create a new remote runtime.")
+        #expect(
+            recoveryAttempt.failureMessage
+                == "Known remote runtime 'nexus-\(launchedSession.id.uuidString.lowercased())-runtime-1' is no longer available on Build Server. Relaunch to create a new remote runtime."
+        )
     }
 
     @Test func failedNamedRemoteSessionRemainsInspectableAndCanBeRelaunched() async throws {
@@ -2684,7 +2821,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    "cd '/srv/api' && pwd"
+                    "cd '/srv/api' && pwd",
                 ]
             ): .success(stdout: "/srv/api\n")
         ])
@@ -2695,7 +2832,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    remoteClaudeProbeScript("/srv/api")
+                    remoteClaudeProbeScript("/srv/api"),
                 ]
             ): .success(stdout: "", stderr: "NEXUS_REMOTE_CLAUDE_NOT_FOUND\n", exitStatus: 1)
         ])
@@ -2726,14 +2863,17 @@ struct nexusTests {
             primaryGroupID: group.id
         )
 
-        let failedSession = try await firstClient.createNamedSession(workspaceID: workspace.id, providerID: .claude, name: "Review")
+        let failedSession = try await firstClient.createNamedSession(
+            workspaceID: workspace.id, providerID: .claude, name: "Review")
         let failedDetail = try await firstClient.getProviderDetail(workspaceID: workspace.id, providerID: .claude)
         let failedScreen = try await firstClient.getSessionScreen(sessionID: failedSession.id)
 
         #expect(failedSession.state == .failed)
         #expect(failedDetail.failedSessions.map(\.id) == [failedSession.id])
         #expect(failedScreen.session.state == .failed)
-        #expect(failedScreen.transcript == "Claude executable was not found in the remote shell environments Nexus checked.")
+        #expect(
+            failedScreen.transcript == "Claude executable was not found in the remote shell environments Nexus checked."
+        )
 
         let recoveredHealthRunner = StubCommandRunner(results: [
             StubCommandRunner.Invocation(
@@ -2742,7 +2882,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    remoteClaudeProbeScript("/srv/api")
+                    remoteClaudeProbeScript("/srv/api"),
                 ]
             ): .success(stdout: "/usr/local/bin/claude\n9.9.9 (Claude Code)\n")
         ])
@@ -2790,8 +2930,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
@@ -3023,8 +3165,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
@@ -3092,8 +3236,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
@@ -3106,8 +3252,10 @@ struct nexusTests {
             primaryGroupID: nil
         )
 
-        let defaultSession = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
-        let namedSession = try await client.createNamedSession(workspaceID: workspace.id, providerID: .claude, name: nil)
+        let defaultSession = try await client.launchOrResumeDefaultSession(
+            workspaceID: workspace.id, providerID: .claude)
+        let namedSession = try await client.createNamedSession(
+            workspaceID: workspace.id, providerID: .claude, name: nil)
         let providerDetail = try await client.getProviderDetail(workspaceID: workspace.id, providerID: .claude)
         let overview = try await client.getWorkspaceOverview(workspaceID: workspace.id)
         let claudeCard = try #require(overview.providerCards.first(where: { $0.provider.id == .claude }))
@@ -3134,8 +3282,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(stdout: "Usage: codex\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(
+                        stdout: "1.2.3\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
+                        stdout: "Usage: codex\n"),
                 ]),
                 codexReadinessProbe: NoOpCodexReadinessProbe()
             ),
@@ -3188,8 +3338,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
@@ -3202,7 +3354,8 @@ struct nexusTests {
             primaryGroupID: nil
         )
 
-        let namedSession = try await client.createNamedSession(workspaceID: workspace.id, providerID: .claude, name: nil)
+        let namedSession = try await client.createNamedSession(
+            workspaceID: workspace.id, providerID: .claude, name: nil)
         let stoppedSession = try await client.stopSession(sessionID: namedSession.id)
         let providerDetail = try await client.getProviderDetail(workspaceID: workspace.id, providerID: .claude)
         let screen = try await client.getSessionScreen(sessionID: namedSession.id)
@@ -3228,8 +3381,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
@@ -3242,7 +3397,8 @@ struct nexusTests {
             primaryGroupID: nil
         )
 
-        let namedSession = try await client.createNamedSession(workspaceID: workspace.id, providerID: .claude, name: nil)
+        let namedSession = try await client.createNamedSession(
+            workspaceID: workspace.id, providerID: .claude, name: nil)
         _ = try await client.stopSession(sessionID: namedSession.id)
         let deleted = try await client.deleteSessionRecord(sessionID: namedSession.id)
         let providerDetail = try await client.getProviderDetail(workspaceID: workspace.id, providerID: .claude)
@@ -3266,8 +3422,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
@@ -3280,7 +3438,8 @@ struct nexusTests {
             primaryGroupID: nil
         )
 
-        let namedSession = try await client.createNamedSession(workspaceID: workspace.id, providerID: .claude, name: nil)
+        let namedSession = try await client.createNamedSession(
+            workspaceID: workspace.id, providerID: .claude, name: nil)
 
         await #expect(throws: (any Error).self) {
             _ = try await client.deleteSessionRecord(sessionID: namedSession.id)
@@ -3300,8 +3459,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -3331,7 +3492,8 @@ struct nexusTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let runtimeManager = StubSessionRuntimeManager(initialTranscript: "progress 0%\rprogress 100%\n\u{001B}[32mClaude ready\u{001B}[0m\n")
+        let runtimeManager = StubSessionRuntimeManager(
+            initialTranscript: "progress 0%\rprogress 100%\n\u{001B}[32mClaude ready\u{001B}[0m\n")
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
@@ -3339,8 +3501,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -3376,8 +3540,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -3412,8 +3578,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -3448,8 +3616,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -3481,8 +3651,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -3516,8 +3688,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -3552,8 +3726,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -3588,8 +3764,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -3624,8 +3802,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -3660,8 +3840,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -3696,8 +3878,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -3732,8 +3916,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -3768,8 +3954,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -3804,8 +3992,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -3840,8 +4030,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -3868,7 +4060,10 @@ struct nexusTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let runtimeManager = StubSessionRuntimeManager(initialTranscript: "top\nalpha\nbeta\nbottom\u{001B}[2;3r\u{001B}[?6h\u{001B}[?1049halt\u{001B}[?6l\u{001B}[r\u{001B}[?1049l\u{001B}[1;1HX")
+        let runtimeManager = StubSessionRuntimeManager(
+            initialTranscript:
+                "top\nalpha\nbeta\nbottom\u{001B}[2;3r\u{001B}[?6h\u{001B}[?1049halt\u{001B}[?6l\u{001B}[r\u{001B}[?1049l\u{001B}[1;1HX"
+        )
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
@@ -3876,8 +4071,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -3904,7 +4101,8 @@ struct nexusTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let runtimeManager = StubSessionRuntimeManager(initialTranscript: "main\u{001B}[?1049halt\u{001B}[?1h\u{001B}[?1049l")
+        let runtimeManager = StubSessionRuntimeManager(
+            initialTranscript: "main\u{001B}[?1049halt\u{001B}[?1h\u{001B}[?1049l")
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
@@ -3912,8 +4110,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -3946,8 +4146,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -3982,8 +4184,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -4018,8 +4222,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -4054,8 +4260,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -4090,8 +4298,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -4126,8 +4336,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -4162,8 +4374,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -4198,8 +4412,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -4234,8 +4450,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -4270,8 +4488,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -4299,7 +4519,8 @@ struct nexusTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let runtimeManager = StubSessionRuntimeManager(initialTranscript: "alpha\nbeta\u{001B}[1;1H\u{001B}[sXY\u{001B}[uZ")
+        let runtimeManager = StubSessionRuntimeManager(
+            initialTranscript: "alpha\nbeta\u{001B}[1;1H\u{001B}[sXY\u{001B}[uZ")
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
@@ -4307,8 +4528,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -4335,7 +4558,8 @@ struct nexusTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let runtimeManager = StubSessionRuntimeManager(initialTranscript: "alpha\nbeta\u{001B}[1;1H\u{001B}7\u{001B}[2;1HXY\u{001B}8Z")
+        let runtimeManager = StubSessionRuntimeManager(
+            initialTranscript: "alpha\nbeta\u{001B}[1;1H\u{001B}7\u{001B}[2;1HXY\u{001B}8Z")
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
@@ -4343,8 +4567,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -4379,8 +4605,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -4407,7 +4635,8 @@ struct nexusTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let runtimeManager = StubSessionRuntimeManager(initialTranscript: "pre\u{001B}]8;;https://example.com\u{001B}\\link\u{001B}]8;;\u{001B}\\post")
+        let runtimeManager = StubSessionRuntimeManager(
+            initialTranscript: "pre\u{001B}]8;;https://example.com\u{001B}\\link\u{001B}]8;;\u{001B}\\post")
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
@@ -4415,8 +4644,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -4451,8 +4682,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -4487,8 +4720,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -4523,8 +4758,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -4559,8 +4796,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -4595,8 +4834,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -4631,8 +4872,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -4659,7 +4902,8 @@ struct nexusTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let runtimeManager = StubSessionRuntimeManager(initialTranscript: "top\nalpha\nbeta\nbottom\u{001B}[2;3r\u{001B}[?6h\u{001B}[HXY")
+        let runtimeManager = StubSessionRuntimeManager(
+            initialTranscript: "top\nalpha\nbeta\nbottom\u{001B}[2;3r\u{001B}[?6h\u{001B}[HXY")
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
@@ -4667,8 +4911,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -4695,7 +4941,8 @@ struct nexusTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let runtimeManager = StubSessionRuntimeManager(initialTranscript: "top\nalpha\nbeta\nbottom\u{001B}[2;3r\u{001B}[S")
+        let runtimeManager = StubSessionRuntimeManager(
+            initialTranscript: "top\nalpha\nbeta\nbottom\u{001B}[2;3r\u{001B}[S")
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
@@ -4703,8 +4950,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -4731,7 +4980,8 @@ struct nexusTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let runtimeManager = StubSessionRuntimeManager(initialTranscript: "top\nalpha\nbeta\nbottom\u{001B}[2;3r\u{001B}[T")
+        let runtimeManager = StubSessionRuntimeManager(
+            initialTranscript: "top\nalpha\nbeta\nbottom\u{001B}[2;3r\u{001B}[T")
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
@@ -4739,8 +4989,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -4767,7 +5019,8 @@ struct nexusTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let runtimeManager = StubSessionRuntimeManager(initialTranscript: "top\nalpha\nbeta\nbottom\u{001B}[2;3r\u{001B}[3;1H\u{001B}D")
+        let runtimeManager = StubSessionRuntimeManager(
+            initialTranscript: "top\nalpha\nbeta\nbottom\u{001B}[2;3r\u{001B}[3;1H\u{001B}D")
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
@@ -4775,8 +5028,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -4803,7 +5058,8 @@ struct nexusTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let runtimeManager = StubSessionRuntimeManager(initialTranscript: "top\nalpha\nbeta\nbottom\u{001B}[2;3r\u{001B}[2;1H\u{001B}[L")
+        let runtimeManager = StubSessionRuntimeManager(
+            initialTranscript: "top\nalpha\nbeta\nbottom\u{001B}[2;3r\u{001B}[2;1H\u{001B}[L")
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
@@ -4811,8 +5067,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -4839,7 +5097,8 @@ struct nexusTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let runtimeManager = StubSessionRuntimeManager(initialTranscript: "top\nalpha\nbeta\nbottom\u{001B}[2;3r\u{001B}[2;1H\u{001B}[M")
+        let runtimeManager = StubSessionRuntimeManager(
+            initialTranscript: "top\nalpha\nbeta\nbottom\u{001B}[2;3r\u{001B}[2;1H\u{001B}[M")
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
@@ -4847,8 +5106,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -4883,8 +5144,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -4919,8 +5182,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -4955,8 +5220,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -4991,8 +5258,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -5027,8 +5296,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -5063,8 +5334,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -5099,8 +5372,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: runtimeManager
@@ -5135,7 +5410,7 @@ struct nexusTests {
         import struct
         import sys
         import termios
-        
+
         try:
             rows, cols, _, _ = struct.unpack(
                 "HHHH",
@@ -5150,17 +5425,24 @@ struct nexusTests {
             if not line:
                 break
         """.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
 
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
             providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
+                executableResolver: StubExecutableResolver(executables: [
+                    "claude": executableURL.path(percentEncoded: false)
+                ]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
+                            stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
+                            stdout: "Usage: claude\n"),
                 ])
             )
         )
@@ -5202,17 +5484,24 @@ struct nexusTests {
         sys.stdout.flush()
         time.sleep(2)
         """.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
 
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
             providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
+                executableResolver: StubExecutableResolver(executables: [
+                    "claude": executableURL.path(percentEncoded: false)
+                ]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
+                            stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
+                            stdout: "Usage: claude\n"),
                 ])
             )
         )
@@ -5250,17 +5539,24 @@ struct nexusTests {
         time.sleep(0.2)
         print("Claude streamed update", flush=True)
         """.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
 
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
             providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
+                executableResolver: StubExecutableResolver(executables: [
+                    "claude": executableURL.path(percentEncoded: false)
+                ]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
+                            stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
+                            stdout: "Usage: claude\n"),
                 ])
             )
         )
@@ -5308,17 +5604,24 @@ struct nexusTests {
         else:
             print(f"Unexpected input: {line!r}", flush=True)
         """.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
 
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
             providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
+                executableResolver: StubExecutableResolver(executables: [
+                    "claude": executableURL.path(percentEncoded: false)
+                ]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
+                            stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
+                            stdout: "Usage: claude\n"),
                 ])
             )
         )
@@ -5366,17 +5669,24 @@ struct nexusTests {
         else:
             print(repr(data), flush=True)
         """#.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
 
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
             providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
+                executableResolver: StubExecutableResolver(executables: [
+                    "claude": executableURL.path(percentEncoded: false)
+                ]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
+                            stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
+                            stdout: "Usage: claude\n"),
                 ])
             )
         )
@@ -5423,17 +5733,24 @@ struct nexusTests {
         else:
             print(repr(data), flush=True)
         """#.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
 
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
             providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
+                executableResolver: StubExecutableResolver(executables: [
+                    "claude": executableURL.path(percentEncoded: false)
+                ]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
+                            stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
+                            stdout: "Usage: claude\n"),
                 ])
             )
         )
@@ -5478,17 +5795,24 @@ struct nexusTests {
         else:
             print(repr(data), flush=True)
         """#.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
 
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
             providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
+                executableResolver: StubExecutableResolver(executables: [
+                    "claude": executableURL.path(percentEncoded: false)
+                ]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
+                            stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
+                            stdout: "Usage: claude\n"),
                 ])
             )
         )
@@ -5533,17 +5857,24 @@ struct nexusTests {
         else:
             print(repr(data), flush=True)
         """#.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
 
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
             providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
+                executableResolver: StubExecutableResolver(executables: [
+                    "claude": executableURL.path(percentEncoded: false)
+                ]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
+                            stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
+                            stdout: "Usage: claude\n"),
                 ])
             )
         )
@@ -5589,17 +5920,24 @@ struct nexusTests {
         else:
             print(repr(data), flush=True)
         """#.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
 
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
             providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
+                executableResolver: StubExecutableResolver(executables: [
+                    "claude": executableURL.path(percentEncoded: false)
+                ]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
+                            stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
+                            stdout: "Usage: claude\n"),
                 ])
             )
         )
@@ -5649,17 +5987,24 @@ struct nexusTests {
         else:
             print(repr(data), flush=True)
         """#.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
 
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
             providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
+                executableResolver: StubExecutableResolver(executables: [
+                    "claude": executableURL.path(percentEncoded: false)
+                ]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
+                            stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
+                            stdout: "Usage: claude\n"),
                 ])
             )
         )
@@ -5703,17 +6048,24 @@ struct nexusTests {
         else:
             print(repr(data), flush=True)
         """#.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
 
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
             providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
+                executableResolver: StubExecutableResolver(executables: [
+                    "claude": executableURL.path(percentEncoded: false)
+                ]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
+                            stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
+                            stdout: "Usage: claude\n"),
                 ])
             )
         )
@@ -5761,17 +6113,24 @@ struct nexusTests {
         else:
             print(repr(data), flush=True)
         """#.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
 
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
             providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
+                executableResolver: StubExecutableResolver(executables: [
+                    "claude": executableURL.path(percentEncoded: false)
+                ]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
+                            stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
+                            stdout: "Usage: claude\n"),
                 ])
             )
         )
@@ -5817,17 +6176,24 @@ struct nexusTests {
         else:
             print(repr((first, second)), flush=True)
         """#.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
 
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
             providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
+                executableResolver: StubExecutableResolver(executables: [
+                    "claude": executableURL.path(percentEncoded: false)
+                ]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
+                            stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
+                            stdout: "Usage: claude\n"),
                 ])
             )
         )
@@ -5863,17 +6229,24 @@ struct nexusTests {
         #!/usr/bin/env python3
         print("Claude finished work", flush=True)
         """.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
 
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
             providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
+                executableResolver: StubExecutableResolver(executables: [
+                    "claude": executableURL.path(percentEncoded: false)
+                ]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
+                            stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
+                            stdout: "Usage: claude\n"),
                 ])
             )
         )
@@ -5906,17 +6279,24 @@ struct nexusTests {
         #!/usr/bin/env python3
         print("Claude finished work", flush=True)
         """.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
 
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
             providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
+                executableResolver: StubExecutableResolver(executables: [
+                    "claude": executableURL.path(percentEncoded: false)
+                ]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
+                            stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
+                            stdout: "Usage: claude\n"),
                 ])
             )
         )
@@ -5955,8 +6335,10 @@ struct nexusTests {
         let healthEvaluator = ProviderHealthFacts(
             executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
             commandRunner: StubCommandRunner(results: [
-                StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                    stdout: "9.9.9 (Claude Code)\n"),
+                StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                    stdout: "Usage: claude\n"),
             ])
         )
 
@@ -5972,7 +6354,8 @@ struct nexusTests {
             folderPath: workspaceFolderURL.path(percentEncoded: false),
             primaryGroupID: nil
         )
-        let launchedSession = try await firstClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let launchedSession = try await firstClient.launchOrResumeDefaultSession(
+            workspaceID: workspace.id, providerID: .claude)
 
         let restartedService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
@@ -6003,8 +6386,10 @@ struct nexusTests {
         let healthEvaluator = ProviderHealthFacts(
             executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
             commandRunner: StubCommandRunner(results: [
-                StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                    stdout: "9.9.9 (Claude Code)\n"),
+                StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                    stdout: "Usage: claude\n"),
             ])
         )
 
@@ -6020,7 +6405,8 @@ struct nexusTests {
             folderPath: workspaceFolderURL.path(percentEncoded: false),
             primaryGroupID: nil
         )
-        let launchedSession = try await firstClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let launchedSession = try await firstClient.launchOrResumeDefaultSession(
+            workspaceID: workspace.id, providerID: .claude)
         let resizedScreen = try await firstClient.resizeSession(sessionID: launchedSession.id, columns: 132, rows: 40)
 
         let restartedService = try NexusService.bootstrapForTests(
@@ -6049,8 +6435,10 @@ struct nexusTests {
         let healthEvaluator = ProviderHealthFacts(
             executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
             commandRunner: StubCommandRunner(results: [
-                StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                    stdout: "9.9.9 (Claude Code)\n"),
+                StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                    stdout: "Usage: claude\n"),
             ])
         )
 
@@ -6066,7 +6454,8 @@ struct nexusTests {
             folderPath: workspaceFolderURL.path(percentEncoded: false),
             primaryGroupID: nil
         )
-        let launchedSession = try await firstClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let launchedSession = try await firstClient.launchOrResumeDefaultSession(
+            workspaceID: workspace.id, providerID: .claude)
 
         let restartedService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
@@ -6076,7 +6465,8 @@ struct nexusTests {
         let restartedClient = try NexusIPCClient.connect(to: restartedService.listenerEndpoint)
         _ = try await restartedClient.getWorkspaceOverview(workspaceID: workspace.id)
 
-        let relaunchedSession = try await restartedClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let relaunchedSession = try await restartedClient.launchOrResumeDefaultSession(
+            workspaceID: workspace.id, providerID: .claude)
         let relaunchedScreen = try await restartedClient.getSessionScreen(sessionID: launchedSession.id)
 
         #expect(relaunchedSession.id == launchedSession.id)
@@ -6085,7 +6475,9 @@ struct nexusTests {
         #expect(relaunchedScreen.transcript == "Claude ready")
     }
 
-    @Test func interruptedDefaultSessionRelaunchesFromPersistedLaunchSnapshotWhenCurrentHealthIsUnavailable() async throws {
+    @Test func interruptedDefaultSessionRelaunchesFromPersistedLaunchSnapshotWhenCurrentHealthIsUnavailable()
+        async throws
+    {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -6101,8 +6493,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/claude-a"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/claude-a", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/claude-a", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/claude-a", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/claude-a", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: firstRuntimeManager
@@ -6114,7 +6508,8 @@ struct nexusTests {
             folderPath: workspaceFolderURL.path(percentEncoded: false),
             primaryGroupID: nil
         )
-        let launchedSession = try await firstClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let launchedSession = try await firstClient.launchOrResumeDefaultSession(
+            workspaceID: workspace.id, providerID: .claude)
 
         let restartedService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
@@ -6131,7 +6526,8 @@ struct nexusTests {
 
         #expect(interruptedScreen.session.state == .interrupted)
 
-        let relaunchedSession = try await restartedClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let relaunchedSession = try await restartedClient.launchOrResumeDefaultSession(
+            workspaceID: workspace.id, providerID: .claude)
         let relaunchedScreen = try await restartedClient.getSessionScreen(sessionID: launchedSession.id)
 
         #expect(relaunchedSession.id == launchedSession.id)
@@ -6152,8 +6548,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/claude-a"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/claude-a", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/claude-a", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/claude-a", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/claude-a", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(launchTranscriptForExecutable: { executable in
@@ -6167,15 +6565,18 @@ struct nexusTests {
             folderPath: workspaceFolderURL.path(percentEncoded: false),
             primaryGroupID: nil
         )
-        let defaultSession = try await firstClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let defaultSession = try await firstClient.launchOrResumeDefaultSession(
+            workspaceID: workspace.id, providerID: .claude)
 
         let restartedService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/claude-b"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/claude-b", arguments: ["--version"]): .success(stdout: "9.9.10 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/claude-b", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/claude-b", arguments: ["--version"]): .success(
+                        stdout: "9.9.10 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/claude-b", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(launchTranscriptForExecutable: { executable in
@@ -6184,9 +6585,11 @@ struct nexusTests {
         )
         let restartedClient = try NexusIPCClient.connect(to: restartedService.listenerEndpoint)
 
-        let relaunchedDefaultSession = try await restartedClient.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let relaunchedDefaultSession = try await restartedClient.launchOrResumeDefaultSession(
+            workspaceID: workspace.id, providerID: .claude)
         let defaultSessionScreen = try await restartedClient.getSessionScreen(sessionID: defaultSession.id)
-        let namedSession = try await restartedClient.createNamedSession(workspaceID: workspace.id, providerID: .claude, name: "Fresh Session")
+        let namedSession = try await restartedClient.createNamedSession(
+            workspaceID: workspace.id, providerID: .claude, name: "Fresh Session")
         let namedSessionScreen = try await restartedClient.getSessionScreen(sessionID: namedSession.id)
 
         #expect(relaunchedDefaultSession.id == defaultSession.id)
@@ -6233,7 +6636,8 @@ struct nexusTests {
         let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests()
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
         _ = try await client.createWorkspaceGroup(name: "Solo Group")
-        let workspace = try await client.createLocalWorkspace(name: nil, folderPath: "/tmp/perf-diagnostics-workspace", primaryGroupID: nil)
+        let workspace = try await client.createLocalWorkspace(
+            name: nil, folderPath: "/tmp/perf-diagnostics-workspace", primaryGroupID: nil)
 
         _ = try await client.getWorkspaceOverview(workspaceID: workspace.id)
         let diagnostics = try await client.listPerformanceDiagnostics(limit: 10)
@@ -6250,7 +6654,8 @@ struct nexusTests {
         let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests()
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
         _ = try await client.createWorkspaceGroup(name: "Solo Group")
-        _ = try await client.createLocalWorkspace(name: nil, folderPath: "/tmp/app-model-workspace", primaryGroupID: nil)
+        _ = try await client.createLocalWorkspace(
+            name: nil, folderPath: "/tmp/app-model-workspace", primaryGroupID: nil)
         let model = NexusAppModel(client: client)
 
         await model.refresh()
@@ -6258,7 +6663,9 @@ struct nexusTests {
         #expect(model.serviceStatus?.state == .running)
         #expect(model.workspaceGroups.map(\.name) == ["Solo Group"])
         #expect(model.workspaces.map(\.name) == ["app-model-workspace"])
-        #expect(model.workspaceOverview(for: try #require(model.workspaces.first).id)?.providerCards.map(\.provider.displayName) == ["Codex", "Claude", "IBM Bob", "Pi"])
+        #expect(
+            model.workspaceOverview(for: try #require(model.workspaces.first).id)?.providerCards.map(
+                \.provider.displayName) == ["Codex", "Claude", "IBM Bob", "Pi"])
     }
 
     @MainActor
@@ -6279,7 +6686,9 @@ struct nexusTests {
 
         let firstOverview = try await client.getWorkspaceOverview(workspaceID: firstWorkspace.id)
         let secondOverview = try await client.getWorkspaceOverview(workspaceID: secondWorkspace.id)
-        let batchOverviews = try await client.getWorkspaceOverviews(workspaceIDs: [secondWorkspace.id, firstWorkspace.id])
+        let batchOverviews = try await client.getWorkspaceOverviews(workspaceIDs: [
+            secondWorkspace.id, firstWorkspace.id,
+        ])
 
         #expect(batchOverviews.map(\.workspace.id) == [secondWorkspace.id, firstWorkspace.id])
         #expect(batchOverviews == [secondOverview, firstOverview])
@@ -6332,11 +6741,11 @@ struct nexusTests {
         )
         let overviewsByID = [
             firstWorkspace.id: firstOverview,
-            secondWorkspace.id: secondOverview
+            secondWorkspace.id: secondOverview,
         ]
         let loader = ControlledWorkspaceOverviewLoader(modeByWorkspaceID: [
             firstWorkspace.id: .suspended,
-            secondWorkspace.id: .suspended
+            secondWorkspace.id: .suspended,
         ])
         let session = Session(
             id: UUID(),
@@ -6381,8 +6790,12 @@ struct nexusTests {
         loader.resume(workspaceID: secondWorkspace.id, with: secondOverview)
         await refreshTask.value
 
-        #expect(model.workspaceOverview(for: firstWorkspace.id)?.providerCards.first?.health.summary == "Alpha Claude available")
-        #expect(model.workspaceOverview(for: secondWorkspace.id)?.providerCards.first?.health.summary == "Beta Pi available")
+        #expect(
+            model.workspaceOverview(for: firstWorkspace.id)?.providerCards.first?.health.summary
+                == "Alpha Claude available")
+        #expect(
+            model.workspaceOverview(for: secondWorkspace.id)?.providerCards.first?.health.summary == "Beta Pi available"
+        )
         #expect(client.providerDetailRequestCount == 0)
     }
 
@@ -6447,7 +6860,8 @@ struct nexusTests {
         let model = NexusAppModel(client: client)
 
         await model.refresh()
-        #expect(model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary == "Initial Claude health")
+        #expect(
+            model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary == "Initial Claude health")
 
         overviewStore.setOverview(refreshedOverview, for: workspace.id)
         loader.setMode(.suspended, for: workspace.id)
@@ -6460,12 +6874,15 @@ struct nexusTests {
             loader.requestedWorkspaceIDs().count == 2
         }
 
-        #expect(model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary == "Initial Claude health")
+        #expect(
+            model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary == "Initial Claude health")
 
         loader.resume(workspaceID: workspace.id, with: refreshedOverview)
         await refreshTask.value
 
-        #expect(model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary == "Refreshed Claude health")
+        #expect(
+            model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary == "Refreshed Claude health"
+        )
     }
 
     @MainActor
@@ -6533,7 +6950,8 @@ struct nexusTests {
 
         await model.refresh()
 
-        #expect(model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary == "Cached Claude health")
+        #expect(
+            model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary == "Cached Claude health")
 
         let deadline = ContinuousClock.now.advanced(by: .seconds(5))
         while model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary != "Fresh Claude health" {
@@ -6545,7 +6963,8 @@ struct nexusTests {
             try await Task.sleep(nanoseconds: 50_000_000)
         }
 
-        #expect(model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary == "Fresh Claude health")
+        #expect(
+            model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary == "Fresh Claude health")
         #expect(client.refreshWorkspaceOverviewRequestCount == 1)
     }
 
@@ -6791,7 +7210,11 @@ struct nexusTests {
             state: .unavailable,
             summary: "SSH connection timed out",
             checkedAt: Date(timeIntervalSince1970: 123),
-            diagnostics: [HostValidationDiagnostic(severity: .error, code: "sshTimedOut", message: "ssh build-box timed out while validating the Host.")]
+            diagnostics: [
+                HostValidationDiagnostic(
+                    severity: .error, code: "sshTimedOut", message: "ssh build-box timed out while validating the Host."
+                )
+            ]
         )
         let client = TrackingServiceClient(
             workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []),
@@ -6842,7 +7265,8 @@ struct nexusTests {
         #expect(model.hosts == [createdHost])
         #expect(model.hostDetail(for: createdHost.id) == HostDetail(host: createdHost, latestValidation: nil))
 
-        let updatedHost = try await model.updateHost(hostID: createdHost.id, name: "Primary Build Server", sshTarget: "build-box-2", port: nil)
+        let updatedHost = try await model.updateHost(
+            hostID: createdHost.id, name: "Primary Build Server", sshTarget: "build-box-2", port: nil)
 
         #expect(model.hosts == [updatedHost])
         #expect(model.hostDetail(for: updatedHost.id) == HostDetail(host: updatedHost, latestValidation: nil))
@@ -6864,7 +7288,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    "cd '/srv/api' && pwd"
+                    "cd '/srv/api' && pwd",
                 ]
             ): .success(stdout: "/srv/api\n")
         ])
@@ -6875,8 +7299,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
@@ -7301,7 +7727,7 @@ struct nexusTests {
             workspaceGroups: [group],
             workspaceOverviewsByID: [
                 alphaWorkspace.id: alphaOverview,
-                zuluWorkspace.id: zuluOverview
+                zuluWorkspace.id: zuluOverview,
             ],
             recentNavigation: [
                 NavigationItem(
@@ -7314,14 +7740,22 @@ struct nexusTests {
         let model = NexusAppModel(client: client)
 
         await model.refresh()
-        #expect(model.workspaceBrowseSidebarPresentation(currentWorkspaceID: nil).workspaces.map(\.workspace.id) == [alphaWorkspace.id, zuluWorkspace.id])
+        #expect(
+            model.workspaceBrowseSidebarPresentation(currentWorkspaceID: nil).workspaces.map(\.workspace.id) == [
+                alphaWorkspace.id, zuluWorkspace.id,
+            ])
 
         try await model.loadProviderDetail(workspaceID: zuluWorkspace.id, providerID: .claude)
-        #expect(model.workspaceBrowseSidebarPresentation(currentWorkspaceID: nil).workspaces.map(\.workspace.id) == [zuluWorkspace.id, alphaWorkspace.id])
+        #expect(
+            model.workspaceBrowseSidebarPresentation(currentWorkspaceID: nil).workspaces.map(\.workspace.id) == [
+                zuluWorkspace.id, alphaWorkspace.id,
+            ])
     }
 
     @MainActor
-    @Test func appModelWorkspaceBrowseNavigationPresentationUsesLoadedSessionRoutingForQuickSwitchOrdering() async throws {
+    @Test func appModelWorkspaceBrowseNavigationPresentationUsesLoadedSessionRoutingForQuickSwitchOrdering()
+        async throws
+    {
         let group = WorkspaceGroup(id: UUID(), name: "Group")
         let alphaWorkspace = Workspace(
             id: UUID(),
@@ -7364,7 +7798,7 @@ struct nexusTests {
             workspaceGroups: [group],
             workspaceOverviewsByID: [
                 alphaWorkspace.id: alphaOverview,
-                zuluWorkspace.id: zuluOverview
+                zuluWorkspace.id: zuluOverview,
             ],
             recentNavigation: [
                 NavigationItem(
@@ -7513,7 +7947,7 @@ struct nexusTests {
         }
 
         await client.emitObservedScreen(SessionScreen(session: session, transcript: "Updated transcript"))
-        for _ in 0 ..< 20 where model.focusedSessionScreen?.transcript != "Updated transcript" {
+        for _ in 0..<20 where model.focusedSessionScreen?.transcript != "Updated transcript" {
             try await Task.sleep(nanoseconds: 50_000_000)
         }
         try await Task.sleep(nanoseconds: 50_000_000)
@@ -7569,7 +8003,7 @@ struct nexusTests {
         }
 
         await client.emitObservedScreen(SessionScreen(session: session, transcript: "Updated transcript"))
-        for _ in 0 ..< 20 where model.focusedSessionScreen?.transcript != "Updated transcript" {
+        for _ in 0..<20 where model.focusedSessionScreen?.transcript != "Updated transcript" {
             try await Task.sleep(nanoseconds: 50_000_000)
         }
         try await Task.sleep(nanoseconds: 50_000_000)
@@ -7626,7 +8060,7 @@ struct nexusTests {
         }
 
         await client.emitObservedScreen(SessionScreen(session: session, transcript: "Updated transcript"))
-        for _ in 0 ..< 20 where model.focusedSessionScreen?.transcript != "Updated transcript" {
+        for _ in 0..<20 where model.focusedSessionScreen?.transcript != "Updated transcript" {
             try await Task.sleep(nanoseconds: 50_000_000)
         }
         try await Task.sleep(nanoseconds: 50_000_000)
@@ -7636,7 +8070,9 @@ struct nexusTests {
     }
 
     @MainActor
-    @Test func appModelLoadsOlderPiStructuredSessionHistoryIntoFocusedPresentationWithoutDisturbingLiveTailState() async throws {
+    @Test func appModelLoadsOlderPiStructuredSessionHistoryIntoFocusedPresentationWithoutDisturbingLiveTailState()
+        async throws
+    {
         let group = WorkspaceGroup(id: UUID(), name: "Group")
         let workspace = Workspace(
             id: UUID(),
@@ -7684,17 +8120,22 @@ struct nexusTests {
         #expect(model.canLoadOlderFocusedStructuredSessionHistory)
         #expect(model.focusedStructuredSessionPresentation?.feed.activityRows.map(\.text) == [liveActivity.text])
         #expect(model.focusedStructuredSessionPresentation?.feed.pendingApprovalRequests == [approvalRequest])
-        #expect(model.focusedStructuredSessionPresentation?.feed.thinkingIndicator == StructuredSessionThinkingIndicator(text: "Thinking"))
+        #expect(
+            model.focusedStructuredSessionPresentation?.feed.thinkingIndicator
+                == StructuredSessionThinkingIndicator(text: "Thinking"))
 
         await model.loadOlderFocusedStructuredSessionHistory()
 
         #expect(model.canLoadOlderFocusedStructuredSessionHistory == false)
-        #expect(model.focusedStructuredSessionPresentation?.feed.activityRows.map(\.text) == [
-            olderActivity.text,
-            liveActivity.text
-        ])
+        #expect(
+            model.focusedStructuredSessionPresentation?.feed.activityRows.map(\.text) == [
+                olderActivity.text,
+                liveActivity.text,
+            ])
         #expect(model.focusedStructuredSessionPresentation?.feed.pendingApprovalRequests == [approvalRequest])
-        #expect(model.focusedStructuredSessionPresentation?.feed.thinkingIndicator == StructuredSessionThinkingIndicator(text: "Thinking"))
+        #expect(
+            model.focusedStructuredSessionPresentation?.feed.thinkingIndicator
+                == StructuredSessionThinkingIndicator(text: "Thinking"))
         #expect(client.structuredHistoryPageRequests.map(\.sessionID) == [session.id])
     }
 
@@ -7751,21 +8192,25 @@ struct nexusTests {
         try await model.focusSession(sessionID: session.id)
 
         await client.emitObservedScreen(recoveredLiveScreen)
-        for _ in 0 ..< 20 where model.focusedStructuredSessionPresentation?.feed.activityRows.map(\.text) != [
+        for _ in 0..<20
+        where model.focusedStructuredSessionPresentation?.feed.activityRows.map(\.text) != [
             droppedActivity.text,
             previousTailActivity.text,
-            latestActivity.text
+            latestActivity.text,
         ] {
             try await Task.sleep(nanoseconds: 50_000_000)
         }
 
-        #expect(model.focusedStructuredSessionPresentation?.feed.activityRows.map(\.text) == [
-            droppedActivity.text,
-            previousTailActivity.text,
-            latestActivity.text
-        ])
+        #expect(
+            model.focusedStructuredSessionPresentation?.feed.activityRows.map(\.text) == [
+                droppedActivity.text,
+                previousTailActivity.text,
+                latestActivity.text,
+            ])
         #expect(model.focusedStructuredSessionPresentation?.feed.pendingApprovalRequests.isEmpty == true)
-        #expect(model.focusedStructuredSessionPresentation?.feed.thinkingIndicator == StructuredSessionThinkingIndicator(text: "Thinking…"))
+        #expect(
+            model.focusedStructuredSessionPresentation?.feed.thinkingIndicator
+                == StructuredSessionThinkingIndicator(text: "Thinking…"))
         #expect(client.structuredHistoryPageRequests.map(\.sessionID) == [session.id])
     }
 
@@ -7826,7 +8271,7 @@ struct nexusTests {
         }
 
         await client.emitObservedScreen(updatedScreen)
-        for _ in 0 ..< 20 where model.focusedSessionScreen?.transcript != updatedScreen.transcript {
+        for _ in 0..<20 where model.focusedSessionScreen?.transcript != updatedScreen.transcript {
             try await Task.sleep(nanoseconds: 50_000_000)
         }
         try await Task.sleep(nanoseconds: 50_000_000)
@@ -7895,15 +8340,16 @@ struct nexusTests {
         }
 
         await client.emitObservedScreen(updatedScreen)
-        for _ in 0 ..< 20 where model.focusedSessionScreen?.transcript != updatedScreen.transcript {
+        for _ in 0..<20 where model.focusedSessionScreen?.transcript != updatedScreen.transcript {
             try await Task.sleep(nanoseconds: 50_000_000)
         }
         try await Task.sleep(nanoseconds: 50_000_000)
 
-        #expect(model.focusedStructuredSessionPresentation?.feed.activityRows.map(\.text) == [
-            initialActivity.text,
-            appendedActivity.text
-        ])
+        #expect(
+            model.focusedStructuredSessionPresentation?.feed.activityRows.map(\.text) == [
+                initialActivity.text,
+                appendedActivity.text,
+            ])
         #expect(chromeChanged.changed == false)
         #expect(model.focusedStructuredSessionChromePresentation == initialChrome)
     }
@@ -7977,7 +8423,7 @@ struct nexusTests {
         }
 
         await client.emitObservedScreen(updatedScreen)
-        for _ in 0 ..< 20 where model.focusedSessionScreen?.transcript != updatedScreen.transcript {
+        for _ in 0..<20 where model.focusedSessionScreen?.transcript != updatedScreen.transcript {
             try await Task.sleep(nanoseconds: 50_000_000)
         }
         try await Task.sleep(nanoseconds: 50_000_000)
@@ -8046,15 +8492,16 @@ struct nexusTests {
         }
 
         await client.emitObservedScreen(updatedScreen)
-        for _ in 0 ..< 20 where model.focusedSessionScreen?.transcript != updatedScreen.transcript {
+        for _ in 0..<20 where model.focusedSessionScreen?.transcript != updatedScreen.transcript {
             try await Task.sleep(nanoseconds: 50_000_000)
         }
         try await Task.sleep(nanoseconds: 50_000_000)
 
-        #expect(model.focusedStructuredSessionPresentation?.feed.activityRows.map(\.text) == [
-            initialActivity.text,
-            appendedActivity.text
-        ])
+        #expect(
+            model.focusedStructuredSessionPresentation?.feed.activityRows.map(\.text) == [
+                initialActivity.text,
+                appendedActivity.text,
+            ])
         #expect(summaryChanged.changed == false)
         #expect(model.focusedSessionSummaryPresentation == initialSummary)
     }
@@ -8080,7 +8527,8 @@ struct nexusTests {
         let client = TrackingServiceClient(
             workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []),
             session: session,
-            screen: SessionScreen(session: session, controller: .pairedDevice(pairedDevice.id), transcript: "Claude ready"),
+            screen: SessionScreen(
+                session: session, controller: .pairedDevice(pairedDevice.id), transcript: "Claude ready"),
             pairedDevices: [pairedDevice]
         )
         let model = NexusAppModel(client: client)
@@ -8088,10 +8536,12 @@ struct nexusTests {
         await model.refresh()
         try await model.focusSession(sessionID: session.id)
 
-        #expect(model.focusedSessionControllerSummary == SessionControllerSummary(
-            label: "Chris’s iPhone",
-            message: "Chris’s iPhone is the Controller. Input on this Mac reclaims Controller."
-        ))
+        #expect(
+            model.focusedSessionControllerSummary
+                == SessionControllerSummary(
+                    label: "Chris’s iPhone",
+                    message: "Chris’s iPhone is the Controller. Input on this Mac reclaims Controller."
+                ))
     }
 
     @MainActor
@@ -8202,8 +8652,12 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
-                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                    StubCommandRunner.Invocation(
+                        executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(
+                            stdout: "0.9.0\n"),
+                    StubCommandRunner.Invocation(
+                        executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(
+                            stdout: "Usage: pi\n"),
                 ]),
                 localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
             ),
@@ -8224,11 +8678,12 @@ struct nexusTests {
 
         let screen = try #require(model.focusedSessionScreen)
         #expect(screen.primarySurface == .structuredActivityFeed)
-        #expect(screen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
-            "You: hello",
-            "Pi: world"
-        ])
+        #expect(
+            screen.activityItems.map(\.text) == [
+                "Pi shared Session stream connected",
+                "You: hello",
+                "Pi: world",
+            ])
     }
 
     @MainActor
@@ -8251,8 +8706,12 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
-                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                    StubCommandRunner.Invocation(
+                        executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(
+                            stdout: "0.9.0\n"),
+                    StubCommandRunner.Invocation(
+                        executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(
+                            stdout: "Usage: pi\n"),
                 ]),
                 localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
             ),
@@ -8277,11 +8736,12 @@ struct nexusTests {
                 && screen.activityItems.contains(where: { $0.text == "Pi: README.md\nSources\nTests" })
         }
 
-        #expect(finalScreen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
-            "You: What files are in this folder?",
-            "Pi: README.md\nSources\nTests"
-        ])
+        #expect(
+            finalScreen.activityItems.map(\.text) == [
+                "Pi shared Session stream connected",
+                "You: What files are in this folder?",
+                "Pi: README.md\nSources\nTests",
+            ])
     }
 
     @MainActor
@@ -8301,8 +8761,12 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
-                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                    StubCommandRunner.Invocation(
+                        executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(
+                            stdout: "0.9.0\n"),
+                    StubCommandRunner.Invocation(
+                        executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(
+                            stdout: "Usage: pi\n"),
                 ]),
                 localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
             ),
@@ -8331,13 +8795,14 @@ struct nexusTests {
                 && screen.activityItems.contains(where: { $0.text == "Pi: Done" })
         }
 
-        #expect(finalScreen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
-            "You: delegate",
-            "subagent reviewer: Review the latest diff and summarize issues",
-            "subagent: Looks good overall. Watch the new error path.",
-            "Pi: Done"
-        ])
+        #expect(
+            finalScreen.activityItems.map(\.text) == [
+                "Pi shared Session stream connected",
+                "You: delegate",
+                "subagent reviewer: Review the latest diff and summarize issues",
+                "subagent: Looks good overall. Watch the new error path.",
+                "Pi: Done",
+            ])
     }
 
     @MainActor
@@ -8357,8 +8822,12 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
-                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                    StubCommandRunner.Invocation(
+                        executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(
+                            stdout: "0.9.0\n"),
+                    StubCommandRunner.Invocation(
+                        executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(
+                            stdout: "Usage: pi\n"),
                 ]),
                 localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
             ),
@@ -8399,8 +8868,12 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
-                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                    StubCommandRunner.Invocation(
+                        executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(
+                            stdout: "0.9.0\n"),
+                    StubCommandRunner.Invocation(
+                        executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(
+                            stdout: "Usage: pi\n"),
                 ]),
                 localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
             ),
@@ -8446,11 +8919,12 @@ struct nexusTests {
         #expect(responseScreen.activityItems[1].prompt == prompt)
         #expect(observedScreen.activityItems[1].prompt == prompt)
         #expect(fetchedScreen.activityItems[1].prompt == prompt)
-        #expect(fetchedScreen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
-            "You: What changed in this screenshot? [1 image]",
-            "Pi: world"
-        ])
+        #expect(
+            fetchedScreen.activityItems.map(\.text) == [
+                "Pi shared Session stream connected",
+                "You: What changed in this screenshot? [1 image]",
+                "Pi: world",
+            ])
     }
 
     @Test func localXPCLoadsPiStructuredHistoryPagesSeparatelyFromLiveTail() async throws {
@@ -8464,7 +8938,7 @@ struct nexusTests {
         let messages = (0..<messageCount).map { index in
             [
                 "role": "user",
-                "content": "History \(index)"
+                "content": "History \(index)",
             ]
         }
         let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
@@ -8476,8 +8950,12 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
-                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                    StubCommandRunner.Invocation(
+                        executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(
+                            stdout: "0.9.0\n"),
+                    StubCommandRunner.Invocation(
+                        executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(
+                            stdout: "Usage: pi\n"),
                 ]),
                 localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
             ),
@@ -8520,8 +8998,12 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
-                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                    StubCommandRunner.Invocation(
+                        executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(
+                            stdout: "0.9.0\n"),
+                    StubCommandRunner.Invocation(
+                        executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(
+                            stdout: "Usage: pi\n"),
                 ]),
                 localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
             ),
@@ -8543,15 +9025,18 @@ struct nexusTests {
         let streamedScreen = try await waitForObservedFocusedSessionScreen(model: model) { screen in
             screen.session.id == session.id
                 && screen.isAgentTurnInProgress
-                && screen.activityItems.contains(where: { $0.text == "subagent: Looks good overall. Watch the new error path." })
+                && screen.activityItems.contains(where: {
+                    $0.text == "subagent: Looks good overall. Watch the new error path."
+                })
         }
 
-        #expect(streamedScreen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
-            "You: delegate",
-            "subagent reviewer: Review the latest diff and summarize issues",
-            "subagent: Looks good overall. Watch the new error path."
-        ])
+        #expect(
+            streamedScreen.activityItems.map(\.text) == [
+                "Pi shared Session stream connected",
+                "You: delegate",
+                "subagent reviewer: Review the latest diff and summarize issues",
+                "subagent: Looks good overall. Watch the new error path.",
+            ])
 
         let completedScreen = try await waitForObservedFocusedSessionScreen(model: model) { screen in
             screen.session.id == session.id
@@ -8559,13 +9044,14 @@ struct nexusTests {
                 && screen.activityItems.contains(where: { $0.text == "Pi: Done" })
         }
 
-        #expect(completedScreen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
-            "You: delegate",
-            "subagent reviewer: Review the latest diff and summarize issues",
-            "subagent: Looks good overall. Watch the new error path.",
-            "Pi: Done"
-        ])
+        #expect(
+            completedScreen.activityItems.map(\.text) == [
+                "Pi shared Session stream connected",
+                "You: delegate",
+                "subagent reviewer: Review the latest diff and summarize issues",
+                "subagent: Looks good overall. Watch the new error path.",
+                "Pi: Done",
+            ])
     }
 
     @MainActor
@@ -8578,7 +9064,10 @@ struct nexusTests {
             private let transcript: String
             private let activityItems: [SessionActivityItem]
 
-            init(primarySurface: SessionSurface = .terminal, transcript: String, activityItems: [SessionActivityItem] = []) {
+            init(
+                primarySurface: SessionSurface = .terminal, transcript: String,
+                activityItems: [SessionActivityItem] = []
+            ) {
                 self.primarySurface = primarySurface
                 self.transcript = transcript
                 self.activityItems = activityItems
@@ -8620,7 +9109,8 @@ struct nexusTests {
                 case .claude:
                     CompatibilityStaticSessionRuntime(transcript: "Claude ready")
                 case .codex:
-                    CompatibilityStaticSessionRuntime(primarySurface: .structuredActivityFeed, transcript: "Codex ready")
+                    CompatibilityStaticSessionRuntime(
+                        primarySurface: .structuredActivityFeed, transcript: "Codex ready")
                 case .pi:
                     CompatibilityStaticSessionRuntime(
                         transcript: "",
@@ -8645,15 +9135,27 @@ struct nexusTests {
                 executableResolver: StubExecutableResolver(executables: [
                     "claude": "/tmp/fake-claude",
                     "codex": "/tmp/fake-codex",
-                    "pi": "/tmp/fake-pi"
+                    "pi": "/tmp/fake-pi",
                 ]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-claude' '--version'"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-claude' '--help'"]): .success(stdout: "Usage: claude\n"),
-                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-codex' '--version'"]): .success(stdout: "1.2.3\n"),
-                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-codex' '--help'"]): .success(stdout: "Usage: codex\n"),
-                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
-                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                    StubCommandRunner.Invocation(
+                        executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-claude' '--version'"]): .success(
+                            stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(
+                        executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-claude' '--help'"]): .success(
+                            stdout: "Usage: claude\n"),
+                    StubCommandRunner.Invocation(
+                        executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-codex' '--version'"]): .success(
+                            stdout: "1.2.3\n"),
+                    StubCommandRunner.Invocation(
+                        executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-codex' '--help'"]): .success(
+                            stdout: "Usage: codex\n"),
+                    StubCommandRunner.Invocation(
+                        executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(
+                            stdout: "0.9.0\n"),
+                    StubCommandRunner.Invocation(
+                        executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(
+                            stdout: "Usage: pi\n"),
                 ]),
                 localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
                 codexReadinessProbe: NoOpCodexReadinessProbe()
@@ -8751,8 +9253,12 @@ struct nexusTests {
                 providerHealthEvaluator: ProviderHealthFacts(
                     executableResolver: StubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
                     commandRunner: StubCommandRunner(results: [
-                        StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
-                        StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                        StubCommandRunner.Invocation(
+                            executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(
+                                stdout: "0.9.0\n"),
+                        StubCommandRunner.Invocation(
+                            executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(
+                                stdout: "Usage: pi\n"),
                     ]),
                     localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
                 ),
@@ -8773,12 +9279,14 @@ struct nexusTests {
         let restartedService = try makeService()
         let restartedClient = try NexusIPCClient.connect(to: restartedService.listenerEndpoint)
         let model = NexusAppModel(client: restartedClient)
-        let expectedMessage = "Pi Session Record survived, but its live runtime was lost when the background service restarted. Relaunch to create a new live runtime."
+        let expectedMessage =
+            "Pi Session Record survived, but its live runtime was lost when the background service restarted. Relaunch to create a new live runtime."
 
         await model.refresh()
         try await model.focusSession(sessionID: launchedSession.id)
 
-        let piCard = try #require(model.workspaceOverview(for: workspace.id)?.providerCards.first(where: { $0.provider.id == .pi }))
+        let piCard = try #require(
+            model.workspaceOverview(for: workspace.id)?.providerCards.first(where: { $0.provider.id == .pi }))
         let screen = try #require(model.focusedSessionScreen)
 
         #expect(piCard.defaultSession.state == .interrupted)
@@ -8808,8 +9316,12 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(stdout: "0.9.0\n"),
-                    StubCommandRunner.Invocation(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(stdout: "Usage: pi\n")
+                    StubCommandRunner.Invocation(
+                        executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(
+                            stdout: "0.9.0\n"),
+                    StubCommandRunner.Invocation(
+                        executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(
+                            stdout: "Usage: pi\n"),
                 ]),
                 localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
             ),
@@ -8825,7 +9337,8 @@ struct nexusTests {
         let model = NexusAppModel(client: client)
 
         await model.refresh()
-        let namedSession = try await model.createNamedSession(workspaceID: workspace.id, providerID: .pi, name: "Review")
+        let namedSession = try await model.createNamedSession(
+            workspaceID: workspace.id, providerID: .pi, name: "Review")
         try await model.sendInputToFocusedSession("hello")
 
         let stoppedSession = try await model.stopSession(
@@ -8845,7 +9358,8 @@ struct nexusTests {
             providerID: .pi
         )
         let deletedDetail = try #require(model.providerDetail(for: workspace.id, providerID: .pi))
-        let piCard = try #require(model.workspaceOverview(for: workspace.id)?.providerCards.first(where: { $0.provider.id == .pi }))
+        let piCard = try #require(
+            model.workspaceOverview(for: workspace.id)?.providerCards.first(where: { $0.provider.id == .pi }))
 
         #expect(namedSession.providerID == .pi)
         #expect(namedSession.name == "Review")
@@ -8855,11 +9369,12 @@ struct nexusTests {
         #expect(stoppedDetail.alternateSessions.map(\.id) == [namedSession.id])
         #expect(stoppedDetail.alternateSessions.first?.state == .exited)
         #expect(stoppedScreen.session.state == .exited)
-        #expect(stoppedScreen.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
-            "You: hello",
-            "Pi: world"
-        ])
+        #expect(
+            stoppedScreen.activityItems.map(\.text) == [
+                "Pi shared Session stream connected",
+                "You: hello",
+                "Pi: world",
+            ])
         #expect(relaunchedSession.id == namedSession.id)
         #expect(relaunchedSession.state == .ready)
         #expect(relaunchedScreen.primarySurface == .structuredActivityFeed)
@@ -8882,8 +9397,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
@@ -8900,7 +9417,8 @@ struct nexusTests {
         await model.refresh()
         let session = try await model.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
 
-        let claudeCard = try #require(model.workspaceOverview(for: workspace.id)?.providerCards.first(where: { $0.provider.id == .claude }))
+        let claudeCard = try #require(
+            model.workspaceOverview(for: workspace.id)?.providerCards.first(where: { $0.provider.id == .claude }))
         #expect(claudeCard.defaultSession.state == .ready)
         #expect(claudeCard.defaultSession.actionTitle == "Resume")
         #expect(model.focusedSessionScreen?.session.id == session.id)
@@ -9025,7 +9543,8 @@ struct nexusTests {
         let model = NexusAppModel(client: client)
 
         try await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
-        let stoppedSession = try await model.stopSession(sessionID: namedSession.id, workspaceID: workspace.id, providerID: .claude)
+        let stoppedSession = try await model.stopSession(
+            sessionID: namedSession.id, workspaceID: workspace.id, providerID: .claude)
 
         let refreshedDetail = try #require(model.providerDetail(for: workspace.id, providerID: .claude))
         #expect(stoppedSession.state == .exited)
@@ -9092,7 +9611,8 @@ struct nexusTests {
         let model = NexusAppModel(client: client)
 
         try await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
-        let deleted = try await model.deleteSessionRecord(sessionID: stoppedSession.id, workspaceID: workspace.id, providerID: .claude)
+        let deleted = try await model.deleteSessionRecord(
+            sessionID: stoppedSession.id, workspaceID: workspace.id, providerID: .claude)
 
         let refreshedDetail = try #require(model.providerDetail(for: workspace.id, providerID: .claude))
         let refreshedCard = try #require(model.workspaceOverview(for: workspace.id)?.providerCards.first)
@@ -9128,13 +9648,15 @@ struct nexusTests {
         await model.refresh()
         let session = try await model.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
 
-        let claudeCard = try #require(model.workspaceOverview(for: workspace.id)?.providerCards.first(where: { $0.provider.id == .claude }))
+        let claudeCard = try #require(
+            model.workspaceOverview(for: workspace.id)?.providerCards.first(where: { $0.provider.id == .claude }))
         #expect(session.state == .failed)
         #expect(claudeCard.defaultSession.state == .failed)
         #expect(claudeCard.defaultSession.actionTitle == "Relaunch")
         #expect(model.focusedSessionScreen?.session.id == session.id)
         #expect(model.focusedSessionScreen?.session.state == .failed)
-        #expect(model.focusedSessionScreen?.transcript == "Claude executable was not found in the service search paths.")
+        #expect(
+            model.focusedSessionScreen?.transcript == "Claude executable was not found in the service search paths.")
     }
 
     @MainActor
@@ -9151,17 +9673,24 @@ struct nexusTests {
         time.sleep(0.2)
         print("Claude finished work", flush=True)
         """.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
 
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
             providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
+                executableResolver: StubExecutableResolver(executables: [
+                    "claude": executableURL.path(percentEncoded: false)
+                ]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
+                            stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
+                            stdout: "Usage: claude\n"),
                 ])
             )
         )
@@ -9176,14 +9705,16 @@ struct nexusTests {
 
         await model.refresh()
         let session = try await model.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
-        let readyCard = try #require(model.workspaceOverview(for: workspace.id)?.providerCards.first(where: { $0.provider.id == .claude }))
+        let readyCard = try #require(
+            model.workspaceOverview(for: workspace.id)?.providerCards.first(where: { $0.provider.id == .claude }))
         #expect(readyCard.defaultSession.state == .ready)
 
         let exitedScreen = try await waitForFocusedSessionScreen(model: model, sessionID: session.id) { screen in
             screen.session.state == .exited
         }
 
-        let claudeCard = try #require(model.workspaceOverview(for: workspace.id)?.providerCards.first(where: { $0.provider.id == .claude }))
+        let claudeCard = try #require(
+            model.workspaceOverview(for: workspace.id)?.providerCards.first(where: { $0.provider.id == .claude }))
         #expect(exitedScreen.session.id == session.id)
         #expect(exitedScreen.session.state == .exited)
         #expect(exitedScreen.transcript.contains("Claude finished work"))
@@ -9215,7 +9746,8 @@ struct nexusTests {
             state_path.write_text("relaunched")
             print("Claude finished work", flush=True)
         """.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
 
         setenv("NEXUS_RELAUNCH_STATE_FILE", stateFileURL.path(percentEncoded: false), 1)
         defer { unsetenv("NEXUS_RELAUNCH_STATE_FILE") }
@@ -9225,10 +9757,16 @@ struct nexusTests {
                 .appendingPathComponent("NexusTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
             providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: StubExecutableResolver(executables: ["claude": executableURL.path(percentEncoded: false)]),
+                executableResolver: StubExecutableResolver(executables: [
+                    "claude": executableURL.path(percentEncoded: false)
+                ]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
+                            stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
+                            stdout: "Usage: claude\n"),
                 ])
             )
         )
@@ -9248,11 +9786,13 @@ struct nexusTests {
         }
 
         let relaunchedSession = try await model.relaunchFocusedSession()
-        let readyScreen = try await waitForFocusedSessionScreen(model: model, sessionID: relaunchedSession.id) { screen in
+        let readyScreen = try await waitForFocusedSessionScreen(model: model, sessionID: relaunchedSession.id) {
+            screen in
             screen.session.state == .ready && screen.transcript.contains("Claude relaunched")
         }
 
-        let claudeCard = try #require(model.workspaceOverview(for: workspace.id)?.providerCards.first(where: { $0.provider.id == .claude }))
+        let claudeCard = try #require(
+            model.workspaceOverview(for: workspace.id)?.providerCards.first(where: { $0.provider.id == .claude }))
         #expect(relaunchedSession.id == firstSession.id)
         #expect(readyScreen.session.state == .ready)
         #expect(readyScreen.transcript.contains("Claude relaunched"))
@@ -9272,7 +9812,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    "cd '/srv/api' && pwd"
+                    "cd '/srv/api' && pwd",
                 ]
             ): .success(stdout: "/srv/api\n")
         ])
@@ -9283,7 +9823,7 @@ struct nexusTests {
                     "-o", "BatchMode=yes",
                     "-o", "ConnectTimeout=5",
                     "build-box",
-                    remoteClaudeProbeScript("/srv/api")
+                    remoteClaudeProbeScript("/srv/api"),
                 ]
             ): .success(stdout: "/usr/local/bin/claude\n9.9.9 (Claude Code)\n")
         ])
@@ -9318,8 +9858,10 @@ struct nexusTests {
         let model = NexusAppModel(client: client)
 
         await model.refresh()
-        let defaultSession = try await model.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
-        let namedSession = try await model.createNamedSession(workspaceID: workspace.id, providerID: .claude, name: "Review")
+        let defaultSession = try await model.launchOrResumeDefaultSession(
+            workspaceID: workspace.id, providerID: .claude)
+        let namedSession = try await model.createNamedSession(
+            workspaceID: workspace.id, providerID: .claude, name: "Review")
         _ = try await model.stopSession(sessionID: namedSession.id, workspaceID: workspace.id, providerID: .claude)
         _ = try await waitForFocusedSessionScreen(model: model, sessionID: namedSession.id) { screen in
             screen.session.state == .exited
@@ -9330,7 +9872,8 @@ struct nexusTests {
             screen.session.state == .ready
         }
         let detail = try #require(model.providerDetail(for: workspace.id, providerID: .claude))
-        let claudeCard = try #require(model.workspaceOverview(for: workspace.id)?.providerCards.first(where: { $0.provider.id == .claude }))
+        let claudeCard = try #require(
+            model.workspaceOverview(for: workspace.id)?.providerCards.first(where: { $0.provider.id == .claude }))
 
         #expect(relaunchedSession.id == namedSession.id)
         #expect(relaunchedSession.id != defaultSession.id)
@@ -9354,8 +9897,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
@@ -9390,8 +9935,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
@@ -9425,8 +9972,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
@@ -9522,7 +10071,9 @@ struct nexusTests {
             state: .ready
         )
         let screen = SessionScreen(session: session, transcript: "Claude ready")
-        let client = TrackingServiceClient(workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []), session: session, screen: screen)
+        let client = TrackingServiceClient(
+            workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []), session: session,
+            screen: screen)
         let model = NexusAppModel(client: client)
 
         try await model.loadSessionScreen(sessionID: session.id)
@@ -9549,7 +10100,9 @@ struct nexusTests {
             state: .ready
         )
         let initialScreen = SessionScreen(session: session, transcript: "Claude ready")
-        let client = TrackingServiceClient(workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []), session: session, screen: initialScreen)
+        let client = TrackingServiceClient(
+            workspaceOverview: WorkspaceOverview(workspace: workspace, providerCards: []), session: session,
+            screen: initialScreen)
         let model = NexusAppModel(client: client)
         model.focusedSessionScreen = initialScreen
 
@@ -9605,7 +10158,7 @@ struct nexusTests {
             activityItems: [
                 SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"),
                 SessionActivityItem(kind: .message, text: "You: \(prompt)"),
-                SessionActivityItem(kind: .message, text: "Pi: README.md\nSources\nTests")
+                SessionActivityItem(kind: .message, text: "Pi: README.md\nSources\nTests"),
             ],
             isAgentTurnInProgress: false
         )
@@ -9615,7 +10168,7 @@ struct nexusTests {
             transcript: "",
             activityItems: [
                 SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"),
-                SessionActivityItem(kind: .message, text: "You: \(prompt)")
+                SessionActivityItem(kind: .message, text: "You: \(prompt)"),
             ],
             isAgentTurnInProgress: true
         )
@@ -9699,7 +10252,7 @@ struct nexusTests {
             transcript: "",
             activityItems: [
                 SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"),
-                SessionActivityItem(kind: .message, text: "You: \(prompt)")
+                SessionActivityItem(kind: .message, text: "You: \(prompt)"),
             ],
             isAgentTurnInProgress: true
         )
@@ -9710,7 +10263,7 @@ struct nexusTests {
             activityItems: [
                 SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"),
                 SessionActivityItem(kind: .message, text: "You: \(prompt)"),
-                SessionActivityItem(kind: .message, text: "Pi: README.md\nSources\nTests")
+                SessionActivityItem(kind: .message, text: "Pi: README.md\nSources\nTests"),
             ],
             isAgentTurnInProgress: false
         )
@@ -9776,7 +10329,7 @@ struct nexusTests {
             activityItems: [
                 SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"),
                 SessionActivityItem(kind: .message, text: "You: old prompt"),
-                SessionActivityItem(kind: .message, text: "Pi: old answer")
+                SessionActivityItem(kind: .message, text: "Pi: old answer"),
             ]
         )
         let clearedScreen = SessionScreen(
@@ -9829,7 +10382,9 @@ struct nexusTests {
         let initialScreen = SessionScreen(
             session: session,
             transcript: "> deploy",
-            activityItems: [SessionActivityItem(kind: .approvalRequest, text: "Approval Request: Deploy to production?")],
+            activityItems: [
+                SessionActivityItem(kind: .approvalRequest, text: "Approval Request: Deploy to production?")
+            ],
             approvalRequests: [approvalRequest]
         )
         let client = TrackingServiceClient(
@@ -9846,14 +10401,15 @@ struct nexusTests {
         #expect(client.respondedApprovalRequests[0].sessionID == session.id)
         #expect(client.respondedApprovalRequests[0].approvalRequestID == approvalRequest.id)
         #expect(client.respondedApprovalRequests[0].decision == .approve)
-        #expect(model.focusedSessionScreen?.approvalRequests == [
-            SessionApprovalRequest(
-                id: approvalRequest.id,
-                title: approvalRequest.title,
-                text: approvalRequest.text,
-                state: .approved
-            )
-        ])
+        #expect(
+            model.focusedSessionScreen?.approvalRequests == [
+                SessionApprovalRequest(
+                    id: approvalRequest.id,
+                    title: approvalRequest.title,
+                    text: approvalRequest.text,
+                    state: .approved
+                )
+            ])
     }
 
     @MainActor
@@ -9950,8 +10506,10 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(stdout: "Usage: claude\n")
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
                 ])
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
@@ -10137,7 +10695,8 @@ struct nexusTests {
         let store = try NexusMetadataStore(storeURL: storeURL)
         let group = try store.createWorkspaceGroup(name: "Remote")
         let host = try store.createHost(name: "Build Server", sshTarget: "build-box", port: 2222)
-        _ = try store.createRemoteWorkspace(name: "Remote API", hostID: host.id, remotePath: "/srv/api", primaryGroupID: group.id)
+        _ = try store.createRemoteWorkspace(
+            name: "Remote API", hostID: host.id, remotePath: "/srv/api", primaryGroupID: group.id)
 
         let service = try NexusService.bootstrapForTests(rootURL: rootURL)
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -10146,7 +10705,8 @@ struct nexusTests {
             _ = try await client.deleteHost(hostID: host.id)
             Issue.record("Expected Host deletion to be blocked by a Remote Workspace reference")
         } catch {
-            #expect(error.localizedDescription == "Host is still referenced by Remote Workspaces: Remote API (/srv/api)")
+            #expect(
+                error.localizedDescription == "Host is still referenced by Remote Workspaces: Remote API (/srv/api)")
         }
 
         #expect(try await client.listHosts() == [host])
@@ -10173,7 +10733,11 @@ private func waitForSessionScreen(
 
     while predicate(latestScreen) == false {
         guard ContinuousClock.now < deadline else {
-            throw NSError(domain: "nexusTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for session screen update: \(latestScreen.transcript)"])
+            throw NSError(
+                domain: "nexusTests", code: 1,
+                userInfo: [
+                    NSLocalizedDescriptionKey: "Timed out waiting for session screen update: \(latestScreen.transcript)"
+                ])
         }
 
         try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
@@ -10223,13 +10787,13 @@ struct WorkspaceOverviewRefreshStagingTests {
             alphaWorkspace.id: alphaOverview,
             betaWorkspace.id: betaOverview,
             gammaWorkspace.id: gammaOverview,
-            deltaWorkspace.id: deltaOverview
+            deltaWorkspace.id: deltaOverview,
         ]
         let loader = ControlledWorkspaceOverviewLoader(modeByWorkspaceID: [
             alphaWorkspace.id: .suspended,
             betaWorkspace.id: .suspended,
             gammaWorkspace.id: .suspended,
-            deltaWorkspace.id: .suspended
+            deltaWorkspace.id: .suspended,
         ])
         let session = Session(
             id: UUID(),
@@ -10249,8 +10813,12 @@ struct WorkspaceOverviewRefreshStagingTests {
                 try await loader.loadBatch(workspaceIDs: workspaceIDs, overviewsByID: overviewsByID)
             },
             recentNavigation: [
-                NavigationItem(target: .workspace(deltaWorkspace.id), title: deltaWorkspace.name, subtitle: deltaWorkspace.folderPath),
-                NavigationItem(target: .provider(workspaceID: betaWorkspace.id, providerID: .pi), title: ProviderID.pi.displayName, subtitle: betaWorkspace.name)
+                NavigationItem(
+                    target: .workspace(deltaWorkspace.id), title: deltaWorkspace.name,
+                    subtitle: deltaWorkspace.folderPath),
+                NavigationItem(
+                    target: .provider(workspaceID: betaWorkspace.id, providerID: .pi), title: ProviderID.pi.displayName,
+                    subtitle: betaWorkspace.name),
             ]
         )
         let model = NexusAppModel(client: client)
@@ -10263,7 +10831,8 @@ struct WorkspaceOverviewRefreshStagingTests {
             loader.requestedWorkspaceIDs().count >= 3
         }
 
-        #expect(Array(loader.requestedWorkspaceIDs().prefix(3)) == [deltaWorkspace.id, betaWorkspace.id, alphaWorkspace.id])
+        #expect(
+            Array(loader.requestedWorkspaceIDs().prefix(3)) == [deltaWorkspace.id, betaWorkspace.id, alphaWorkspace.id])
 
         loader.resume(workspaceID: deltaWorkspace.id, with: deltaOverview)
         loader.resume(workspaceID: betaWorkspace.id, with: betaOverview)
@@ -10271,9 +10840,14 @@ struct WorkspaceOverviewRefreshStagingTests {
 
         await refreshTask.value
 
-        #expect(model.workspaceOverview(for: deltaWorkspace.id)?.providerCards.first?.health.summary == "Delta IBM Bob available")
-        #expect(model.workspaceOverview(for: betaWorkspace.id)?.providerCards.first?.health.summary == "Beta Pi available")
-        #expect(model.workspaceOverview(for: alphaWorkspace.id)?.providerCards.first?.health.summary == "Alpha Claude available")
+        #expect(
+            model.workspaceOverview(for: deltaWorkspace.id)?.providerCards.first?.health.summary
+                == "Delta IBM Bob available")
+        #expect(
+            model.workspaceOverview(for: betaWorkspace.id)?.providerCards.first?.health.summary == "Beta Pi available")
+        #expect(
+            model.workspaceOverview(for: alphaWorkspace.id)?.providerCards.first?.health.summary
+                == "Alpha Claude available")
         #expect(model.workspaceOverview(for: gammaWorkspace.id) == nil)
 
         try await waitUntil {
@@ -10284,7 +10858,8 @@ struct WorkspaceOverviewRefreshStagingTests {
 
         try await waitUntilAsync {
             await MainActor.run {
-                model.workspaceOverview(for: gammaWorkspace.id)?.providerCards.first?.health.summary == "Gamma Codex available"
+                model.workspaceOverview(for: gammaWorkspace.id)?.providerCards.first?.health.summary
+                    == "Gamma Codex available"
             }
         }
     }
@@ -10328,13 +10903,13 @@ struct WorkspaceOverviewRefreshStagingTests {
             alphaWorkspace.id: alphaOverview,
             betaWorkspace.id: betaOverview,
             gammaWorkspace.id: gammaOverview,
-            zetaWorkspace.id: zetaOverview
+            zetaWorkspace.id: zetaOverview,
         ]
         let loader = ControlledWorkspaceOverviewLoader(modeByWorkspaceID: [
             alphaWorkspace.id: .suspended,
             betaWorkspace.id: .suspended,
             gammaWorkspace.id: .suspended,
-            zetaWorkspace.id: .suspended
+            zetaWorkspace.id: .suspended,
         ])
         let session = Session(
             id: UUID(),
@@ -10364,7 +10939,8 @@ struct WorkspaceOverviewRefreshStagingTests {
             loader.requestedWorkspaceIDs().count >= 3
         }
 
-        #expect(Array(loader.requestedWorkspaceIDs().prefix(3)) == [alphaWorkspace.id, betaWorkspace.id, gammaWorkspace.id])
+        #expect(
+            Array(loader.requestedWorkspaceIDs().prefix(3)) == [alphaWorkspace.id, betaWorkspace.id, gammaWorkspace.id])
 
         loader.resume(workspaceID: alphaWorkspace.id, with: alphaOverview)
         loader.resume(workspaceID: betaWorkspace.id, with: betaOverview)
@@ -10396,7 +10972,8 @@ struct WorkspaceOverviewRefreshStagingTests {
             providerCards: [
                 WorkspaceProviderCard(
                     provider: Provider(id: providerID),
-                    health: ProviderHealthSummary(state: .available, summary: "\(workspace.name) \(providerID.displayName) available"),
+                    health: ProviderHealthSummary(
+                        state: .available, summary: "\(workspace.name) \(providerID.displayName) available"),
                     defaultSession: ProviderDefaultSessionSummary(
                         state: .notCreated,
                         summary: "No default session yet",
@@ -10422,7 +10999,12 @@ private func waitForFocusedSessionScreen(
 
     while predicate(latestScreen) == false {
         guard ContinuousClock.now < deadline else {
-            throw NSError(domain: "nexusTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for focused session screen update: \(latestScreen.transcript)"])
+            throw NSError(
+                domain: "nexusTests", code: 1,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Timed out waiting for focused session screen update: \(latestScreen.transcript)"
+                ])
         }
 
         try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
@@ -10445,7 +11027,12 @@ private func waitForObservedFocusedSessionScreen(
 
     while predicate(latestScreen) == false {
         guard ContinuousClock.now < deadline else {
-            throw NSError(domain: "nexusTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for observed focused session update: \(latestScreen.transcript)"])
+            throw NSError(
+                domain: "nexusTests", code: 1,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Timed out waiting for observed focused session update: \(latestScreen.transcript)"
+                ])
         }
 
         try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
@@ -10464,7 +11051,8 @@ private func waitUntil(
 
     while predicate() == false {
         guard ContinuousClock.now < deadline else {
-            throw NSError(domain: "nexusTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for condition"])
+            throw NSError(
+                domain: "nexusTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for condition"])
         }
 
         try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
@@ -10480,7 +11068,9 @@ private func waitUntilAsync(
 
     while await predicate() == false {
         guard ContinuousClock.now < deadline else {
-            throw NSError(domain: "nexusTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for async condition"])
+            throw NSError(
+                domain: "nexusTests", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for async condition"])
         }
 
         try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
@@ -10554,12 +11144,18 @@ private func remoteCLIProbeScript(_ workspacePath: String, commandName: String) 
         "/opt/homebrew/bin/\(commandName)",
         "/usr/local/bin/\(commandName)",
         "/usr/bin/\(commandName)",
-        "/bin/\(commandName)"
+        "/bin/\(commandName)",
     ].map { "\"\($0)\"" }.joined(separator: " ")
-    let shellCandidates = ["\"${SHELL:-}\"", "\"/bin/zsh\"", "\"/usr/bin/zsh\"", "\"/bin/bash\"", "\"/usr/bin/bash\"", "\"/bin/sh\"", "\"/usr/bin/sh\"", "\"/bin/ksh\"", "\"/usr/bin/ksh\"", "\"/bin/dash\"", "\"/usr/bin/dash\"", "\"/bin/csh\"", "\"/usr/bin/csh\"", "\"/bin/tcsh\"", "\"/usr/bin/tcsh\"", "\"/opt/homebrew/bin/fish\"", "\"/usr/local/bin/fish\"", "\"/usr/bin/fish\"", "\"/bin/fish\"", "$(grep '^/' /etc/shells 2>/dev/null)"]
-        .joined(separator: " ")
+    let shellCandidates = [
+        "\"${SHELL:-}\"", "\"/bin/zsh\"", "\"/usr/bin/zsh\"", "\"/bin/bash\"", "\"/usr/bin/bash\"", "\"/bin/sh\"",
+        "\"/usr/bin/sh\"", "\"/bin/ksh\"", "\"/usr/bin/ksh\"", "\"/bin/dash\"", "\"/usr/bin/dash\"", "\"/bin/csh\"",
+        "\"/usr/bin/csh\"", "\"/bin/tcsh\"", "\"/usr/bin/tcsh\"", "\"/opt/homebrew/bin/fish\"",
+        "\"/usr/local/bin/fish\"", "\"/usr/bin/fish\"", "\"/bin/fish\"", "$(grep '^/' /etc/shells 2>/dev/null)",
+    ]
+    .joined(separator: " ")
 
-    return "cd \(testShellQuoted(workspacePath)) || { echo 'NEXUS_REMOTE_WORKSPACE_UNAVAILABLE' >&2; exit 1; }; command -v tmux >/dev/null 2>&1 || { echo 'NEXUS_REMOTE_TMUX_UNAVAILABLE' >&2; exit 1; }; \(resolveFunctionName)() { for shell in \(shellCandidates); do [ -n \"$shell\" ] || continue; [ -x \"$shell\" ] || continue; case \"${shell##*/}\" in csh|tcsh) CANDIDATE=\"$(\"$shell\" -i -c \"if ( -f ~/.login ) source ~/.login; command -v \(commandName)\" 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -c \"if ( -f ~/.login ) source ~/.login; command -v \(commandName)\" 2>/dev/null)\" || continue ;; fish) CANDIDATE=\"$(\"$shell\" -i -c \"command -v \(commandName)\" 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -l -c \"command -v \(commandName)\" 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -c \"command -v \(commandName)\" 2>/dev/null)\" || continue ;; *) CANDIDATE=\"$(\"$shell\" -lic \(shellCommand) 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -lc \(shellCommand) 2>/dev/null)\" || continue ;; esac; [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; for CANDIDATE in \(fallbackCandidates); do [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; return 1; }; \(commandPathVariable)=\"$(\(resolveFunctionName))\" || { echo '\(notFoundMarker)' >&2; exit 1; }; [ -n \"$\(commandPathVariable)\" ] || { echo '\(notFoundMarker)' >&2; exit 1; }; printf '%s\\n' \"$\(commandPathVariable)\"; \"$\(commandPathVariable)\" --version; \"$\(commandPathVariable)\" --help >/dev/null 2>&1"
+    return
+        "cd \(testShellQuoted(workspacePath)) || { echo 'NEXUS_REMOTE_WORKSPACE_UNAVAILABLE' >&2; exit 1; }; command -v tmux >/dev/null 2>&1 || { echo 'NEXUS_REMOTE_TMUX_UNAVAILABLE' >&2; exit 1; }; \(resolveFunctionName)() { for shell in \(shellCandidates); do [ -n \"$shell\" ] || continue; [ -x \"$shell\" ] || continue; case \"${shell##*/}\" in csh|tcsh) CANDIDATE=\"$(\"$shell\" -i -c \"if ( -f ~/.login ) source ~/.login; command -v \(commandName)\" 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -c \"if ( -f ~/.login ) source ~/.login; command -v \(commandName)\" 2>/dev/null)\" || continue ;; fish) CANDIDATE=\"$(\"$shell\" -i -c \"command -v \(commandName)\" 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -l -c \"command -v \(commandName)\" 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -c \"command -v \(commandName)\" 2>/dev/null)\" || continue ;; *) CANDIDATE=\"$(\"$shell\" -lic \(shellCommand) 2>/dev/null)\" || CANDIDATE=\"$(\"$shell\" -lc \(shellCommand) 2>/dev/null)\" || continue ;; esac; [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; for CANDIDATE in \(fallbackCandidates); do [ -x \"$CANDIDATE\" ] || continue; printf '%s\\n' \"$CANDIDATE\"; return 0; done; return 1; }; \(commandPathVariable)=\"$(\(resolveFunctionName))\" || { echo '\(notFoundMarker)' >&2; exit 1; }; [ -n \"$\(commandPathVariable)\" ] || { echo '\(notFoundMarker)' >&2; exit 1; }; printf '%s\\n' \"$\(commandPathVariable)\"; \"$\(commandPathVariable)\" --version; \"$\(commandPathVariable)\" --help >/dev/null 2>&1"
 }
 
 private func testShellQuoted(_ value: String) -> String {
@@ -10586,7 +11182,9 @@ private actor SessionScreenCollector {
             }
 
             guard ContinuousClock.now < deadline else {
-                throw NSError(domain: "nexusTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for streamed session screen update"])
+                throw NSError(
+                    domain: "nexusTests", code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for streamed session screen update"])
             }
 
             try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
@@ -10674,7 +11272,9 @@ struct StubCommandRunner: ProviderCommandRunning {
 
     func run(executable: String, arguments: [String], currentDirectoryURL: URL?) throws -> ProviderCommandResult {
         guard let result = results[Invocation(executable: executable, arguments: arguments)] else {
-            throw NSError(domain: "StubCommandRunner", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing stub for \(arguments)"])
+            throw NSError(
+                domain: "StubCommandRunner", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Missing stub for \(arguments)"])
         }
 
         switch result {
@@ -10710,7 +11310,8 @@ private class NexusTestsBasePiRPCTransport: PiRPCTransporting, @unchecked Sendab
 
     func emit(_ object: [String: Any]) {
         guard let data = try? JSONSerialization.data(withJSONObject: object),
-              let line = String(data: data, encoding: .utf8) else {
+            let line = String(data: data, encoding: .utf8)
+        else {
             return
         }
         stdoutLineHandler?(line)
@@ -10726,8 +11327,9 @@ private final class NexusTestsPiRPCTransport: NexusTestsBasePiRPCTransport, @unc
 
     override func sendLine(_ line: String) throws {
         guard let data = line.data(using: .utf8),
-              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let type = object["type"] as? String else {
+            let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let type = object["type"] as? String
+        else {
             return
         }
 
@@ -10740,13 +11342,13 @@ private final class NexusTestsPiRPCTransport: NexusTestsBasePiRPCTransport, @unc
                 "success": true,
                 "data": [
                     "sessionId": "pi-session-1"
-                ]
+                ],
             ])
         case "prompt":
             emit([
                 "type": "response",
                 "command": "prompt",
-                "success": true
+                "success": true,
             ])
             guard promptResponseText.isEmpty == false else {
                 return
@@ -10755,8 +11357,8 @@ private final class NexusTestsPiRPCTransport: NexusTestsBasePiRPCTransport, @unc
                 "type": "message_update",
                 "assistantMessageEvent": [
                     "type": "text_delta",
-                    "delta": promptResponseText
-                ]
+                    "delta": promptResponseText,
+                ],
             ])
             emit([
                 "type": "turn_end",
@@ -10764,10 +11366,10 @@ private final class NexusTestsPiRPCTransport: NexusTestsBasePiRPCTransport, @unc
                     "content": [
                         [
                             "type": "text",
-                            "text": promptResponseText
+                            "text": promptResponseText,
                         ]
                     ]
-                ]
+                ],
             ])
         default:
             return
@@ -10786,8 +11388,9 @@ private final class DelayedPromptNexusTestsPiRPCTransport: NexusTestsBasePiRPCTr
 
     override func sendLine(_ line: String) throws {
         guard let data = line.data(using: .utf8),
-              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let type = object["type"] as? String else {
+            let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let type = object["type"] as? String
+        else {
             return
         }
 
@@ -10800,13 +11403,13 @@ private final class DelayedPromptNexusTestsPiRPCTransport: NexusTestsBasePiRPCTr
                 "success": true,
                 "data": [
                     "sessionId": "pi-session-1"
-                ]
+                ],
             ])
         case "prompt":
             emit([
                 "type": "response",
                 "command": "prompt",
-                "success": true
+                "success": true,
             ])
             guard promptResponseText.isEmpty == false else {
                 return
@@ -10820,8 +11423,8 @@ private final class DelayedPromptNexusTestsPiRPCTransport: NexusTestsBasePiRPCTr
                     "type": "message_update",
                     "assistantMessageEvent": [
                         "type": "text_delta",
-                        "delta": self.promptResponseText
-                    ]
+                        "delta": self.promptResponseText,
+                    ],
                 ])
                 self.emit([
                     "type": "turn_end",
@@ -10829,10 +11432,10 @@ private final class DelayedPromptNexusTestsPiRPCTransport: NexusTestsBasePiRPCTr
                         "content": [
                             [
                                 "type": "text",
-                                "text": self.promptResponseText
+                                "text": self.promptResponseText,
                             ]
                         ]
-                    ]
+                    ],
                 ])
             }
         default:
@@ -10852,8 +11455,9 @@ private final class RecordingNexusTestsPiRPCTransport: NexusTestsBasePiRPCTransp
     override func sendLine(_ line: String) throws {
         sentLines.append(line)
         guard let data = line.data(using: .utf8),
-              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let type = object["type"] as? String else {
+            let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let type = object["type"] as? String
+        else {
             return
         }
 
@@ -10866,13 +11470,13 @@ private final class RecordingNexusTestsPiRPCTransport: NexusTestsBasePiRPCTransp
                 "success": true,
                 "data": [
                     "sessionId": "pi-session-1"
-                ]
+                ],
             ])
         case "prompt":
             emit([
                 "type": "response",
                 "command": "prompt",
-                "success": true
+                "success": true,
             ])
             guard promptResponseText.isEmpty == false else {
                 return
@@ -10881,8 +11485,8 @@ private final class RecordingNexusTestsPiRPCTransport: NexusTestsBasePiRPCTransp
                 "type": "message_update",
                 "assistantMessageEvent": [
                     "type": "text_delta",
-                    "delta": promptResponseText
-                ]
+                    "delta": promptResponseText,
+                ],
             ])
             emit([
                 "type": "turn_end",
@@ -10890,10 +11494,10 @@ private final class RecordingNexusTestsPiRPCTransport: NexusTestsBasePiRPCTransp
                     "content": [
                         [
                             "type": "text",
-                            "text": promptResponseText
+                            "text": promptResponseText,
                         ]
                     ]
-                ]
+                ],
             ])
         default:
             return
@@ -10904,8 +11508,9 @@ private final class RecordingNexusTestsPiRPCTransport: NexusTestsBasePiRPCTransp
 private final class StreamingNexusTestsPiRPCTransport: NexusTestsBasePiRPCTransport, @unchecked Sendable {
     override func sendLine(_ line: String) throws {
         guard let data = line.data(using: .utf8),
-              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let type = object["type"] as? String else {
+            let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let type = object["type"] as? String
+        else {
             return
         }
 
@@ -10918,13 +11523,13 @@ private final class StreamingNexusTestsPiRPCTransport: NexusTestsBasePiRPCTransp
                 "success": true,
                 "data": [
                     "sessionId": "pi-session-1"
-                ]
+                ],
             ])
         case "prompt":
             emit([
                 "type": "response",
                 "command": "prompt",
-                "success": true
+                "success": true,
             ])
 
             DispatchQueue.global().asyncAfter(deadline: .now() + 0.05) { [weak self] in
@@ -10934,8 +11539,8 @@ private final class StreamingNexusTestsPiRPCTransport: NexusTestsBasePiRPCTransp
                     "toolName": "subagent",
                     "args": [
                         "agent": "reviewer",
-                        "task": "Review the latest diff and summarize issues"
-                    ]
+                        "task": "Review the latest diff and summarize issues",
+                    ],
                 ])
             }
 
@@ -10945,11 +11550,13 @@ private final class StreamingNexusTestsPiRPCTransport: NexusTestsBasePiRPCTransp
                     "toolCallId": "tool-1",
                     "toolName": "subagent",
                     "result": [
-                        "content": [[
-                            "type": "text",
-                            "text": "Looks good overall. Watch the new error path."
-                        ]]
-                    ]
+                        "content": [
+                            [
+                                "type": "text",
+                                "text": "Looks good overall. Watch the new error path.",
+                            ]
+                        ]
+                    ],
                 ])
             }
 
@@ -10957,11 +11564,13 @@ private final class StreamingNexusTestsPiRPCTransport: NexusTestsBasePiRPCTransp
                 self?.emit([
                     "type": "turn_end",
                     "message": [
-                        "content": [[
-                            "type": "text",
-                            "text": "Done"
-                        ]]
-                    ]
+                        "content": [
+                            [
+                                "type": "text",
+                                "text": "Done",
+                            ]
+                        ]
+                    ],
                 ])
             }
         default:
@@ -10974,11 +11583,12 @@ struct StubHostValidationEvaluator: HostValidationEvaluating {
     let resultsByTarget: [String: HostValidationResult]
 
     func validate(host: NexusDomain.Host) -> HostValidationResult {
-        resultsByTarget[host.sshTarget] ?? HostValidationResult(
-            state: .available,
-            summary: "Host is available",
-            diagnostics: []
-        )
+        resultsByTarget[host.sshTarget]
+            ?? HostValidationResult(
+                state: .available,
+                summary: "Host is available",
+                diagnostics: []
+            )
     }
 }
 
@@ -11009,7 +11619,9 @@ private final class StubSessionRuntimeManager: SessionRuntimeManaging {
 
     func setRuntimeChangePostObserverHandler(_ handler: (@Sendable (UUID) -> Void)?) {}
 
-    func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration) async throws {
+    func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration)
+        async throws
+    {
         try launchBehavior?(launchConfiguration, session, workspace)
         if let launchTranscriptForConfiguration {
             transcripts[session.id] = launchTranscriptForConfiguration(launchConfiguration, session, workspace)
@@ -11109,7 +11721,8 @@ private final class StubSessionRuntimeManager: SessionRuntimeManaging {
         )
     }
 
-    func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool, to session: Session) throws -> SessionScreen {
+    func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool, to session: Session) throws -> SessionScreen
+    {
         let prefix = transcripts[session.id, default: initialTranscript]
         let separator = prefix.isEmpty ? "" : "\n"
         let modeSuffix = applicationCursorMode ? ":application" : ""
@@ -11124,7 +11737,9 @@ private final class StubSessionRuntimeManager: SessionRuntimeManaging {
         )
     }
 
-    func respondToApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision, to session: Session) throws -> SessionScreen {
+    func respondToApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision, to session: Session)
+        throws -> SessionScreen
+    {
         throw NexusSessionApprovalError.approvalRequestsUnavailable
     }
 
@@ -11191,7 +11806,8 @@ private final class ControlledWorkspaceOverviewLoader: @unchecked Sendable {
             (workspaceID, appendRequestedWorkspaceID(workspaceID))
         }
 
-        return try await withThrowingTaskGroup(of: (Int, WorkspaceOverview).self, returning: [WorkspaceOverview].self) { group in
+        return try await withThrowingTaskGroup(of: (Int, WorkspaceOverview).self, returning: [WorkspaceOverview].self) {
+            group in
             for (index, request) in requests.enumerated() {
                 let (workspaceID, mode) = request
                 switch mode {
@@ -11210,7 +11826,7 @@ private final class ControlledWorkspaceOverviewLoader: @unchecked Sendable {
                 }
             }
 
-            var orderedOverviews = Array<WorkspaceOverview?>(repeating: nil, count: workspaceIDs.count)
+            var orderedOverviews = [WorkspaceOverview?](repeating: nil, count: workspaceIDs.count)
             for try await (index, overview) in group {
                 orderedOverviews[index] = overview
             }
@@ -11313,7 +11929,8 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
     var providerDetailRequestCount = 0
     var recordedNavigationTargets: [NavigationTarget] = []
     var respondedApprovalRequests: [(sessionID: UUID, approvalRequestID: UUID, decision: ApprovalRequestDecision)] = []
-    var respondedExtensionDialogs: [(sessionID: UUID, dialogID: String, response: SessionExtensionUIDialogResponse)] = []
+    var respondedExtensionDialogs: [(sessionID: UUID, dialogID: String, response: SessionExtensionUIDialogResponse)] =
+        []
     var structuredHistoryPageRequests: [(sessionID: UUID, pageSize: Int, cursor: StructuredSessionHistoryCursor?)] = []
     var observedScreenHandlerCount: Int {
         observedScreenHandlers.count
@@ -11345,18 +11962,22 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
         self.workspaceOverviewValuesByID = allWorkspaceOverviews
         self.refreshedWorkspaceOverviewValue = refreshedWorkspaceOverview
         self.refreshedWorkspaceOverviewValuesByID = refreshedWorkspaceOverview.map { [$0.workspace.id: $0] } ?? [:]
-        self.providerDetailValue = providerDetail ?? ProviderDetail(
-            workspace: detailWorkspaceOverview.workspace,
-            provider: Provider(id: session.providerID),
-            health: detailWorkspaceOverview.providerCards.first(where: { $0.provider.id == session.providerID })?.health
-                ?? ProviderHealthSummary(state: .notChecked, summary: "Not checked"),
-            defaultSession: session.isDefault ? session : nil,
-            alternateSessions: session.isDefault ? [] : [session],
-            failedSessions: session.state == .failed && session.isDefault == false ? [session] : []
-        )
+        self.providerDetailValue =
+            providerDetail
+            ?? ProviderDetail(
+                workspace: detailWorkspaceOverview.workspace,
+                provider: Provider(id: session.providerID),
+                health: detailWorkspaceOverview.providerCards.first(where: { $0.provider.id == session.providerID })?
+                    .health
+                    ?? ProviderHealthSummary(state: .notChecked, summary: "Not checked"),
+                defaultSession: session.isDefault ? session : nil,
+                alternateSessions: session.isDefault ? [] : [session],
+                failedSessions: session.state == .failed && session.isDefault == false ? [session] : []
+            )
         self.sessionValue = session
         self.screenValue = screen
-        self.workspaceGroupsValue = workspaceGroups ?? [WorkspaceGroup(id: workspaceOverview.workspace.primaryGroupID, name: "Group")]
+        self.workspaceGroupsValue =
+            workspaceGroups ?? [WorkspaceGroup(id: workspaceOverview.workspace.primaryGroupID, name: "Group")]
         self.workspacesValue = workspaces ?? [workspaceOverview.workspace]
         self.hostsValue = hosts
         self.hostDetailsValue = hostDetails
@@ -11370,7 +11991,9 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
     }
 
     func getServiceStatus() async throws -> NexusServiceStatus {
-        NexusServiceStatus(state: .running, store: .init(kind: .sqlite, owner: .backgroundService, location: URL(fileURLWithPath: "/tmp/Nexus.sqlite")))
+        NexusServiceStatus(
+            state: .running,
+            store: .init(kind: .sqlite, owner: .backgroundService, location: URL(fileURLWithPath: "/tmp/Nexus.sqlite")))
     }
 
     func listWorkspaceGroups() async throws -> [WorkspaceGroup] {
@@ -11430,7 +12053,9 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
             state: .available,
             summary: "Host is available",
             checkedAt: Date(timeIntervalSince1970: 456),
-            diagnostics: [HostValidationDiagnostic(severity: .info, code: "sshTarget", message: "Validated \(host.sshTarget)")]
+            diagnostics: [
+                HostValidationDiagnostic(severity: .info, code: "sshTarget", message: "Validated \(host.sshTarget)")
+            ]
         )
         hostDetailsValue[hostID] = HostDetail(host: host, latestValidation: snapshot)
         return snapshot
@@ -11506,7 +12131,8 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
     }
 
     func setRemoteAccessEnabled(_ isEnabled: Bool) async throws -> RemoteAccessState {
-        remoteAccessStateValue = RemoteAccessState(isEnabled: isEnabled, activePairing: isEnabled ? remoteAccessStateValue.activePairing : nil)
+        remoteAccessStateValue = RemoteAccessState(
+            isEnabled: isEnabled, activePairing: isEnabled ? remoteAccessStateValue.activePairing : nil)
         return remoteAccessStateValue
     }
 
@@ -11562,14 +12188,16 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
         }
 
         if let workspaceOverviewLoader {
-            return try await withThrowingTaskGroup(of: (Int, WorkspaceOverview).self, returning: [WorkspaceOverview].self) { group in
+            return try await withThrowingTaskGroup(
+                of: (Int, WorkspaceOverview).self, returning: [WorkspaceOverview].self
+            ) { group in
                 for (index, workspaceID) in workspaceIDs.enumerated() {
                     group.addTask {
                         (index, try await workspaceOverviewLoader(workspaceID))
                     }
                 }
 
-                var orderedOverviews = Array<WorkspaceOverview?>(repeating: nil, count: workspaceIDs.count)
+                var orderedOverviews = [WorkspaceOverview?](repeating: nil, count: workspaceIDs.count)
                 for try await (index, overview) in group {
                     orderedOverviews[index] = overview
                 }
@@ -11582,7 +12210,8 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
 
     func refreshWorkspaceOverview(workspaceID: UUID) async throws -> WorkspaceOverview {
         refreshWorkspaceOverviewRequestCount += 1
-        let refreshed = refreshedWorkspaceOverviewValuesByID[workspaceID]
+        let refreshed =
+            refreshedWorkspaceOverviewValuesByID[workspaceID]
             ?? refreshedWorkspaceOverviewValue
             ?? workspaceOverviewValuesByID[workspaceID]
             ?? workspaceOverviewValue
@@ -11602,7 +12231,9 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
         workspacesValue.first ?? workspaceOverviewValue.workspace
     }
 
-    func createRemoteWorkspace(name: String?, hostID: UUID, remotePath: String, primaryGroupID: UUID?) async throws -> Workspace {
+    func createRemoteWorkspace(name: String?, hostID: UUID, remotePath: String, primaryGroupID: UUID?) async throws
+        -> Workspace
+    {
         workspacesValue.first ?? workspaceOverviewValue.workspace
     }
 
@@ -11630,7 +12261,9 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
             provider: providerDetailValue.provider,
             health: providerDetailValue.health,
             defaultSession: relaunchedSession.isDefault ? relaunchedSession : providerDetailValue.defaultSession,
-            alternateSessions: providerDetailValue.alternateSessions.map { $0.id == relaunchedSession.id ? relaunchedSession : $0 },
+            alternateSessions: providerDetailValue.alternateSessions.map {
+                $0.id == relaunchedSession.id ? relaunchedSession : $0
+            },
             failedSessions: providerDetailValue.failedSessions.filter { $0.id != relaunchedSession.id }
         )
         return relaunchedSession
@@ -11691,7 +12324,9 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
             provider: providerDetailValue.provider,
             health: providerDetailValue.health,
             defaultSession: stoppedSession.isDefault ? stoppedSession : providerDetailValue.defaultSession,
-            alternateSessions: providerDetailValue.alternateSessions.map { $0.id == stoppedSession.id ? stoppedSession : $0 },
+            alternateSessions: providerDetailValue.alternateSessions.map {
+                $0.id == stoppedSession.id ? stoppedSession : $0
+            },
             failedSessions: providerDetailValue.failedSessions
         )
         return stoppedSession
@@ -11699,7 +12334,9 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
 
     func deleteSessionRecord(sessionID: UUID) async throws -> Bool {
         guard sessionValue.id == sessionID, sessionValue.state != .ready else {
-            throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Stop the session before deleting its record"])
+            throw NSError(
+                domain: "Test", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Stop the session before deleting its record"])
         }
 
         providerDetailValue = ProviderDetail(
@@ -11710,7 +12347,9 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
             alternateSessions: providerDetailValue.alternateSessions.filter { $0.id != sessionID },
             failedSessions: providerDetailValue.failedSessions.filter { $0.id != sessionID }
         )
-        if let index = workspaceOverviewValue.providerCards.firstIndex(where: { $0.provider.id == sessionValue.providerID }) {
+        if let index = workspaceOverviewValue.providerCards.firstIndex(where: {
+            $0.provider.id == sessionValue.providerID
+        }) {
             let card = workspaceOverviewValue.providerCards[index]
             var providerCards = workspaceOverviewValue.providerCards
             providerCards[index] = WorkspaceProviderCard(
@@ -11759,10 +12398,13 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
         if structuredHistoryPages.isEmpty == false {
             return structuredHistoryPages.removeFirst()
         }
-        return StructuredSessionHistoryPage(sessionID: sessionID, activityItems: [], providerEvents: [], nextCursor: nil)
+        return StructuredSessionHistoryPage(
+            sessionID: sessionID, activityItems: [], providerEvents: [], nextCursor: nil)
     }
 
-    func observeSessionScreen(sessionID: UUID, onUpdate: @escaping @Sendable (SessionScreen) -> Void) async throws -> any SessionScreenObservation {
+    func observeSessionScreen(sessionID: UUID, onUpdate: @escaping @Sendable (SessionScreen) -> Void) async throws
+        -> any SessionScreenObservation
+    {
         let observationID = UUID()
         observedScreenHandlers[observationID] = onUpdate
         onUpdate(screenValue)
@@ -11793,12 +12435,16 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
     }
 
     func sendSessionInputKey(sessionID: UUID, key: SessionInputKey) async throws -> SessionScreen {
-        screenValue = SessionScreen(session: sessionValue, transcript: screenValue.transcript + "[key: \(key.rawValue)]")
+        screenValue = SessionScreen(
+            session: sessionValue, transcript: screenValue.transcript + "[key: \(key.rawValue)]")
         return screenValue
     }
 
-    func respondToApprovalRequest(sessionID: UUID, approvalRequestID: UUID, decision: ApprovalRequestDecision) async throws -> SessionScreen {
-        respondedApprovalRequests.append((sessionID: sessionID, approvalRequestID: approvalRequestID, decision: decision))
+    func respondToApprovalRequest(sessionID: UUID, approvalRequestID: UUID, decision: ApprovalRequestDecision)
+        async throws -> SessionScreen
+    {
+        respondedApprovalRequests.append(
+            (sessionID: sessionID, approvalRequestID: approvalRequestID, decision: decision))
         let updatedApprovalRequests = screenValue.approvalRequests.map { request in
             guard request.id == approvalRequestID else {
                 return request
@@ -11820,7 +12466,8 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
             activityItems: screenValue.activityItems + [
                 SessionActivityItem(
                     kind: .approvalDecision,
-                    text: "\(decision == .approve ? "Approved" : "Denied"): \(screenValue.approvalRequests.first(where: { $0.id == approvalRequestID })?.title ?? "Approval Request")"
+                    text:
+                        "\(decision == .approve ? "Approved" : "Denied"): \(screenValue.approvalRequests.first(where: { $0.id == approvalRequestID })?.title ?? "Approval Request")"
                 )
             ],
             approvalRequests: updatedApprovalRequests,
@@ -11829,7 +12476,9 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
         return screenValue
     }
 
-    func respondToExtensionDialog(sessionID: UUID, dialogID: String, response: SessionExtensionUIDialogResponse) async throws -> SessionScreen {
+    func respondToExtensionDialog(sessionID: UUID, dialogID: String, response: SessionExtensionUIDialogResponse)
+        async throws -> SessionScreen
+    {
         respondedExtensionDialogs.append((sessionID: sessionID, dialogID: dialogID, response: response))
         let updatedDialogs = screenValue.extensionUI?.pendingDialogs.filter { $0.id != dialogID } ?? []
         let extensionUI = screenValue.extensionUI.map {
@@ -11866,7 +12515,9 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
         return screenValue
     }
 
-    func takeRemoteSessionControl(sessionID: UUID, pairedDeviceID: UUID, columns: Int, rows: Int) async throws -> SessionScreen {
+    func takeRemoteSessionControl(sessionID: UUID, pairedDeviceID: UUID, columns: Int, rows: Int) async throws
+        -> SessionScreen
+    {
         screenValue = SessionScreen(
             session: sessionValue,
             controller: .pairedDevice(pairedDeviceID),
@@ -11905,7 +12556,8 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
         approvalRequestID: UUID,
         decision: ApprovalRequestDecision
     ) async throws -> SessionScreen {
-        respondedApprovalRequests.append((sessionID: sessionID, approvalRequestID: approvalRequestID, decision: decision))
+        respondedApprovalRequests.append(
+            (sessionID: sessionID, approvalRequestID: approvalRequestID, decision: decision))
         let updatedApprovalRequests = screenValue.approvalRequests.map { request in
             guard request.id == approvalRequestID else {
                 return request
@@ -11927,7 +12579,8 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
             activityItems: screenValue.activityItems + [
                 SessionActivityItem(
                     kind: .approvalDecision,
-                    text: "\(decision == .approve ? "Approved" : "Denied"): \(screenValue.approvalRequests.first(where: { $0.id == approvalRequestID })?.title ?? "Approval Request")"
+                    text:
+                        "\(decision == .approve ? "Approved" : "Denied"): \(screenValue.approvalRequests.first(where: { $0.id == approvalRequestID })?.title ?? "Approval Request")"
                 )
             ],
             approvalRequests: updatedApprovalRequests
@@ -11946,7 +12599,9 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
         return screenValue
     }
 
-    func sendRemoteSessionInputKey(sessionID: UUID, pairedDeviceID: UUID, key: SessionInputKey) async throws -> SessionScreen {
+    func sendRemoteSessionInputKey(sessionID: UUID, pairedDeviceID: UUID, key: SessionInputKey) async throws
+        -> SessionScreen
+    {
         screenValue = SessionScreen(
             session: sessionValue,
             controller: .pairedDevice(pairedDeviceID),
@@ -12072,7 +12727,9 @@ private struct FailingServiceClient: NexusServiceClient {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 
-    func createRemoteWorkspace(name: String?, hostID: UUID, remotePath: String, primaryGroupID: UUID?) async throws -> Workspace {
+    func createRemoteWorkspace(name: String?, hostID: UUID, remotePath: String, primaryGroupID: UUID?) async throws
+        -> Workspace
+    {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 
@@ -12115,7 +12772,9 @@ private struct FailingServiceClient: NexusServiceClient {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 
-    func observeSessionScreen(sessionID: UUID, onUpdate: @escaping @Sendable (SessionScreen) -> Void) async throws -> any SessionScreenObservation {
+    func observeSessionScreen(sessionID: UUID, onUpdate: @escaping @Sendable (SessionScreen) -> Void) async throws
+        -> any SessionScreenObservation
+    {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 
@@ -12131,7 +12790,9 @@ private struct FailingServiceClient: NexusServiceClient {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 
-    func respondToApprovalRequest(sessionID: UUID, approvalRequestID: UUID, decision: ApprovalRequestDecision) async throws -> SessionScreen {
+    func respondToApprovalRequest(sessionID: UUID, approvalRequestID: UUID, decision: ApprovalRequestDecision)
+        async throws -> SessionScreen
+    {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 
@@ -12139,7 +12800,9 @@ private struct FailingServiceClient: NexusServiceClient {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 
-    func takeRemoteSessionControl(sessionID: UUID, pairedDeviceID: UUID, columns: Int, rows: Int) async throws -> SessionScreen {
+    func takeRemoteSessionControl(sessionID: UUID, pairedDeviceID: UUID, columns: Int, rows: Int) async throws
+        -> SessionScreen
+    {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 
@@ -12151,7 +12814,9 @@ private struct FailingServiceClient: NexusServiceClient {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 
-    func respondToRemoteApprovalRequest(sessionID: UUID, pairedDeviceID: UUID, approvalRequestID: UUID, decision: ApprovalRequestDecision) async throws -> SessionScreen {
+    func respondToRemoteApprovalRequest(
+        sessionID: UUID, pairedDeviceID: UUID, approvalRequestID: UUID, decision: ApprovalRequestDecision
+    ) async throws -> SessionScreen {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 
@@ -12159,7 +12824,9 @@ private struct FailingServiceClient: NexusServiceClient {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 
-    func sendRemoteSessionInputKey(sessionID: UUID, pairedDeviceID: UUID, key: SessionInputKey) async throws -> SessionScreen {
+    func sendRemoteSessionInputKey(sessionID: UUID, pairedDeviceID: UUID, key: SessionInputKey) async throws
+        -> SessionScreen
+    {
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 }

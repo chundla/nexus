@@ -1,7 +1,8 @@
 import Foundation
 import NexusDomain
-@testable import NexusSessionPresentation
 import Testing
+
+@testable import NexusSessionPresentation
 
 struct StructuredSessionFeedSegmentScrollPolicyTests {
     private func piSession() -> Session {
@@ -40,7 +41,7 @@ struct StructuredSessionFeedSegmentScrollPolicyTests {
                     detailText: "Plan."
                 ),
                 SessionActivityItem(id: commandID, kind: .command, text: "git status"),
-                SessionActivityItem(id: answerID, kind: .message, text: "Pi: Done")
+                SessionActivityItem(id: answerID, kind: .message, text: "Pi: Done"),
             ],
             isAgentTurnInProgress: false
         )
@@ -55,7 +56,7 @@ struct StructuredSessionFeedSegmentScrollPolicyTests {
     }
 
     @Test func progressiveRevealTailUsesSegmentCount() throws {
-        let segmentIDs = (0 ..< 4).map { _ in UUID() }
+        let segmentIDs = (0..<4).map { _ in UUID() }
         let rows = segmentIDs.enumerated().map { index, id in
             StructuredSessionActivityRow(
                 id: id,
@@ -82,11 +83,13 @@ struct StructuredSessionFeedSegmentScrollPolicyTests {
 
         #expect(structuredSessionFeedScrollItemCount(for: feed) == 4)
         #expect(
-            structuredSessionFeedRevealShowsFullTail(visibleTailItemCount: 3, totalFeedItemCount: feed.feedScrollItemCount)
+            structuredSessionFeedRevealShowsFullTail(
+                visibleTailItemCount: 3, totalFeedItemCount: feed.feedScrollItemCount)
                 == false
         )
         #expect(
-            structuredSessionFeedRevealShowsFullTail(visibleTailItemCount: 4, totalFeedItemCount: feed.feedScrollItemCount)
+            structuredSessionFeedRevealShowsFullTail(
+                visibleTailItemCount: 4, totalFeedItemCount: feed.feedScrollItemCount)
         )
 
         let tailTwo = structuredSessionActivityRows(in: feed, visibleTailItemCount: 2)
@@ -108,7 +111,7 @@ struct StructuredSessionFeedSegmentScrollPolicyTests {
                     text: "You: hi",
                     prompt: SessionPrompt(text: "hi")
                 ),
-                SessionActivityItem(id: turnAnchorID, kind: .status, text: "thoughts:", detailText: "think")
+                SessionActivityItem(id: turnAnchorID, kind: .status, text: "thoughts:", detailText: "think"),
             ],
             providerFacts: StructuredSessionProviderFacts(liveAssistantDraftText: "draft body"),
             isAgentTurnInProgress: true
@@ -156,7 +159,7 @@ struct StructuredSessionFeedSegmentScrollPolicyTests {
                 ),
                 SessionActivityItem(id: thoughtsID, kind: .status, text: "thoughts:", detailText: "a"),
                 SessionActivityItem(id: commandID, kind: .command, text: "run"),
-                SessionActivityItem(id: answerID, kind: .message, text: "Pi: ok")
+                SessionActivityItem(id: answerID, kind: .message, text: "Pi: ok"),
             ],
             isAgentTurnInProgress: false
         )

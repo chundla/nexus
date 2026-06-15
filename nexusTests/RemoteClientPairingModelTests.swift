@@ -3,6 +3,7 @@ import NexusDomain
 import NexusSessionPresentation
 import Observation
 import Testing
+
 @testable import nexus
 
 @MainActor
@@ -23,7 +24,9 @@ struct RemoteClientPairingModelTests {
         store.saveActivePairedMacID(pairedMac.id)
 
         let model = RemoteClientPairingModel(
-            client: StubRemotePairingClient(result: pairedMac, status: .success(RemotePairedMacStatus(macName: "Studio Mac", isRemoteAccessEnabled: true))),
+            client: StubRemotePairingClient(
+                result: pairedMac,
+                status: .success(RemotePairedMacStatus(macName: "Studio Mac", isRemoteAccessEnabled: true))),
             store: store
         )
 
@@ -184,7 +187,9 @@ struct RemoteClientPairingModelTests {
         )
         let catalog = RemoteWorkspaceCatalog(
             workspaceGroups: [group],
-            recentNavigation: [NavigationItem(target: .workspace(workspace.id), title: "Nexus", subtitle: "/tmp/nexus")],
+            recentNavigation: [
+                NavigationItem(target: .workspace(workspace.id), title: "Nexus", subtitle: "/tmp/nexus")
+            ],
             workspaceOverviews: [
                 WorkspaceOverview(
                     workspace: workspace,
@@ -239,7 +244,9 @@ struct RemoteClientPairingModelTests {
         )
         let catalog = RemoteWorkspaceCatalog(
             workspaceGroups: [group],
-            recentNavigation: [NavigationItem(target: .workspace(workspace.id), title: "Nexus", subtitle: "/tmp/nexus")],
+            recentNavigation: [
+                NavigationItem(target: .workspace(workspace.id), title: "Nexus", subtitle: "/tmp/nexus")
+            ],
             workspaceOverviews: [WorkspaceOverview(workspace: workspace, providerCards: [])]
         )
         let store = UserDefaultsPairedMacStore(defaults: defaults)
@@ -279,7 +286,11 @@ struct RemoteClientPairingModelTests {
         )
         let catalog = RemoteWorkspaceCatalog(
             workspaceGroups: [group],
-            recentNavigation: [NavigationItem(target: .provider(workspaceID: workspace.id, providerID: .claude), title: "Claude", subtitle: "Nexus")],
+            recentNavigation: [
+                NavigationItem(
+                    target: .provider(workspaceID: workspace.id, providerID: .claude), title: "Claude",
+                    subtitle: "Nexus")
+            ],
             workspaceOverviews: [
                 WorkspaceOverview(
                     workspace: workspace,
@@ -307,7 +318,8 @@ struct RemoteClientPairingModelTests {
         )
         await model.refreshActivePairedMacCatalog()
 
-        let destination = try await model.browseDestination(for: .provider(workspaceID: workspace.id, providerID: .claude))
+        let destination = try await model.browseDestination(
+            for: .provider(workspaceID: workspace.id, providerID: .claude))
 
         #expect(destination == .provider(workspace.id, .claude))
     }
@@ -342,7 +354,9 @@ struct RemoteClientPairingModelTests {
         )
         let catalog = RemoteWorkspaceCatalog(
             workspaceGroups: [group],
-            recentNavigation: [NavigationItem(target: .session(session.id), title: "Session 1", subtitle: "Nexus • Claude")],
+            recentNavigation: [
+                NavigationItem(target: .session(session.id), title: "Session 1", subtitle: "Nexus • Claude")
+            ],
             workspaceOverviews: [
                 WorkspaceOverview(
                     workspace: workspace,
@@ -380,7 +394,8 @@ struct RemoteClientPairingModelTests {
         let destination = try await model.browseDestination(for: .session(session.id))
 
         #expect(destination == .session(workspaceID: workspace.id, providerID: .claude, sessionID: session.id))
-        #expect(model.providerDetail(for: workspace.id, providerID: .claude)?.alternateSessions.map(\.id) == [session.id])
+        #expect(
+            model.providerDetail(for: workspace.id, providerID: .claude)?.alternateSessions.map(\.id) == [session.id])
         #expect(client.requestLog == ["fetchCatalog", "fetchProviderDetail"])
     }
 
@@ -403,7 +418,8 @@ struct RemoteClientPairingModelTests {
         let model = RemoteClientPairingModel(
             client: StubRemotePairingClient(
                 result: pairedMac,
-                catalogResult: .failure(RemotePairingHTTPError.pairingRevoked("Pair this iPhone again to browse this Paired Mac"))
+                catalogResult: .failure(
+                    RemotePairingHTTPError.pairingRevoked("Pair this iPhone again to browse this Paired Mac"))
             ),
             store: store
         )
@@ -630,7 +646,9 @@ struct RemoteClientPairingModelTests {
             session: session,
             primarySurface: .structuredActivityFeed,
             transcript: "",
-            activityItems: [SessionActivityItem(kind: .status, text: "IBM Bob Session ready. Send a prompt to start IBM Bob.")]
+            activityItems: [
+                SessionActivityItem(kind: .status, text: "IBM Bob Session ready. Send a prompt to start IBM Bob.")
+            ]
         )
         let store = UserDefaultsPairedMacStore(defaults: defaults)
         try store.savePairedMacs([pairedMac])
@@ -758,7 +776,7 @@ struct RemoteClientPairingModelTests {
             terminalRows: 12,
             activityItems: [
                 SessionActivityItem(kind: .status, text: "Codex shared Session stream connected"),
-                SessionActivityItem(kind: .message, text: "You: Ship it")
+                SessionActivityItem(kind: .message, text: "You: Ship it"),
             ]
         )
         let store = UserDefaultsPairedMacStore(defaults: defaults)
@@ -825,7 +843,7 @@ struct RemoteClientPairingModelTests {
             transcript: "Codex shared Session stream connected\nApproval Request: deploy --prod",
             activityItems: [
                 SessionActivityItem(kind: .status, text: "Codex shared Session stream connected"),
-                SessionActivityItem(kind: .approvalRequest, text: "Approval Request: deploy --prod")
+                SessionActivityItem(kind: .approvalRequest, text: "Approval Request: deploy --prod"),
             ],
             approvalRequests: [approvalRequest]
         )
@@ -856,14 +874,17 @@ struct RemoteClientPairingModelTests {
 
         #expect(client.requestLog.contains("respondToApprovalRequest"))
         #expect(model.focusedSessionScreen?.approvalRequests.first?.state == .approved)
-        #expect(model.focusedSessionScreen?.activityItems.map(\.text) == [
-            "Codex shared Session stream connected",
-            "Approval Request: deploy --prod",
-            "Approved: deploy --prod"
-        ])
+        #expect(
+            model.focusedSessionScreen?.activityItems.map(\.text) == [
+                "Codex shared Session stream connected",
+                "Approval Request: deploy --prod",
+                "Approved: deploy --prod",
+            ])
     }
 
-    @Test func sendingStructuredPromptToFocusedRemotePiSessionUsesGenericSessionInputRouteAndUpdatesFocusedScreen() async throws {
+    @Test func sendingStructuredPromptToFocusedRemotePiSessionUsesGenericSessionInputRouteAndUpdatesFocusedScreen()
+        async throws
+    {
         let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
@@ -917,7 +938,7 @@ struct RemoteClientPairingModelTests {
             activityItems: [
                 SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"),
                 SessionActivityItem(kind: .message, text: "You: deploy"),
-                SessionActivityItem(kind: .message, text: "Pi: Remote deploy")
+                SessionActivityItem(kind: .message, text: "Pi: Remote deploy"),
             ]
         )
         let store = UserDefaultsPairedMacStore(defaults: defaults)
@@ -985,7 +1006,7 @@ struct RemoteClientPairingModelTests {
             transcript: "Pi shared Session stream connected\nApproval Request: Deploy to production?",
             activityItems: [
                 SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"),
-                SessionActivityItem(kind: .approvalRequest, text: "Approval Request: Deploy to production?")
+                SessionActivityItem(kind: .approvalRequest, text: "Approval Request: Deploy to production?"),
             ],
             approvalRequests: [approvalRequest]
         )
@@ -1016,11 +1037,12 @@ struct RemoteClientPairingModelTests {
 
         #expect(client.requestLog.contains("respondToApprovalRequest"))
         #expect(model.focusedSessionScreen?.approvalRequests.first?.state == .approved)
-        #expect(model.focusedSessionScreen?.activityItems.map(\.text) == [
-            "Pi shared Session stream connected",
-            "Approval Request: Deploy to production?",
-            "Approved: Deploy to production?"
-        ])
+        #expect(
+            model.focusedSessionScreen?.activityItems.map(\.text) == [
+                "Pi shared Session stream connected",
+                "Approval Request: Deploy to production?",
+                "Approved: Deploy to production?",
+            ])
     }
 
     @Test func controllerCanRespondToFocusedRemotePiExtensionDialogAndKeepStructuredState() async throws {
@@ -1102,7 +1124,9 @@ struct RemoteClientPairingModelTests {
             transcript: "> deploy\nDeployment approved",
             terminalColumns: 44,
             terminalRows: 12,
-            activityItems: initialScreen.activityItems + [SessionActivityItem(kind: .message, text: "Pi: Deployment approved")],
+            activityItems: initialScreen.activityItems + [
+                SessionActivityItem(kind: .message, text: "Pi: Deployment approved")
+            ],
             extensionUI: SessionExtensionUIState(
                 title: "Pi Demo",
                 notifications: [SessionExtensionUINotification(kind: .info, message: "Editor prefilled")],
@@ -1178,9 +1202,12 @@ struct RemoteClientPairingModelTests {
 
         do {
             try await model.respondToFocusedRemoteSessionExtensionDialog(dialog.id, response: .confirmed(true))
-            Issue.record("Expected responding to a remote Pi Extension UI dialog as a Viewer to require taking Controller first")
+            Issue.record(
+                "Expected responding to a remote Pi Extension UI dialog as a Viewer to require taking Controller first")
         } catch {
-            #expect(error.localizedDescription == "Take Controller on this iPhone before responding to Extension UI dialogs")
+            #expect(
+                error.localizedDescription == "Take Controller on this iPhone before responding to Extension UI dialogs"
+            )
         }
     }
 
@@ -1214,7 +1241,7 @@ struct RemoteClientPairingModelTests {
             transcript: "Codex shared Session stream connected\nApproval Request: deploy --prod",
             activityItems: [
                 SessionActivityItem(kind: .status, text: "Codex shared Session stream connected"),
-                SessionActivityItem(kind: .approvalRequest, text: "Approval Request: deploy --prod")
+                SessionActivityItem(kind: .approvalRequest, text: "Approval Request: deploy --prod"),
             ],
             approvalRequests: [approvalRequest]
         )
@@ -1231,7 +1258,8 @@ struct RemoteClientPairingModelTests {
             try await model.respondToFocusedRemoteSessionApprovalRequest(approvalRequest.id, decision: .deny)
             Issue.record("Expected responding to an Approval Request as a Viewer to require taking Controller first")
         } catch {
-            #expect(error.localizedDescription == "Take Controller on this iPhone before responding to Approval Requests")
+            #expect(
+                error.localizedDescription == "Take Controller on this iPhone before responding to Approval Requests")
         }
     }
 
@@ -1277,10 +1305,11 @@ struct RemoteClientPairingModelTests {
         await Task.yield()
 
         #expect(model.focusedSessionScreen == screen)
-        #expect(client.requestLog == [
-            "observeSessionScreen",
-            "fetchSessionScreen"
-        ])
+        #expect(
+            client.requestLog == [
+                "observeSessionScreen",
+                "fetchSessionScreen",
+            ])
     }
 
     @Test func focusRemoteSessionFallsBackToFetchedScreenWhenObservationStartupStalls() async throws {
@@ -1331,7 +1360,7 @@ struct RemoteClientPairingModelTests {
             await model.focusRemoteSession(sessionID: session.id)
         }
 
-        for _ in 0 ..< 20 {
+        for _ in 0..<20 {
             if model.focusedSessionScreen == screen {
                 break
             }
@@ -1339,10 +1368,11 @@ struct RemoteClientPairingModelTests {
         }
 
         #expect(model.focusedSessionScreen == screen)
-        #expect(client.requestLog == [
-            "observeSessionScreen",
-            "fetchSessionScreen"
-        ])
+        #expect(
+            client.requestLog == [
+                "observeSessionScreen",
+                "fetchSessionScreen",
+            ])
 
         await observationStartGate.open()
         await focusTask.value
@@ -1387,7 +1417,7 @@ struct RemoteClientPairingModelTests {
             activityItems: [
                 SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"),
                 SessionActivityItem(kind: .message, text: "You: list files"),
-                SessionActivityItem(kind: .message, text: "Pi: Done")
+                SessionActivityItem(kind: .message, text: "Pi: Done"),
             ]
         )
         let store = UserDefaultsPairedMacStore(defaults: defaults)
@@ -1411,7 +1441,7 @@ struct RemoteClientPairingModelTests {
             await model.focusRemoteSession(sessionID: session.id)
         }
 
-        for _ in 0 ..< 20 {
+        for _ in 0..<20 {
             if model.focusedSessionScreen == initialScreen {
                 break
             }
@@ -1419,17 +1449,18 @@ struct RemoteClientPairingModelTests {
         }
 
         #expect(model.focusedSessionScreen == initialScreen)
-        #expect(client.requestLog == [
-            "observeSessionScreen",
-            "fetchSessionScreen"
-        ])
+        #expect(
+            client.requestLog == [
+                "observeSessionScreen",
+                "fetchSessionScreen",
+            ])
 
         try await Task.sleep(nanoseconds: 1_100_000_000)
         await observationStartGate.open()
         await focusTask.value
         await client.emitObservedScreen(updatedScreen)
 
-        for _ in 0 ..< 20 {
+        for _ in 0..<20 {
             if model.focusedSessionScreen == updatedScreen {
                 break
             }
@@ -1437,10 +1468,11 @@ struct RemoteClientPairingModelTests {
         }
 
         #expect(model.focusedSessionScreen == updatedScreen)
-        #expect(client.requestLog == [
-            "observeSessionScreen",
-            "fetchSessionScreen"
-        ])
+        #expect(
+            client.requestLog == [
+                "observeSessionScreen",
+                "fetchSessionScreen",
+            ])
     }
 
     @Test func workspaceBrowsePresentationStaysStableDuringTranscriptOnlyFocusedSessionUpdates() async throws {
@@ -1480,11 +1512,13 @@ struct RemoteClientPairingModelTests {
         let catalog = RemoteWorkspaceCatalog(
             workspaceGroups: [group],
             recentNavigation: [
-                NavigationItem(target: .workspace(alphaWorkspace.id), title: alphaWorkspace.name, subtitle: alphaWorkspace.folderPath)
+                NavigationItem(
+                    target: .workspace(alphaWorkspace.id), title: alphaWorkspace.name,
+                    subtitle: alphaWorkspace.folderPath)
             ],
             workspaceOverviews: [
                 WorkspaceOverview(workspace: alphaWorkspace, providerCards: []),
-                WorkspaceOverview(workspace: zuluWorkspace, providerCards: [])
+                WorkspaceOverview(workspace: zuluWorkspace, providerCards: []),
             ]
         )
         let initialScreen = SessionScreen(session: session, transcript: "Claude ready")
@@ -1504,11 +1538,12 @@ struct RemoteClientPairingModelTests {
         await model.refreshActivePairedMacCatalog()
         await model.focusRemoteSession(sessionID: session.id, workspaceID: session.workspaceID)
 
-        for _ in 0 ..< 20 where model.focusedSessionScreen != initialScreen {
+        for _ in 0..<20 where model.focusedSessionScreen != initialScreen {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
 
-        let initialPresentation = try #require(model.workspaceBrowsePresentation(showingGroupsOnly: false, selectedGroupID: nil))
+        let initialPresentation = try #require(
+            model.workspaceBrowsePresentation(showingGroupsOnly: false, selectedGroupID: nil))
         #expect(initialPresentation.workspaceOverviews.map(\.workspace.id) == [zuluWorkspace.id, alphaWorkspace.id])
 
         @MainActor
@@ -1526,16 +1561,19 @@ struct RemoteClientPairingModelTests {
         }
 
         await client.emitObservedScreen(updatedScreen)
-        for _ in 0 ..< 20 where model.focusedSessionScreen != updatedScreen {
+        for _ in 0..<20 where model.focusedSessionScreen != updatedScreen {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
         try await Task.sleep(nanoseconds: 50_000_000)
 
         #expect(presentationChanged.changed == false)
-        #expect(model.workspaceBrowsePresentation(showingGroupsOnly: false, selectedGroupID: nil) == initialPresentation)
+        #expect(
+            model.workspaceBrowsePresentation(showingGroupsOnly: false, selectedGroupID: nil) == initialPresentation)
     }
 
-    @Test func loadOlderFocusedPiStructuredSessionHistoryPrependsPersistedRowsWithoutDisturbingLiveTailState() async throws {
+    @Test func loadOlderFocusedPiStructuredSessionHistoryPrependsPersistedRowsWithoutDisturbingLiveTailState()
+        async throws
+    {
         let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
@@ -1599,24 +1637,29 @@ struct RemoteClientPairingModelTests {
         await model.refreshActivePairedMacCatalog()
         await model.focusRemoteSession(sessionID: session.id, workspaceID: session.workspaceID)
 
-        for _ in 0 ..< 20 where model.focusedSessionScreen != screen {
+        for _ in 0..<20 where model.focusedSessionScreen != screen {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
 
         #expect(model.canLoadOlderFocusedStructuredSessionHistory)
         #expect(model.focusedStructuredSessionPresentation?.feed.activityRows.map(\.text) == [liveActivity.text])
         #expect(model.focusedStructuredSessionPresentation?.feed.pendingApprovalRequests == [approvalRequest])
-        #expect(model.focusedStructuredSessionPresentation?.feed.thinkingIndicator == StructuredSessionThinkingIndicator(text: "Thinking"))
+        #expect(
+            model.focusedStructuredSessionPresentation?.feed.thinkingIndicator
+                == StructuredSessionThinkingIndicator(text: "Thinking"))
 
         await model.loadOlderFocusedStructuredSessionHistory()
 
         #expect(model.canLoadOlderFocusedStructuredSessionHistory == false)
-        #expect(model.focusedStructuredSessionPresentation?.feed.activityRows.map(\.text) == [
-            olderActivity.text,
-            liveActivity.text
-        ])
+        #expect(
+            model.focusedStructuredSessionPresentation?.feed.activityRows.map(\.text) == [
+                olderActivity.text,
+                liveActivity.text,
+            ])
         #expect(model.focusedStructuredSessionPresentation?.feed.pendingApprovalRequests == [approvalRequest])
-        #expect(model.focusedStructuredSessionPresentation?.feed.thinkingIndicator == StructuredSessionThinkingIndicator(text: "Thinking"))
+        #expect(
+            model.focusedStructuredSessionPresentation?.feed.thinkingIndicator
+                == StructuredSessionThinkingIndicator(text: "Thinking"))
         #expect(client.structuredHistoryPageRequests.map(\.sessionID) == [session.id])
     }
 
@@ -1691,26 +1734,30 @@ struct RemoteClientPairingModelTests {
         await model.refreshActivePairedMacCatalog()
         await model.focusRemoteSession(sessionID: session.id, workspaceID: session.workspaceID)
 
-        for _ in 0 ..< 20 where model.focusedSessionScreen != initialScreen {
+        for _ in 0..<20 where model.focusedSessionScreen != initialScreen {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
 
         await client.emitObservedScreen(recoveredLiveScreen)
-        for _ in 0 ..< 20 where model.focusedStructuredSessionPresentation?.feed.activityRows.map(\.text) != [
+        for _ in 0..<20
+        where model.focusedStructuredSessionPresentation?.feed.activityRows.map(\.text) != [
             droppedActivity.text,
             previousTailActivity.text,
-            latestActivity.text
+            latestActivity.text,
         ] {
             try await Task.sleep(nanoseconds: 50_000_000)
         }
 
-        #expect(model.focusedStructuredSessionPresentation?.feed.activityRows.map(\.text) == [
-            droppedActivity.text,
-            previousTailActivity.text,
-            latestActivity.text
-        ])
+        #expect(
+            model.focusedStructuredSessionPresentation?.feed.activityRows.map(\.text) == [
+                droppedActivity.text,
+                previousTailActivity.text,
+                latestActivity.text,
+            ])
         #expect(model.focusedStructuredSessionPresentation?.feed.pendingApprovalRequests.isEmpty == true)
-        #expect(model.focusedStructuredSessionPresentation?.feed.thinkingIndicator == StructuredSessionThinkingIndicator(text: "Thinking…"))
+        #expect(
+            model.focusedStructuredSessionPresentation?.feed.thinkingIndicator
+                == StructuredSessionThinkingIndicator(text: "Thinking…"))
         #expect(client.structuredHistoryPageRequests.map(\.sessionID) == [session.id])
     }
 
@@ -1773,7 +1820,7 @@ struct RemoteClientPairingModelTests {
         await model.refreshActivePairedMacCatalog()
         await model.focusRemoteSession(sessionID: session.id, workspaceID: session.workspaceID)
 
-        for _ in 0 ..< 20 where model.focusedSessionScreen != initialScreen {
+        for _ in 0..<20 where model.focusedSessionScreen != initialScreen {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
 
@@ -1795,7 +1842,7 @@ struct RemoteClientPairingModelTests {
         }
 
         await client.emitObservedScreen(updatedScreen)
-        for _ in 0 ..< 20 where model.focusedSessionScreen != updatedScreen {
+        for _ in 0..<20 where model.focusedSessionScreen != updatedScreen {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
         try await Task.sleep(nanoseconds: 50_000_000)
@@ -1865,7 +1912,7 @@ struct RemoteClientPairingModelTests {
         await model.refreshActivePairedMacCatalog()
         await model.focusRemoteSession(sessionID: session.id, workspaceID: session.workspaceID)
 
-        for _ in 0 ..< 20 where model.focusedSessionScreen != initialScreen {
+        for _ in 0..<20 where model.focusedSessionScreen != initialScreen {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
 
@@ -1888,15 +1935,16 @@ struct RemoteClientPairingModelTests {
         }
 
         await client.emitObservedScreen(updatedScreen)
-        for _ in 0 ..< 20 where model.focusedSessionScreen != updatedScreen {
+        for _ in 0..<20 where model.focusedSessionScreen != updatedScreen {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
         try await Task.sleep(nanoseconds: 50_000_000)
 
-        #expect(model.focusedStructuredSessionPresentation?.feed.activityRows.map(\.text) == [
-            initialActivity.text,
-            appendedActivity.text
-        ])
+        #expect(
+            model.focusedStructuredSessionPresentation?.feed.activityRows.map(\.text) == [
+                initialActivity.text,
+                appendedActivity.text,
+            ])
         #expect(chromeChanged.changed == false)
         #expect(model.focusedStructuredSessionChromePresentation == initialChrome)
     }
@@ -1972,7 +2020,7 @@ struct RemoteClientPairingModelTests {
         await model.refreshActivePairedMacCatalog()
         await model.focusRemoteSession(sessionID: session.id, workspaceID: session.workspaceID)
 
-        for _ in 0 ..< 20 where model.focusedSessionScreen != initialScreen {
+        for _ in 0..<20 where model.focusedSessionScreen != initialScreen {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
 
@@ -1994,7 +2042,7 @@ struct RemoteClientPairingModelTests {
         }
 
         await client.emitObservedScreen(updatedScreen)
-        for _ in 0 ..< 20 where model.focusedSessionScreen != updatedScreen {
+        for _ in 0..<20 where model.focusedSessionScreen != updatedScreen {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
         try await Task.sleep(nanoseconds: 50_000_000)
@@ -2064,7 +2112,7 @@ struct RemoteClientPairingModelTests {
         await model.refreshActivePairedMacCatalog()
         await model.focusRemoteSession(sessionID: session.id, workspaceID: session.workspaceID)
 
-        for _ in 0 ..< 20 where model.focusedSessionScreen != initialScreen {
+        for _ in 0..<20 where model.focusedSessionScreen != initialScreen {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
 
@@ -2086,7 +2134,7 @@ struct RemoteClientPairingModelTests {
         }
 
         await client.emitObservedScreen(updatedScreen)
-        for _ in 0 ..< 20 where model.focusedSessionScreen != updatedScreen {
+        for _ in 0..<20 where model.focusedSessionScreen != updatedScreen {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
         try await Task.sleep(nanoseconds: 50_000_000)
@@ -2117,7 +2165,9 @@ struct RemoteClientPairingModelTests {
         )
         let catalog = RemoteWorkspaceCatalog(
             workspaceGroups: [group],
-            recentNavigation: [NavigationItem(target: .workspace(workspace.id), title: workspace.name, subtitle: workspace.folderPath)],
+            recentNavigation: [
+                NavigationItem(target: .workspace(workspace.id), title: workspace.name, subtitle: workspace.folderPath)
+            ],
             workspaceOverviews: [WorkspaceOverview(workspace: workspace, providerCards: [])]
         )
         let store = UserDefaultsPairedMacStore(defaults: defaults)
@@ -2132,7 +2182,8 @@ struct RemoteClientPairingModelTests {
         let model = RemoteClientPairingModel(client: client, store: store)
 
         await model.refreshActivePairedMacCatalog()
-        let initialPresentation = try #require(model.workspaceBrowsePresentation(showingGroupsOnly: false, selectedGroupID: nil))
+        let initialPresentation = try #require(
+            model.workspaceBrowsePresentation(showingGroupsOnly: false, selectedGroupID: nil))
 
         @MainActor
         final class ObservationChangeState {
@@ -2152,7 +2203,8 @@ struct RemoteClientPairingModelTests {
         try await Task.sleep(nanoseconds: 50_000_000)
 
         #expect(presentationChanged.changed == false)
-        #expect(model.workspaceBrowsePresentation(showingGroupsOnly: false, selectedGroupID: nil) == initialPresentation)
+        #expect(
+            model.workspaceBrowsePresentation(showingGroupsOnly: false, selectedGroupID: nil) == initialPresentation)
     }
 
     @Test func focusedSessionWorkspaceLocationStaysStableDuringUnrelatedCatalogRefreshes() async throws {
@@ -2204,19 +2256,25 @@ struct RemoteClientPairingModelTests {
         )
         let initialCatalog = RemoteWorkspaceCatalog(
             workspaceGroups: [group],
-            recentNavigation: [NavigationItem(target: .workspace(otherWorkspace.id), title: otherWorkspace.name, subtitle: otherWorkspace.folderPath)],
+            recentNavigation: [
+                NavigationItem(
+                    target: .workspace(otherWorkspace.id), title: otherWorkspace.name,
+                    subtitle: otherWorkspace.folderPath)
+            ],
             workspaceOverviews: [
                 WorkspaceOverview(
                     workspace: workspace,
                     providerCards: [],
                     remoteTarget: remoteTarget
                 ),
-                WorkspaceOverview(workspace: otherWorkspace, providerCards: [])
+                WorkspaceOverview(workspace: otherWorkspace, providerCards: []),
             ]
         )
         let refreshedCatalog = RemoteWorkspaceCatalog(
             workspaceGroups: [group],
-            recentNavigation: [NavigationItem(target: .workspace(workspace.id), title: workspace.name, subtitle: "/srv/api")],
+            recentNavigation: [
+                NavigationItem(target: .workspace(workspace.id), title: workspace.name, subtitle: "/srv/api")
+            ],
             workspaceOverviews: [
                 WorkspaceOverview(
                     workspace: workspace,
@@ -2229,10 +2287,11 @@ struct RemoteClientPairingModelTests {
                         WorkspaceProviderCard(
                             provider: Provider(id: .pi),
                             health: ProviderHealthSummary(state: .available, summary: "Pi available"),
-                            defaultSession: ProviderDefaultSessionSummary(state: .notCreated, summary: "Not created", actionTitle: "Start")
+                            defaultSession: ProviderDefaultSessionSummary(
+                                state: .notCreated, summary: "Not created", actionTitle: "Start")
                         )
                     ]
-                )
+                ),
             ]
         )
         let screen = SessionScreen(session: session, transcript: "Claude ready")
@@ -2250,7 +2309,7 @@ struct RemoteClientPairingModelTests {
         await model.refreshActivePairedMacCatalog()
         await model.focusRemoteSession(sessionID: session.id, workspaceID: session.workspaceID)
 
-        for _ in 0 ..< 20 where model.focusedSessionScreen != screen {
+        for _ in 0..<20 where model.focusedSessionScreen != screen {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
 
@@ -2313,7 +2372,8 @@ struct RemoteClientPairingModelTests {
         let model = RemoteClientPairingModel(client: client, store: store)
 
         await model.focusRemoteSession(sessionID: session.id)
-        await client.disconnectObservedSession(RemotePairingHTTPError.pairingRevoked("Pair this iPhone again to browse this Paired Mac"))
+        await client.disconnectObservedSession(
+            RemotePairingHTTPError.pairingRevoked("Pair this iPhone again to browse this Paired Mac"))
         await Task.yield()
 
         #expect(model.pairedMacs.isEmpty)
@@ -2358,7 +2418,7 @@ struct RemoteClientPairingModelTests {
             result: pairedMac,
             sessionScreenResults: [
                 .success(initialScreen),
-                .success(recoveredScreen)
+                .success(recoveredScreen),
             ]
         )
         let model = RemoteClientPairingModel(client: client, store: store)
@@ -2369,7 +2429,8 @@ struct RemoteClientPairingModelTests {
 
         #expect(model.focusedSessionScreen == initialScreen)
         #expect(model.focusedSessionIsStale)
-        #expect(model.focusedSessionErrorMessage == "The operation couldn’t be completed. (NSURLErrorDomain error -1004.)")
+        #expect(
+            model.focusedSessionErrorMessage == "The operation couldn’t be completed. (NSURLErrorDomain error -1004.)")
 
         try await Task.sleep(nanoseconds: 1_100_000_000)
         await Task.yield()
@@ -2377,12 +2438,13 @@ struct RemoteClientPairingModelTests {
         #expect(model.focusedSessionScreen == recoveredScreen)
         #expect(model.focusedSessionIsStale == false)
         #expect(model.focusedSessionErrorMessage == nil)
-        #expect(client.requestLog == [
-            "observeSessionScreen",
-            "fetchSessionScreen",
-            "observeSessionScreen",
-            "fetchSessionScreen"
-        ])
+        #expect(
+            client.requestLog == [
+                "observeSessionScreen",
+                "fetchSessionScreen",
+                "observeSessionScreen",
+                "fetchSessionScreen",
+            ])
     }
 
     @Test func focusRemoteSessionPrefersObservedInitialScreenOverRedundantFetchSnapshot() async throws {
@@ -2416,10 +2478,12 @@ struct RemoteClientPairingModelTests {
             session: session,
             primarySurface: .structuredActivityFeed,
             controller: .mac,
-            transcript: "Pi shared Session stream connected\nsubagent reviewer: Review the latest diff and summarize issues",
+            transcript:
+                "Pi shared Session stream connected\nsubagent reviewer: Review the latest diff and summarize issues",
             activityItems: [
                 SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"),
-                SessionActivityItem(kind: .message, text: "subagent reviewer: Review the latest diff and summarize issues")
+                SessionActivityItem(
+                    kind: .message, text: "subagent reviewer: Review the latest diff and summarize issues"),
             ]
         )
         let staleFetchedScreen = SessionScreen(
@@ -2428,7 +2492,9 @@ struct RemoteClientPairingModelTests {
             controller: .mac,
             transcript: "Delete the shallow leftover terminal renderer copy and make one seam authoritative",
             activityItems: [
-                SessionActivityItem(kind: .message, text: "Pi: Delete the shallow leftover terminal renderer copy and make one seam authoritative")
+                SessionActivityItem(
+                    kind: .message,
+                    text: "Pi: Delete the shallow leftover terminal renderer copy and make one seam authoritative")
             ]
         )
         let store = UserDefaultsPairedMacStore(defaults: defaults)
@@ -2450,7 +2516,7 @@ struct RemoteClientPairingModelTests {
             await model.focusRemoteSession(sessionID: session.id)
         }
 
-        for _ in 0 ..< 20 {
+        for _ in 0..<20 {
             if model.focusedSessionScreen == observedScreen {
                 break
             }
@@ -2467,7 +2533,9 @@ struct RemoteClientPairingModelTests {
         #expect(client.requestLog == ["observeSessionScreen"])
     }
 
-    @Test func reconnectedFocusedRemotePiSessionKeepsStaleStructuredContentAndRequiresExplicitControllerRetake() async throws {
+    @Test func reconnectedFocusedRemotePiSessionKeepsStaleStructuredContentAndRequiresExplicitControllerRetake()
+        async throws
+    {
         let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
@@ -2527,7 +2595,7 @@ struct RemoteClientPairingModelTests {
             sessionScreen: initialScreen,
             sessionScreenResults: [
                 .success(initialScreen),
-                .success(recoveredViewerScreen)
+                .success(recoveredViewerScreen),
             ],
             takeSessionControlResult: .success(controlledScreen)
         )
@@ -2552,7 +2620,9 @@ struct RemoteClientPairingModelTests {
 
         do {
             try await model.sendInputToFocusedRemoteSession("deploy")
-            Issue.record("Expected reconnected remote Pi Session to require taking Controller again before sending a structured prompt")
+            Issue.record(
+                "Expected reconnected remote Pi Session to require taking Controller again before sending a structured prompt"
+            )
         } catch {
             #expect(error.localizedDescription == "Take Controller on this iPhone before sending Session input")
         }
@@ -2655,10 +2725,11 @@ struct RemoteClientPairingModelTests {
         #expect(model.focusedSessionID == nil)
         #expect(model.focusedSessionScreen == nil)
         #expect(model.focusedSessionIsStale == false)
-        #expect(client.requestLog == [
-            "observeSessionScreen",
-            "fetchSessionScreen"
-        ])
+        #expect(
+            client.requestLog == [
+                "observeSessionScreen",
+                "fetchSessionScreen",
+            ])
     }
 
     @Test func unauthorizedObservedSessionDisconnectStopsReconnectAndShowsPairingRecovery() async throws {
@@ -2699,7 +2770,8 @@ struct RemoteClientPairingModelTests {
         let model = RemoteClientPairingModel(client: client, store: store)
 
         await model.focusRemoteSession(sessionID: session.id)
-        await client.disconnectObservedSession(RemotePairingHTTPError.pairingRevoked("Pair this iPhone again to browse this Paired Mac"))
+        await client.disconnectObservedSession(
+            RemotePairingHTTPError.pairingRevoked("Pair this iPhone again to browse this Paired Mac"))
         await Task.yield()
         try await Task.sleep(nanoseconds: 1_100_000_000)
         await Task.yield()
@@ -2709,10 +2781,11 @@ struct RemoteClientPairingModelTests {
         #expect(model.focusedSessionID == nil)
         #expect(model.focusedSessionScreen == nil)
         #expect(model.pairingRecoveryMessage == "Pair this iPhone again to browse this Paired Mac")
-        #expect(client.requestLog == [
-            "observeSessionScreen",
-            "fetchSessionScreen"
-        ])
+        #expect(
+            client.requestLog == [
+                "observeSessionScreen",
+                "fetchSessionScreen",
+            ])
     }
 
     @Test func preservesStaleFocusedRemoteSessionScreenWhenRefreshFails() async throws {
@@ -2750,7 +2823,7 @@ struct RemoteClientPairingModelTests {
             result: pairedMac,
             sessionScreenResults: [
                 .success(screen),
-                .failure(NSError(domain: NSURLErrorDomain, code: NSURLErrorCannotConnectToHost))
+                .failure(NSError(domain: NSURLErrorDomain, code: NSURLErrorCannotConnectToHost)),
             ]
         )
         let model = RemoteClientPairingModel(client: client, store: store)
@@ -2760,7 +2833,8 @@ struct RemoteClientPairingModelTests {
 
         #expect(model.focusedSessionScreen == screen)
         #expect(model.focusedSessionIsStale)
-        #expect(model.focusedSessionErrorMessage == "The operation couldn’t be completed. (NSURLErrorDomain error -1004.)")
+        #expect(
+            model.focusedSessionErrorMessage == "The operation couldn’t be completed. (NSURLErrorDomain error -1004.)")
     }
 
     @Test func recoversFocusedRemoteSessionFromStaleSnapshotAfterRefreshSucceeds() async throws {
@@ -2800,7 +2874,7 @@ struct RemoteClientPairingModelTests {
             sessionScreenResults: [
                 .success(initialScreen),
                 .failure(NSError(domain: NSURLErrorDomain, code: NSURLErrorCannotConnectToHost)),
-                .success(recoveredScreen)
+                .success(recoveredScreen),
             ]
         )
         let model = RemoteClientPairingModel(client: client, store: store)
@@ -2852,7 +2926,8 @@ struct RemoteClientPairingModelTests {
         let client = StubRemotePairingClient(
             result: pairedMac,
             sessionScreen: screen,
-            takeSessionControlResult: .failure(RemotePairingHTTPError.pairingRevoked("Pair this iPhone again to browse this Paired Mac"))
+            takeSessionControlResult: .failure(
+                RemotePairingHTTPError.pairingRevoked("Pair this iPhone again to browse this Paired Mac"))
         )
         let model = RemoteClientPairingModel(client: client, store: store)
 
@@ -2909,10 +2984,11 @@ struct RemoteClientPairingModelTests {
         try await model.takeFocusedRemoteSessionControl(columns: 44, rows: 12)
         await model.updateFocusedRemoteSessionViewport(columns: 60, rows: 20)
 
-        #expect(client.takeSessionControlRequests == [
-            .init(sessionID: session.id, columns: 44, rows: 12),
-            .init(sessionID: session.id, columns: 60, rows: 20)
-        ])
+        #expect(
+            client.takeSessionControlRequests == [
+                .init(sessionID: session.id, columns: 44, rows: 12),
+                .init(sessionID: session.id, columns: 60, rows: 20),
+            ])
         #expect(model.focusedSessionScreen?.terminalColumns == 60)
         #expect(model.focusedSessionScreen?.terminalRows == 20)
     }
@@ -3051,7 +3127,9 @@ struct RemoteClientPairingModelTests {
 
         do {
             try await model.sendTextToFocusedRemoteSession("still viewer")
-            Issue.record("Expected returning from background to keep this iPhone in Viewer mode until Controller is explicitly retaken")
+            Issue.record(
+                "Expected returning from background to keep this iPhone in Viewer mode until Controller is explicitly retaken"
+            )
         } catch {
             #expect(error.localizedDescription == "Take Controller on this iPhone before sending terminal input")
         }
@@ -3109,7 +3187,8 @@ struct RemoteClientPairingModelTests {
 
         do {
             try await model.sendTextToFocusedRemoteSession("still remote")
-            Issue.record("Expected Mac reclaim to leave this iPhone attached as a Viewer until Controller is explicitly retaken")
+            Issue.record(
+                "Expected Mac reclaim to leave this iPhone attached as a Viewer until Controller is explicitly retaken")
         } catch {
             #expect(error.localizedDescription == "Take Controller on this iPhone before sending terminal input")
         }
@@ -3461,7 +3540,8 @@ struct RemoteClientPairingModelTests {
         )
 
         await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
-        let launchedSession = try await model.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+        let launchedSession = try await model.launchOrResumeDefaultSession(
+            workspaceID: workspace.id, providerID: .claude)
         await Task.yield()
 
         #expect(launchedSession.id == session.id)
@@ -3508,8 +3588,10 @@ struct RemoteClientPairingModelTests {
                             provider: Provider(id: .codex),
                             health: ProviderHealthSummary(state: .available, summary: "Codex available"),
                             capabilities: ProviderCapabilities(
-                                launchDefaultSession: ProviderCapability(action: .launchDefaultSession, isSupported: true, isEnabled: true),
-                                createNamedSession: ProviderCapability(action: .createNamedSession, isSupported: true, isEnabled: true)
+                                launchDefaultSession: ProviderCapability(
+                                    action: .launchDefaultSession, isSupported: true, isEnabled: true),
+                                createNamedSession: ProviderCapability(
+                                    action: .createNamedSession, isSupported: true, isEnabled: true)
                             ),
                             defaultSession: ProviderDefaultSessionSummary(
                                 state: .ready,
@@ -3527,7 +3609,8 @@ struct RemoteClientPairingModelTests {
             provider: Provider(id: .codex),
             health: ProviderHealthSummary(state: .available, summary: "Codex available"),
             capabilities: ProviderCapabilities(
-                launchDefaultSession: ProviderCapability(action: .launchDefaultSession, isSupported: true, isEnabled: true),
+                launchDefaultSession: ProviderCapability(
+                    action: .launchDefaultSession, isSupported: true, isEnabled: true),
                 createNamedSession: ProviderCapability(action: .createNamedSession, isSupported: true, isEnabled: true)
             ),
             defaultSession: nil,
@@ -3539,7 +3622,8 @@ struct RemoteClientPairingModelTests {
             provider: Provider(id: .codex),
             health: ProviderHealthSummary(state: .available, summary: "Codex available"),
             capabilities: ProviderCapabilities(
-                launchDefaultSession: ProviderCapability(action: .launchDefaultSession, isSupported: true, isEnabled: true),
+                launchDefaultSession: ProviderCapability(
+                    action: .launchDefaultSession, isSupported: true, isEnabled: true),
                 createNamedSession: ProviderCapability(action: .createNamedSession, isSupported: true, isEnabled: true)
             ),
             defaultSession: session,
@@ -3569,7 +3653,8 @@ struct RemoteClientPairingModelTests {
         )
 
         await model.loadProviderDetail(workspaceID: workspace.id, providerID: .codex)
-        let launchedSession = try await model.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .codex)
+        let launchedSession = try await model.launchOrResumeDefaultSession(
+            workspaceID: workspace.id, providerID: .codex)
         await Task.yield()
 
         #expect(launchedSession.id == session.id)
@@ -3581,7 +3666,8 @@ struct RemoteClientPairingModelTests {
         #expect(model.providerDetail(for: workspace.id, providerID: .codex)?.defaultSession?.id == session.id)
     }
 
-    @Test func launchingRemotePiDefaultRemoteSessionRefreshesCatalogProviderDetailAndKeepsViewerByDefault() async throws {
+    @Test func launchingRemotePiDefaultRemoteSessionRefreshesCatalogProviderDetailAndKeepsViewerByDefault() async throws
+    {
         let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
@@ -3620,8 +3706,10 @@ struct RemoteClientPairingModelTests {
                             provider: Provider(id: .pi),
                             health: ProviderHealthSummary(state: .available, summary: "Pi 0.9.0 is available"),
                             capabilities: ProviderCapabilities(
-                                launchDefaultSession: ProviderCapability(action: .launchDefaultSession, isSupported: true, isEnabled: true),
-                                createNamedSession: ProviderCapability(action: .createNamedSession, isSupported: true, isEnabled: true)
+                                launchDefaultSession: ProviderCapability(
+                                    action: .launchDefaultSession, isSupported: true, isEnabled: true),
+                                createNamedSession: ProviderCapability(
+                                    action: .createNamedSession, isSupported: true, isEnabled: true)
                             ),
                             prelaunchPrimarySurface: .structuredActivityFeed,
                             defaultSession: ProviderDefaultSessionSummary(
@@ -3640,7 +3728,8 @@ struct RemoteClientPairingModelTests {
             provider: Provider(id: .pi),
             health: ProviderHealthSummary(state: .available, summary: "Pi 0.9.0 is available"),
             capabilities: ProviderCapabilities(
-                launchDefaultSession: ProviderCapability(action: .launchDefaultSession, isSupported: true, isEnabled: true),
+                launchDefaultSession: ProviderCapability(
+                    action: .launchDefaultSession, isSupported: true, isEnabled: true),
                 createNamedSession: ProviderCapability(action: .createNamedSession, isSupported: true, isEnabled: true)
             ),
             prelaunchPrimarySurface: .structuredActivityFeed,
@@ -3653,7 +3742,8 @@ struct RemoteClientPairingModelTests {
             provider: Provider(id: .pi),
             health: ProviderHealthSummary(state: .available, summary: "Pi 0.9.0 is available"),
             capabilities: ProviderCapabilities(
-                launchDefaultSession: ProviderCapability(action: .launchDefaultSession, isSupported: true, isEnabled: true),
+                launchDefaultSession: ProviderCapability(
+                    action: .launchDefaultSession, isSupported: true, isEnabled: true),
                 createNamedSession: ProviderCapability(action: .createNamedSession, isSupported: true, isEnabled: true)
             ),
             prelaunchPrimarySurface: .structuredActivityFeed,
@@ -3684,7 +3774,8 @@ struct RemoteClientPairingModelTests {
         )
 
         await model.loadProviderDetail(workspaceID: workspace.id, providerID: ProviderID.pi)
-        let launchedSession = try await model.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: ProviderID.pi)
+        let launchedSession = try await model.launchOrResumeDefaultSession(
+            workspaceID: workspace.id, providerID: ProviderID.pi)
         await Task.yield()
 
         #expect(launchedSession.id == session.id)
@@ -3736,8 +3827,10 @@ struct RemoteClientPairingModelTests {
                             provider: Provider(id: .pi),
                             health: ProviderHealthSummary(state: .available, summary: "Pi 0.9.0 is available"),
                             capabilities: ProviderCapabilities(
-                                launchDefaultSession: ProviderCapability(action: .launchDefaultSession, isSupported: true, isEnabled: true),
-                                createNamedSession: ProviderCapability(action: .createNamedSession, isSupported: true, isEnabled: true)
+                                launchDefaultSession: ProviderCapability(
+                                    action: .launchDefaultSession, isSupported: true, isEnabled: true),
+                                createNamedSession: ProviderCapability(
+                                    action: .createNamedSession, isSupported: true, isEnabled: true)
                             ),
                             prelaunchPrimarySurface: .structuredActivityFeed,
                             defaultSession: ProviderDefaultSessionSummary(
@@ -3756,7 +3849,8 @@ struct RemoteClientPairingModelTests {
             provider: Provider(id: .pi),
             health: ProviderHealthSummary(state: .available, summary: "Pi 0.9.0 is available"),
             capabilities: ProviderCapabilities(
-                launchDefaultSession: ProviderCapability(action: .launchDefaultSession, isSupported: true, isEnabled: true),
+                launchDefaultSession: ProviderCapability(
+                    action: .launchDefaultSession, isSupported: true, isEnabled: true),
                 createNamedSession: ProviderCapability(action: .createNamedSession, isSupported: true, isEnabled: true)
             ),
             prelaunchPrimarySurface: .structuredActivityFeed,
@@ -3794,7 +3888,10 @@ struct RemoteClientPairingModelTests {
         #expect(model.focusedSessionScreen == createdScreen)
         #expect(model.focusedSessionSurfaceSupport == SessionSurfaceSupport.supported)
         #expect(model.focusedSessionIsController == false)
-        #expect(model.providerDetail(for: workspace.id, providerID: ProviderID.pi)?.alternateSessions.map { $0.id } == [session.id])
+        #expect(
+            model.providerDetail(for: workspace.id, providerID: ProviderID.pi)?.alternateSessions.map { $0.id } == [
+                session.id
+            ])
     }
 
     @Test func creatingNamedRemoteSessionRefreshesCatalogProviderDetailAndFocusesSession() async throws {
@@ -3876,7 +3973,10 @@ struct RemoteClientPairingModelTests {
         #expect(model.catalog == refreshedCatalog)
         #expect(model.focusedSessionID == session.id)
         #expect(model.focusedSessionScreen?.session.id == session.id)
-        #expect(model.providerDetail(for: workspace.id, providerID: .claude)?.alternateSessions.map { $0.id } == [session.id])
+        #expect(
+            model.providerDetail(for: workspace.id, providerID: .claude)?.alternateSessions.map { $0.id } == [
+                session.id
+            ])
     }
 
     @Test func creatingCodexNamedRemoteSessionRefreshesCatalogProviderDetailAndFocusesSession() async throws {
@@ -3918,8 +4018,10 @@ struct RemoteClientPairingModelTests {
                             provider: Provider(id: .codex),
                             health: ProviderHealthSummary(state: .available, summary: "Codex available"),
                             capabilities: ProviderCapabilities(
-                                launchDefaultSession: ProviderCapability(action: .launchDefaultSession, isSupported: true, isEnabled: true),
-                                createNamedSession: ProviderCapability(action: .createNamedSession, isSupported: true, isEnabled: true)
+                                launchDefaultSession: ProviderCapability(
+                                    action: .launchDefaultSession, isSupported: true, isEnabled: true),
+                                createNamedSession: ProviderCapability(
+                                    action: .createNamedSession, isSupported: true, isEnabled: true)
                             ),
                             defaultSession: ProviderDefaultSessionSummary(
                                 state: .notCreated,
@@ -3937,7 +4039,8 @@ struct RemoteClientPairingModelTests {
             provider: Provider(id: .codex),
             health: ProviderHealthSummary(state: .available, summary: "Codex available"),
             capabilities: ProviderCapabilities(
-                launchDefaultSession: ProviderCapability(action: .launchDefaultSession, isSupported: true, isEnabled: true),
+                launchDefaultSession: ProviderCapability(
+                    action: .launchDefaultSession, isSupported: true, isEnabled: true),
                 createNamedSession: ProviderCapability(action: .createNamedSession, isSupported: true, isEnabled: true)
             ),
             defaultSession: nil,
@@ -3976,7 +4079,9 @@ struct RemoteClientPairingModelTests {
         #expect(model.focusedSessionScreen?.controller == .mac)
         #expect(model.focusedSessionSurfaceSupport == .supported)
         #expect(model.focusedSessionIsController == false)
-        #expect(model.providerDetail(for: workspace.id, providerID: .codex)?.alternateSessions.map { $0.id } == [session.id])
+        #expect(
+            model.providerDetail(for: workspace.id, providerID: .codex)?.alternateSessions.map { $0.id } == [session.id]
+        )
     }
 
     @Test func creatingNamedRemoteSessionPropagatesRequestFailuresWithoutOpeningSession() async throws {
@@ -4004,7 +4109,8 @@ struct RemoteClientPairingModelTests {
 
         let client = StubRemotePairingClient(
             result: pairedMac,
-            createdNamedSessionResult: .failure(RemotePairingHTTPError.requestFailed("The connection to this Paired Mac was lost."))
+            createdNamedSessionResult: .failure(
+                RemotePairingHTTPError.requestFailed("The connection to this Paired Mac was lost."))
         )
         let model = RemoteClientPairingModel(client: client, store: store)
 
@@ -4045,7 +4151,8 @@ struct RemoteClientPairingModelTests {
 
         let client = StubRemotePairingClient(
             result: pairedMac,
-            createdNamedSessionResult: .failure(RemotePairingHTTPError.pairingRevoked("Pair this iPhone again to browse this Paired Mac"))
+            createdNamedSessionResult: .failure(
+                RemotePairingHTTPError.pairingRevoked("Pair this iPhone again to browse this Paired Mac"))
         )
         let model = RemoteClientPairingModel(client: client, store: store)
 
@@ -4087,7 +4194,8 @@ struct RemoteClientPairingModelTests {
 
         let client = StubRemotePairingClient(
             result: pairedMac,
-            createdNamedSessionResult: .failure(RemotePairingHTTPError.requestFailed("The connection to this Paired Mac was lost."))
+            createdNamedSessionResult: .failure(
+                RemotePairingHTTPError.requestFailed("The connection to this Paired Mac was lost."))
         )
         let model = RemoteClientPairingModel(client: client, store: store)
         model.pairedMacAvailability[pairedMac.id] = .unavailablePairedMac
@@ -4128,7 +4236,8 @@ struct RemoteClientPairingModelTests {
 
         let client = StubRemotePairingClient(
             result: pairedMac,
-            createdNamedSessionResult: .failure(RemotePairingHTTPError.requestFailed("The connection to this Paired Mac was lost."))
+            createdNamedSessionResult: .failure(
+                RemotePairingHTTPError.requestFailed("The connection to this Paired Mac was lost."))
         )
         let model = RemoteClientPairingModel(client: client, store: store)
 
@@ -4217,7 +4326,8 @@ struct RemoteClientPairingModelTests {
             result: pairedMac,
             catalog: catalog,
             providerDetail: detail,
-            createdNamedSessionResult: .failure(RemotePairingHTTPError.requestFailed("The connection to this Paired Mac was lost."))
+            createdNamedSessionResult: .failure(
+                RemotePairingHTTPError.requestFailed("The connection to this Paired Mac was lost."))
         )
         let model = RemoteClientPairingModel(client: client, store: store)
         model.pairedMacAvailability[pairedMac.id] = .available
@@ -4294,7 +4404,8 @@ struct RemoteClientPairingModelTests {
             result: pairedMac,
             catalog: catalog,
             providerDetail: detail,
-            createdNamedSessionResult: .failure(RemotePairingHTTPError.requestFailed("The connection to this Paired Mac was lost."))
+            createdNamedSessionResult: .failure(
+                RemotePairingHTTPError.requestFailed("The connection to this Paired Mac was lost."))
         )
         let model = RemoteClientPairingModel(client: client, store: store)
         model.pairedMacAvailability[pairedMac.id] = .available
@@ -4397,12 +4508,13 @@ struct RemoteClientPairingModelTests {
 
         #expect(await capture.value()?.id == session.id)
         #expect(model.focusedSessionID == session.id)
-        #expect(client.requestLog == [
-            "createNamedSession",
-            "observeSessionScreen",
-            "fetchSessionScreen",
-            "fetchCatalog"
-        ])
+        #expect(
+            client.requestLog == [
+                "createNamedSession",
+                "observeSessionScreen",
+                "fetchSessionScreen",
+                "fetchCatalog",
+            ])
 
         await catalogGate.open()
 
@@ -4410,13 +4522,14 @@ struct RemoteClientPairingModelTests {
             await Task.yield()
         }
 
-        #expect(client.requestLog == [
-            "createNamedSession",
-            "observeSessionScreen",
-            "fetchSessionScreen",
-            "fetchCatalog",
-            "fetchProviderDetail"
-        ])
+        #expect(
+            client.requestLog == [
+                "createNamedSession",
+                "observeSessionScreen",
+                "fetchSessionScreen",
+                "fetchCatalog",
+                "fetchProviderDetail",
+            ])
 
         await providerDetailGate.open()
         try await createTask.value
@@ -4426,7 +4539,8 @@ struct RemoteClientPairingModelTests {
         #expect(model.focusedSessionScreen?.session.id == session.id)
         #expect(model.focusedSessionScreen?.controller == .mac)
         #expect(model.focusedSessionIsController == false)
-        #expect(model.providerDetail(for: workspace.id, providerID: .claude)?.alternateSessions.map(\.id) == [session.id])
+        #expect(
+            model.providerDetail(for: workspace.id, providerID: .claude)?.alternateSessions.map(\.id) == [session.id])
     }
 
     @Test func stoppingRemoteSessionRefreshesProviderDetailAndFocusedScreen() async throws {
@@ -4491,7 +4605,10 @@ struct RemoteClientPairingModelTests {
                 sessionScreen: SessionScreen(session: readySession, transcript: "Claude ready"),
                 sessionScreenResults: [
                     .success(SessionScreen(session: readySession, transcript: "Claude ready")),
-                    .success(SessionScreen(session: stoppedSession, transcript: "Session exited. Relaunch to start a new live runtime."))
+                    .success(
+                        SessionScreen(
+                            session: stoppedSession, transcript: "Session exited. Relaunch to start a new live runtime."
+                        )),
                 ],
                 stoppedSession: stoppedSession
             ),
@@ -4500,7 +4617,8 @@ struct RemoteClientPairingModelTests {
 
         await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
         await model.focusRemoteSession(sessionID: readySession.id)
-        let result = try await model.stopSession(sessionID: readySession.id, workspaceID: workspace.id, providerID: .claude)
+        let result = try await model.stopSession(
+            sessionID: readySession.id, workspaceID: workspace.id, providerID: .claude)
         await Task.yield()
 
         #expect(result.state == .exited)
@@ -4597,12 +4715,13 @@ struct RemoteClientPairingModelTests {
         #expect(model.providerDetail(for: workspace.id, providerID: .claude)?.defaultSession == nil)
         #expect(model.catalog?.workspaceOverviews.first?.providerCards.first?.defaultSession.state == .notCreated)
         #expect(model.catalog?.workspaceOverviews.first?.providerCards.first?.defaultSession.actionTitle == "Launch")
-        #expect(client.requestLog == [
-            "fetchProviderDetail",
-            "deleteSessionRecord",
-            "fetchCatalog",
-            "fetchProviderDetail"
-        ])
+        #expect(
+            client.requestLog == [
+                "fetchProviderDetail",
+                "deleteSessionRecord",
+                "fetchCatalog",
+                "fetchProviderDetail",
+            ])
     }
 
     @Test func deletingFailedRemoteSessionRecordRefreshesCatalogAndProviderDetail() async throws {
@@ -4659,7 +4778,8 @@ struct RemoteClientPairingModelTests {
                     providerCards: [
                         WorkspaceProviderCard(
                             provider: Provider(id: .claude),
-                            health: ProviderHealthSummary(state: .unavailable, summary: "Claude is unavailable on this Workspace."),
+                            health: ProviderHealthSummary(
+                                state: .unavailable, summary: "Claude is unavailable on this Workspace."),
                             defaultSession: ProviderDefaultSessionSummary(
                                 state: .notCreated,
                                 summary: "No default session yet",
@@ -4694,12 +4814,13 @@ struct RemoteClientPairingModelTests {
         #expect(model.focusedSessionID == nil)
         #expect(model.catalog == refreshedCatalog)
         #expect(model.providerDetail(for: workspace.id, providerID: .claude)?.failedSessions.isEmpty == true)
-        #expect(client.requestLog == [
-            "fetchProviderDetail",
-            "deleteSessionRecord",
-            "fetchCatalog",
-            "fetchProviderDetail"
-        ])
+        #expect(
+            client.requestLog == [
+                "fetchProviderDetail",
+                "deleteSessionRecord",
+                "fetchCatalog",
+                "fetchProviderDetail",
+            ])
     }
 
     @Test func creatingFailedNamedRemoteSessionStillFocusesInspectableSessionRecord() async throws {
@@ -4763,7 +4884,10 @@ struct RemoteClientPairingModelTests {
         #expect(createdSession.state == .failed)
         #expect(model.focusedSessionID == failedSession.id)
         #expect(model.focusedSessionScreen?.session.state == .failed)
-        #expect(model.providerDetail(for: workspace.id, providerID: .claude)?.failedSessions.map { $0.id } == [failedSession.id])
+        #expect(
+            model.providerDetail(for: workspace.id, providerID: .claude)?.failedSessions.map { $0.id } == [
+                failedSession.id
+            ])
     }
 
     @Test func creatingFailedRemotePiNamedSessionStillFocusesInspectableStructuredViewer() async throws {
@@ -4803,7 +4927,8 @@ struct RemoteClientPairingModelTests {
                 summary: "Pi 0.9.0 is available"
             ),
             capabilities: ProviderCapabilities(
-                launchDefaultSession: ProviderCapability(action: .launchDefaultSession, isSupported: true, isEnabled: true),
+                launchDefaultSession: ProviderCapability(
+                    action: .launchDefaultSession, isSupported: true, isEnabled: true),
                 createNamedSession: ProviderCapability(action: .createNamedSession, isSupported: true, isEnabled: true)
             ),
             prelaunchPrimarySurface: .structuredActivityFeed,
@@ -4841,7 +4966,10 @@ struct RemoteClientPairingModelTests {
         #expect(model.focusedSessionScreen?.activityItems.map(\.kind) == [SessionActivityItem.Kind.error])
         #expect(model.focusedSessionSurfaceSupport == SessionSurfaceSupport.supported)
         #expect(model.focusedSessionIsController == false)
-        #expect(model.providerDetail(for: workspace.id, providerID: ProviderID.pi)?.failedSessions.map { $0.id } == [failedSession.id])
+        #expect(
+            model.providerDetail(for: workspace.id, providerID: ProviderID.pi)?.failedSessions.map { $0.id } == [
+                failedSession.id
+            ])
     }
 
     @Test func creatingFailedStructuredNamedRemoteSessionStillFocusesInspectableSessionRecord() async throws {
@@ -4915,7 +5043,10 @@ struct RemoteClientPairingModelTests {
         #expect(model.focusedSessionScreen?.activityItems.map(\.kind) == [.error])
         #expect(model.focusedSessionSurfaceSupport == .supported)
         #expect(model.focusedSessionIsController == false)
-        #expect(model.providerDetail(for: workspace.id, providerID: .codex)?.failedSessions.map { $0.id } == [failedSession.id])
+        #expect(
+            model.providerDetail(for: workspace.id, providerID: .codex)?.failedSessions.map { $0.id } == [
+                failedSession.id
+            ])
     }
 
     @Test func relaunchingRemoteSessionRecordRefreshesProviderDetailAndFocusesSession() async throws {
@@ -4986,7 +5117,8 @@ struct RemoteClientPairingModelTests {
         )
 
         await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
-        let result = try await model.launchOrResumeSession(sessionID: exitedSession.id, workspaceID: workspace.id, providerID: .claude)
+        let result = try await model.launchOrResumeSession(
+            sessionID: exitedSession.id, workspaceID: workspace.id, providerID: .claude)
         await Task.yield()
 
         #expect(result.state == .ready)
@@ -5046,7 +5178,8 @@ struct RemoteClientPairingModelTests {
         let initialDetail = ProviderDetail(
             workspace: workspace,
             provider: Provider(id: .codex),
-            health: ProviderHealthSummary(state: .unavailable, summary: "Codex executable was not found in the service search paths."),
+            health: ProviderHealthSummary(
+                state: .unavailable, summary: "Codex executable was not found in the service search paths."),
             defaultSession: nil,
             alternateSessions: [],
             failedSessions: [failedSession]
@@ -5210,7 +5343,8 @@ struct RemoteClientPairingModelTests {
             provider: Provider(id: .claude),
             health: health,
             capabilities: ProviderCapabilities(
-                launchDefaultSession: ProviderCapability(action: .launchDefaultSession, isSupported: true, isEnabled: true),
+                launchDefaultSession: ProviderCapability(
+                    action: .launchDefaultSession, isSupported: true, isEnabled: true),
                 createNamedSession: ProviderCapability(action: .createNamedSession, isSupported: true, isEnabled: true)
             ),
             defaultSession: nil,
@@ -5247,8 +5381,12 @@ struct RemoteClientPairingModelTests {
             provider: Provider(id: .claude),
             health: health,
             capabilities: ProviderCapabilities(
-                launchDefaultSession: ProviderCapability(action: .launchDefaultSession, isSupported: true, isEnabled: false, disabledReason: "Claude blocked by Host Validation"),
-                createNamedSession: ProviderCapability(action: .createNamedSession, isSupported: true, isEnabled: false, disabledReason: "Claude blocked by Host Validation")
+                launchDefaultSession: ProviderCapability(
+                    action: .launchDefaultSession, isSupported: true, isEnabled: false,
+                    disabledReason: "Claude blocked by Host Validation"),
+                createNamedSession: ProviderCapability(
+                    action: .createNamedSession, isSupported: true, isEnabled: false,
+                    disabledReason: "Claude blocked by Host Validation")
             ),
             defaultSession: nil,
             alternateSessions: [],
@@ -5310,8 +5448,12 @@ struct RemoteClientPairingModelTests {
             provider: Provider(id: .claude),
             health: health,
             capabilities: ProviderCapabilities(
-                launchDefaultSession: ProviderCapability(action: .launchDefaultSession, isSupported: true, isEnabled: false, disabledReason: "Claude is unavailable on this Workspace."),
-                createNamedSession: ProviderCapability(action: .createNamedSession, isSupported: true, isEnabled: false, disabledReason: "Claude is unavailable on this Workspace.")
+                launchDefaultSession: ProviderCapability(
+                    action: .launchDefaultSession, isSupported: true, isEnabled: false,
+                    disabledReason: "Claude is unavailable on this Workspace."),
+                createNamedSession: ProviderCapability(
+                    action: .createNamedSession, isSupported: true, isEnabled: false,
+                    disabledReason: "Claude is unavailable on this Workspace.")
             ),
             defaultSession: nil,
             alternateSessions: [readySession, exitedSession, interruptedSession],
@@ -5505,7 +5647,8 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
     private(set) var takeSessionControlRequests: [TakeSessionControlRequest] = []
     private(set) var releaseSessionControlRequests: [UUID] = []
     private(set) var requestLog: [String] = []
-    private(set) var structuredHistoryPageRequests: [(sessionID: UUID, pageSize: Int, cursor: StructuredSessionHistoryCursor?)] = []
+    private(set) var structuredHistoryPageRequests:
+        [(sessionID: UUID, pageSize: Int, cursor: StructuredSessionHistoryCursor?)] = []
     private(set) var catalogFetchStarted = false
     private(set) var providerDetailFetchStarted = false
     private(set) var sessionScreenFetchStarted = false
@@ -5628,7 +5771,9 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
         return catalog
     }
 
-    func fetchProviderDetail(for pairedMac: PairedMac, workspaceID: UUID, providerID: ProviderID) async throws -> ProviderDetail {
+    func fetchProviderDetail(for pairedMac: PairedMac, workspaceID: UUID, providerID: ProviderID) async throws
+        -> ProviderDetail
+    {
         requestLog.append("fetchProviderDetail")
         providerDetailFetchStarted = true
         await providerDetailFetchGate?.wait()
@@ -5640,12 +5785,15 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
         return providerDetail
     }
 
-    func launchOrResumeDefaultSession(for pairedMac: PairedMac, workspaceID: UUID, providerID: ProviderID) async throws -> Session {
+    func launchOrResumeDefaultSession(for pairedMac: PairedMac, workspaceID: UUID, providerID: ProviderID) async throws
+        -> Session
+    {
         requestLog.append("launchOrResumeDefaultSession")
         return launchedDefaultSession
     }
 
-    func createNamedSession(for pairedMac: PairedMac, workspaceID: UUID, providerID: ProviderID) async throws -> Session {
+    func createNamedSession(for pairedMac: PairedMac, workspaceID: UUID, providerID: ProviderID) async throws -> Session
+    {
         requestLog.append("createNamedSession")
 
         if let createdNamedSessionResult {
@@ -5695,10 +5843,13 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
             return structuredHistoryPages.removeFirst()
         }
 
-        return StructuredSessionHistoryPage(sessionID: sessionID, activityItems: [], providerEvents: [], nextCursor: nil)
+        return StructuredSessionHistoryPage(
+            sessionID: sessionID, activityItems: [], providerEvents: [], nextCursor: nil)
     }
 
-    func takeSessionControl(for pairedMac: PairedMac, sessionID: UUID, columns: Int, rows: Int) async throws -> SessionScreen {
+    func takeSessionControl(for pairedMac: PairedMac, sessionID: UUID, columns: Int, rows: Int) async throws
+        -> SessionScreen
+    {
         takeSessionControlRequests.append(.init(sessionID: sessionID, columns: columns, rows: rows))
 
         if let takeSessionControlResult {
@@ -5780,7 +5931,8 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
             activityItems: defaultSessionScreen.activityItems + [
                 SessionActivityItem(
                     kind: .approvalDecision,
-                    text: "\(decision == .approve ? "Approved" : "Denied"): \(defaultSessionScreen.approvalRequests.first(where: { $0.id == approvalRequestID })?.title ?? "Approval Request")"
+                    text:
+                        "\(decision == .approve ? "Approved" : "Denied"): \(defaultSessionScreen.approvalRequests.first(where: { $0.id == approvalRequestID })?.title ?? "Approval Request")"
                 )
             ],
             approvalRequests: updatedApprovalRequests
@@ -5846,7 +5998,9 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
         )
     }
 
-    func sendSessionInputKey(for pairedMac: PairedMac, sessionID: UUID, key: SessionInputKey) async throws -> SessionScreen {
+    func sendSessionInputKey(for pairedMac: PairedMac, sessionID: UUID, key: SessionInputKey) async throws
+        -> SessionScreen
+    {
         requestLog.append("sendSessionInputKey")
 
         if let observedScreenBeforeSendSessionInputKeyResponse {
@@ -5955,4 +6109,3 @@ private final class TestRemoteSessionScreenObservation: SessionScreenObservation
         onCancel()
     }
 }
-

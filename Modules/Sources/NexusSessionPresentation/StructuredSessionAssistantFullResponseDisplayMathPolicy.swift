@@ -22,7 +22,9 @@ public struct StructuredSessionAssistantFullResponseDisplayMathPolicy: Equatable
     }
 }
 
-public func structuredSessionAssistantFullResponseDisplayMathPolicy() -> StructuredSessionAssistantFullResponseDisplayMathPolicy {
+public func structuredSessionAssistantFullResponseDisplayMathPolicy()
+    -> StructuredSessionAssistantFullResponseDisplayMathPolicy
+{
     StructuredSessionAssistantFullResponseDisplayMathPolicy(
         detectsDoubleDollarDelimiters: true,
         detectsBracketDelimiters: true,
@@ -68,7 +70,8 @@ public func structuredSessionFeedDisplayMathUsesPlainFallback(for text: String) 
 
 public func structuredSessionAssistantFullResponseDisplayMathBlocks(
     in markdown: String,
-    policy: StructuredSessionAssistantFullResponseDisplayMathPolicy = structuredSessionAssistantFullResponseDisplayMathPolicy()
+    policy: StructuredSessionAssistantFullResponseDisplayMathPolicy =
+        structuredSessionAssistantFullResponseDisplayMathPolicy()
 ) -> [StructuredSessionAssistantFullResponseDisplayMathBlock] {
     structuredSessionAssistantFullResponseReaderSegments(in: markdown, policy: policy)
         .compactMap(\.displayMath)
@@ -76,7 +79,8 @@ public func structuredSessionAssistantFullResponseDisplayMathBlocks(
 
 public func structuredSessionAssistantFullResponseReaderSegments(
     in markdown: String,
-    policy: StructuredSessionAssistantFullResponseDisplayMathPolicy = structuredSessionAssistantFullResponseDisplayMathPolicy()
+    policy: StructuredSessionAssistantFullResponseDisplayMathPolicy =
+        structuredSessionAssistantFullResponseDisplayMathPolicy()
 ) -> [StructuredSessionAssistantFullResponseReaderSegment] {
     guard markdown.isEmpty == false else {
         return []
@@ -117,8 +121,9 @@ public func structuredSessionAssistantFullResponseReaderSegments(
         }
 
         if policy.detectsDoubleDollarDelimiters,
-           line.trimmingCharacters(in: .whitespaces) == "$$",
-           displayMathCount < policy.maxDisplayMathBlocksPerDocument {
+            line.trimmingCharacters(in: .whitespaces) == "$$",
+            displayMathCount < policy.maxDisplayMathBlocksPerDocument
+        {
             var latexLines: [String] = []
             var scan = lines.index(after: index)
             var foundClose = false
@@ -149,8 +154,9 @@ public func structuredSessionAssistantFullResponseReaderSegments(
         }
 
         if policy.detectsBracketDelimiters,
-           line.trimmingCharacters(in: .whitespaces) == "\\[",
-           displayMathCount < policy.maxDisplayMathBlocksPerDocument {
+            line.trimmingCharacters(in: .whitespaces) == "\\[",
+            displayMathCount < policy.maxDisplayMathBlocksPerDocument
+        {
             var latexLines: [String] = []
             var scan = lines.index(after: index)
             var foundClose = false

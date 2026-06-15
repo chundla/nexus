@@ -38,7 +38,8 @@ public struct StructuredSessionActivityRow: Identifiable, Equatable {
         self.isDetailTextTruncated = isDetailTextTruncated
         self.emphasis = emphasis
         self.conversationPresentation = conversationPresentation
-        self.showsExpandedSystemCard = showsExpandedSystemCard
+        self.showsExpandedSystemCard =
+            showsExpandedSystemCard
             ?? structuredSessionActivityRowShowsExpandedSystemCard(text: text, detailText: detailText)
     }
 }
@@ -419,11 +420,12 @@ public final class FocusedStructuredSessionChromePresenter {
         // ProviderFacts (tokenUsage), finalOutputDiagnostic, extensionUI, and pure isAgent toggles without
         // row change must not force a new chrome value during dwells.
         if let last = lastStablePresentation,
-           last.session.id == screen.session.id,
-           screen.activityItems == lastSourceActivityItems,
-           screen.isAgentTurnInProgress == lastIsAgent,
-           screen.slashCommands == lastSourceSlashCommands,
-           screen.extensionUI == lastSourceExtensionUI {
+            last.session.id == screen.session.id,
+            screen.activityItems == lastSourceActivityItems,
+            screen.isAgentTurnInProgress == lastIsAgent,
+            screen.slashCommands == lastSourceSlashCommands,
+            screen.extensionUI == lastSourceExtensionUI
+        {
             return last
         }
 
@@ -519,7 +521,8 @@ public final class StructuredSessionFeedPresenter {
 
         let stablePrefixCount = structuredSessionCommonPrefixCount(cachedActivityItems, screen.activityItems)
         if stablePrefixCount == cachedActivityItems.count,
-           screen.activityItems.count > cachedActivityItems.count {
+            screen.activityItems.count > cachedActivityItems.count
+        {
             let appendedItems = Array(screen.activityItems.dropFirst(cachedActivityItems.count))
             let appendedRows = annotateStructuredSessionActivityRows(
                 rowBuilder(appendedItems),
@@ -609,7 +612,9 @@ public final class StructuredSessionFeedPresenter {
         baseRows: [StructuredSessionActivityRow]
     ) -> (rows: [StructuredSessionActivityRow], chunks: [StructuredSessionActivityRowChunk]) {
         let currentActivityItemIDs = Set(screen.activityItems.map(\.id))
-        presentedRowIDByActivityItemID = presentedRowIDByActivityItemID.filter { currentActivityItemIDs.contains($0.key) }
+        presentedRowIDByActivityItemID = presentedRowIDByActivityItemID.filter {
+            currentActivityItemIDs.contains($0.key)
+        }
 
         var liveDraftRow: StructuredSessionActivityRow?
         if structuredSessionAgentTurnFeedSegments(for: screen) != nil {
@@ -625,9 +630,12 @@ public final class StructuredSessionFeedPresenter {
             )
         } else {
             if let liveAssistantDraft,
-               let finalizedItem = screen.activityItems.reversed().first(where: {
-                   $0.kind == .message && structuredSessionDraftMatchesFinalizedMessage(draftText: liveAssistantDraft.text, finalizedText: $0.text)
-               }) {
+                let finalizedItem = screen.activityItems.reversed().first(where: {
+                    $0.kind == .message
+                        && structuredSessionDraftMatchesFinalizedMessage(
+                            draftText: liveAssistantDraft.text, finalizedText: $0.text)
+                })
+            {
                 presentedRowIDByActivityItemID[finalizedItem.id] = liveAssistantDraft.rowID
             }
             self.liveAssistantDraft = nil
@@ -675,7 +683,8 @@ private func structuredSessionChunksByUpdatingLiveDraftRow(
     liveTailChunkSize: Int
 ) -> [StructuredSessionActivityRowChunk] {
     if let lastChunkIndex = chunks.indices.last,
-       let rowIndex = chunks[lastChunkIndex].rows.firstIndex(where: { $0.id == liveDraftRow.id }) {
+        let rowIndex = chunks[lastChunkIndex].rows.firstIndex(where: { $0.id == liveDraftRow.id })
+    {
         var updatedRows = chunks[lastChunkIndex].rows
         updatedRows[rowIndex] = liveDraftRow
         var updatedChunks = chunks
@@ -798,15 +807,17 @@ private func piStructuredSessionLiveAssistantDraftText(from providerEvents: [Ses
 
     for event in providerEvents {
         guard let payload = structuredSessionJSONObject(from: event.rawPayload),
-              let type = structuredSessionTrimmedString(in: payload, keys: ["type"]) else {
+            let type = structuredSessionTrimmedString(in: payload, keys: ["type"])
+        else {
             continue
         }
 
         switch type {
         case "message_update":
             guard let assistantMessageEvent = payload["assistantMessageEvent"] as? [String: Any],
-                  structuredSessionTrimmedString(in: assistantMessageEvent, keys: ["type"]) == "text_delta",
-                  let delta = assistantMessageEvent["delta"] as? String else {
+                structuredSessionTrimmedString(in: assistantMessageEvent, keys: ["type"]) == "text_delta",
+                let delta = assistantMessageEvent["delta"] as? String
+            else {
                 continue
             }
             draft += delta
@@ -814,7 +825,8 @@ private func piStructuredSessionLiveAssistantDraftText(from providerEvents: [Ses
             draft = ""
         case "message_end":
             if let message = payload["message"] as? [String: Any],
-               structuredSessionTrimmedString(in: message, keys: ["role"]) == "assistant" {
+                structuredSessionTrimmedString(in: message, keys: ["role"]) == "assistant"
+            {
                 draft = ""
             }
         default:
@@ -844,17 +856,17 @@ private let structuredSessionMacOSLiveTailActivityRowChunkSize = 16
 
 var structuredSessionDefaultActivityRowChunkSize: Int {
     #if os(macOS)
-    structuredSessionMacOSActivityRowChunkSize
+        structuredSessionMacOSActivityRowChunkSize
     #else
-    structuredSessionActivityRowChunkSize
+        structuredSessionActivityRowChunkSize
     #endif
 }
 
 var structuredSessionDefaultLiveTailActivityRowChunkSize: Int {
     #if os(macOS)
-    structuredSessionMacOSLiveTailActivityRowChunkSize
+        structuredSessionMacOSLiveTailActivityRowChunkSize
     #else
-    structuredSessionLiveTailActivityRowChunkSize
+        structuredSessionLiveTailActivityRowChunkSize
     #endif
 }
 
@@ -876,19 +888,21 @@ func structuredSessionActivityRowChunks(
 
     while startIndex < sealedRowCount {
         let endIndex = startIndex + normalizedChunkSize
-        chunks.append(StructuredSessionActivityRowChunk(
-            id: startIndex,
-            rows: Array(activityRows[startIndex ..< endIndex])
-        ))
+        chunks.append(
+            StructuredSessionActivityRowChunk(
+                id: startIndex,
+                rows: Array(activityRows[startIndex..<endIndex])
+            ))
         startIndex = endIndex
     }
 
     while startIndex < activityRows.count {
         let endIndex = min(startIndex + normalizedLiveTailChunkSize, activityRows.count)
-        chunks.append(StructuredSessionActivityRowChunk(
-            id: startIndex,
-            rows: Array(activityRows[startIndex ..< endIndex])
-        ))
+        chunks.append(
+            StructuredSessionActivityRowChunk(
+                id: startIndex,
+                rows: Array(activityRows[startIndex..<endIndex])
+            ))
         startIndex = endIndex
     }
 
@@ -1001,9 +1015,11 @@ public final class StructuredSessionAutoScrollCoordinator: @unchecked Sendable {
     private var hasScheduledFlush = false
     private var pendingScroll: (() -> Void)?
 
-    public init(schedule: @escaping (@escaping @Sendable () -> Void) -> Void = { work in
-        DispatchQueue.main.async(execute: work)
-    }) {
+    public init(
+        schedule: @escaping (@escaping @Sendable () -> Void) -> Void = { work in
+            DispatchQueue.main.async(execute: work)
+        }
+    ) {
         self.schedule = schedule
     }
 
@@ -1111,21 +1127,24 @@ public func structuredSessionBottomScrollIntent(
 
     if previous.autoScrollTrigger.lastActivityRowID != current.autoScrollTrigger.lastActivityRowID {
         if previous.feedScrollTarget == current.feedScrollTarget,
-           case .activityRow = current.feedScrollTarget {
+            case .activityRow = current.feedScrollTarget
+        {
             return .none
         }
         return .immediate
     }
 
     if previous.autoScrollTrigger.pendingApprovalRequestIDs != current.autoScrollTrigger.pendingApprovalRequestIDs
-        || previous.autoScrollTrigger.pendingDialogIDs != current.autoScrollTrigger.pendingDialogIDs {
+        || previous.autoScrollTrigger.pendingDialogIDs != current.autoScrollTrigger.pendingDialogIDs
+    {
         return .animated
     }
 
     if previous.liveDraftGrowthToken != nil,
-       current.liveDraftGrowthToken != nil,
-       previous.feedScrollTarget == current.feedScrollTarget,
-       previous.liveDraftGrowthToken != current.liveDraftGrowthToken {
+        current.liveDraftGrowthToken != nil,
+        previous.feedScrollTarget == current.feedScrollTarget,
+        previous.liveDraftGrowthToken != current.liveDraftGrowthToken
+    {
         return .draftGrowthCoalesced
     }
 
@@ -1137,7 +1156,8 @@ public func structuredSessionShouldRequestBottomScroll(
     current: StructuredSessionFeedScrollSnapshot,
     isPinnedToBottom: Bool
 ) -> Bool {
-    structuredSessionBottomScrollIntent(previous: previous, current: current, isPinnedToBottom: isPinnedToBottom) != .none
+    structuredSessionBottomScrollIntent(previous: previous, current: current, isPinnedToBottom: isPinnedToBottom)
+        != .none
 }
 
 /// Returns nil when scroll-policy inputs are unchanged — avoids `@State` churn from recomputed snapshots.
@@ -1290,7 +1310,8 @@ public final class StructuredSessionDraftGrowthScrollThrottle: @unchecked Sendab
     public func requestIfDue(_ perform: () -> Void) -> Bool {
         let current = now()
         if let lastPerformedAt,
-           current - lastPerformedAt < minimumInterval {
+            current - lastPerformedAt < minimumInterval
+        {
             return false
         }
         lastPerformedAt = current
@@ -1347,7 +1368,8 @@ public func structuredSessionThinkingIndicator(
     hasPendingApprovalRequests: Bool
 ) -> StructuredSessionThinkingIndicator? {
     guard structuredSessionEffectiveAgentTurnInProgress(for: screen),
-          hasPendingApprovalRequests == false else {
+        hasPendingApprovalRequests == false
+    else {
         return nil
     }
 
@@ -1621,7 +1643,8 @@ private func structuredSessionAssistantMarkdownRenderTexts(
         guard row.conversationPresentation?.isStreaming != true else {
             continue
         }
-        let conversation = row.conversationPresentation
+        let conversation =
+            row.conversationPresentation
             ?? structuredSessionConversationPresentation(for: row, providerDisplayName: providerDisplayName)
         guard case .assistant = conversation.role else {
             continue
@@ -1645,17 +1668,17 @@ private func structuredSessionPrewarmAssistantMarkdownCache(
         return
     }
     #if os(macOS)
-    // Row onAppear hydration owns first paint; bulk prewarm contended with utility parse + main-thread flushes (#225).
-    return
-    #else
-    let renderTexts = structuredSessionAssistantMarkdownRenderTexts(
-        for: rows,
-        providerDisplayName: providerDisplayName
-    )
-    guard renderTexts.isEmpty == false else {
+        // Row onAppear hydration owns first paint; bulk prewarm contended with utility parse + main-thread flushes (#225).
         return
-    }
-    StructuredSessionAssistantMarkdownPrewarmScheduler.schedule(renderTexts: renderTexts)
+    #else
+        let renderTexts = structuredSessionAssistantMarkdownRenderTexts(
+            for: rows,
+            providerDisplayName: providerDisplayName
+        )
+        guard renderTexts.isEmpty == false else {
+            return
+        }
+        StructuredSessionAssistantMarkdownPrewarmScheduler.schedule(renderTexts: renderTexts)
     #endif
 }
 
@@ -1787,7 +1810,8 @@ private func structuredSessionSlashCommandMenuPresentation(
     let prefixMatches = commands.filter { command in
         let normalizedCommand = command.matchText.lowercased()
         if let requiredPrefix = command.suggestionQueryPrefix?.lowercased(),
-           normalizedQuery.hasPrefix(requiredPrefix) == false {
+            normalizedQuery.hasPrefix(requiredPrefix) == false
+        {
             return false
         }
         if normalizedQuery.isEmpty || normalizedCommand.hasPrefix(normalizedQuery) {
@@ -1796,11 +1820,13 @@ private func structuredSessionSlashCommandMenuPresentation(
         return command.acceptsArguments && normalizedQuery.hasPrefix(normalizedCommand + " ")
     }
 
-    let fallbackMatches = prefixMatches.isEmpty
+    let fallbackMatches =
+        prefixMatches.isEmpty
         ? commands.filter { command in
             let normalizedCommand = command.matchText.lowercased()
             if let requiredPrefix = command.suggestionQueryPrefix?.lowercased(),
-               normalizedQuery.hasPrefix(requiredPrefix) == false {
+                normalizedQuery.hasPrefix(requiredPrefix) == false
+            {
                 return false
             }
             return normalizedQuery.isEmpty == false && normalizedCommand.contains(normalizedQuery)
@@ -1824,24 +1850,56 @@ public func structuredSessionSlashCommands(for screen: SessionScreen) -> [Struct
     case .codex:
         return mergeStructuredSessionSlashCommands(
             staticCommands: [
-                StructuredSessionSlashCommand(matchText: "model", displayText: "/model", insertionText: "/model", summary: "Switch models or reasoning effort."),
-                StructuredSessionSlashCommand(matchText: "review", displayText: "/review", insertionText: "/review", summary: "Review your current code changes."),
-                StructuredSessionSlashCommand(matchText: "status", displayText: "/status", insertionText: "/status", summary: "Show the current model, approvals, and token usage."),
-                StructuredSessionSlashCommand(matchText: "new", displayText: "/new", insertionText: "/new", summary: "Start a new chat."),
-                StructuredSessionSlashCommand(matchText: "resume", displayText: "/resume", insertionText: "/resume", summary: "Resume a saved chat."),
-                StructuredSessionSlashCommand(matchText: "fork", displayText: "/fork", insertionText: "/fork", summary: "Fork the current chat."),
-                StructuredSessionSlashCommand(matchText: "init", displayText: "/init", insertionText: "/init", summary: "Create an AGENTS.md file with project guidance."),
-                StructuredSessionSlashCommand(matchText: "compact", displayText: "/compact", insertionText: "/compact", summary: "Summarize the conversation to free context."),
-                StructuredSessionSlashCommand(matchText: "goal", displayText: "/goal <objective>", insertionText: "/goal ", summary: "Set or view the goal for a long-running task.", acceptsArguments: true),
-                StructuredSessionSlashCommand(matchText: "side", displayText: "/side", insertionText: "/side", summary: "Start a side conversation in an ephemeral fork."),
-                StructuredSessionSlashCommand(matchText: "copy", displayText: "/copy", insertionText: "/copy", summary: "Copy the latest agent response as Markdown."),
-                StructuredSessionSlashCommand(matchText: "diff", displayText: "/diff", insertionText: "/diff", summary: "Show the current git diff, including untracked files."),
-                StructuredSessionSlashCommand(matchText: "mcp", displayText: "/mcp", insertionText: "/mcp", summary: "List configured MCP tools."),
-                StructuredSessionSlashCommand(matchText: "ide", displayText: "/ide [on|off|status]", insertionText: "/ide ", summary: "Control IDE context sharing.", acceptsArguments: true),
-                StructuredSessionSlashCommand(matchText: "keymap", displayText: "/keymap", insertionText: "/keymap", summary: "Remap TUI shortcuts."),
-                StructuredSessionSlashCommand(matchText: "plugins", displayText: "/plugins", insertionText: "/plugins", summary: "Browse and manage plugins."),
-                StructuredSessionSlashCommand(matchText: "clear", displayText: "/clear", insertionText: "/clear", summary: "Clear the terminal and start a new chat."),
-                StructuredSessionSlashCommand(matchText: "quit", displayText: "/quit", insertionText: "/quit", summary: "Exit Codex.")
+                StructuredSessionSlashCommand(
+                    matchText: "model", displayText: "/model", insertionText: "/model",
+                    summary: "Switch models or reasoning effort."),
+                StructuredSessionSlashCommand(
+                    matchText: "review", displayText: "/review", insertionText: "/review",
+                    summary: "Review your current code changes."),
+                StructuredSessionSlashCommand(
+                    matchText: "status", displayText: "/status", insertionText: "/status",
+                    summary: "Show the current model, approvals, and token usage."),
+                StructuredSessionSlashCommand(
+                    matchText: "new", displayText: "/new", insertionText: "/new", summary: "Start a new chat."),
+                StructuredSessionSlashCommand(
+                    matchText: "resume", displayText: "/resume", insertionText: "/resume",
+                    summary: "Resume a saved chat."),
+                StructuredSessionSlashCommand(
+                    matchText: "fork", displayText: "/fork", insertionText: "/fork", summary: "Fork the current chat."),
+                StructuredSessionSlashCommand(
+                    matchText: "init", displayText: "/init", insertionText: "/init",
+                    summary: "Create an AGENTS.md file with project guidance."),
+                StructuredSessionSlashCommand(
+                    matchText: "compact", displayText: "/compact", insertionText: "/compact",
+                    summary: "Summarize the conversation to free context."),
+                StructuredSessionSlashCommand(
+                    matchText: "goal", displayText: "/goal <objective>", insertionText: "/goal ",
+                    summary: "Set or view the goal for a long-running task.", acceptsArguments: true),
+                StructuredSessionSlashCommand(
+                    matchText: "side", displayText: "/side", insertionText: "/side",
+                    summary: "Start a side conversation in an ephemeral fork."),
+                StructuredSessionSlashCommand(
+                    matchText: "copy", displayText: "/copy", insertionText: "/copy",
+                    summary: "Copy the latest agent response as Markdown."),
+                StructuredSessionSlashCommand(
+                    matchText: "diff", displayText: "/diff", insertionText: "/diff",
+                    summary: "Show the current git diff, including untracked files."),
+                StructuredSessionSlashCommand(
+                    matchText: "mcp", displayText: "/mcp", insertionText: "/mcp", summary: "List configured MCP tools."),
+                StructuredSessionSlashCommand(
+                    matchText: "ide", displayText: "/ide [on|off|status]", insertionText: "/ide ",
+                    summary: "Control IDE context sharing.", acceptsArguments: true),
+                StructuredSessionSlashCommand(
+                    matchText: "keymap", displayText: "/keymap", insertionText: "/keymap",
+                    summary: "Remap TUI shortcuts."),
+                StructuredSessionSlashCommand(
+                    matchText: "plugins", displayText: "/plugins", insertionText: "/plugins",
+                    summary: "Browse and manage plugins."),
+                StructuredSessionSlashCommand(
+                    matchText: "clear", displayText: "/clear", insertionText: "/clear",
+                    summary: "Clear the terminal and start a new chat."),
+                StructuredSessionSlashCommand(
+                    matchText: "quit", displayText: "/quit", insertionText: "/quit", summary: "Exit Codex."),
             ],
             liveCommands: (screen.slashCommands ?? []).map(structuredSessionSlashCommand(from:))
         )
@@ -1942,26 +2000,52 @@ public func structuredSessionSlashCommands(for screen: SessionScreen) -> [Struct
                     displayText: "/follow-up-mode <mode>",
                     insertionText: "/follow-up-mode ",
                     summary: "Set how Pi delivers queued follow-up messages."
-                )
+                ),
             ],
             liveCommands: (screen.slashCommands ?? []).map(structuredSessionSlashCommand(from:))
         )
     case .ibmBob:
         return mergeStructuredSessionSlashCommands(
             staticCommands: [
-                StructuredSessionSlashCommand(matchText: "help", displayText: "/help", insertionText: "/help", summary: "Show available Bob commands."),
-                StructuredSessionSlashCommand(matchText: "editor", displayText: "/editor", insertionText: "/editor", summary: "Configure your preferred editor."),
-                StructuredSessionSlashCommand(matchText: "memory show", displayText: "/memory show", insertionText: "/memory show", summary: "View the current memory context."),
-                StructuredSessionSlashCommand(matchText: "memory refresh", displayText: "/memory refresh", insertionText: "/memory refresh", summary: "Reload memory and context files."),
-                StructuredSessionSlashCommand(matchText: "restore", displayText: "/restore <checkpoint_file>", insertionText: "/restore ", summary: "Restore a checkpoint.", acceptsArguments: true),
-                StructuredSessionSlashCommand(matchText: "ide enable", displayText: "/ide enable", insertionText: "/ide enable", summary: "Enable IDE context integration."),
-                StructuredSessionSlashCommand(matchText: "ide disable", displayText: "/ide disable", insertionText: "/ide disable", summary: "Disable IDE context integration."),
-                StructuredSessionSlashCommand(matchText: "ide status", displayText: "/ide status", insertionText: "/ide status", summary: "Show IDE integration status."),
-                StructuredSessionSlashCommand(matchText: "ide install", displayText: "/ide install", insertionText: "/ide install", summary: "Install the Bob IDE companion extension."),
-                StructuredSessionSlashCommand(matchText: "mode plan", displayText: "/mode plan", insertionText: "/mode plan", summary: "Switch to Plan mode."),
-                StructuredSessionSlashCommand(matchText: "mode code", displayText: "/mode code", insertionText: "/mode code", summary: "Switch to Code mode."),
-                StructuredSessionSlashCommand(matchText: "mode advanced", displayText: "/mode advanced", insertionText: "/mode advanced", summary: "Switch to Advanced mode."),
-                StructuredSessionSlashCommand(matchText: "mode ask", displayText: "/mode ask", insertionText: "/mode ask", summary: "Switch to Ask mode.")
+                StructuredSessionSlashCommand(
+                    matchText: "help", displayText: "/help", insertionText: "/help",
+                    summary: "Show available Bob commands."),
+                StructuredSessionSlashCommand(
+                    matchText: "editor", displayText: "/editor", insertionText: "/editor",
+                    summary: "Configure your preferred editor."),
+                StructuredSessionSlashCommand(
+                    matchText: "memory show", displayText: "/memory show", insertionText: "/memory show",
+                    summary: "View the current memory context."),
+                StructuredSessionSlashCommand(
+                    matchText: "memory refresh", displayText: "/memory refresh", insertionText: "/memory refresh",
+                    summary: "Reload memory and context files."),
+                StructuredSessionSlashCommand(
+                    matchText: "restore", displayText: "/restore <checkpoint_file>", insertionText: "/restore ",
+                    summary: "Restore a checkpoint.", acceptsArguments: true),
+                StructuredSessionSlashCommand(
+                    matchText: "ide enable", displayText: "/ide enable", insertionText: "/ide enable",
+                    summary: "Enable IDE context integration."),
+                StructuredSessionSlashCommand(
+                    matchText: "ide disable", displayText: "/ide disable", insertionText: "/ide disable",
+                    summary: "Disable IDE context integration."),
+                StructuredSessionSlashCommand(
+                    matchText: "ide status", displayText: "/ide status", insertionText: "/ide status",
+                    summary: "Show IDE integration status."),
+                StructuredSessionSlashCommand(
+                    matchText: "ide install", displayText: "/ide install", insertionText: "/ide install",
+                    summary: "Install the Bob IDE companion extension."),
+                StructuredSessionSlashCommand(
+                    matchText: "mode plan", displayText: "/mode plan", insertionText: "/mode plan",
+                    summary: "Switch to Plan mode."),
+                StructuredSessionSlashCommand(
+                    matchText: "mode code", displayText: "/mode code", insertionText: "/mode code",
+                    summary: "Switch to Code mode."),
+                StructuredSessionSlashCommand(
+                    matchText: "mode advanced", displayText: "/mode advanced", insertionText: "/mode advanced",
+                    summary: "Switch to Advanced mode."),
+                StructuredSessionSlashCommand(
+                    matchText: "mode ask", displayText: "/mode ask", insertionText: "/mode ask",
+                    summary: "Switch to Ask mode."),
             ],
             liveCommands: (screen.slashCommands ?? []).map(structuredSessionSlashCommand(from:))
         )
@@ -1994,7 +2078,8 @@ private func structuredSessionSlashCommand(from command: SessionSlashCommand) ->
     }
 
     let trimmedDescription = command.description?.trimmingCharacters(in: .whitespacesAndNewlines)
-    let summary = (trimmedDescription?.isEmpty == false ? trimmedDescription : nil)
+    let summary =
+        (trimmedDescription?.isEmpty == false ? trimmedDescription : nil)
         ?? structuredSessionSlashCommandSummaryFallback(for: command)
 
     let resolvedDisplayName = command.displayName ?? command.name
@@ -2063,7 +2148,9 @@ private func resolvedStructuredSessionTokenUsage(
     )
 }
 
-private func structuredSessionTokenUsage(from providerEvents: [SessionProviderEvent]) -> StructuredSessionResolvedTokenUsage? {
+private func structuredSessionTokenUsage(from providerEvents: [SessionProviderEvent])
+    -> StructuredSessionResolvedTokenUsage?
+{
     for event in providerEvents.reversed() {
         if let usage = structuredSessionTokenUsage(from: event) {
             return usage
@@ -2074,13 +2161,16 @@ private func structuredSessionTokenUsage(from providerEvents: [SessionProviderEv
 
 private func structuredSessionTokenUsage(from event: SessionProviderEvent) -> StructuredSessionResolvedTokenUsage? {
     guard let payload = structuredSessionJSONObject(from: event.rawPayload),
-          let usage = structuredSessionTokenUsage(from: payload) else {
+        let usage = structuredSessionTokenUsage(from: payload)
+    else {
         return nil
     }
     return usage
 }
 
-private func structuredSessionTokenUsage(from activityItems: [SessionActivityItem]) -> StructuredSessionResolvedTokenUsage? {
+private func structuredSessionTokenUsage(from activityItems: [SessionActivityItem])
+    -> StructuredSessionResolvedTokenUsage?
+{
     for item in activityItems.reversed() {
         if let usage = structuredSessionTokenUsage(from: item) {
             return usage
@@ -2094,7 +2184,8 @@ private func structuredSessionTokenUsage(from item: SessionActivityItem) -> Stru
         return usage
     }
     if let detailText = item.detailText,
-       let usage = structuredSessionTokenUsage(from: detailText) {
+        let usage = structuredSessionTokenUsage(from: detailText)
+    {
         return usage
     }
     return nil
@@ -2107,10 +2198,14 @@ private func structuredSessionTokenUsage(from value: Any) -> StructuredSessionRe
             return directUsage
         }
 
-        let priorityKeys = ["contextUsage", "tokenUsage", "usage", "data", "result", "params", "context", "thread", "turn", "item", "message"]
+        let priorityKeys = [
+            "contextUsage", "tokenUsage", "usage", "data", "result", "params", "context", "thread", "turn", "item",
+            "message",
+        ]
         for key in priorityKeys {
             if let nestedValue = object[key],
-               let usage = structuredSessionTokenUsage(from: nestedValue) {
+                let usage = structuredSessionTokenUsage(from: nestedValue)
+            {
                 return usage
             }
         }
@@ -2134,17 +2229,22 @@ private func structuredSessionTokenUsage(from value: Any) -> StructuredSessionRe
 }
 
 private func directStructuredSessionTokenUsage(from object: [String: Any]) -> StructuredSessionResolvedTokenUsage? {
-    let totalTokens = structuredSessionIntValue(in: object, keys: ["contextWindow", "context_window", "maxTokens", "max_tokens", "totalTokens", "total_tokens"])
+    let totalTokens = structuredSessionIntValue(
+        in: object, keys: ["contextWindow", "context_window", "maxTokens", "max_tokens", "totalTokens", "total_tokens"])
 
-    let explicitUsedTokens = structuredSessionIntValue(in: object, keys: ["tokens", "usedTokens", "used_tokens", "tokenCount", "token_count"])
-        ?? structuredSessionSummedIntValue(in: object, keyPairs: [("inputTokens", "outputTokens"), ("input_tokens", "output_tokens")])
+    let explicitUsedTokens =
+        structuredSessionIntValue(
+            in: object, keys: ["tokens", "usedTokens", "used_tokens", "tokenCount", "token_count"])
+        ?? structuredSessionSummedIntValue(
+            in: object, keyPairs: [("inputTokens", "outputTokens"), ("input_tokens", "output_tokens")])
     let explicitPercent = structuredSessionIntValue(in: object, keys: ["percent", "usagePercent", "usage_percent"])
 
     guard let totalTokens else {
         return nil
     }
 
-    let usedTokens = explicitUsedTokens ?? explicitPercent.map { max(0, Int((Double(totalTokens) * Double($0)) / 100.0)) }
+    let usedTokens =
+        explicitUsedTokens ?? explicitPercent.map { max(0, Int((Double(totalTokens) * Double($0)) / 100.0)) }
     guard let usedTokens else {
         return nil
     }
@@ -2165,10 +2265,11 @@ private func structuredSessionTokenUsage(from text: String) -> StructuredSession
 
     let range = NSRange(text.startIndex..<text.endIndex, in: text)
     guard let match = regex.firstMatch(in: text, options: [], range: range),
-          match.numberOfRanges == 4,
-          let usedRange = Range(match.range(at: 1), in: text),
-          let totalRange = Range(match.range(at: 2), in: text),
-          let percentRange = Range(match.range(at: 3), in: text) else {
+        match.numberOfRanges == 4,
+        let usedRange = Range(match.range(at: 1), in: text),
+        let totalRange = Range(match.range(at: 2), in: text),
+        let percentRange = Range(match.range(at: 3), in: text)
+    else {
         return nil
     }
 
@@ -2177,8 +2278,9 @@ private func structuredSessionTokenUsage(from text: String) -> StructuredSession
     let percentText = text[percentRange]
 
     guard let usedTokens = Int(usedText),
-          let totalTokens = Int(totalText),
-          let percent = Int(percentText) else {
+        let totalTokens = Int(totalText),
+        let percent = Int(percentText)
+    else {
         return nil
     }
 
@@ -2218,10 +2320,11 @@ private func structuredSessionModelIdentifier(for screen: SessionScreen) -> Stri
 private func piStructuredSessionModelIdentifier(from providerEvents: [SessionProviderEvent]) -> String? {
     for event in providerEvents.reversed() {
         guard let payload = structuredSessionJSONObject(from: event.rawPayload),
-              let data = payload["data"] as? [String: Any],
-              let model = data["model"] as? [String: Any],
-              let provider = structuredSessionTrimmedString(in: model, keys: ["provider"]),
-              let modelID = structuredSessionTrimmedString(in: model, keys: ["id"]) else {
+            let data = payload["data"] as? [String: Any],
+            let model = data["model"] as? [String: Any],
+            let provider = structuredSessionTrimmedString(in: model, keys: ["provider"]),
+            let modelID = structuredSessionTrimmedString(in: model, keys: ["id"])
+        else {
             continue
         }
         return "\(provider)/\(modelID)"
@@ -2237,7 +2340,9 @@ private func piStructuredSessionModelIdentifier(from activityItems: [SessionActi
         }
 
         let suffix = item.text.dropFirst("Current Model: ".count)
-        let target = suffix.split(separator: "(", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? String(suffix)
+        let target =
+            suffix.split(separator: "(", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init)
+            ?? String(suffix)
         let trimmedTarget = target.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmedTarget.isEmpty == false {
             return trimmedTarget
@@ -2254,12 +2359,14 @@ private func codexStructuredSessionModelIdentifier(from providerEvents: [Session
         }
 
         if let result = payload["result"] as? [String: Any],
-           let model = structuredSessionTrimmedString(in: result, keys: ["model"]) {
+            let model = structuredSessionTrimmedString(in: result, keys: ["model"])
+        {
             return model
         }
 
         if let params = payload["params"] as? [String: Any],
-           let model = structuredSessionTrimmedString(in: params, keys: ["model"]) {
+            let model = structuredSessionTrimmedString(in: params, keys: ["model"])
+        {
             return model
         }
     }
@@ -2277,7 +2384,9 @@ private func structuredSessionContextWindow(forModelIdentifier modelIdentifier: 
         return 272_000
     }
 
-    if normalized.contains("claude") || normalized.contains("sonnet") || normalized.contains("haiku") || normalized.contains("opus") {
+    if normalized.contains("claude") || normalized.contains("sonnet") || normalized.contains("haiku")
+        || normalized.contains("opus")
+    {
         return 200_000
     }
 
@@ -2286,7 +2395,8 @@ private func structuredSessionContextWindow(forModelIdentifier modelIdentifier: 
 
 private func structuredSessionJSONObject(from rawPayload: String) -> [String: Any]? {
     guard let data = rawPayload.data(using: .utf8),
-          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    else {
         return nil
     }
 
@@ -2341,7 +2451,8 @@ private func structuredSessionIntValue(in object: [String: Any], keys: [String])
 private func structuredSessionSummedIntValue(in object: [String: Any], keyPairs: [(String, String)]) -> Int? {
     for (lhs, rhs) in keyPairs {
         if let lhsValue = structuredSessionCoerceInt(object[lhs]),
-           let rhsValue = structuredSessionCoerceInt(object[rhs]) {
+            let rhsValue = structuredSessionCoerceInt(object[rhs])
+        {
             return lhsValue + rhsValue
         }
     }
@@ -2397,8 +2508,9 @@ private func structuredSessionConversationPrefixSplit(for text: String) -> (labe
     let label = String(text[..<separatorRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
     let body = String(text[separatorRange.upperBound...])
     guard label.isEmpty == false,
-          body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
-          label.count <= 24 else {
+        body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
+        label.count <= 24
+    else {
         return nil
     }
     return (label, body)
@@ -2476,7 +2588,8 @@ private func structuredSessionActivitySystemImage(for kind: SessionActivityItem.
     }
 }
 
-private func structuredSessionActivityEmphasis(for kind: SessionActivityItem.Kind) -> StructuredSessionActivityEmphasis {
+private func structuredSessionActivityEmphasis(for kind: SessionActivityItem.Kind) -> StructuredSessionActivityEmphasis
+{
     switch kind {
     case .status, .command:
         .neutral
@@ -2503,7 +2616,8 @@ private func structuredSessionActivityEmphasis(for kind: SessionActivityItem.Kin
 /// lower on iOS). Thresholds and behavior are the locked contract for row geometry stability.
 /// These thresholds drive live draft bounding, finalized assistant preview collapse, and long detail output.
 public func structuredSessionShouldCollapseStreamingMarkdownPreview(_ text: String, charactersPerLine: Int) -> Bool {
-    structuredSessionEstimatedWrappedLineCount(for: text, charactersPerLine: charactersPerLine) > 18 || text.count > 6_000
+    structuredSessionEstimatedWrappedLineCount(for: text, charactersPerLine: charactersPerLine) > 18
+        || text.count > 6_000
 }
 
 public func structuredSessionShouldCollapseDetailPreview(_ text: String, charactersPerLine: Int) -> Bool {
@@ -2518,7 +2632,8 @@ public let structuredSessionFeedCollapsedDetailViewportHeight: CGFloat = 200
 public let structuredSessionFeedAssistantMarkdownPreviewLineLimit = 18
 
 /// Footnote shown under bounded finalized assistant markdown in the structured feed.
-public let structuredSessionFeedAssistantMarkdownCollapsedFootnote = "Long response preview truncated for smooth scrolling."
+public let structuredSessionFeedAssistantMarkdownCollapsedFootnote =
+    "Long response preview truncated for smooth scrolling."
 
 /// Action label that opens the dedicated full-response reader for a bounded finalized assistant row.
 public let structuredSessionFeedAssistantMarkdownShowFullResponseTitle = "Show full response"
@@ -2591,7 +2706,8 @@ public func structuredSessionLatestFinalizedAssistantActivityRowID(
 ) -> UUID? {
     for row in rows.reversed() {
         guard let conversation = row.conversationPresentation,
-              conversation.isStreaming == false else {
+            conversation.isStreaming == false
+        else {
             continue
         }
         guard case .assistant = conversation.role else {
@@ -2615,11 +2731,11 @@ public func structuredSessionFeedAssistantAutoExpandedLatestResponsePrefersPlain
 /// Idle-gated inline markdown for the latest visible assistant response (#229).
 public enum StructuredSessionLatestAssistantInlineMarkdownIdleGatePolicy {
     #if os(iOS)
-    public static var usesIdleGatedInlineMarkdownHydration: Bool { true }
-    public static var scrollIdleInterval: TimeInterval { 0.15 }
+        public static var usesIdleGatedInlineMarkdownHydration: Bool { true }
+        public static var scrollIdleInterval: TimeInterval { 0.15 }
     #else
-    public static var usesIdleGatedInlineMarkdownHydration: Bool { false }
-    public static var scrollIdleInterval: TimeInterval { 0 }
+        public static var usesIdleGatedInlineMarkdownHydration: Bool { false }
+        public static var scrollIdleInterval: TimeInterval { 0 }
     #endif
 }
 
@@ -2707,7 +2823,8 @@ public func structuredSessionFeedStreamingAssistantDisplayText(
 
 private func structuredSessionEstimatedWrappedLineCount(for text: String, charactersPerLine: Int) -> Int {
     let clampedCharactersPerLine = max(12, charactersPerLine)
-    let wrappedLineCount = text
+    let wrappedLineCount =
+        text
         .split(separator: "\n", omittingEmptySubsequences: false)
         .reduce(into: 0) { count, line in
             let lineLength = max(1, line.count)

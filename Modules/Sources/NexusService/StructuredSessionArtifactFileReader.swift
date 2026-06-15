@@ -28,7 +28,8 @@ enum StructuredSessionArtifactFileReader {
     static func read(hostPath: String) throws -> StructuredSessionArtifactFile {
         let trimmed = hostPath.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix("/"),
-              trimmed.contains("..") == false else {
+            trimmed.contains("..") == false
+        else {
             throw StructuredSessionArtifactFileReaderError.invalidPath
         }
 

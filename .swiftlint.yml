@@ -1,0 +1,32 @@
+# Nexus SwiftLint: strict on force_try only. Other rules disabled until we opt in.
+disabled_rules:
+  - line_length
+  - function_body_length
+  - type_name
+  - identifier_name
+  - trailing_newline
+  - cyclomatic_complexity
+  - large_tuple
+  - function_parameter_count
+  - opening_brace
+  - nesting
+  - vertical_whitespace
+  - trailing_whitespace
+  - file_length
+  - type_body_length
+  - todo
+  - blanket_disable_command
+
+included:
+  - Modules/Sources
+  - Modules/Tests
+  - nexus
+  - nexusTests
+  - nexusUITests
+
+excluded:
+  - Modules/.build
+
+force_try: error
+
+reporter: xcode

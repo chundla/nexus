@@ -8,7 +8,8 @@ struct StructuredSessionComposerDraftState: Equatable {
         defer { lastObservedEditorText = editorText }
 
         guard lastObservedEditorText != editorText,
-              let editorText else {
+            let editorText
+        else {
             return
         }
 

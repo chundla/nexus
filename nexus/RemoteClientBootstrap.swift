@@ -3,7 +3,9 @@ import NexusDomain
 import NexusIPC
 
 extension RemoteClientPairingModel {
-    static func bootstrap(environment: [String: String] = ProcessInfo.processInfo.environment) -> RemoteClientPairingModel {
+    static func bootstrap(environment: [String: String] = ProcessInfo.processInfo.environment)
+        -> RemoteClientPairingModel
+    {
         if let mode = RemoteClientFixtureMode(rawValue: environment[RemoteClientFixture.environmentKey] ?? "") {
             return RemoteClientFixture.makeModel(mode: mode)
         }
@@ -118,7 +120,8 @@ private enum RemoteClientFixture {
                 state: .ready
             )
             providerCapabilities = ProviderCapabilities(
-                launchDefaultSession: ProviderCapability(action: .launchDefaultSession, isSupported: true, isEnabled: true),
+                launchDefaultSession: ProviderCapability(
+                    action: .launchDefaultSession, isSupported: true, isEnabled: true),
                 createNamedSession: ProviderCapability(action: .createNamedSession, isSupported: true, isEnabled: true)
             )
 
@@ -154,12 +157,17 @@ private enum RemoteClientFixture {
             catalog = RemoteWorkspaceCatalog(
                 workspaceGroups: [workspaceGroup],
                 recentNavigation: [
-                    NavigationItem(target: .workspace(apiWorkspace.id), title: apiWorkspace.name, subtitle: apiWorkspace.folderPath),
-                    NavigationItem(target: .workspace(phoneWorkspace.id), title: phoneWorkspace.name, subtitle: phoneWorkspace.folderPath)
+                    NavigationItem(
+                        target: .workspace(apiWorkspace.id), title: apiWorkspace.name, subtitle: apiWorkspace.folderPath
+                    ),
+                    NavigationItem(
+                        target: .workspace(phoneWorkspace.id), title: phoneWorkspace.name,
+                        subtitle: phoneWorkspace.folderPath),
                 ],
                 workspaceOverviews: [
-                    WorkspaceOverview(workspace: apiWorkspace, providerCards: [providerCard], remoteTarget: remoteTarget),
-                    WorkspaceOverview(workspace: phoneWorkspace, providerCards: [providerCard])
+                    WorkspaceOverview(
+                        workspace: apiWorkspace, providerCards: [providerCard], remoteTarget: remoteTarget),
+                    WorkspaceOverview(workspace: phoneWorkspace, providerCards: [providerCard]),
                 ]
             )
 
@@ -193,7 +201,7 @@ private enum RemoteClientFixture {
                     transcript: "Pi shared Session stream connected\nPi: thinking step 0",
                     activityItems: [
                         SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"),
-                        SessionActivityItem(kind: .message, text: "Pi: thinking step 0")
+                        SessionActivityItem(kind: .message, text: "Pi: thinking step 0"),
                     ],
                     isAgentTurnInProgress: true
                 )
@@ -205,7 +213,7 @@ private enum RemoteClientFixture {
                     transcript: "Pi shared Session stream connected",
                     activityItems: [
                         SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"),
-                        SessionActivityItem(kind: .message, text: "Pi: Profiling fixture ready")
+                        SessionActivityItem(kind: .message, text: "Pi: Profiling fixture ready"),
                     ],
                     isAgentTurnInProgress: false
                 )
@@ -216,7 +224,8 @@ private enum RemoteClientFixture {
             RemotePairedMacStatus(macName: pairedMac.name, isRemoteAccessEnabled: true)
         }
 
-        func completePairing(host: String, port: Int, pairingCode: String, deviceName: String) async throws -> PairedMac {
+        func completePairing(host: String, port: Int, pairingCode: String, deviceName: String) async throws -> PairedMac
+        {
             pairedMac
         }
 
@@ -224,15 +233,21 @@ private enum RemoteClientFixture {
             catalog
         }
 
-        func fetchProviderDetail(for pairedMac: PairedMac, workspaceID: UUID, providerID: ProviderID) async throws -> ProviderDetail {
+        func fetchProviderDetail(for pairedMac: PairedMac, workspaceID: UUID, providerID: ProviderID) async throws
+            -> ProviderDetail
+        {
             providerDetail
         }
 
-        func launchOrResumeDefaultSession(for pairedMac: PairedMac, workspaceID: UUID, providerID: ProviderID) async throws -> Session {
+        func launchOrResumeDefaultSession(for pairedMac: PairedMac, workspaceID: UUID, providerID: ProviderID)
+            async throws -> Session
+        {
             session
         }
 
-        func createNamedSession(for pairedMac: PairedMac, workspaceID: UUID, providerID: ProviderID) async throws -> Session {
+        func createNamedSession(for pairedMac: PairedMac, workspaceID: UUID, providerID: ProviderID) async throws
+            -> Session
+        {
             Session(
                 id: UUID(),
                 workspaceID: workspaceID,
@@ -262,7 +277,9 @@ private enum RemoteClientFixture {
                 transcript: latestScreen.transcript,
                 terminalColumns: latestScreen.terminalColumns,
                 terminalRows: latestScreen.terminalRows,
-                activityItems: latestScreen.activityItems + [SessionActivityItem(kind: .status, text: "Fixture Session stopped")],
+                activityItems: latestScreen.activityItems + [
+                    SessionActivityItem(kind: .status, text: "Fixture Session stopped")
+                ],
                 approvalRequests: latestScreen.approvalRequests,
                 extensionUI: latestScreen.extensionUI,
                 slashCommands: latestScreen.slashCommands,
@@ -309,7 +326,9 @@ private enum RemoteClientFixture {
             )
         }
 
-        func takeSessionControl(for pairedMac: PairedMac, sessionID: UUID, columns: Int, rows: Int) async throws -> SessionScreen {
+        func takeSessionControl(for pairedMac: PairedMac, sessionID: UUID, columns: Int, rows: Int) async throws
+            -> SessionScreen
+        {
             rebuildLatestScreen(
                 controller: .pairedDevice(pairedMac.pairedDeviceID!),
                 terminalColumns: columns,
@@ -330,16 +349,22 @@ private enum RemoteClientFixture {
             return latestScreen
         }
 
-        func sendSessionInput(for pairedMac: PairedMac, sessionID: UUID, prompt: SessionPrompt) async throws -> SessionScreen {
+        func sendSessionInput(for pairedMac: PairedMac, sessionID: UUID, prompt: SessionPrompt) async throws
+            -> SessionScreen
+        {
             latestScreen = appendedScreen(userLine: prompt.text, agentLine: "Fixture reply for: \(prompt.text)")
             return latestScreen
         }
 
-        func respondToApprovalRequest(for pairedMac: PairedMac, sessionID: UUID, approvalRequestID: UUID, decision: ApprovalRequestDecision) async throws -> SessionScreen {
+        func respondToApprovalRequest(
+            for pairedMac: PairedMac, sessionID: UUID, approvalRequestID: UUID, decision: ApprovalRequestDecision
+        ) async throws -> SessionScreen {
             latestScreen
         }
 
-        func respondToExtensionDialog(for pairedMac: PairedMac, sessionID: UUID, dialogID: String, response: SessionExtensionUIDialogResponse) async throws -> SessionScreen {
+        func respondToExtensionDialog(
+            for pairedMac: PairedMac, sessionID: UUID, dialogID: String, response: SessionExtensionUIDialogResponse
+        ) async throws -> SessionScreen {
             latestScreen
         }
 
@@ -347,7 +372,9 @@ private enum RemoteClientFixture {
             try await sendSessionInput(for: pairedMac, sessionID: sessionID, text: text)
         }
 
-        func sendSessionInputKey(for pairedMac: PairedMac, sessionID: UUID, key: SessionInputKey) async throws -> SessionScreen {
+        func sendSessionInputKey(for pairedMac: PairedMac, sessionID: UUID, key: SessionInputKey) async throws
+            -> SessionScreen
+        {
             latestScreen
         }
 
@@ -359,7 +386,8 @@ private enum RemoteClientFixture {
         ) async throws -> any SessionScreenObservation {
             _ = onDisconnect
 
-            let updateIntervalNanoseconds = mode == .streamingFeedProfile
+            let updateIntervalNanoseconds =
+                mode == .streamingFeedProfile
                 ? StructuredFeedProfilingFixture.updateIntervalNanoseconds
                 : 750_000_000
             let task = Task {
@@ -435,7 +463,8 @@ private enum RemoteClientFixture {
 
         private func appendAutoUpdate() -> SessionScreen {
             autoUpdateCount += 1
-            let line = mode == .thinkingDiagnosis
+            let line =
+                mode == .thinkingDiagnosis
                 ? "Pi: thinking step \(autoUpdateCount)"
                 : "Pi: Fixture update \(autoUpdateCount)"
             latestScreen = SessionScreen(
@@ -475,7 +504,8 @@ private enum RemoteClientFixture {
                 providerFacts: latestScreen.providerFacts,
                 finalOutputDiagnostic: StructuredSessionFinalOutputDiagnostic(
                     trigger: .turnEnd,
-                    providerEventSequence: latestScreen.providerFacts.lastProviderEventSequence ?? latestScreen.providerEvents.last?.sequence ?? latestScreen.activityItems.count + 1,
+                    providerEventSequence: latestScreen.providerFacts.lastProviderEventSequence ?? latestScreen
+                        .providerEvents.last?.sequence ?? latestScreen.activityItems.count + 1,
                     providerRuntimeLatencyMilliseconds: 4,
                     serviceObservationLatencyMilliseconds: 10,
                     expectedActivityItemID: agentItem.id,

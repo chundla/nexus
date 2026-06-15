@@ -1,7 +1,8 @@
 import Foundation
 import NexusDomain
-@testable import NexusSessionPresentation
 import Testing
+
+@testable import NexusSessionPresentation
 
 struct StructuredSessionFeedSegmentIterationPolicyTests {
     private func piFeedWithSegments() -> StructuredSessionFeedPresentation {
@@ -22,7 +23,7 @@ struct StructuredSessionFeedSegmentIterationPolicyTests {
                 SessionActivityItem(kind: .message, text: "Pi: a"),
                 SessionActivityItem(kind: .message, text: "You: two", prompt: SessionPrompt(text: "two")),
                 SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Planning."),
-                SessionActivityItem(kind: .message, text: "Pi: b")
+                SessionActivityItem(kind: .message, text: "Pi: b"),
             ]
         )
         return structuredSessionFeedPresentation(for: screen)
@@ -71,7 +72,7 @@ struct StructuredSessionFeedSegmentIterationPolicyTests {
             transcript: "",
             activityItems: [
                 SessionActivityItem(kind: .message, text: "You: go", prompt: SessionPrompt(text: "go")),
-                SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Working.")
+                SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Working."),
             ],
             isAgentTurnInProgress: true
         )
@@ -87,8 +88,9 @@ struct StructuredSessionFeedSegmentIterationPolicyTests {
             id: UUID(),
             isOpen: true,
             stackItems: [
-                .reasoning(StructuredSessionFeedAgentTurnReasoningSegment(activityItemID: reasoningID, markdownBody: "Plan.")),
-                .tool(StructuredSessionFeedAgentTurnToolSegment(activityItemID: UUID(), callPreview: "tool: run"))
+                .reasoning(
+                    StructuredSessionFeedAgentTurnReasoningSegment(activityItemID: reasoningID, markdownBody: "Plan.")),
+                .tool(StructuredSessionFeedAgentTurnToolSegment(activityItemID: UUID(), callPreview: "tool: run")),
             ],
             finalAnswer: nil
         )
@@ -103,8 +105,10 @@ struct StructuredSessionFeedSegmentIterationPolicyTests {
             id: UUID(),
             isOpen: false,
             stackItems: [
-                .reasoning(StructuredSessionFeedAgentTurnReasoningSegment(activityItemID: UUID(), markdownBody: "Done thinking.")),
-                .tool(StructuredSessionFeedAgentTurnToolSegment(activityItemID: toolID, callPreview: "bash: ls"))
+                .reasoning(
+                    StructuredSessionFeedAgentTurnReasoningSegment(
+                        activityItemID: UUID(), markdownBody: "Done thinking.")),
+                .tool(StructuredSessionFeedAgentTurnToolSegment(activityItemID: toolID, callPreview: "bash: ls")),
             ],
             finalAnswer: StructuredSessionFeedAgentTurnFinalAnswerSegment(text: "ok", isStreaming: false)
         )

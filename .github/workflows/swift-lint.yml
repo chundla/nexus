@@ -1,0 +1,16 @@
+name: Swift lint
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+jobs:
+  lint:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: brew install swift-format swiftlint
+      - name: Lint
+        run: ./scripts/lint-swift.sh

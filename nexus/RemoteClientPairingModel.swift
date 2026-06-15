@@ -3,16 +3,19 @@ import NexusDomain
 import NexusIPC
 import NexusSessionPresentation
 import Observation
+
 #if os(iOS)
-import UIKit
+    import UIKit
 #endif
 
 protocol RemotePairingClient {
     func fetchStatus(host: String, port: Int) async throws -> RemotePairedMacStatus
     func completePairing(host: String, port: Int, pairingCode: String, deviceName: String) async throws -> PairedMac
     func fetchCatalog(for pairedMac: PairedMac) async throws -> RemoteWorkspaceCatalog
-    func fetchProviderDetail(for pairedMac: PairedMac, workspaceID: UUID, providerID: ProviderID) async throws -> ProviderDetail
-    func launchOrResumeDefaultSession(for pairedMac: PairedMac, workspaceID: UUID, providerID: ProviderID) async throws -> Session
+    func fetchProviderDetail(for pairedMac: PairedMac, workspaceID: UUID, providerID: ProviderID) async throws
+        -> ProviderDetail
+    func launchOrResumeDefaultSession(for pairedMac: PairedMac, workspaceID: UUID, providerID: ProviderID) async throws
+        -> Session
     func createNamedSession(for pairedMac: PairedMac, workspaceID: UUID, providerID: ProviderID) async throws -> Session
     func launchOrResumeSession(for pairedMac: PairedMac, sessionID: UUID) async throws -> Session
     func stopSession(for pairedMac: PairedMac, sessionID: UUID) async throws -> Session
@@ -29,14 +32,21 @@ protocol RemotePairingClient {
         sessionID: UUID,
         hostPath: String
     ) async throws -> StructuredSessionArtifactFile
-    func takeSessionControl(for pairedMac: PairedMac, sessionID: UUID, columns: Int, rows: Int) async throws -> SessionScreen
+    func takeSessionControl(for pairedMac: PairedMac, sessionID: UUID, columns: Int, rows: Int) async throws
+        -> SessionScreen
     func releaseSessionControl(for pairedMac: PairedMac, sessionID: UUID) async throws -> SessionScreen
     func sendSessionInput(for pairedMac: PairedMac, sessionID: UUID, text: String) async throws -> SessionScreen
-    func sendSessionInput(for pairedMac: PairedMac, sessionID: UUID, prompt: SessionPrompt) async throws -> SessionScreen
-    func respondToApprovalRequest(for pairedMac: PairedMac, sessionID: UUID, approvalRequestID: UUID, decision: ApprovalRequestDecision) async throws -> SessionScreen
-    func respondToExtensionDialog(for pairedMac: PairedMac, sessionID: UUID, dialogID: String, response: SessionExtensionUIDialogResponse) async throws -> SessionScreen
+    func sendSessionInput(for pairedMac: PairedMac, sessionID: UUID, prompt: SessionPrompt) async throws
+        -> SessionScreen
+    func respondToApprovalRequest(
+        for pairedMac: PairedMac, sessionID: UUID, approvalRequestID: UUID, decision: ApprovalRequestDecision
+    ) async throws -> SessionScreen
+    func respondToExtensionDialog(
+        for pairedMac: PairedMac, sessionID: UUID, dialogID: String, response: SessionExtensionUIDialogResponse
+    ) async throws -> SessionScreen
     func sendSessionText(for pairedMac: PairedMac, sessionID: UUID, text: String) async throws -> SessionScreen
-    func sendSessionInputKey(for pairedMac: PairedMac, sessionID: UUID, key: SessionInputKey) async throws -> SessionScreen
+    func sendSessionInputKey(for pairedMac: PairedMac, sessionID: UUID, key: SessionInputKey) async throws
+        -> SessionScreen
     func observeSessionScreen(
         for pairedMac: PairedMac,
         sessionID: UUID,
@@ -46,12 +56,17 @@ protocol RemotePairingClient {
 }
 
 extension RemotePairingClient {
-    func sendSessionInput(for pairedMac: PairedMac, sessionID: UUID, prompt: SessionPrompt) async throws -> SessionScreen {
+    func sendSessionInput(for pairedMac: PairedMac, sessionID: UUID, prompt: SessionPrompt) async throws
+        -> SessionScreen
+    {
         if prompt.images.isEmpty == false {
             throw NSError(
                 domain: "RemotePairingClient",
                 code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "This remote pairing client does not support image-bearing Session prompts."]
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "This remote pairing client does not support image-bearing Session prompts."
+                ]
             )
         }
         return try await sendSessionInput(for: pairedMac, sessionID: sessionID, text: prompt.text)
@@ -70,7 +85,10 @@ extension RemotePairingClient {
         throw NSError(
             domain: "RemotePairingClient",
             code: 1,
-            userInfo: [NSLocalizedDescriptionKey: "This remote pairing client does not support structured Session history paging."]
+            userInfo: [
+                NSLocalizedDescriptionKey:
+                    "This remote pairing client does not support structured Session history paging."
+            ]
         )
     }
 }
@@ -101,7 +119,8 @@ struct UserDefaultsPairedMacStore: PairedMacStore {
 
     func loadPairedMacs() -> [PairedMac] {
         guard let data = defaults.data(forKey: key),
-              let pairedMacs = try? JSONDecoder().decode([PairedMac].self, from: data) else {
+            let pairedMacs = try? JSONDecoder().decode([PairedMac].self, from: data)
+        else {
             return []
         }
 
@@ -239,7 +258,8 @@ final class RemoteClientPairingModel {
 
     var focusedStructuredSessionDiagnosticSnapshot: StructuredSessionClientDiagnosticSnapshot? {
         guard let screen = focusedSessionScreen,
-              screen.primarySurface == .structuredActivityFeed else {
+            screen.primarySurface == .structuredActivityFeed
+        else {
             return nil
         }
 
@@ -258,14 +278,16 @@ final class RemoteClientPairingModel {
         self.client = client
         self.store = store
         self.focusedSessionObservationStartupTimeoutNanoseconds = focusedSessionObservationStartupTimeoutNanoseconds
-        self.structuredSessionHistoryPagingController = StructuredSessionHistoryPagingController { sessionID, pageSize, cursor in
+        self.structuredSessionHistoryPagingController = StructuredSessionHistoryPagingController {
+            sessionID, pageSize, cursor in
             let pairedMac = try await MainActor.run {
                 let pairedMacs = store.loadPairedMacs()
                 guard pairedMacs.isEmpty == false else {
                     throw RemoteClientPairingModelError.pairedMacNotFound
                 }
                 if let preferredID = store.loadActivePairedMacID(),
-                   let preferredMac = pairedMacs.first(where: { $0.id == preferredID }) {
+                    let preferredMac = pairedMacs.first(where: { $0.id == preferredID })
+                {
                     return preferredMac
                 }
                 return pairedMacs[0]
@@ -301,7 +323,8 @@ final class RemoteClientPairingModel {
         for pairedMac in pairedMacs {
             do {
                 let status = try await client.fetchStatus(host: pairedMac.host, port: pairedMac.port)
-                nextAvailability[pairedMac.id] = status.isRemoteAccessEnabled
+                nextAvailability[pairedMac.id] =
+                    status.isRemoteAccessEnabled
                     ? .available
                     : .remoteAccessDisabled
             } catch {
@@ -365,7 +388,9 @@ final class RemoteClientPairingModel {
         return session(in: detail, sessionID: sessionID)
     }
 
-    func workspaceBrowsePresentation(showingGroupsOnly: Bool, selectedGroupID: UUID?) -> RemoteWorkspaceBrowsePresentation? {
+    func workspaceBrowsePresentation(showingGroupsOnly: Bool, selectedGroupID: UUID?)
+        -> RemoteWorkspaceBrowsePresentation?
+    {
         guard let catalog else {
             return nil
         }
@@ -407,17 +432,19 @@ final class RemoteClientPairingModel {
         switch target.kind {
         case .workspace:
             guard let workspaceID = target.workspaceID,
-                  catalog.workspaceOverviews.contains(where: { $0.workspace.id == workspaceID }) else {
+                catalog.workspaceOverviews.contains(where: { $0.workspace.id == workspaceID })
+            else {
                 throw RemoteBrowseNavigationError.itemUnavailable
             }
             return .workspace(workspaceID)
         case .provider:
             guard let workspaceID = target.workspaceID,
-                  let providerID = target.providerID,
-                  catalog.workspaceOverviews
+                let providerID = target.providerID,
+                catalog.workspaceOverviews
                     .first(where: { $0.workspace.id == workspaceID })?
                     .providerCards
-                    .contains(where: { $0.provider.id == providerID }) == true else {
+                    .contains(where: { $0.provider.id == providerID }) == true
+            else {
                 throw RemoteBrowseNavigationError.itemUnavailable
             }
             return .provider(workspaceID, providerID)
@@ -638,8 +665,9 @@ final class RemoteClientPairingModel {
 
     func releaseFocusedRemoteSessionControl() async {
         guard let pairedMac = activePairedMac,
-              let sessionID = focusedSessionID,
-              focusedSessionIsController else {
+            let sessionID = focusedSessionID,
+            focusedSessionIsController
+        else {
             return
         }
 
@@ -660,8 +688,9 @@ final class RemoteClientPairingModel {
 
     func updateFocusedRemoteSessionViewport(columns: Int, rows: Int) async {
         guard let pairedMac = activePairedMac,
-              let sessionID = focusedSessionID,
-              focusedSessionIsController else {
+            let sessionID = focusedSessionID,
+            focusedSessionIsController
+        else {
             return
         }
         guard focusedSessionScreen?.terminalColumns != columns || focusedSessionScreen?.terminalRows != rows else {
@@ -706,8 +735,9 @@ final class RemoteClientPairingModel {
         _ artifact: StructuredSessionFeedArtifactPresentation
     ) async {
         guard let pairedMac = activePairedMac,
-              let sessionID = focusedSessionID,
-              let hostPath = artifact.hostPath else {
+            let sessionID = focusedSessionID,
+            let hostPath = artifact.hostPath
+        else {
             focusedSessionErrorMessage = "Artifact path unavailable for download."
             return
         }
@@ -726,14 +756,15 @@ final class RemoteClientPairingModel {
                 .appendingPathComponent(file.fileName)
             try file.data.write(to: tempURL, options: .atomic)
             #if os(iOS)
-            await MainActor.run {
-                guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                      let root = scene.windows.first(where: \.isKeyWindow)?.rootViewController else {
-                    focusedSessionErrorMessage = "Could not present download share sheet."
-                    return
+                await MainActor.run {
+                    guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                        let root = scene.windows.first(where: \.isKeyWindow)?.rootViewController
+                    else {
+                        focusedSessionErrorMessage = "Could not present download share sheet."
+                        return
+                    }
+                    StructuredSessionFeedArtifactSharePresenter.presentShare(for: tempURL, from: root)
                 }
-                StructuredSessionFeedArtifactSharePresenter.presentShare(for: tempURL, from: root)
-            }
             #endif
         } catch {
             focusedSessionErrorMessage = error.localizedDescription
@@ -749,7 +780,8 @@ final class RemoteClientPairingModel {
 
     func sendInputToFocusedRemoteSession(_ text: String) async throws {
         guard let pairedMac = activePairedMac,
-              let sessionID = focusedSessionID else {
+            let sessionID = focusedSessionID
+        else {
             throw RemoteClientPairingModelError.focusedSessionUnavailable
         }
         guard focusedSessionIsController else {
@@ -775,9 +807,12 @@ final class RemoteClientPairingModel {
         }
     }
 
-    func respondToFocusedRemoteSessionApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision) async throws {
+    func respondToFocusedRemoteSessionApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision)
+        async throws
+    {
         guard let pairedMac = activePairedMac,
-              let sessionID = focusedSessionID else {
+            let sessionID = focusedSessionID
+        else {
             throw RemoteClientPairingModelError.focusedSessionUnavailable
         }
         guard focusedSessionIsController else {
@@ -808,9 +843,12 @@ final class RemoteClientPairingModel {
         }
     }
 
-    func respondToFocusedRemoteSessionExtensionDialog(_ dialogID: String, response: SessionExtensionUIDialogResponse) async throws {
+    func respondToFocusedRemoteSessionExtensionDialog(_ dialogID: String, response: SessionExtensionUIDialogResponse)
+        async throws
+    {
         guard let pairedMac = activePairedMac,
-              let sessionID = focusedSessionID else {
+            let sessionID = focusedSessionID
+        else {
             throw RemoteClientPairingModelError.focusedSessionUnavailable
         }
         guard focusedSessionIsController else {
@@ -843,7 +881,8 @@ final class RemoteClientPairingModel {
 
     func sendTextToFocusedRemoteSession(_ text: String) async throws {
         guard let pairedMac = activePairedMac,
-              let sessionID = focusedSessionID else {
+            let sessionID = focusedSessionID
+        else {
             throw RemoteClientPairingModelError.focusedSessionUnavailable
         }
         guard focusedSessionIsController else {
@@ -871,7 +910,8 @@ final class RemoteClientPairingModel {
 
     func sendInputKeyToFocusedRemoteSession(_ key: SessionInputKey) async throws {
         guard let pairedMac = activePairedMac,
-              let sessionID = focusedSessionID else {
+            let sessionID = focusedSessionID
+        else {
             throw RemoteClientPairingModelError.focusedSessionUnavailable
         }
         guard focusedSessionIsController else {
@@ -909,7 +949,8 @@ final class RemoteClientPairingModel {
         let currentScreen = focusedSessionScreen
         let receivedObservedUpdateDuringRequest = currentScreen != nil && currentScreen != screenBeforeRequest
 
-        let shouldApplyResponse = focusedSessionObservation == nil
+        let shouldApplyResponse =
+            focusedSessionObservation == nil
             || currentScreen?.session.id != sessionID
             || receivedObservedUpdateDuringRequest == false
 
@@ -1009,27 +1050,32 @@ final class RemoteClientPairingModel {
         }
 
         guard let remoteError = error as? RemotePairingHTTPError,
-              case .requestFailed = remoteError else {
+            case .requestFailed = remoteError
+        else {
             return error
         }
 
         if let availability = pairedMacAvailability[pairedMac.id],
-           availability != .unknown,
-           availability != .available {
+            availability != .unknown,
+            availability != .available
+        {
             return RemoteClientPairingModelError.actionRecovery(availability.summary)
         }
 
         if let workspaceID,
-           let workspaceAvailability = workspaceOverview(id: workspaceID)?.remoteTarget?.workspaceAvailability,
-           workspaceAvailability.state != .available {
+            let workspaceAvailability = workspaceOverview(id: workspaceID)?.remoteTarget?.workspaceAvailability,
+            workspaceAvailability.state != .available
+        {
             return RemoteClientPairingModelError.actionRecovery(workspaceAvailability.summary)
         }
 
         if let workspaceID, let providerID {
-            let providerHealth = providerDetail(for: workspaceID, providerID: providerID)?.health
+            let providerHealth =
+                providerDetail(for: workspaceID, providerID: providerID)?.health
                 ?? providerCard(workspaceID: workspaceID, providerID: providerID)?.health
             if let providerHealth,
-               providerHealth.state != .available || providerHealth.launchability != .launchable {
+                providerHealth.state != .available || providerHealth.launchability != .launchable
+            {
                 return RemoteClientPairingModelError.actionRecovery(providerHealth.summary)
             }
         }
@@ -1085,7 +1131,8 @@ final class RemoteClientPairingModel {
                     )
                 }
 
-                let key = RemoteProviderDetailKey(workspaceID: overview.workspace.id, providerID: providerCard.provider.id)
+                let key = RemoteProviderDetailKey(
+                    workspaceID: overview.workspace.id, providerID: providerCard.provider.id)
                 if let detail = providerDetails[key], session(in: detail, sessionID: sessionID) != nil {
                     return .session(
                         workspaceID: overview.workspace.id,
@@ -1166,7 +1213,8 @@ final class RemoteClientPairingModel {
                 }
             case .session:
                 if let sessionID = item.target.sessionID,
-                   let workspaceID = browseWorkspaceID(forSessionID: sessionID, catalog: catalog) {
+                    let workspaceID = browseWorkspaceID(forSessionID: sessionID, catalog: catalog)
+                {
                     workspaceIDs.append(workspaceID)
                 }
             }
@@ -1186,7 +1234,8 @@ final class RemoteClientPairingModel {
             }
 
             for providerCard in overview.providerCards {
-                let key = RemoteProviderDetailKey(workspaceID: overview.workspace.id, providerID: providerCard.provider.id)
+                let key = RemoteProviderDetailKey(
+                    workspaceID: overview.workspace.id, providerID: providerCard.provider.id)
                 if let detail = providerDetails[key], session(in: detail, sessionID: sessionID) != nil {
                     return overview.workspace.id
                 }
@@ -1197,12 +1246,14 @@ final class RemoteClientPairingModel {
 
     private func resolvedWorkspaceID(for sessionID: UUID) -> UUID? {
         if let focusedSessionScreen,
-           focusedSessionScreen.session.id == sessionID {
+            focusedSessionScreen.session.id == sessionID
+        {
             return focusedSessionScreen.session.workspaceID
         }
 
         if let catalog,
-           let workspaceID = browseWorkspaceID(forSessionID: sessionID, catalog: catalog) {
+            let workspaceID = browseWorkspaceID(forSessionID: sessionID, catalog: catalog)
+        {
             return workspaceID
         }
 
@@ -1223,7 +1274,8 @@ final class RemoteClientPairingModel {
 
     private func syncFocusedSessionWorkspaceLocation() {
         guard let focusedSessionWorkspaceID,
-              let workspaceLocation = remoteWorkspaceLocation(for: focusedSessionWorkspaceID) else {
+            let workspaceLocation = remoteWorkspaceLocation(for: focusedSessionWorkspaceID)
+        else {
             return
         }
 
@@ -1276,7 +1328,8 @@ final class RemoteClientPairingModel {
             guard let self else {
                 return
             }
-            await self.structuredSessionHistoryPagingController.recoverPersistedGapIfNeeded(from: previousScreen, to: screen)
+            await self.structuredSessionHistoryPagingController.recoverPersistedGapIfNeeded(
+                from: previousScreen, to: screen)
             guard self.focusedSessionScreen?.session.id == screen.session.id else {
                 return
             }
@@ -1441,7 +1494,8 @@ final class RemoteClientPairingModel {
         do {
             let initialScreen = try await client.fetchSessionScreen(for: pairedMac, sessionID: sessionID)
             if focusedSessionID == sessionID,
-               focusedSessionScreen?.session.id != sessionID {
+                focusedSessionScreen?.session.id != sessionID
+            {
                 applyFocusedSessionScreen(initialScreen)
                 focusedSessionIsStale = false
                 focusedSessionErrorMessage = nil
@@ -1521,7 +1575,8 @@ final class RemoteClientPairingModel {
         focusedSessionObservation = nil
 
         if let pairedMac = activePairedMac,
-           handleUnauthorizedPairedMac(error, pairedMacID: pairedMac.id) {
+            handleUnauthorizedPairedMac(error, pairedMacID: pairedMac.id)
+        {
             return
         }
 
@@ -1569,13 +1624,15 @@ final class RemoteClientPairingModel {
             }
 
             while Task.isCancelled == false,
-                  self.focusedSessionID == sessionID,
-                  self.focusedSessionObservation == nil {
+                self.focusedSessionID == sessionID,
+                self.focusedSessionObservation == nil
+            {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
 
                 guard Task.isCancelled == false,
-                      self.focusedSessionID == sessionID,
-                      self.focusedSessionObservation == nil else {
+                    self.focusedSessionID == sessionID,
+                    self.focusedSessionObservation == nil
+                else {
                     break
                 }
 
@@ -1626,7 +1683,8 @@ final class RemoteClientPairingModel {
         pairedMacs: [PairedMac]
     ) -> PairedMac.ID? {
         if let preferredID,
-           pairedMacs.contains(where: { $0.id == preferredID }) {
+            pairedMacs.contains(where: { $0.id == preferredID })
+        {
             return preferredID
         }
 
