@@ -1833,32 +1833,49 @@
 
         private func handleMessageEnd(_ object: [String: Any]) {
             guard let message = object["message"] as? [String: Any],
-                string(for: "role", in: message) == "assistant",
-                let stopReason = string(for: "stopReason", in: message),
-                stopReason == "aborted" || stopReason == "error"
+                string(for: "role", in: message) == "assistant"
             else {
                 return
             }
 
-            let finalText = resolvedPiAssistantFinalText(from: message)
-            let errorText =
-                trimmedString(for: "errorMessage", in: message)
-                ?? (stopReason == "aborted" ? "Operation aborted" : "Error")
+            let stopReason = string(for: "stopReason", in: message) ?? "stop"
+            let resolvedText = resolvedPiAssistantFinalText(from: message)
 
             lock.lock()
-            if finalText.isEmpty == false {
-                ensureAssistantTranscriptEntryLocked()
-                if let assistantTranscriptIndex {
-                    transcriptEntries[assistantTranscriptIndex] = finalText
-                    trimTranscriptEntriesLocked()
+            defer { lock.unlock() }
+
+            switch stopReason {
+            case "aborted", "error":
+                let errorText =
+                    trimmedString(for: "errorMessage", in: message)
+                    ?? (stopReason == "aborted" ? "Operation aborted" : "Error")
+                if resolvedText.isEmpty == false {
+                    ensureAssistantTranscriptEntryLocked()
+                    if let assistantTranscriptIndex {
+                        transcriptEntries[assistantTranscriptIndex] = resolvedText
+                        trimTranscriptEntriesLocked()
+                    }
+                    appendActivityItemLocked(SessionActivityItem(kind: .message, text: "Pi: \(resolvedText)"))
                 }
-                appendActivityItemLocked(SessionActivityItem(kind: .message, text: "Pi: \(finalText)"))
+                finishPiAgentTurnLocked(stopReason: stopReason)
+                appendActivityItemLocked(SessionActivityItem(kind: .error, text: errorText))
+                requestSlashCommands()
+                notifyChange()
+            case "stop", "length", "toolUse":
+                // Pi RPC: assistant `message_end` can arrive before `turn_end` (e.g. toolUse). Record
+                // provisional assistant text in activity order; keep the user-visible turn open until `turn_end`.
+                if resolvedText.isEmpty == false {
+                    appendActivityItemLocked(SessionActivityItem(kind: .message, text: "Pi: \(resolvedText)"))
+                }
+                clearAssistantStreamingDraftBuffersLocked()
+                notifyChange()
+            default:
+                if resolvedText.isEmpty == false {
+                    appendActivityItemLocked(SessionActivityItem(kind: .message, text: "Pi: \(resolvedText)"))
+                }
+                clearAssistantStreamingDraftBuffersLocked()
+                notifyChange()
             }
-            finishPiAgentTurnLocked(stopReason: stopReason)
-            appendActivityItemLocked(SessionActivityItem(kind: .error, text: errorText))
-            lock.unlock()
-            requestSlashCommands()
-            notifyChange()
         }
 
         private func handleToolExecutionStart(_ object: [String: Any]) {
@@ -1989,10 +2006,15 @@
             notifyChange()
         }
 
-        private func clearAssistantStreamingBuffersLocked() {
+        /// Clears in-flight assistant text for the current assistant sub-message (between `message_end` and the next `text_delta`).
+        private func clearAssistantStreamingDraftBuffersLocked() {
             currentAssistantText = ""
             liveStreamedAssistantText = ""
             assistantTranscriptIndex = nil
+        }
+
+        private func clearAssistantStreamingBuffersLocked() {
+            clearAssistantStreamingDraftBuffersLocked()
             toolOutputByCallID.removeAll()
             toolNamesByCallID.removeAll()
             toolActivityItemIDByCallID.removeAll()

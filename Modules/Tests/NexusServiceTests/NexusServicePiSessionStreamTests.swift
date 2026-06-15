@@ -2362,6 +2362,78 @@
             #expect(screen.transcript == "> inspect auth\nPartial answer")
         }
 
+        @Test func localPiRuntimeRecordsToolUseMessageEndBeforeTurnEndWithoutClosingAgentTurn() throws {
+            let interimText = "Gathering context before running tools."
+            let transport = PromptEventPiRPCTransport(promptEvents: [
+                ["type": "agent_start", "agent": "pi"],
+                [
+                    "type": "message_update",
+                    "assistantMessageEvent": [
+                        "type": "text_delta",
+                        "delta": interimText,
+                    ],
+                ],
+                [
+                    "type": "message_end",
+                    "message": [
+                        "role": "assistant",
+                        "stopReason": "toolUse",
+                        "content": [
+                            [
+                                "type": "text",
+                                "text": interimText,
+                            ]
+                        ],
+                    ],
+                ],
+                [
+                    "type": "tool_execution_start",
+                    "toolCallId": "tool-1",
+                    "toolName": "read",
+                    "args": ["path": "README.md"],
+                ],
+                [
+                    "type": "turn_end",
+                    "message": [
+                        "content": [
+                            [
+                                "type": "text",
+                                "text": "Final answer after tools.",
+                            ]
+                        ]
+                    ],
+                ],
+            ])
+            let runtime = try PiRPCSessionRuntime(
+                executable: "/tmp/fake-pi",
+                workingDirectory: "/tmp",
+                terminationStatusMessageBuilder: { _ in "" },
+                transportFactory: { _, _, _ in transport }
+            )
+
+            let session = Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            )
+
+            try runtime.sendInput("review")
+            let screen = runtime.sessionScreen(for: session)
+
+            #expect(screen.isAgentTurnInProgress == false)
+            #expect(screen.providerFacts.liveAssistantDraftText == nil)
+            #expect(
+                screen.activityItems.map(\.text) == [
+                    "Session stream connected",
+                    "You: review",
+                    "Pi: \(interimText)",
+                    "read: README.md",
+                    "Pi: Final answer after tools.",
+                ])
+        }
+
         @Test func localPiRuntimeProjectsCompactionAndRetryLifecycleIntoSharedSessionActivity() throws {
             let transport = PromptEventPiRPCTransport(promptEvents: [
                 ["type": "compaction_start", "reason": "manual"],
