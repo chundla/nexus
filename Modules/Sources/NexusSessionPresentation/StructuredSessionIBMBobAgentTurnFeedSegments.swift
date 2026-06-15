@@ -141,16 +141,26 @@ private func structuredSessionIBMBobAgentTurnActivitySlice(
                 continue
             }
 
-            finalAnswer = StructuredSessionFeedAgentTurnFinalAnswerSegment(text: plainBody, isStreaming: false)
+            if isAgentTurnInProgress == false {
+                finalAnswer = StructuredSessionFeedAgentTurnFinalAnswerSegment(text: plainBody, isStreaming: false)
+            }
             consumedAny = true
             cursor += 1
+            if isAgentTurnInProgress {
+                continue
+            }
             break
         }
 
         if let plainBody = structuredSessionIBMBobPlainAssistantMessageBody(from: item) {
-            finalAnswer = StructuredSessionFeedAgentTurnFinalAnswerSegment(text: plainBody, isStreaming: false)
+            if isAgentTurnInProgress == false {
+                finalAnswer = StructuredSessionFeedAgentTurnFinalAnswerSegment(text: plainBody, isStreaming: false)
+            }
             consumedAny = true
             cursor += 1
+            if isAgentTurnInProgress {
+                continue
+            }
             break
         }
 

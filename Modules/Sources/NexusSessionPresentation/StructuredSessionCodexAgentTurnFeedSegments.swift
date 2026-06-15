@@ -139,11 +139,15 @@ private func structuredSessionCodexAgentTurnActivitySlice(
         }
 
         if structuredSessionCodexFeedSegmentIsPrimaryCodexAssistantMessage(item) {
-            if let body = structuredSessionCodexPrimaryAssistantBody(from: item.text) {
+            if isAgentTurnInProgress == false,
+               let body = structuredSessionCodexPrimaryAssistantBody(from: item.text) {
                 finalAnswer = StructuredSessionFeedAgentTurnFinalAnswerSegment(text: body, isStreaming: false)
             }
             consumedAny = true
             cursor += 1
+            if isAgentTurnInProgress {
+                continue
+            }
             break
         }
 

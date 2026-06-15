@@ -722,28 +722,26 @@ struct StructuredSessionPresentationTests {
             isPerformingAction: false
         )
 
-        #expect(presentation.feed == StructuredSessionFeedPresentation(
-            copy: StructuredSessionPresentationCopy(
-                emptyStateTitle: "No Session activity yet",
-                emptyStateDescription: "Send a prompt to start the Codex Session.",
-                composerPlaceholder: "Send a prompt to Codex"
-            ),
-            activityRows: [
-                StructuredSessionActivityRow(
-                    id: screen.activityItems[0].id,
-                    title: "Progress",
-                    systemImage: "hourglass",
-                    text: "Gathering context",
-                    emphasis: .accent,
-                    conversationPresentation: StructuredSessionConversationPresentation(
-                        role: .system,
-                        text: "Gathering context"
-                    )
-                )
-            ],
-            pendingApprovalRequests: [pendingRequest],
-            thinkingIndicator: nil
+        let expectedRow = StructuredSessionActivityRow(
+            id: screen.activityItems[0].id,
+            title: "Progress",
+            systemImage: "hourglass",
+            text: "Gathering context",
+            emphasis: .accent,
+            conversationPresentation: StructuredSessionConversationPresentation(
+                role: .system,
+                text: "Gathering context"
+            )
+        )
+        #expect(presentation.feed.copy == StructuredSessionPresentationCopy(
+            emptyStateTitle: "No Session activity yet",
+            emptyStateDescription: "Send a prompt to start the Codex Session.",
+            composerPlaceholder: "Send a prompt to Codex"
         ))
+        #expect(presentation.feed.activityRows == [expectedRow])
+        #expect(presentation.feed.pendingApprovalRequests == [pendingRequest])
+        #expect(presentation.feed.thinkingIndicator == nil)
+        #expect(presentation.feed.feedSegments?.count == 1)
         #expect(presentation.composer == StructuredSessionComposerPresentation(
             placeholder: "Send a prompt to Codex",
             isEnabled: false,
@@ -934,23 +932,19 @@ struct StructuredSessionPresentationTests {
             isAgentTurnInProgress: false
         ))
 
-        #expect(firstDraftPresentation.activityRows.map(\.text) == ["You: hello", "Pi: wor"])
-        #expect(firstDraftPresentation.activityRows.last?.conversationPresentation?.isStreaming == true)
-        let draftRowID = try #require(firstDraftPresentation.activityRows.last?.id)
-        #expect(streamedDraftPresentation.activityRows.map(\.text) == ["You: hello", "Pi: world"])
-        #expect(streamedDraftPresentation.activityRows.last?.id == draftRowID)
-        #expect(streamedDraftPresentation.activityRows.last?.conversationPresentation?.isStreaming == true)
-        let sealedChunkCount = firstDraftPresentation.activityRowChunks.count
-        #expect(streamedDraftPresentation.activityRowChunks.count == sealedChunkCount)
-        #expect(
-            zip(firstDraftPresentation.activityRowChunks, streamedDraftPresentation.activityRowChunks).allSatisfy {
-                $0.id == $1.id && $0.rows.count == $1.rows.count
-            }
-        )
+        #expect(firstDraftPresentation.activityRows.map(\.text) == ["You: hello"])
+        #expect(firstDraftPresentation.thinkingIndicator == StructuredSessionThinkingIndicator(text: "Thinking…"))
+        #expect(streamedDraftPresentation.activityRows.map(\.text) == ["You: hello"])
+        #expect(streamedDraftPresentation.thinkingIndicator == StructuredSessionThinkingIndicator(text: "Thinking…"))
         #expect(finalizedPresentation.activityRows.map(\.text) == ["You: hello", "Pi: world"])
-        #expect(finalizedPresentation.activityRows.last?.id == draftRowID)
-        #expect(finalizedPresentation.activityRows.last?.conversationPresentation?.isStreaming == false)
-        #expect(finalizedPresentation.activityRows.filter { $0.text == "Pi: world" }.count == 1)
+        #expect(finalizedPresentation.thinkingIndicator == nil)
+        let finalizedSegments = try #require(finalizedPresentation.feedSegments)
+        guard case .agentTurn(let closedTurn) = finalizedSegments.last else {
+            Issue.record("Expected closed agent turn")
+            return
+        }
+        #expect(closedTurn.isOpen == false)
+        #expect(closedTurn.finalAnswer?.text == "world")
     }
 
     @Test func structuredSessionFeedPresenterDefersAssistantMarkdownPrewarmUntilAfterPresentationReturns() async {
@@ -1065,7 +1059,10 @@ struct StructuredSessionPresentationTests {
             isAgentTurnInProgress: true
         )
 
-        #expect(presenter.presentation(for: screen).activityRows.map(\.text) == ["You: hello", "Pi: fresh"])
+        let feed = presenter.presentation(for: screen)
+        #expect(feed.feedSegments != nil)
+        #expect(feed.activityRows.map(\.text) == ["You: hello"])
+        #expect(feed.thinkingIndicator == StructuredSessionThinkingIndicator(text: "Thinking…"))
     }
 
     @Test func structuredSessionFeedPresentationUsesChunksAsCanonicalActivityRowStorage() {
@@ -2025,7 +2022,8 @@ struct StructuredSessionPresentationTests {
             providerFacts: StructuredSessionProviderFacts(liveAssistantDraftText: String(longBody.prefix(80))),
             isAgentTurnInProgress: true
         ))
-        #expect(draftPresentation.activityRows.last?.conversationPresentation?.isStreaming == true)
+        #expect(draftPresentation.activityRows.map(\.text) == ["You: summarize"])
+        #expect(draftPresentation.thinkingIndicator != nil)
 
         let finalizedPresentation = presenter.presentation(for: SessionScreen(
             session: session,
@@ -2217,7 +2215,7 @@ struct StructuredSessionPresentationTests {
 
     // MARK: - Feed scroll policy (#211)
 
-    @Test func structuredSessionFeedScrollTargetUsesLiveDraftRowWhileStreaming() throws {
+    @Test func structuredSessionFeedScrollTargetUsesOpenTurnSegmentWithoutLiveDraftRow() throws {
         let session = Session(id: UUID(), workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready)
         let userItem = SessionActivityItem(kind: .message, text: "You: hi")
         let presenter = StructuredSessionFeedPresenter()
@@ -2230,22 +2228,16 @@ struct StructuredSessionPresentationTests {
             isAgentTurnInProgress: true
         )
         let feed = presenter.presentation(for: screen)
+        #expect(feed.activityRows.count == 1)
         let presentation = FocusedStructuredSessionPresentation(
             session: session,
             feed: feed,
             autoScrollTrigger: structuredSessionAutoScrollTrigger(for: screen)
         )
 
-        let draftRowID = try #require(feed.activityRows.last?.id)
-        if let segments = feed.feedSegments, let last = segments.last {
-            if case .agentTurn(let turn) = last, turn.finalAnswer?.isStreaming == true {
-                #expect(structuredSessionFeedScrollTarget(for: presentation) == .activityRow(turn.id))
-            } else {
-                #expect(structuredSessionFeedScrollTarget(for: presentation) == .activityRow(last.id))
-            }
-        } else {
-            #expect(structuredSessionFeedScrollTarget(for: presentation) == .activityRow(draftRowID))
-        }
+        let segments = try #require(feed.feedSegments)
+        let last = try #require(segments.last)
+        #expect(structuredSessionFeedScrollTarget(for: presentation) == .activityRow(last.id))
     }
 
     @Test func structuredSessionFeedScrollTargetFallsBackToBottomSentinelWhenFeedEmpty() {

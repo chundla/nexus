@@ -282,7 +282,7 @@ public struct StructuredSessionAgentTurnStackView: View {
                 }
             }
 
-            if let finalAnswer = turn.finalAnswer {
+            if turn.isOpen == false, let finalAnswer = turn.finalAnswer {
                 finalAnswerBubble(finalAnswer)
             }
         }

@@ -612,7 +612,9 @@ public final class StructuredSessionFeedPresenter {
         presentedRowIDByActivityItemID = presentedRowIDByActivityItemID.filter { currentActivityItemIDs.contains($0.key) }
 
         let liveDraftRow: StructuredSessionActivityRow?
-        if let draftText = structuredSessionLiveAssistantDraftText(for: screen) {
+        let usesCompositeAgentTurnFeed = structuredSessionAgentTurnFeedSegments(for: screen) != nil
+        if usesCompositeAgentTurnFeed == false,
+           let draftText = structuredSessionLiveAssistantDraftText(for: screen) {
             let rowID = liveAssistantDraft?.rowID ?? UUID()
             liveAssistantDraft = LiveAssistantDraftState(rowID: rowID, text: draftText)
             liveDraftRow = structuredSessionLiveAssistantDraftRow(
