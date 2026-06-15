@@ -355,11 +355,12 @@
         func launchOrResume(
             session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration
         ) async throws {
-            let shouldCreateRuntime = try withLock {
+            let (shouldCreateRuntime, replacedExistingRuntime) = try withLock {
+                let hadRuntime = runtimes[session.id] != nil
                 if let runtime = runtimes[session.id], runtime.state == .ready {
-                    return false
+                    return (false, hadRuntime)
                 }
-                return true
+                return (true, hadRuntime)
             }
 
             guard shouldCreateRuntime else {
@@ -375,6 +376,11 @@
             try withLock {
                 runtimes[session.id] = runtime
             }
+            NexusSessionRuntimeDiagnostics.logRuntimeRegistered(
+                sessionID: session.id,
+                providerID: session.providerID,
+                hadExistingRuntime: replacedExistingRuntime
+            )
             notifyRuntimeChange(for: session.id)
         }
 
@@ -396,12 +402,19 @@
 
         func remove(session: Session, preservingObservers: Bool) {
             lock.lock()
+            let hadRuntime = runtimes[session.id] != nil
             runtimes.removeValue(forKey: session.id)?.setChangeHandler(nil)
             if preservingObservers == false {
                 updateObservers.removeValue(forKey: session.id)
                 observedSessionIDs = observedSessionIDs.filter { $0.value != session.id }
             }
             lock.unlock()
+            if hadRuntime {
+                NexusSessionRuntimeDiagnostics.logRuntimeRemoved(
+                    sessionID: session.id,
+                    providerID: session.providerID
+                )
+            }
         }
 
         func hasRuntime(for session: Session) -> Bool {
@@ -723,10 +736,10 @@
                         try makeRemoteTerminalRuntime(launchConfiguration: launchConfiguration)
                     },
                     makeLocalPiRuntime: { [self] in
-                        try await makeLocalPiRuntime(launchConfiguration: launchConfiguration)
+                        try await makeLocalPiRuntime(session: session, launchConfiguration: launchConfiguration)
                     },
                     makeRemotePiRuntime: { [self] in
-                        try await makeRemotePiRuntime(launchConfiguration: launchConfiguration)
+                        try await makeRemotePiRuntime(session: session, launchConfiguration: launchConfiguration)
                     },
                     makeLocalCodexRuntime: { [self] in
                         try await makeLocalCodexRuntime(launchConfiguration: launchConfiguration)
@@ -808,6 +821,7 @@
         }
 
         private func makeLocalPiRuntime(
+            session: Session,
             launchConfiguration: SessionRuntimeLaunchConfiguration
         ) async throws -> any SessionRuntime {
             let processEnvironment = localShellEnvironmentResolver.resolvedEnvironment()
@@ -819,6 +833,7 @@
                     restoredMetadata: launchConfiguration.sessionRecordAdapterMetadata,
                     terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
                     processEnvironment: processEnvironment,
+                    nexusSessionID: session.id,
                     transportFactory: piTransportFactory
                 )
             }
@@ -829,11 +844,13 @@
                 sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.piSessionLinkage,
                 restoredMetadata: launchConfiguration.sessionRecordAdapterMetadata,
                 terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
-                processEnvironment: processEnvironment
+                processEnvironment: processEnvironment,
+                nexusSessionID: session.id
             )
         }
 
         private func makeRemotePiRuntime(
+            session: Session,
             launchConfiguration: SessionRuntimeLaunchConfiguration
         ) async throws -> any SessionRuntime {
             guard let remoteHost = launchConfiguration.remoteHost,
@@ -857,6 +874,7 @@
                 launchMode: launchConfiguration.remoteRuntimeLaunchMode
             )
 
+            let nexusSessionID = session.id
             return try await PiRPCSessionRuntime(
                 executable: "/usr/bin/ssh",
                 workingDirectory: launchConfiguration.workingDirectory,
@@ -876,6 +894,7 @@
                         )
                     )
                 },
+                nexusSessionID: nexusSessionID,
                 transportFactory: { _, _, _ in
                     if let piTransportFactory = self.piTransportFactory {
                         return try piTransportFactory("/usr/bin/ssh", bridgeArguments, nil)
@@ -884,7 +903,8 @@
                     return try ProcessPiRPCTransport(
                         executable: "/usr/bin/ssh",
                         arguments: bridgeArguments,
-                        workingDirectory: nil
+                        workingDirectory: nil,
+                        nexusSessionID: nexusSessionID
                     )
                 }
             )
@@ -2691,7 +2711,8 @@
                 return resolvedSession
             }
 
-            guard sessionRuntimeManager.hasRuntime(for: resolvedSession) == false,
+            let hadRuntimeBefore = sessionRuntimeManager.hasRuntime(for: resolvedSession)
+            guard hadRuntimeBefore == false,
                 let workspace = try metadataStore.workspace(id: resolvedSession.workspaceID)
             else {
                 return resolvedSession
@@ -2714,9 +2735,20 @@
                 fatalError("Interactive ready bootstrap must produce a bootstrapReadyWithoutRuntime transition plan.")
             }
 
+            let relaunched: Bool
             if case .relaunchPersistedSession = plan {
                 _ = try await sessionLifecycle.launchOrResumeSession(sessionID: resolvedSession.id)
+                relaunched = true
+            } else {
+                relaunched = false
             }
+
+            NexusSessionRuntimeDiagnostics.logInteractiveReadyBootstrap(
+                sessionID: resolvedSession.id,
+                providerID: resolvedSession.providerID,
+                hadRuntimeBefore: hadRuntimeBefore,
+                relaunchedPersistedSession: relaunched
+            )
 
             return resolvedSession
         }

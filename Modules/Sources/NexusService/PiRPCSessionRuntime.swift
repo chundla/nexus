@@ -166,6 +166,7 @@
         private var nextSetFollowUpModeRequestSequence = 0
         private var nextBashRequestSequence = 0
         private var nextExportHTMLRequestSequence = 0
+        private let nexusSessionID: UUID?
 
         convenience init(
             executable: String,
@@ -177,15 +178,18 @@
             unexpectedTerminationMessageBuilder: ((Int32) -> String)? = nil,
             stopHandler: (() throws -> Void)? = nil,
             processEnvironment: [String: String]? = nil,
+            nexusSessionID: UUID? = nil,
             transportFactory: TransportFactory? = nil
         ) throws {
+            let sessionID = nexusSessionID
             let resolvedTransportFactory =
                 transportFactory ?? { executable, arguments, workingDirectory in
                     try ProcessPiRPCTransport(
                         executable: executable,
                         arguments: arguments,
                         workingDirectory: workingDirectory,
-                        environment: processEnvironment
+                        environment: processEnvironment,
+                        nexusSessionID: sessionID
                     )
                 }
 
@@ -198,6 +202,7 @@
                 unexpectedTerminationState: unexpectedTerminationState,
                 unexpectedTerminationMessageBuilder: unexpectedTerminationMessageBuilder,
                 stopHandler: stopHandler,
+                nexusSessionID: nexusSessionID,
                 transportFactory: resolvedTransportFactory,
                 performStartup: false
             )
@@ -214,15 +219,18 @@
             unexpectedTerminationMessageBuilder: ((Int32) -> String)? = nil,
             stopHandler: (() throws -> Void)? = nil,
             processEnvironment: [String: String]? = nil,
+            nexusSessionID: UUID? = nil,
             transportFactory: TransportFactory? = nil
         ) async throws {
+            let sessionID = nexusSessionID
             let resolvedTransportFactory =
                 transportFactory ?? { executable, arguments, workingDirectory in
                     try ProcessPiRPCTransport(
                         executable: executable,
                         arguments: arguments,
                         workingDirectory: workingDirectory,
-                        environment: processEnvironment
+                        environment: processEnvironment,
+                        nexusSessionID: sessionID
                     )
                 }
 
@@ -235,6 +243,7 @@
                 unexpectedTerminationState: unexpectedTerminationState,
                 unexpectedTerminationMessageBuilder: unexpectedTerminationMessageBuilder,
                 stopHandler: stopHandler,
+                nexusSessionID: nexusSessionID,
                 transportFactory: resolvedTransportFactory,
                 performStartup: false
             )
@@ -250,9 +259,11 @@
             unexpectedTerminationState: Session.State,
             unexpectedTerminationMessageBuilder: ((Int32) -> String)?,
             stopHandler: (() throws -> Void)?,
+            nexusSessionID: UUID?,
             transportFactory: TransportFactory,
             performStartup: Bool
         ) throws {
+            self.nexusSessionID = nexusSessionID
             self.stopHandler = stopHandler
             self.terminationStatusMessageBuilder = terminationStatusMessageBuilder
             self.unexpectedTerminationState = unexpectedTerminationState
@@ -659,6 +670,12 @@
                 isStreaming = true
                 promptTurnCommitted = true
                 awaitingPromptAcceptance = true
+                if let nexusSessionID {
+                    NexusSessionRuntimeDiagnostics.logPiPromptDispatch(
+                        sessionID: nexusSessionID,
+                        startedNewTurn: true
+                    )
+                }
                 assistantTranscriptIndex = nil
                 currentAssistantText = ""
                 liveStreamedAssistantText = ""
@@ -1430,7 +1447,11 @@
                 if bool(for: "success", in: response) == true {
                     lock.lock()
                     awaitingPromptAcceptance = false
+                    let sessionID = nexusSessionID
                     lock.unlock()
+                    if let sessionID {
+                        NexusSessionRuntimeDiagnostics.logPiPromptAccepted(sessionID: sessionID)
+                    }
                     requestSlashCommands()
                 } else {
                     handlePromptSubmissionRejected(response)
@@ -2172,7 +2193,11 @@
         }
 
         private func handleAgentEnd(_ object: [String: Any]) {
-            guard bool(for: "willRetry", in: object) != true else {
+            let willRetry = bool(for: "willRetry", in: object) == true
+            if let nexusSessionID {
+                NexusSessionRuntimeDiagnostics.logPiAgentEnd(sessionID: nexusSessionID, willRetry: willRetry)
+            }
+            guard willRetry == false else {
                 notifyChange()
                 return
             }
@@ -4033,6 +4058,7 @@
         private let arguments: [String]
         private let workingDirectory: String?
         private let environment: [String: String]?
+        private let nexusSessionID: UUID?
         private let lock = NSLock()
         private var stdoutLineHandler: (@Sendable (String) -> Void)?
         private var terminationHandler: (@Sendable (Int32) -> Void)?
@@ -4042,13 +4068,18 @@
         private var stderrHandle: FileHandle?
         private var stdoutBuffer = Data()
 
-        init(executable: String, arguments: [String], workingDirectory: String?, environment: [String: String]? = nil)
-            throws
-        {
+        init(
+            executable: String,
+            arguments: [String],
+            workingDirectory: String?,
+            environment: [String: String]? = nil,
+            nexusSessionID: UUID? = nil
+        ) throws {
             self.executable = executable
             self.arguments = arguments
             self.workingDirectory = workingDirectory
             self.environment = environment
+            self.nexusSessionID = nexusSessionID
         }
 
         func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
@@ -4087,6 +4118,15 @@
             }
 
             try process.run()
+
+            if let nexusSessionID {
+                NexusSessionRuntimeDiagnostics.logPiProcessStarted(
+                    sessionID: nexusSessionID,
+                    childPID: process.processIdentifier,
+                    executable: invocation.executable,
+                    arguments: invocation.arguments
+                )
+            }
 
             let stdoutHandle = stdoutPipe.fileHandleForReading
             stdoutHandle.readabilityHandler = { [weak self] handle in
@@ -4232,11 +4272,20 @@
 
         private func handleTermination(_ status: Int32) {
             let handler: (@Sendable (Int32) -> Void)?
+            let childPID: Int32?
+            let sessionID: UUID?
             lock.lock()
             stdoutHandle?.readabilityHandler = nil
             stderrHandle?.readabilityHandler = nil
             handler = terminationHandler
+            childPID = process?.processIdentifier
+            sessionID = nexusSessionID
             lock.unlock()
+            NexusSessionRuntimeDiagnostics.logPiProcessTerminated(
+                sessionID: sessionID,
+                childPID: childPID,
+                exitStatus: status
+            )
             handler?(status)
         }
     }

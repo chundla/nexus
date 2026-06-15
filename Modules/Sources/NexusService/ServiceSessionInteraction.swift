@@ -211,6 +211,12 @@
             if isPiSessionResetCommand(prompt, session: resolvedSession) {
                 return dependencies.normalizedSessionScreen(try dependencies.resetPiSession(resolvedSession))
             }
+            NexusSessionRuntimeDiagnostics.logSessionPromptSubmitted(
+                sessionID: resolvedSession.id,
+                providerID: resolvedSession.providerID,
+                hasRuntime: dependencies.hasRuntime(resolvedSession),
+                promptPreview: prompt.text
+            )
             return dependencies.normalizedSessionScreen(try dependencies.sendInput(prompt, resolvedSession))
         }
 
