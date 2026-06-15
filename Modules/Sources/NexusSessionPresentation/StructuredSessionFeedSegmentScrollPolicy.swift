@@ -299,7 +299,7 @@ public func structuredSessionHistoryPagingRowAffectingDraftKey(for screen: Sessi
     if let draft = screen.providerFacts.liveAssistantDraftText?.trimmingCharacters(in: .whitespacesAndNewlines),
        draft.isEmpty == false
     {
-        return draft
+        return structuredSessionLiveDraftScrollGrowthToken(for: draft)
     }
     return "open-turn"
 }

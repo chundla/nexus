@@ -61,7 +61,10 @@
                     scrollPosition = ScrollPosition()
                     pinState = StructuredSessionFeedPinState(isFollowingBottom: false, userHasDetachedFromBottom: true)
                 } else {
-                    scrollPosition = ScrollPosition(edge: .bottom)
+                    // Do not bind `ScrollPosition(edge: .bottom)` while final-answer markdown mounts;
+                    // bottom-edge tracking + growing content height can spin AppKit layout (#hang).
+                    scrollPosition = ScrollPosition()
+                    pinState = StructuredSessionFeedPinState(isFollowingBottom: true, userHasDetachedFromBottom: false)
                 }
             }
             .onChange(of: presentation.session.id) { _, _ in

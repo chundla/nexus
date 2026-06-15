@@ -141,6 +141,7 @@
         private var toolNamesByCallID: [String: String] = [:]
         private var toolActivityItemIDByCallID: [String: UUID] = [:]
         private var toolAgentsByCallID: [String: String] = [:]
+        private var streamingObservationThrottle = PiRPCStreamingObservationThrottle()
         private var didRequestStop = false
         private var pendingSlashCommandsRequestID: String?
         private var pendingAvailableModelsRequestID: String?
@@ -1809,7 +1810,7 @@
                     trimTranscriptEntriesLocked()
                 }
                 lock.unlock()
-                notifyChange()
+                notifyChangeThrottledForAssistantTextDelta()
             case "thinking_start":
                 return
             case "thinking_end":
@@ -2001,6 +2002,7 @@
         /// Ends the user-visible agent turn (Thinking… + scroll policy) at `turn_end`.
         private func finishPiAgentTurnLocked(stopReason: String) {
             clearAssistantStreamingBuffersLocked()
+            streamingObservationThrottle.reset()
             isStreaming = false
             promptTurnCommitted = false
             lastAssistantStopReason = stopReason
@@ -3639,6 +3641,36 @@
             handler = changeHandler
             lock.unlock()
             handler?()
+        }
+
+        private func notifyChangeThrottledForAssistantTextDelta() {
+            let shouldNotifyImmediately: Bool
+            let scheduleDeferredFlush: Bool
+            lock.lock()
+            shouldNotifyImmediately = streamingObservationThrottle.shouldNotifyImmediatelyForStreamingDelta()
+            scheduleDeferredFlush = shouldNotifyImmediately == false
+            lock.unlock()
+
+            if shouldNotifyImmediately {
+                notifyChange()
+                return
+            }
+
+            guard scheduleDeferredFlush else {
+                return
+            }
+
+            let interval = 0.05
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+                guard let self else {
+                    return
+                }
+                let shouldFlush = self.streamingObservationThrottle.consumePendingNotify()
+                if shouldFlush {
+                    self.notifyChange()
+                }
+            }
         }
 
         static func transportArguments(sessionLinkage: PiSessionLinkage?) -> [String] {

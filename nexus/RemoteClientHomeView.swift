@@ -2281,7 +2281,11 @@
                             userHasDetachedFromBottom: true
                         )
                     } else {
-                        structuredSessionFeedScrollPosition = ScrollPosition(edge: .bottom)
+                        structuredSessionFeedScrollPosition = ScrollPosition()
+                        structuredSessionPinState = StructuredSessionFeedPinState(
+                            isFollowingBottom: true,
+                            userHasDetachedFromBottom: false
+                        )
                     }
                 }
 
