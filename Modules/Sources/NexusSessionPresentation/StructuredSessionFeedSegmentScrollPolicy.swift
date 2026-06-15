@@ -170,11 +170,13 @@ public func structuredSessionFeedScrollSnapshot(
     )
 }
 
-/// `ScrollPosition(edge: .bottom)` follows every layout growth; turn off while an **Agent Turn** is open.
+/// `ScrollPosition(edge: .bottom)` tracks every content height change and can spin AppKit `ScrollView` layout.
+/// Follow the tail via pin state + explicit `scrollTo` instead (macOS structured feed).
 public func structuredSessionFeedUsesBottomEdgeScrollPositionBinding(
     for presentation: FocusedStructuredSessionPresentation
 ) -> Bool {
-    structuredSessionEffectiveAgentTurnInProgress(for: presentation) == false
+    _ = presentation
+    return false
 }
 
 /// While an open turn is effective, do not treat scroll geometry as “pinned to bottom” (avoids tail stickiness).
@@ -233,7 +235,7 @@ public func structuredSessionFeedFollowScrollToken(
             let final = turn.finalAnswer,
             final.isStreaming
         {
-            draftSuffix = "-\(final.text.count)"
+            draftSuffix = "-\(structuredSessionLiveDraftScrollGrowthToken(for: final.text))"
         } else {
             draftSuffix = ""
         }

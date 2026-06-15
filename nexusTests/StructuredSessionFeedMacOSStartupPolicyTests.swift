@@ -65,13 +65,13 @@
                     == true)
         }
 
-        @Test func markdownHydrationAllowedDuringProgressiveReveal() {
-            #expect(StructuredSessionFeedMacOSStartupPolicy.allowsMarkdownHydrationDuringProgressiveReveal)
+        @Test func markdownHydrationDeferredUntilFullTailRevealed() {
+            #expect(StructuredSessionFeedMacOSStartupPolicy.allowsMarkdownHydrationDuringProgressiveReveal == false)
             #expect(
                 StructuredSessionFeedMacOSStartupPolicy.isFeedMarkdownHydrationAllowed(
                     visibleTailRowCount: 4,
                     totalActivityRowCount: 20
-                )
+                ) == false
             )
             #expect(
                 StructuredSessionFeedMacOSStartupPolicy.isFeedMarkdownHydrationAllowed(

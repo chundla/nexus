@@ -8,8 +8,9 @@
         private let lock = NSLock()
         nonisolated(unsafe) private var lastNotifiedAt: Date?
         nonisolated(unsafe) private var pendingNotify = false
+        nonisolated(unsafe) private var scheduledFlushGeneration: UInt64 = 0
 
-        init(minimumInterval: TimeInterval = 0.05, now: @escaping @Sendable () -> Date = Date.init) {
+        init(minimumInterval: TimeInterval = 0.2, now: @escaping @Sendable () -> Date = Date.init) {
             self.minimumInterval = minimumInterval
             self.now = now
         }
@@ -40,11 +41,35 @@
             return true
         }
 
+        /// Returns a generation token for a single in-flight deferred flush task.
+        func beginScheduledFlushIfNeeded() -> UInt64? {
+            lock.lock()
+            defer { lock.unlock() }
+            guard pendingNotify else {
+                return nil
+            }
+            scheduledFlushGeneration &+= 1
+            return scheduledFlushGeneration
+        }
+
+        /// Consume pending notify only when `generation` is still the active scheduled flush.
+        func consumePendingNotify(forScheduledFlushGeneration generation: UInt64) -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            guard scheduledFlushGeneration == generation, pendingNotify else {
+                return false
+            }
+            pendingNotify = false
+            lastNotifiedAt = now()
+            return true
+        }
+
         func reset() {
             lock.lock()
             defer { lock.unlock() }
             lastNotifiedAt = nil
             pendingNotify = false
+            scheduledFlushGeneration &+= 1
         }
     }
 #endif

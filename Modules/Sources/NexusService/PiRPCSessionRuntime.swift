@@ -3645,10 +3645,13 @@
 
         private func notifyChangeThrottledForAssistantTextDelta() {
             let shouldNotifyImmediately: Bool
-            let scheduleDeferredFlush: Bool
+            let flushGeneration: UInt64?
             lock.lock()
             shouldNotifyImmediately = streamingObservationThrottle.shouldNotifyImmediatelyForStreamingDelta()
-            scheduleDeferredFlush = shouldNotifyImmediately == false
+            flushGeneration =
+                shouldNotifyImmediately
+                ? nil
+                : streamingObservationThrottle.beginScheduledFlushIfNeeded()
             lock.unlock()
 
             if shouldNotifyImmediately {
@@ -3656,17 +3659,19 @@
                 return
             }
 
-            guard scheduleDeferredFlush else {
+            guard let flushGeneration else {
                 return
             }
 
-            let interval = 0.05
+            let interval = 0.2
             Task { [weak self] in
                 try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
                 guard let self else {
                     return
                 }
-                let shouldFlush = self.streamingObservationThrottle.consumePendingNotify()
+                let shouldFlush = self.streamingObservationThrottle.consumePendingNotify(
+                    forScheduledFlushGeneration: flushGeneration
+                )
                 if shouldFlush {
                     self.notifyChange()
                 }

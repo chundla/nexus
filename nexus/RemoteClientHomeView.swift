@@ -1496,7 +1496,7 @@
         @State private var structuredSessionDraftGrowthScrollThrottle = StructuredSessionDraftGrowthScrollThrottle()
         @State private var structuredSessionPinState = StructuredSessionFeedPinState()
         @State private var structuredSessionFeedScrollSnapshot: StructuredSessionFeedScrollSnapshot?
-        @State private var structuredSessionFeedScrollPosition = ScrollPosition(edge: .bottom)
+        @State private var structuredSessionFeedScrollPosition = ScrollPosition()
         @State private var structuredSessionFeedVisibleTailRowCount = 0
         @State private var structuredSessionFeedScrollGeometrySample: StructuredSessionScrollGeometrySample?
         @State private var structuredSessionFeedScrollLastMovementAt = Date()
@@ -2299,10 +2299,7 @@
                     presentedStructuredSessionAssistantFullResponse = nil
                     structuredSessionFeedVisibleTailRowCount = 0
                     structuredSessionAgentTurnDisclosureState.reset()
-                    structuredSessionFeedScrollPosition =
-                        structuredSessionEffectiveAgentTurnInProgress(for: presentation)
-                        ? ScrollPosition()
-                        : ScrollPosition(edge: .bottom)
+                    structuredSessionFeedScrollPosition = ScrollPosition()
                     structuredSessionScheduleFeedActivityRowsIfNeeded()
                 }
                 .onChange(of: presentation.structuredSessionFeedScrollSnapshot) { _, current in

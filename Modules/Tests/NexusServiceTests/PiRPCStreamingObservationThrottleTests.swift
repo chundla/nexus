@@ -29,8 +29,12 @@
 
             #expect(throttle.shouldNotifyImmediatelyForStreamingDelta())
             #expect(throttle.shouldNotifyImmediatelyForStreamingDelta() == false)
-            #expect(throttle.consumePendingNotify())
-            #expect(throttle.consumePendingNotify() == false)
+            guard let generation = throttle.beginScheduledFlushIfNeeded() else {
+                Issue.record("Expected scheduled flush generation")
+                return
+            }
+            #expect(throttle.consumePendingNotify(forScheduledFlushGeneration: generation))
+            #expect(throttle.consumePendingNotify(forScheduledFlushGeneration: generation) == false)
             #expect(throttle.shouldNotifyImmediatelyForStreamingDelta())
         }
 
@@ -41,7 +45,7 @@
             #expect(throttle.shouldNotifyImmediatelyForStreamingDelta())
             #expect(throttle.shouldNotifyImmediatelyForStreamingDelta() == false)
             throttle.reset()
-            #expect(throttle.consumePendingNotify() == false)
+            #expect(throttle.beginScheduledFlushIfNeeded() == nil)
             #expect(throttle.shouldNotifyImmediatelyForStreamingDelta())
         }
     }

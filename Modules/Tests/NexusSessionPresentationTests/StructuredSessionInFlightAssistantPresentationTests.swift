@@ -111,6 +111,32 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
         #expect(structuredSessionFeedUsesBottomEdgeScrollPositionBinding(for: presentation) == false)
     }
 
+    @Test func bottomEdgeScrollBindingDisabledForClosedTurnFeed() throws {
+        let screen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            ),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .message, text: "You: hi", prompt: SessionPrompt(text: "hi")),
+                SessionActivityItem(kind: .message, text: "Pi: **done**"),
+            ],
+            isAgentTurnInProgress: false
+        )
+        let presentation = FocusedStructuredSessionPresentation(
+            session: screen.session,
+            feed: structuredSessionFeedPresentation(for: screen),
+            autoScrollTrigger: structuredSessionAutoScrollTrigger(for: screen)
+        )
+        #expect(structuredSessionEffectiveAgentTurnInProgress(for: presentation) == false)
+        #expect(structuredSessionFeedUsesBottomEdgeScrollPositionBinding(for: presentation) == false)
+    }
+
     @Test func autoScrollTriggerAnchorsAgentTurnNotInterimPiWhenThinkingHidden() throws {
         let screen = SessionScreen(
             session: Session(
