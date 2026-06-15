@@ -119,7 +119,10 @@ struct StructuredSessionFeedSegmentScrollPolicyTests {
 
         let feed = structuredSessionFeedPresentation(for: screen)
         let segments = try #require(feed.feedSegments)
-        guard case .agentTurn(let turn) = segments.last else {
+        guard case .agentTurn(let turn) = segments.first(where: {
+            if case .agentTurn = $0 { return true }
+            return false
+        }) else {
             Issue.record("Expected agent turn segment")
             return
         }

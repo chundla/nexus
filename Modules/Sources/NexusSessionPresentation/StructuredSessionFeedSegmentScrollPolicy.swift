@@ -104,6 +104,9 @@ public func structuredSessionFeedScrollTarget(
     }
 
     if let segments = presentation.feed.feedSegments, segments.isEmpty == false {
+        if let anchorTurnID = structuredSessionFeedScrollAnchorTurnIDForInterimPiLayout(in: segments) {
+            return .activityRow(anchorTurnID)
+        }
         if let last = segments.last,
             case .agentTurn(let turn) = last,
             let final = turn.finalAnswer,
@@ -155,11 +158,15 @@ public func structuredSessionFeedScrollSnapshot(
         growthToken = nil
     }
 
+    let suppressBottomScroll =
+        structuredSessionEffectiveAgentTurnInProgress(for: presentation)
+        || structuredSessionFeedHasInterimPiAssistantAfterOpenTurn(in: presentation.feed.feedSegments)
+
     return StructuredSessionFeedScrollSnapshot(
         feedScrollTarget: target,
         autoScrollTrigger: presentation.autoScrollTrigger,
         liveDraftGrowthToken: growthToken,
-        suppressesProgrammaticBottomScroll: structuredSessionEffectiveAgentTurnInProgress(for: presentation)
+        suppressesProgrammaticBottomScroll: suppressBottomScroll
     )
 }
 
@@ -242,16 +249,30 @@ public func structuredSessionFeedFollowScrollToken(
     return "\(rows.count)-\(lastRow?.id.uuidString ?? "none")\(draftSuffix)"
 }
 
+/// Open turn + trailing interim `Pi:` — scroll must not follow the standalone bubble id.
+func structuredSessionFeedScrollAnchorTurnIDForInterimPiLayout(
+    in segments: [StructuredSessionFeedSegment]
+) -> UUID? {
+    guard structuredSessionFeedHasInterimPiAssistantAfterOpenTurn(in: segments),
+        let anchorTurnID = structuredSessionFeedScrollAnchorTurnID(in: segments)
+    else {
+        return nil
+    }
+    return anchorTurnID
+}
+
 public func structuredSessionAutoScrollTrigger(for screen: SessionScreen) -> StructuredSessionAutoScrollTrigger {
     let lastScrollItemID: UUID?
     if let segments = structuredSessionAgentTurnFeedSegments(for: screen) {
-        let hasThinking =
-            structuredSessionThinkingIndicator(
-                for: screen,
-                hasPendingApprovalRequests: screen.approvalRequests.contains { $0.state == .pending }
-            ) != nil
-        if hasThinking, let anchorTurnID = structuredSessionFeedScrollAnchorTurnID(in: segments) {
+        let anchorForOpenTurn =
+            structuredSessionEffectiveAgentTurnInProgress(for: screen)
+            || structuredSessionFeedHasInterimPiAssistantAfterOpenTurn(in: segments)
+        if anchorForOpenTurn,
+            let anchorTurnID = structuredSessionFeedScrollAnchorTurnID(in: segments)
+        {
             lastScrollItemID = anchorTurnID
+        } else if let interimAnchor = structuredSessionFeedScrollAnchorTurnIDForInterimPiLayout(in: segments) {
+            lastScrollItemID = interimAnchor
         } else if let last = segments.last {
             lastScrollItemID = last.id
         } else {

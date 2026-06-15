@@ -101,6 +101,49 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
         #expect(structuredSessionFeedUsesBottomEdgeScrollPositionBinding(for: presentation) == false)
     }
 
+    @Test func autoScrollTriggerAnchorsAgentTurnNotInterimPiWhenThinkingHidden() throws {
+        let screen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            ),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .message, text: "You: review", prompt: SessionPrompt(text: "review")),
+                SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Scan."),
+                SessionActivityItem(
+                    kind: .message,
+                    text: "Pi: Reviewing Nexus: checking recent changes and key architecture."
+                ),
+            ],
+            isAgentTurnInProgress: false
+        )
+
+        let segments = try #require(structuredSessionPiFeedSegments(for: screen))
+        guard case .agentTurn(let turn) = segments[1],
+              case .standalone(let pi) = segments[2]
+        else {
+            Issue.record("Expected turn + interim Pi")
+            return
+        }
+        #expect(structuredSessionEffectiveAgentTurnInProgress(for: screen) == true)
+        #expect(structuredSessionAutoScrollTrigger(for: screen).lastActivityRowID == turn.id)
+        #expect(structuredSessionAutoScrollTrigger(for: screen).lastActivityRowID != pi.id)
+
+        let feed = structuredSessionFeedPresentation(for: screen)
+        let presentation = FocusedStructuredSessionPresentation(
+            session: screen.session,
+            feed: feed,
+            autoScrollTrigger: structuredSessionAutoScrollTrigger(for: screen)
+        )
+        #expect(structuredSessionFeedScrollTarget(for: presentation) == .activityRow(turn.id))
+        #expect(structuredSessionFeedScrollSnapshot(for: presentation).suppressesProgrammaticBottomScroll == true)
+    }
+
     @Test func piTurnStaysOpenWhenServiceFlagFalseBeforeTurnEndProviderEvent() throws {
         let userID = UUID()
         let thoughtsID = UUID()
