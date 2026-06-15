@@ -44,6 +44,11 @@ public struct StructuredSessionFeedAgentTurnToolSegment: Equatable, Identifiable
     }
 }
 
+public enum StructuredSessionFeedAgentTurnNotice: Equatable, Sendable {
+    case progress(String)
+    case error(String)
+}
+
 public struct StructuredSessionFeedAgentTurnFinalAnswerSegment: Equatable, Sendable {
     public let text: String
     public let isStreaming: Bool
@@ -59,6 +64,8 @@ public struct StructuredSessionFeedAgentTurnSegment: Equatable, Identifiable, Se
     public let isOpen: Bool
     public let reasoning: StructuredSessionFeedAgentTurnReasoningSegment?
     public let tools: [StructuredSessionFeedAgentTurnToolSegment]
+    /// Turn-level progress / errors with no open tool (e.g. `message_end` abort) — shown inside the agent-turn card.
+    public let turnNotices: [StructuredSessionFeedAgentTurnNotice]
     public let finalAnswer: StructuredSessionFeedAgentTurnFinalAnswerSegment?
 
     public init(
@@ -66,12 +73,14 @@ public struct StructuredSessionFeedAgentTurnSegment: Equatable, Identifiable, Se
         isOpen: Bool,
         reasoning: StructuredSessionFeedAgentTurnReasoningSegment? = nil,
         tools: [StructuredSessionFeedAgentTurnToolSegment] = [],
+        turnNotices: [StructuredSessionFeedAgentTurnNotice] = [],
         finalAnswer: StructuredSessionFeedAgentTurnFinalAnswerSegment? = nil
     ) {
         self.id = id
         self.isOpen = isOpen
         self.reasoning = reasoning
         self.tools = tools
+        self.turnNotices = turnNotices
         self.finalAnswer = finalAnswer
     }
 }
@@ -165,6 +174,7 @@ private func structuredSessionPiAgentTurnActivitySlice(
     var tools: [StructuredSessionFeedAgentTurnToolSegment] = []
     var openToolIndex: Int?
     var finalAnswer: StructuredSessionFeedAgentTurnFinalAnswerSegment?
+    var turnNotices: [StructuredSessionFeedAgentTurnNotice] = []
     var cursor = startIndex
     var consumedAny = false
 
@@ -175,8 +185,20 @@ private func structuredSessionPiAgentTurnActivitySlice(
             break
         }
 
+        if structuredSessionPiFeedSegmentIsInTurnProgressRow(item) {
+            structuredSessionPiAgentTurnAppendProgressNotice(item.text, to: &turnNotices)
+            consumedAny = true
+            cursor += 1
+            continue
+        }
+
         if structuredSessionPiFeedSegmentIsInTurnToolErrorRow(item) {
-            structuredSessionPiAgentTurnAttachErrorText(item.text, to: &tools, openToolIndex: &openToolIndex)
+            structuredSessionPiAgentTurnAbsorbErrorText(
+                item.text,
+                to: &tools,
+                openToolIndex: &openToolIndex,
+                turnNotices: &turnNotices
+            )
             consumedAny = true
             cursor += 1
             continue
@@ -264,20 +286,37 @@ private func structuredSessionPiAgentTurnActivitySlice(
         isOpen: isOpenTurn,
         reasoning: reasoning,
         tools: tools,
+        turnNotices: turnNotices,
         finalAnswer: finalAnswer
     )
 
     return StructuredSessionPiAgentTurnSlice(nextIndex: cursor, turn: turn)
 }
 
+private func structuredSessionPiFeedSegmentIsInTurnProgressRow(_ item: SessionActivityItem) -> Bool {
+    item.kind == .progress
+}
+
+private func structuredSessionPiAgentTurnAppendProgressNotice(
+    _ rawText: String,
+    to turnNotices: inout [StructuredSessionFeedAgentTurnNotice]
+) {
+    let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard text.isEmpty == false else {
+        return
+    }
+    turnNotices.append(.progress(text))
+}
+
 private func structuredSessionPiFeedSegmentIsInTurnToolErrorRow(_ item: SessionActivityItem) -> Bool {
     item.kind == .error
 }
 
-private func structuredSessionPiAgentTurnAttachErrorText(
+private func structuredSessionPiAgentTurnAbsorbErrorText(
     _ rawText: String,
     to tools: inout [StructuredSessionFeedAgentTurnToolSegment],
-    openToolIndex: inout Int?
+    openToolIndex: inout Int?,
+    turnNotices: inout [StructuredSessionFeedAgentTurnNotice]
 ) {
     let errorText = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
     guard errorText.isEmpty == false else {
@@ -285,6 +324,7 @@ private func structuredSessionPiAgentTurnAttachErrorText(
     }
 
     guard let toolIndex = openToolIndex, tools.indices.contains(toolIndex) else {
+        turnNotices.append(.error(errorText))
         return
     }
 

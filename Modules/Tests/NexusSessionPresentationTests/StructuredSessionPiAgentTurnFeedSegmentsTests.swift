@@ -258,6 +258,58 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
         #expect(turn.finalAnswer?.text == "Scope unclear — checking recent changes and repo state to focus the review.")
     }
 
+    @Test func piProgressDoesNotSplitTurnIntoLegacyRows() throws {
+        let screen = SessionScreen(
+            session: piSession(),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .message, text: "You: run", prompt: SessionPrompt(text: "run")),
+                SessionActivityItem(kind: .command, text: "/bash ls"),
+                SessionActivityItem(kind: .progress, text: "Running bash: ls"),
+                SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Still working."),
+                SessionActivityItem(kind: .message, text: "Pi: done")
+            ],
+            isAgentTurnInProgress: false
+        )
+
+        let segments = try #require(structuredSessionPiFeedSegments(for: screen))
+        #expect(segments.count == 2)
+        #expect(segments.contains { if case .standalone = $0 { return true }; return false } == false)
+        guard case .agentTurn(let turn) = segments[1] else {
+            Issue.record("Expected composite agent turn")
+            return
+        }
+        #expect(turn.turnNotices == [.progress("Running bash: ls")])
+        #expect(turn.reasoning?.markdownBody == "Still working.")
+        #expect(turn.finalAnswer?.text == "done")
+    }
+
+    @Test func piOrphanTurnErrorSurfacesInTurnNoticesWithoutSplitting() throws {
+        let screen = SessionScreen(
+            session: piSession(),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .message, text: "You: go", prompt: SessionPrompt(text: "go")),
+                SessionActivityItem(kind: .message, text: "Pi: partial answer"),
+                SessionActivityItem(kind: .error, text: "Operation aborted"),
+                SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Recovering.")
+            ],
+            isAgentTurnInProgress: false
+        )
+
+        let segments = try #require(structuredSessionPiFeedSegments(for: screen))
+        #expect(segments.count == 2)
+        guard case .agentTurn(let turn) = segments[1] else {
+            Issue.record("Expected agent turn")
+            return
+        }
+        #expect(turn.turnNotices == [.error("Operation aborted")])
+        #expect(turn.reasoning?.markdownBody == "Recovering.")
+        #expect(turn.finalAnswer?.text == "partial answer")
+    }
+
     @Test func piToolErrorDoesNotSplitTurnIntoLegacyRows() throws {
         let screen = SessionScreen(
             session: piSession(),

@@ -168,6 +168,27 @@ public struct StructuredSessionPiFeedSegmentView: View {
                 }
             }
 
+            if turn.turnNotices.isEmpty == false {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(turn.turnNotices.enumerated()), id: \.offset) { _, notice in
+                        switch notice {
+                        case .progress(let text):
+                            Text(text)
+                                .font(style.bodyFont(13, nil, nil))
+                                .foregroundStyle(style.mutedForeground)
+                                .structuredSessionFeedTextSelection()
+                                .fixedSize(horizontal: false, vertical: true)
+                        case .error(let text):
+                            Text(text)
+                                .font(style.bodyFont(13, nil, nil))
+                                .foregroundStyle(Color.red.opacity(0.92))
+                                .structuredSessionFeedTextSelection()
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+
             if let finalAnswer = turn.finalAnswer {
                 DisclosureGroup(
                     isExpanded: .constant(true)
