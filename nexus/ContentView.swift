@@ -1632,6 +1632,15 @@ struct ContentView: View {
                                 scrollPositionUsesBottomEdge: true
                             )
                     }
+                    .onChange(of: feedPresentation.feedScrollItemCount) { _, total in
+                        let synced = StructuredSessionFeedSegmentRevealPolicy.synchronizedVisibleTailSegmentCount(
+                            currentVisibleCount: structuredSessionMacOSFeedVisibleTailRowCount,
+                            totalFeedSegmentCount: total
+                        )
+                        if synced != structuredSessionMacOSFeedVisibleTailRowCount {
+                            structuredSessionMacOSFeedVisibleTailRowCount = synced
+                        }
+                    }
 
                 if isReady, let structuredChrome {
                     MacStructuredSessionComposerSection(

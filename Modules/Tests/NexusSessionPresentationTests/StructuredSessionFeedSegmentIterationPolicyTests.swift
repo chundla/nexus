@@ -40,6 +40,23 @@ struct StructuredSessionFeedSegmentIterationPolicyTests {
         #expect(visible.map(\.id) == Array(segments.suffix(2).map(\.id)))
     }
 
+    @Test func synchronizedVisibleTailExpandsWhenFeedSegmentCountGrowsAfterInitialReveal() {
+        let totalAfterTurn = 3
+        let totalMidSession = 5
+        #expect(
+            StructuredSessionFeedSegmentRevealPolicy.synchronizedVisibleTailSegmentCount(
+                currentVisibleCount: 3,
+                totalFeedSegmentCount: totalAfterTurn
+            ) == 3
+        )
+        #expect(
+            StructuredSessionFeedSegmentRevealPolicy.synchronizedVisibleTailSegmentCount(
+                currentVisibleCount: 3,
+                totalFeedSegmentCount: totalMidSession
+            ) == totalMidSession
+        )
+    }
+
     @Test func thinkingIndicatorDefersWhenOpenTurnHasReasoningContent() {
         let session = Session(
             id: UUID(),

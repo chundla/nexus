@@ -56,6 +56,24 @@ public enum StructuredSessionFeedSegmentRevealPolicy {
         }
         return visibleTailSegmentCount >= totalFeedSegmentCount
     }
+
+    /// Keeps progressive tail reveal in sync when the feed grows after the initial reveal pass (#225 / ADR 0037).
+    /// Without this, `visibleTailSegmentCount` can stay at the count from first paint while new user/tools segments append.
+    public static func synchronizedVisibleTailSegmentCount(
+        currentVisibleCount: Int,
+        totalFeedSegmentCount: Int
+    ) -> Int {
+        guard usesProgressiveFeedSegmentReveal else {
+            return totalFeedSegmentCount
+        }
+        guard totalFeedSegmentCount > 0 else {
+            return 0
+        }
+        if currentVisibleCount <= 0 {
+            return min(initialVisibleTailSegmentCount, totalFeedSegmentCount)
+        }
+        return min(max(currentVisibleCount, totalFeedSegmentCount), totalFeedSegmentCount)
+    }
 }
 
 public struct StructuredSessionAgentTurnDisclosureExpansionDefaults: Equatable, Sendable {

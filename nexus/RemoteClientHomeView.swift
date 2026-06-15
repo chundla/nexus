@@ -2219,6 +2219,15 @@ private struct RemoteSessionScreenView: View {
                             scrollPositionUsesBottomEdge: true
                         )
                 }
+                .onChange(of: presentation.feed.feedScrollItemCount) { _, total in
+                    let synced = StructuredSessionFeedSegmentRevealPolicy.synchronizedVisibleTailSegmentCount(
+                        currentVisibleCount: structuredSessionFeedVisibleTailRowCount,
+                        totalFeedSegmentCount: total
+                    )
+                    if synced != structuredSessionFeedVisibleTailRowCount {
+                        structuredSessionFeedVisibleTailRowCount = synced
+                    }
+                }
         }
         .sheet(item: $presentedStructuredSessionAssistantFullResponse) { presentation in
             NavigationStack {
