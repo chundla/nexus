@@ -1619,6 +1619,15 @@ struct ContentView: View {
                             structuredSessionFeedScrollPosition = ScrollPosition(edge: .bottom)
                         }
                     }
+                    .onChange(of: structuredPresentation.feed.feedSegments?.count) { _, _ in
+                        guard structuredSessionEffectiveAgentTurnInProgress(for: structuredPresentation),
+                              let turnID = structuredSessionFeedScrollAnchorTurnID(
+                                  in: structuredPresentation.feed.feedSegments
+                              ) else {
+                            return
+                        }
+                        structuredSessionFeedScrollPosition = ScrollPosition(idType: UUID.self, id: turnID)
+                    }
                     .onChange(of: structuredPresentation.session.id) { _, _ in
                         structuredSessionPinState = StructuredSessionFeedPinState()
                         structuredSessionFeedScrollSnapshot = nil

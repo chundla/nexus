@@ -2201,6 +2201,15 @@ private struct RemoteSessionScreenView: View {
                         structuredSessionFeedScrollPosition = ScrollPosition(edge: .bottom)
                     }
                 }
+                .onChange(of: presentation.feed.feedSegments?.count) { _, _ in
+                    guard structuredSessionEffectiveAgentTurnInProgress(for: presentation),
+                          let turnID = structuredSessionFeedScrollAnchorTurnID(
+                              in: presentation.feed.feedSegments
+                          ) else {
+                        return
+                    }
+                    structuredSessionFeedScrollPosition = ScrollPosition(idType: UUID.self, id: turnID)
+                }
                 .onChange(of: presentation.session.id) { _, _ in
                     structuredSessionPinState = StructuredSessionFeedPinState()
                     structuredSessionFeedScrollSnapshot = nil

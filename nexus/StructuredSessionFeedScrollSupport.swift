@@ -75,14 +75,19 @@ enum StructuredSessionFeedScrollSupport {
         if current.suppressesProgrammaticBottomScroll {
             return current
         }
-        if scrollPositionUsesBottomEdge == false || intent != .none {
-            structuredSessionRequestBottomScroll(
-                intent: intent,
-                coordinator: coordinator,
-                draftGrowthThrottle: draftGrowthThrottle,
-                performScroll: performScroll
-            )
+        guard intent != .none else {
+            return current
         }
+        // When `ScrollPosition(edge: .bottom)` is active, avoid redundant `scrollTo(edge: .bottom)`.
+        guard scrollPositionUsesBottomEdge == false else {
+            return current
+        }
+        structuredSessionRequestBottomScroll(
+            intent: intent,
+            coordinator: coordinator,
+            draftGrowthThrottle: draftGrowthThrottle,
+            performScroll: performScroll
+        )
         return current
     }
 }

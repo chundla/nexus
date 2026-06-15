@@ -97,4 +97,29 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
         #expect(current.suppressesProgrammaticBottomScroll == true)
         #expect(structuredSessionFeedUsesBottomEdgeScrollPositionBinding(for: presentation) == false)
     }
+
+    @Test func effectiveTurnInProgressWhenOpenTurnAndInterimPiStandalone() throws {
+        let screen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            ),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .message, text: "You: go", prompt: SessionPrompt(text: "go")),
+                SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Working."),
+                SessionActivityItem(kind: .message, text: "Pi: interim")
+            ],
+            isAgentTurnInProgress: true
+        )
+
+        #expect(structuredSessionFeedHasInterimPiAssistantAfterOpenTurn(
+            in: structuredSessionPiFeedSegments(for: screen)
+        ) == true)
+        #expect(structuredSessionEffectiveAgentTurnInProgress(for: screen) == true)
+    }
 }
