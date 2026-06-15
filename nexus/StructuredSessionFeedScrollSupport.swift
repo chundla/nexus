@@ -51,16 +51,12 @@ enum StructuredSessionFeedScrollSupport {
         scrollPosition: Binding<ScrollPosition>,
         scrollPositionUsesBottomEdge: Bool = false
     ) -> StructuredSessionFeedScrollSnapshot {
-        if scrollPositionUsesBottomEdge {
-            return current
-        }
-
         let performScroll = { (animation: StructuredSessionAutoScrollAnimation) in
             scheduleFollowBottomScroll(position: scrollPosition, animation: animation)
         }
 
         guard let previous else {
-            if isFollowingBottom, scrollPositionUsesBottomEdge == false {
+            if isFollowingBottom {
                 structuredSessionRequestBottomScroll(
                     intent: .immediate,
                     coordinator: coordinator,
@@ -76,12 +72,14 @@ enum StructuredSessionFeedScrollSupport {
             current: current,
             isPinnedToBottom: isFollowingBottom
         )
-        structuredSessionRequestBottomScroll(
-            intent: intent,
-            coordinator: coordinator,
-            draftGrowthThrottle: draftGrowthThrottle,
-            performScroll: performScroll
-        )
+        if scrollPositionUsesBottomEdge == false || intent != .none {
+            structuredSessionRequestBottomScroll(
+                intent: intent,
+                coordinator: coordinator,
+                draftGrowthThrottle: draftGrowthThrottle,
+                performScroll: performScroll
+            )
+        }
         return current
     }
 }

@@ -76,10 +76,28 @@ public func structuredSessionFeedRevealShowsFullTail(
     visibleTailItemCount >= totalFeedItemCount
 }
 
+/// Turn segment to pin scroll to while **Thinking…** is visible (not interim standalone assistant bubbles).
+public func structuredSessionFeedScrollAnchorTurnID(
+    in feedSegments: [StructuredSessionFeedSegment]?
+) -> UUID? {
+    guard let segments = feedSegments, segments.isEmpty == false else {
+        return nil
+    }
+    for segment in segments.reversed() {
+        if case .agentTurn(let turn) = segment {
+            return turn.id
+        }
+    }
+    return nil
+}
+
 public func structuredSessionFeedScrollTarget(
     for presentation: FocusedStructuredSessionPresentation
 ) -> StructuredSessionFeedScrollTarget {
     if presentation.feed.thinkingIndicator != nil {
+        if let anchorTurnID = structuredSessionFeedScrollAnchorTurnID(in: presentation.feed.feedSegments) {
+            return .activityRow(anchorTurnID)
+        }
         return .bottomSentinel
     }
 
@@ -141,6 +159,11 @@ public func structuredSessionFeedScrollSnapshot(
 public func structuredSessionFeedFollowScrollToken(
     for presentation: FocusedStructuredSessionPresentation
 ) -> String {
+    if presentation.feed.thinkingIndicator != nil,
+       let anchorTurnID = structuredSessionFeedScrollAnchorTurnID(in: presentation.feed.feedSegments) {
+        return "thinking-anchor-\(anchorTurnID.uuidString)"
+    }
+
     if let segments = presentation.feed.feedSegments {
         let last = segments.last
         let draftSuffix: String
@@ -165,8 +188,18 @@ public func structuredSessionFeedFollowScrollToken(
 
 public func structuredSessionAutoScrollTrigger(for screen: SessionScreen) -> StructuredSessionAutoScrollTrigger {
     let lastScrollItemID: UUID?
-    if let segments = structuredSessionAgentTurnFeedSegments(for: screen), let last = segments.last {
-        lastScrollItemID = last.id
+    if let segments = structuredSessionAgentTurnFeedSegments(for: screen) {
+        let hasThinking = structuredSessionThinkingIndicator(
+            for: screen,
+            hasPendingApprovalRequests: screen.approvalRequests.contains { $0.state == .pending }
+        ) != nil
+        if hasThinking, let anchorTurnID = structuredSessionFeedScrollAnchorTurnID(in: segments) {
+            lastScrollItemID = anchorTurnID
+        } else if let last = segments.last {
+            lastScrollItemID = last.id
+        } else {
+            lastScrollItemID = screen.activityItems.last?.id
+        }
     } else {
         lastScrollItemID = screen.activityItems.last?.id
     }

@@ -102,7 +102,7 @@ struct StructuredSessionFeedScrollSupportTests {
         #expect(StructuredSessionFeedScrollSupport.scrollToBottomInvocationCountForTesting == 0)
     }
 
-    @Test func applyStructuredSessionFeedScrollSnapshotTransitionSkipsInitialScrollWhenScrollPositionUsesBottomEdge() {
+    @Test func applyStructuredSessionFeedScrollSnapshotTransitionScrollsOnInitialAppearWhenFollowingBottom() {
         StructuredSessionFeedScrollSupport.resetScrollToBottomInvocationCountForTesting()
         var scrollPosition = ScrollPosition(edge: .bottom)
         let binding = Binding(get: { scrollPosition }, set: { scrollPosition = $0 })
@@ -128,7 +128,7 @@ struct StructuredSessionFeedScrollSupportTests {
             scrollPositionUsesBottomEdge: true
         )
 
-        #expect(StructuredSessionFeedScrollSupport.scrollToBottomInvocationCountForTesting == 0)
+        #expect(StructuredSessionFeedScrollSupport.scrollToBottomInvocationCountForTesting == 1)
     }
 
     @Test func applyStructuredSessionFeedScrollSnapshotTransitionSkipsScrollWithinDraftGrowthBucket() {

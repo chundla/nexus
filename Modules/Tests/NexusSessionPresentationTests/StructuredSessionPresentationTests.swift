@@ -2236,8 +2236,11 @@ struct StructuredSessionPresentationTests {
         )
 
         let segments = try #require(feed.feedSegments)
-        let last = try #require(segments.last)
-        #expect(structuredSessionFeedScrollTarget(for: presentation) == .activityRow(last.id))
+        if let anchorTurnID = structuredSessionFeedScrollAnchorTurnID(in: segments) {
+            #expect(structuredSessionFeedScrollTarget(for: presentation) == .activityRow(anchorTurnID))
+        } else {
+            #expect(structuredSessionFeedScrollTarget(for: presentation) == .bottomSentinel)
+        }
     }
 
     @Test func structuredSessionFeedScrollTargetFallsBackToBottomSentinelWhenFeedEmpty() {

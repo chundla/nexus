@@ -64,7 +64,35 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
             autoScrollTrigger: structuredSessionAutoScrollTrigger(for: screen)
         )
 
-        #expect(structuredSessionFeedScrollTarget(for: presentation) == .bottomSentinel)
+        guard let segments = feed.feedSegments,
+              case .agentTurn(let turn) = segments[1] else {
+            Issue.record("Expected open turn segment")
+            return
+        }
+        #expect(structuredSessionFeedScrollTarget(for: presentation) == .activityRow(turn.id))
+        #expect(structuredSessionAutoScrollTrigger(for: screen).lastActivityRowID == turn.id)
         #expect(structuredSessionFeedScrollSnapshot(for: presentation).liveDraftGrowthToken == nil)
+
+        let previous = structuredSessionFeedScrollSnapshot(for: presentation)
+        let appendedPiScreen = SessionScreen(
+            session: screen.session,
+            primarySurface: screen.primarySurface,
+            transcript: screen.transcript,
+            activityItems: screen.activityItems + [
+                SessionActivityItem(kind: .message, text: "Pi: another interim")
+            ],
+            isAgentTurnInProgress: true
+        )
+        let appendedFeed = structuredSessionFeedPresentation(for: appendedPiScreen)
+        let appendedPresentation = FocusedStructuredSessionPresentation(
+            session: appendedPiScreen.session,
+            feed: appendedFeed,
+            autoScrollTrigger: structuredSessionAutoScrollTrigger(for: appendedPiScreen)
+        )
+        let current = structuredSessionFeedScrollSnapshot(for: appendedPresentation)
+        #expect(current.feedScrollTarget == .activityRow(turn.id))
+        #expect(
+            structuredSessionBottomScrollIntent(previous: previous, current: current, isPinnedToBottom: true) == .none
+        )
     }
 }

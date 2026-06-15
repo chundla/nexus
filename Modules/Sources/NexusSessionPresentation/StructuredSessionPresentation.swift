@@ -1102,6 +1102,10 @@ public func structuredSessionBottomScrollIntent(
     }
 
     if previous.autoScrollTrigger.lastActivityRowID != current.autoScrollTrigger.lastActivityRowID {
+        if previous.feedScrollTarget == current.feedScrollTarget,
+           case .activityRow = current.feedScrollTarget {
+            return .none
+        }
         return .immediate
     }
 
