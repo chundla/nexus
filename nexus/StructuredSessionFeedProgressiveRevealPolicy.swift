@@ -4,15 +4,15 @@ import NexusSessionPresentation
 /// Structured feed startup: defer mounting the full `LazyVStack` on first paint (#225 macOS, iOS Remote Client).
 enum StructuredSessionFeedProgressiveRevealPolicy {
     static var usesProgressiveActivityRowReveal: Bool {
-        true
+        StructuredSessionFeedSegmentRevealPolicy.usesProgressiveFeedSegmentReveal
     }
 
     static var initialVisibleTailRowCount: Int {
-        3
+        StructuredSessionFeedSegmentRevealPolicy.initialVisibleTailSegmentCount
     }
 
     static var visibleTailRowsPerRevealBatch: Int {
-        3
+        StructuredSessionFeedSegmentRevealPolicy.visibleTailSegmentsPerRevealBatch
     }
 
     static var allowsMarkdownHydrationDuringProgressiveReveal: Bool {
@@ -23,6 +23,9 @@ enum StructuredSessionFeedProgressiveRevealPolicy {
         in feed: StructuredSessionFeedPresentation,
         visibleTailRowCount: Int
     ) -> [StructuredSessionActivityRow] {
+        if feed.feedSegments != nil {
+            return structuredSessionActivityRows(in: feed, visibleTailItemCount: visibleTailRowCount)
+        }
         let rows = feed.activityRows
         guard usesProgressiveActivityRowReveal, visibleTailRowCount < rows.count else {
             return rows
@@ -37,6 +40,12 @@ enum StructuredSessionFeedProgressiveRevealPolicy {
         in feed: StructuredSessionFeedPresentation,
         visibleTailRowCount: Int
     ) -> Bool {
+        if feed.feedSegments != nil {
+            return StructuredSessionFeedSegmentRevealPolicy.shouldShowThinkingIndicator(
+                in: feed,
+                visibleTailSegmentCount: visibleTailRowCount
+            )
+        }
         guard usesProgressiveActivityRowReveal else {
             return feed.thinkingIndicator != nil
         }

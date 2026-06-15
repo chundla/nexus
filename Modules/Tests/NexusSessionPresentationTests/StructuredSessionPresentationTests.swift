@@ -2231,7 +2231,15 @@ struct StructuredSessionPresentationTests {
         )
 
         let draftRowID = try #require(feed.activityRows.last?.id)
-        #expect(structuredSessionFeedScrollTarget(for: presentation) == .activityRow(draftRowID))
+        if let segments = feed.feedSegments, let last = segments.last {
+            if case .agentTurn(let turn) = last, turn.finalAnswer?.isStreaming == true {
+                #expect(structuredSessionFeedScrollTarget(for: presentation) == .activityRow(turn.id))
+            } else {
+                #expect(structuredSessionFeedScrollTarget(for: presentation) == .activityRow(last.id))
+            }
+        } else {
+            #expect(structuredSessionFeedScrollTarget(for: presentation) == .activityRow(draftRowID))
+        }
     }
 
     @Test func structuredSessionFeedScrollTargetFallsBackToBottomSentinelWhenFeedEmpty() {

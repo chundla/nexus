@@ -100,6 +100,15 @@ public struct StructuredSessionFeedPresentation: Equatable {
         activityRows.map(\.id)
     }
 
+    /// Feed items for scroll/reveal policy: segment IDs when composite projection is active (ADR 0037).
+    public var feedScrollItemCount: Int {
+        structuredSessionFeedScrollItemCount(for: self)
+    }
+
+    public var feedScrollItemIDs: [UUID] {
+        structuredSessionFeedScrollItemIDs(for: self)
+    }
+
     public init(
         copy: StructuredSessionPresentationCopy,
         activityRows: [StructuredSessionActivityRow],
@@ -1032,16 +1041,6 @@ public func structuredSessionAutoScrollAnimation(
     return .animated
 }
 
-public func structuredSessionAutoScrollTrigger(for screen: SessionScreen) -> StructuredSessionAutoScrollTrigger {
-    StructuredSessionAutoScrollTrigger(
-        lastActivityRowID: screen.activityItems.last?.id,
-        pendingApprovalRequestIDs: screen.approvalRequests
-            .filter { $0.state == .pending }
-            .map(\.id),
-        pendingDialogIDs: screen.extensionUI?.pendingDialogs.map(\.id) ?? []
-    )
-}
-
 public let structuredSessionFeedBottomSentinelID = "conversation-bottom"
 
 public enum StructuredSessionFeedScrollTarget: Equatable {
@@ -1083,47 +1082,11 @@ public enum StructuredSessionBottomScrollIntent: Equatable {
     case draftGrowthCoalesced
 }
 
-public func structuredSessionFeedScrollTarget(
-    for presentation: FocusedStructuredSessionPresentation
-) -> StructuredSessionFeedScrollTarget {
-    if let streamingRow = presentation.feed.activityRows.last,
-       streamingRow.conversationPresentation?.isStreaming == true {
-        return .activityRow(streamingRow.id)
-    }
-
-    if let lastRowID = presentation.feed.activityRows.last?.id {
-        return .activityRow(lastRowID)
-    }
-
-    return .bottomSentinel
-}
-
 /// Coarse draft-length bucket for scroll policy (#224). Small per-tick text deltas during streaming
 /// should not change scroll snapshots and force bottom scroll + layout on every provider event.
 public func structuredSessionLiveDraftScrollGrowthToken(for draftText: String) -> String {
     let bucket = max(0, draftText.count) / 96
     return "bucket-\(bucket)"
-}
-
-public func structuredSessionFeedScrollSnapshot(
-    for presentation: FocusedStructuredSessionPresentation
-) -> StructuredSessionFeedScrollSnapshot {
-    let target = structuredSessionFeedScrollTarget(for: presentation)
-    let growthToken: String?
-    if case .activityRow(let rowID) = target,
-       let row = presentation.feed.activityRows.last,
-       row.id == rowID,
-       row.conversationPresentation?.isStreaming == true {
-        growthToken = structuredSessionLiveDraftScrollGrowthToken(for: row.text)
-    } else {
-        growthToken = nil
-    }
-
-    return StructuredSessionFeedScrollSnapshot(
-        feedScrollTarget: target,
-        autoScrollTrigger: presentation.autoScrollTrigger,
-        liveDraftGrowthToken: growthToken
-    )
 }
 
 public func structuredSessionBottomScrollIntent(
@@ -1256,18 +1219,6 @@ public func structuredSessionFeedPinState(
     return StructuredSessionFeedPinState(isFollowingBottom: false, userHasDetachedFromBottom: true)
 }
 
-/// Coarse feed tail signature for scroll follow when `structuredSessionFeedScrollSnapshot` is stable (#208 cache).
-public func structuredSessionFeedFollowScrollToken(
-    for presentation: FocusedStructuredSessionPresentation
-) -> String {
-    let rows = presentation.feed.activityRows
-    let lastRow = rows.last
-    let draftSuffix = lastRow?.conversationPresentation?.isStreaming == true
-        ? "-\(lastRow?.text.count ?? 0)"
-        : ""
-    return "\(rows.count)-\(lastRow?.id.uuidString ?? "none")\(draftSuffix)"
-}
-
 /// Returns nil when pin state is unchanged — avoids `@State` churn from scroll geometry (expensive updates on main).
 public func structuredSessionFeedPinStateIfChanged(
     previous: StructuredSessionFeedPinState,
@@ -1381,6 +1332,11 @@ public func structuredSessionThinkingIndicator(
     hasPendingApprovalRequests: Bool
 ) -> StructuredSessionThinkingIndicator? {
     guard screen.isAgentTurnInProgress, hasPendingApprovalRequests == false else {
+        return nil
+    }
+
+    if screen.session.providerID == .pi,
+       structuredSessionOpenAgentTurnHasReasoningContent(for: screen) {
         return nil
     }
 
@@ -1767,7 +1723,7 @@ public enum StructuredSessionAssistantMarkdownPrewarmScheduler {
     }
 }
 
-private func annotateStructuredSessionActivityRows(
+func annotateStructuredSessionActivityRows(
     _ rows: [StructuredSessionActivityRow],
     providerDisplayName: String
 ) -> [StructuredSessionActivityRow] {

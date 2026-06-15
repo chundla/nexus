@@ -45,6 +45,7 @@ struct ContentView: View {
     @State private var structuredSessionFeedScrollPosition = ScrollPosition(edge: .bottom)
     @State private var structuredSessionMacOSFeedVisibleTailRowCount = 0
     @State private var presentedStructuredSessionAssistantFullResponse: StructuredSessionAssistantFullResponsePresentation?
+    @StateObject private var structuredSessionAgentTurnDisclosureState = StructuredSessionAgentTurnDisclosureState()
 
     private let terminalLayout = TerminalViewportLayout.live
 
@@ -1503,16 +1504,38 @@ struct ContentView: View {
                                 )
                                 .frame(maxWidth: .infinity, minHeight: 220)
                             } else if feedPresentation.activityRows.isEmpty == false {
-                                let visibleRows = StructuredSessionFeedMacOSStartupPolicy.visibleActivityRows(
-                                    in: feedPresentation,
-                                    visibleTailRowCount: structuredSessionMacOSFeedVisibleTailRowCount
-                                )
-                                ForEach(visibleRows) { row in
-                                    MacEquatableStructuredSessionActivityRow(row: row) {
-                                        structuredSessionActivityRowView(row)
+                                if feedPresentation.feedSegments != nil {
+                                    let visibleSegments = structuredSessionVisibleFeedSegments(
+                                        in: feedPresentation,
+                                        visibleTailItemCount: structuredSessionMacOSFeedVisibleTailRowCount
+                                    ) ?? []
+                                    ForEach(visibleSegments) { segment in
+                                        StructuredSessionPiFeedSegmentView(
+                                            segment: segment,
+                                            providerDisplayName: structuredPresentation.session.providerID.displayName,
+                                            style: macOSPiStructuredSessionFeedSegmentStyle(),
+                                            disclosureState: structuredSessionAgentTurnDisclosureState,
+                                            standaloneRow: { row in
+                                                AnyView(structuredSessionActivityRowView(row))
+                                            },
+                                            onShowFullAssistantResponse: { presentation in
+                                                presentedStructuredSessionAssistantFullResponse = presentation
+                                            }
+                                        )
+                                        .id(segment.id)
                                     }
-                                    .equatable()
-                                    .id(row.id)
+                                } else {
+                                    let visibleRows = StructuredSessionFeedMacOSStartupPolicy.visibleActivityRows(
+                                        in: feedPresentation,
+                                        visibleTailRowCount: structuredSessionMacOSFeedVisibleTailRowCount
+                                    )
+                                    ForEach(visibleRows) { row in
+                                        MacEquatableStructuredSessionActivityRow(row: row) {
+                                            structuredSessionActivityRowView(row)
+                                        }
+                                        .equatable()
+                                        .id(row.id)
+                                    }
                                 }
 
                                 if StructuredSessionFeedMacOSStartupPolicy.shouldShowThinkingIndicator(
@@ -1534,7 +1557,7 @@ struct ContentView: View {
                             \.structuredSessionFeedMarkdownHydrationAllowed,
                             StructuredSessionFeedMacOSStartupPolicy.isFeedMarkdownHydrationAllowed(
                                 visibleTailRowCount: structuredSessionMacOSFeedVisibleTailRowCount,
-                                totalActivityRowCount: feedPresentation.activityRows.count
+                                totalActivityRowCount: feedPresentation.feedScrollItemCount
                             )
                         )
                     }
@@ -1577,6 +1600,7 @@ struct ContentView: View {
                         structuredSessionFeedScrollSnapshot = nil
                         presentedStructuredSessionAssistantFullResponse = nil
                         structuredSessionMacOSFeedVisibleTailRowCount = 0
+                        structuredSessionAgentTurnDisclosureState.reset()
                         structuredSessionScheduleMacOSFeedActivityRowsIfNeeded()
                     }
                     .onChange(of: structuredPresentation.structuredSessionFeedScrollSnapshot) { _, current in
@@ -1656,7 +1680,7 @@ struct ContentView: View {
         guard let feed = appModel.focusedStructuredSessionPresentation?.feed else {
             return
         }
-        let total = feed.activityRows.count
+        let total = feed.feedScrollItemCount
         guard total > 0 else {
             structuredSessionMacOSFeedVisibleTailRowCount = 0
             return

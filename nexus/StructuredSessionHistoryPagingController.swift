@@ -157,9 +157,7 @@ final class StructuredSessionHistoryPagingController {
         // continue during dwell. Returning the cached presentation instance prevents the published
         // FocusedStructuredSessionPresentation (and its feed/autoScrollTrigger) from mutating.
         // Only live draft text affects visible rows; provider-event churn must not bust this cache.
-        let draftKey: String? = screen.isAgentTurnInProgress
-            ? screen.providerFacts.liveAssistantDraftText
-            : nil
+        let draftKey = structuredSessionHistoryPagingRowAffectingDraftKey(for: merged)
 
         if let last = lastRowStablePresentation,
            last.session.id == screen.session.id,
