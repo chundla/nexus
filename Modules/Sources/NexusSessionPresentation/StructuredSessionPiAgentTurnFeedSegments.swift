@@ -363,20 +363,7 @@ private func structuredSessionPiAgentTurnAttachBashOutput(
         return
     }
 
-    var tool = tools[toolIndex]
-    let mergedDetail: String
-    if let existing = tool.detailText?.trimmingCharacters(in: .whitespacesAndNewlines), existing.isEmpty == false {
-        mergedDetail = existing + "\n" + output
-    } else {
-        mergedDetail = output
-    }
-    tool = StructuredSessionFeedAgentTurnToolSegment(
-        activityItemID: tool.activityItemID,
-        callPreview: tool.callPreview,
-        detailText: mergedDetail,
-        subagentOutputs: tool.subagentOutputs
-    )
-    tools[toolIndex] = tool
+    structuredSessionPiAgentTurnMergeDetailLine(output, into: &tools[toolIndex])
 }
 
 private func structuredSessionPiAgentTurnAppendProgressNotice(
@@ -410,12 +397,23 @@ private func structuredSessionPiAgentTurnAbsorbErrorText(
         return
     }
 
-    var tool = tools[toolIndex]
+    structuredSessionPiAgentTurnMergeDetailLine(errorText, into: &tools[toolIndex])
+}
+
+/// Appends tool output / errors in arrival order (newline-separated).
+private func structuredSessionPiAgentTurnMergeDetailLine(
+    _ line: String,
+    into tool: inout StructuredSessionFeedAgentTurnToolSegment
+) {
+    let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard trimmed.isEmpty == false else {
+        return
+    }
     let mergedDetail: String
     if let existing = tool.detailText?.trimmingCharacters(in: .whitespacesAndNewlines), existing.isEmpty == false {
-        mergedDetail = existing + "\n" + errorText
+        mergedDetail = existing + "\n" + trimmed
     } else {
-        mergedDetail = errorText
+        mergedDetail = trimmed
     }
     tool = StructuredSessionFeedAgentTurnToolSegment(
         activityItemID: tool.activityItemID,
@@ -423,7 +421,6 @@ private func structuredSessionPiAgentTurnAbsorbErrorText(
         detailText: mergedDetail,
         subagentOutputs: tool.subagentOutputs
     )
-    tools[toolIndex] = tool
 }
 
 private func structuredSessionPiFeedSegmentIsPromptAnchoredUserMessage(_ item: SessionActivityItem) -> Bool {

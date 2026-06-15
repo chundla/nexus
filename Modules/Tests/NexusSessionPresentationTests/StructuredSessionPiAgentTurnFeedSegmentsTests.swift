@@ -362,6 +362,82 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
         #expect(turn.finalAnswer?.text == "partial answer")
     }
 
+    @Test func piMultipleErrorsOnSameToolMergeInChronologicalOrder() throws {
+        let screen = SessionScreen(
+            session: piSession(),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .message, text: "You: read", prompt: SessionPrompt(text: "read")),
+                SessionActivityItem(kind: .command, text: "read: x.swift", detailText: "partial output"),
+                SessionActivityItem(kind: .error, text: "first failure"),
+                SessionActivityItem(kind: .error, text: "second failure"),
+                SessionActivityItem(kind: .message, text: "Pi: stopped")
+            ],
+            isAgentTurnInProgress: false
+        )
+
+        let segments = try #require(structuredSessionPiFeedSegments(for: screen))
+        guard case .agentTurn(let turn) = segments.last else {
+            Issue.record("Expected agent turn")
+            return
+        }
+        #expect(turn.tools.count == 1)
+        #expect(turn.tools[0].detailText == "partial output\nfirst failure\nsecond failure")
+    }
+
+    @Test func piErrorsAttachToMostRecentlyOpenedTool() throws {
+        let screen = SessionScreen(
+            session: piSession(),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .message, text: "You: go", prompt: SessionPrompt(text: "go")),
+                SessionActivityItem(kind: .command, text: "read: a.swift"),
+                SessionActivityItem(kind: .error, text: "err-a"),
+                SessionActivityItem(kind: .command, text: "read: b.swift"),
+                SessionActivityItem(kind: .error, text: "err-b"),
+                SessionActivityItem(kind: .message, text: "Pi: ok")
+            ],
+            isAgentTurnInProgress: false
+        )
+
+        let segments = try #require(structuredSessionPiFeedSegments(for: screen))
+        guard case .agentTurn(let turn) = segments.last else {
+            Issue.record("Expected agent turn")
+            return
+        }
+        #expect(turn.tools.count == 2)
+        #expect(turn.tools[0].detailText == "err-a")
+        #expect(turn.tools[1].detailText == "err-b")
+    }
+
+    @Test func piErrorAfterInterimPiBeforeNextCommandUsesLastOpenTool() throws {
+        let screen = SessionScreen(
+            session: piSession(),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .message, text: "You: go", prompt: SessionPrompt(text: "go")),
+                SessionActivityItem(kind: .command, text: "read: skill.md"),
+                SessionActivityItem(kind: .message, text: "Pi: still checking"),
+                SessionActivityItem(kind: .error, text: "ENOENT: skill.md"),
+                SessionActivityItem(kind: .command, text: "read: fallback.swift"),
+                SessionActivityItem(kind: .message, text: "Pi: done")
+            ],
+            isAgentTurnInProgress: false
+        )
+
+        let segments = try #require(structuredSessionPiFeedSegments(for: screen))
+        guard case .agentTurn(let turn) = segments.last else {
+            Issue.record("Expected agent turn")
+            return
+        }
+        #expect(turn.tools.count == 2)
+        #expect(turn.tools[0].detailText == "ENOENT: skill.md")
+        #expect(turn.tools[1].detailText == nil)
+    }
+
     @Test func piToolErrorDoesNotSplitTurnIntoLegacyRows() throws {
         let screen = SessionScreen(
             session: piSession(),
