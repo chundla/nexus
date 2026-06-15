@@ -129,11 +129,11 @@ struct StructuredSessionFeedSegmentScrollPolicyTests {
             autoScrollTrigger: structuredSessionAutoScrollTrigger(for: screen)
         )
 
-        #expect(structuredSessionFeedScrollTarget(for: presentation) == .activityRow(turnAnchorID))
+        #expect(structuredSessionFeedScrollTarget(for: presentation) == .bottomSentinel)
         #expect(presentation.autoScrollTrigger.lastActivityRowID == turnAnchorID)
 
         let snapshot = structuredSessionFeedScrollSnapshot(for: presentation)
-        #expect(snapshot.feedScrollTarget == .activityRow(turnAnchorID))
+        #expect(snapshot.feedScrollTarget == .bottomSentinel)
         #expect(snapshot.liveDraftGrowthToken == nil)
     }
 

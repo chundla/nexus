@@ -109,7 +109,7 @@ public func structuredSessionPiFeedSegments(for screen: SessionScreen) -> [Struc
     }
 
     return structuredSessionPiFeedSegments(
-        activityItems: structuredSessionActivityItemsForFeedPresentation(for: screen),
+        activityItems: screen.activityItems,
         isAgentTurnInProgress: screen.isAgentTurnInProgress,
         liveAssistantDraftText: screen.providerFacts.liveAssistantDraftText
     )
@@ -284,13 +284,15 @@ private func structuredSessionPiAgentTurnActivitySlice(
         }
 
         if structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage(item) {
-            if isAgentTurnInProgress == false,
-               let body = structuredSessionPiPrimaryAssistantBody(from: item.text) {
+            if isAgentTurnInProgress {
+                // Interim assistant lines render as standalone bubbles after the open turn; do not stick scroll to them.
+                break
+            }
+            if let body = structuredSessionPiPrimaryAssistantBody(from: item.text) {
                 finalAnswer = StructuredSessionFeedAgentTurnFinalAnswerSegment(text: body, isStreaming: false)
             }
             consumedAny = true
             cursor += 1
-            // Pi may emit interim `Pi:` lines before more thoughts/tools; keep absorbing until next user prompt or outside-stack row.
             continue
         }
 

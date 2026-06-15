@@ -79,6 +79,10 @@ public func structuredSessionFeedRevealShowsFullTail(
 public func structuredSessionFeedScrollTarget(
     for presentation: FocusedStructuredSessionPresentation
 ) -> StructuredSessionFeedScrollTarget {
+    if presentation.feed.thinkingIndicator != nil {
+        return .bottomSentinel
+    }
+
     if let segments = presentation.feed.feedSegments, segments.isEmpty == false {
         if let last = segments.last,
            case .agentTurn(let turn) = last,
@@ -106,7 +110,9 @@ public func structuredSessionFeedScrollSnapshot(
 ) -> StructuredSessionFeedScrollSnapshot {
     let target = structuredSessionFeedScrollTarget(for: presentation)
     let growthToken: String?
-    if case .activityRow(let rowID) = target {
+    if presentation.feed.thinkingIndicator != nil {
+        growthToken = nil
+    } else if case .activityRow(let rowID) = target {
         if let segments = presentation.feed.feedSegments,
            let last = segments.last,
            case .agentTurn(let turn) = last,

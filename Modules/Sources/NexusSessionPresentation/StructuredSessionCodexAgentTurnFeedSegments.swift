@@ -10,7 +10,7 @@ public func structuredSessionCodexFeedSegments(for screen: SessionScreen) -> [St
     }
 
     return structuredSessionCodexFeedSegments(
-        activityItems: structuredSessionActivityItemsForFeedPresentation(for: screen),
+        activityItems: screen.activityItems,
         isAgentTurnInProgress: screen.isAgentTurnInProgress,
         liveAssistantDraftText: screen.providerFacts.liveAssistantDraftText
     )

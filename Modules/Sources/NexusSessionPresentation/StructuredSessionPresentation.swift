@@ -505,29 +505,27 @@ public final class StructuredSessionFeedPresenter {
     private func activityRows(for screen: SessionScreen) -> [StructuredSessionActivityRow] {
         let providerDisplayName = screen.session.providerID.displayName
 
-        let feedActivityItems = structuredSessionActivityItemsForFeedPresentation(for: screen)
-
         guard cachedSessionID == screen.session.id else {
             return rebuildActivityRows(
-                for: feedActivityItems,
+                for: screen.activityItems,
                 sessionID: screen.session.id,
                 providerDisplayName: providerDisplayName
             )
         }
 
-        if feedActivityItems == cachedActivityItems {
+        if screen.activityItems == cachedActivityItems {
             return cachedActivityRows
         }
 
-        let stablePrefixCount = structuredSessionCommonPrefixCount(cachedActivityItems, feedActivityItems)
+        let stablePrefixCount = structuredSessionCommonPrefixCount(cachedActivityItems, screen.activityItems)
         if stablePrefixCount == cachedActivityItems.count,
-           feedActivityItems.count > cachedActivityItems.count {
-            let appendedItems = Array(feedActivityItems.dropFirst(cachedActivityItems.count))
+           screen.activityItems.count > cachedActivityItems.count {
+            let appendedItems = Array(screen.activityItems.dropFirst(cachedActivityItems.count))
             let appendedRows = annotateStructuredSessionActivityRows(
                 rowBuilder(appendedItems),
                 providerDisplayName: providerDisplayName
             )
-            cachedActivityItems = feedActivityItems
+            cachedActivityItems = screen.activityItems
             cachedActivityRows.append(contentsOf: appendedRows)
             cachedActivityRowChunks = appendStructuredSessionActivityRowChunks(
                 cachedActivityRowChunks,
@@ -540,14 +538,14 @@ public final class StructuredSessionFeedPresenter {
 
         if stablePrefixCount > 0 {
             return rebuildAffectedTailRows(
-                for: feedActivityItems,
+                for: screen.activityItems,
                 stablePrefixCount: stablePrefixCount,
                 providerDisplayName: providerDisplayName
             )
         }
 
         return rebuildActivityRows(
-            for: feedActivityItems,
+            for: screen.activityItems,
             sessionID: screen.session.id,
             providerDisplayName: providerDisplayName
         )

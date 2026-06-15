@@ -186,10 +186,8 @@ struct StructuredSessionPresentationTests {
             isAgentTurnInProgress: true
         )
 
-        let lastFeedItemID = structuredSessionAgentTurnFeedSegments(for: screen)?.last?.id
-            ?? structuredSessionActivityItemsForFeedPresentation(for: screen).last?.id
         #expect(structuredSessionAutoScrollTrigger(for: screen) == StructuredSessionAutoScrollTrigger(
-            lastActivityRowID: lastFeedItemID,
+            lastActivityRowID: structuredSessionAgentTurnFeedSegments(for: screen)?.last?.id,
             pendingApprovalRequestIDs: [pendingApprovalID],
             pendingDialogIDs: ["dialog-1"]
         ))

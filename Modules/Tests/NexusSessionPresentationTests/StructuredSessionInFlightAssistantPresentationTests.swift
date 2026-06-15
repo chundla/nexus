@@ -3,9 +3,8 @@ import NexusDomain
 import Testing
 @testable import NexusSessionPresentation
 
-struct StructuredSessionInFlightAssistantPresentationTests {
-    @Test func suppressesPiAssistantActivityItemWhileTurnOpen() {
-        let piItemID = UUID()
+struct StructuredSessionOpenTurnAssistantBubbleTests {
+    @Test func interimPiMessageRendersAsStandaloneAfterOpenTurn() throws {
         let screen = SessionScreen(
             session: Session(
                 id: UUID(),
@@ -18,26 +17,26 @@ struct StructuredSessionInFlightAssistantPresentationTests {
             transcript: "",
             activityItems: [
                 SessionActivityItem(kind: .message, text: "You: go", prompt: SessionPrompt(text: "go")),
-                SessionActivityItem(id: piItemID, kind: .message, text: "Pi: streaming chunk")
+                SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Working."),
+                SessionActivityItem(kind: .message, text: "Pi: interim chunk")
             ],
-            providerFacts: StructuredSessionProviderFacts(liveAssistantDraftText: "streaming chunk"),
             isAgentTurnInProgress: true
         )
 
-        let filtered = structuredSessionActivityItemsForFeedPresentation(for: screen)
-        #expect(filtered.map(\.text) == ["You: go"])
-        #expect(filtered.contains { $0.id == piItemID } == false)
-
-        let segments = structuredSessionPiFeedSegments(for: screen)
-        #expect(segments?.contains { segment in
-            if case .standalone(let item) = segment, item.text.hasPrefix("Pi:") {
-                return true
-            }
-            return false
-        } == false)
+        let segments = try #require(structuredSessionPiFeedSegments(for: screen))
+        #expect(segments.count == 3)
+        guard case .userMessage = segments[0],
+              case .agentTurn(let turn) = segments[1],
+              case .standalone(let item) = segments[2] else {
+            Issue.record("Expected user, open turn, then standalone Pi message")
+            return
+        }
+        #expect(turn.isOpen == true)
+        #expect(turn.finalAnswer == nil)
+        #expect(item.text == "Pi: interim chunk")
     }
 
-    @Test func keepsPiAssistantActivityItemAfterTurnCloses() {
+    @Test func scrollTargetUsesBottomSentinelWhileThinkingIndicatorVisible() throws {
         let screen = SessionScreen(
             session: Session(
                 id: UUID(),
@@ -49,12 +48,23 @@ struct StructuredSessionInFlightAssistantPresentationTests {
             primarySurface: .structuredActivityFeed,
             transcript: "",
             activityItems: [
-                SessionActivityItem(kind: .message, text: "You: go", prompt: SessionPrompt(text: "go")),
-                SessionActivityItem(kind: .message, text: "Pi: done")
+                SessionActivityItem(kind: .message, text: "You: hi", prompt: SessionPrompt(text: "hi")),
+                SessionActivityItem(kind: .status, text: "thoughts:", detailText: "think"),
+                SessionActivityItem(kind: .message, text: "Pi: partial")
             ],
-            isAgentTurnInProgress: false
+            isAgentTurnInProgress: true
         )
 
-        #expect(structuredSessionActivityItemsForFeedPresentation(for: screen).count == 2)
+        let feed = structuredSessionFeedPresentation(for: screen)
+        #expect(feed.thinkingIndicator != nil)
+
+        let presentation = FocusedStructuredSessionPresentation(
+            session: screen.session,
+            feed: feed,
+            autoScrollTrigger: structuredSessionAutoScrollTrigger(for: screen)
+        )
+
+        #expect(structuredSessionFeedScrollTarget(for: presentation) == .bottomSentinel)
+        #expect(structuredSessionFeedScrollSnapshot(for: presentation).liveDraftGrowthToken == nil)
     }
 }

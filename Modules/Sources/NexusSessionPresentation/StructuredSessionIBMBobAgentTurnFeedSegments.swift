@@ -10,7 +10,7 @@ public func structuredSessionIBMBobFeedSegments(for screen: SessionScreen) -> [S
     }
 
     return structuredSessionIBMBobFeedSegments(
-        activityItems: structuredSessionActivityItemsForFeedPresentation(for: screen),
+        activityItems: screen.activityItems,
         isAgentTurnInProgress: screen.isAgentTurnInProgress,
         liveAssistantDraftText: screen.providerFacts.liveAssistantDraftText
     )
