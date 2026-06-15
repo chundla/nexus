@@ -156,11 +156,47 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
             return
         }
         #expect(turn.isOpen == true)
-        #expect(turn.reasoningStackItems.map(\.markdownBody) == ["Plan."])
-        #expect(turn.toolStackItems.count == 1)
+        #expect(turn.reasoningStackItems.map(\.markdownBody) == ["Plan.", "More planning."])
+        #expect(turn.toolStackItems.count == 2)
         #expect(turn.finalAnswer == nil)
         #expect(piItem.text.hasPrefix("Pi:"))
-        #expect(segments.count >= 3)
+        #expect(segments.count == 3)
+    }
+
+    @Test func piOpenTurnAbsorbsPostInterimPiCommandsIntoAgentTurnNotStandaloneRows() throws {
+        let screen = SessionScreen(
+            session: piSession(),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .message, text: "You: review", prompt: SessionPrompt(text: "review")),
+                SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Scan."),
+                SessionActivityItem(
+                    kind: .message,
+                    text: "Pi: Reviewing Nexus: checking recent changes and key architecture."
+                ),
+                SessionActivityItem(kind: .command, text: "cd /Users/ck/source/repos/nexus"),
+            ],
+            isAgentTurnInProgress: true
+        )
+
+        let segments = try #require(structuredSessionPiFeedSegments(for: screen))
+        #expect(segments.count == 3)
+        #expect(
+            segments.contains {
+                if case .standalone(let item) = $0, item.kind == .command { return true }
+                return false
+            } == false)
+        guard case .agentTurn(let turn) = segments[1],
+            case .standalone(let pi) = segments[2]
+        else {
+            Issue.record("Expected user, merged turn, interim Pi")
+            return
+        }
+        #expect(turn.isOpen == true)
+        #expect(turn.toolStackItems.count == 1)
+        #expect(turn.toolStackItems[0].callPreview == "cd /Users/ck/source/repos/nexus")
+        #expect(pi.text.contains("Reviewing Nexus"))
     }
 
     @Test func piOpenTurnDoesNotAttachLiveAssistantDraftAsFinalAnswerPlaceholder() throws {
