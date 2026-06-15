@@ -91,6 +91,24 @@ extension RemotePairingClient {
             ]
         )
     }
+
+    func fetchStructuredSessionArtifactFile(
+        for pairedMac: PairedMac,
+        sessionID: UUID,
+        hostPath: String
+    ) async throws -> StructuredSessionArtifactFile {
+        _ = pairedMac
+        _ = sessionID
+        _ = hostPath
+        throw NSError(
+            domain: "RemotePairingClient",
+            code: 1,
+            userInfo: [
+                NSLocalizedDescriptionKey:
+                    "This remote pairing client does not support structured Session artifact download."
+            ]
+        )
+    }
 }
 
 extension RemotePairingHTTPClient: RemotePairingClient {}
@@ -240,7 +258,7 @@ final class RemoteClientPairingModel {
     private var focusedStructuredSessionFinalOutputLatencyTracker = StructuredSessionFinalOutputLatencyTracker()
     @ObservationIgnored
     private let focusedSessionScreenUpdatePump = CoalescingMainActorValuePump<SessionScreen>(
-        mergePendingValue: preferredSessionScreenUpdate(pending:new:)
+        mergePendingValue: preferredSessionScreenMergePendingValue
     )
     private var focusedSessionObservation: (any SessionScreenObservation)?
     private var focusedSessionObservationStartupTask: Task<Void, Never>?

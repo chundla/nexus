@@ -132,7 +132,7 @@
         private var focusedStructuredSessionFinalOutputLatencyTracker = StructuredSessionFinalOutputLatencyTracker()
         @ObservationIgnored
         private let focusedSessionScreenUpdatePump = CoalescingMainActorValuePump<SessionScreen>(
-            mergePendingValue: preferredSessionScreenUpdate(pending:new:)
+            mergePendingValue: preferredSessionScreenMergePendingValue
         )
         private let remotePairingServerFactory: (() throws -> any RemotePairingServing)?
         private var focusedSessionObservation: (any SessionScreenObservation)?
