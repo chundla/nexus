@@ -2,6 +2,8 @@
     import Foundation
     import NexusDomain
 
+    // Pi RPC protocol: docs/pi-rpc.md (links to @earendil-works/pi-coding-agent docs/rpc.md).
+
     private let piBasicThinkingLevels = ["off", "minimal", "low", "medium", "high"]
     private let piExtendedThinkingLevels = piBasicThinkingLevels + ["xhigh"]
 
@@ -130,8 +132,10 @@
         private var pendingSessionTransitions: [SessionRuntimeSessionTransition] = []
         private var changeHandler: (@Sendable () -> Void)?
         private var isStreaming = false
-        /// True after a user `prompt` starts a turn until `turn_end` (Pi can clear `isStreaming` before the turn finishes).
+        /// True after a user `prompt` is accepted until `agent_end` (or error/aborted `message_end` / process exit).
         private var promptTurnCommitted = false
+        /// Set when a new-turn `prompt` is sent until Pi returns `response` for that command.
+        private var awaitingPromptAcceptance = false
         private var assistantTranscriptIndex: Int?
         private var currentAssistantText = ""
         /// Full assistant body accumulated from `text_delta` for the active turn (not subject to transcript trimming).
@@ -650,9 +654,11 @@
 
             lock.lock()
             let isCurrentlyStreaming = isStreaming
-            if isCurrentlyStreaming == false {
+            let startedNewTurn = isCurrentlyStreaming == false
+            if startedNewTurn {
                 isStreaming = true
                 promptTurnCommitted = true
+                awaitingPromptAcceptance = true
                 assistantTranscriptIndex = nil
                 currentAssistantText = ""
                 liveStreamedAssistantText = ""
@@ -674,7 +680,7 @@
 
             var payload = promptPayload(type: "prompt", prompt: resolvedPrompt)
             if isCurrentlyStreaming {
-                payload["streamingBehavior"] = "steer"
+                payload["streamingBehavior"] = piStreamingBehavior(for: resolvedPrompt)
             }
             try transport.sendLine(Self.jsonLine(payload))
         }
@@ -944,6 +950,12 @@
         }
 
         private func requestSessionStats() {
+            lock.lock()
+            let shouldReconcile = promptTurnCommitted
+            lock.unlock()
+            if shouldReconcile {
+                requestGetStateReconciliation()
+            }
             do {
                 try transport.sendLine(
                     Self.jsonLine([
@@ -953,6 +965,29 @@
             } catch {
                 return
             }
+        }
+
+        /// Reconcile stuck Thinking… when Pi finished but lifecycle events were dropped (`get_state.isStreaming`).
+        private func requestGetStateReconciliation() {
+            do {
+                try transport.sendLine(
+                    Self.jsonLine([
+                        "id": "nexus-pi-reconcile-state-\(UUID().uuidString)",
+                        "type": "get_state",
+                    ]))
+            } catch {
+                return
+            }
+        }
+
+        /// Caller must hold `lock`. Only clears an open prompt when Pi reports it is not streaming.
+        private func reconcilePromptTurnFromPiGetStateLocked(_ data: [String: Any]) {
+            guard promptTurnCommitted,
+                bool(for: "isStreaming", in: data) == false
+            else {
+                return
+            }
+            finishPiAgentTurnLocked(stopReason: "stop")
         }
 
         private func isAutomaticSessionStatsRequestID(_ requestID: String?) -> Bool {
@@ -1340,123 +1375,68 @@
                 return
             }
 
-            if command == "get_state" {
+            switch command {
+            case "get_state":
                 handleGetStateResponse(response, requestID: id)
-                return
-            }
-
-            if command == "get_commands" {
+            case "get_commands":
                 handleGetCommandsResponse(response, requestID: id)
-                return
-            }
-
-            if command == "get_available_models" {
+            case "get_available_models":
                 handleAvailableModelsResponse(response, requestID: id)
-                return
-            }
-
-            if command == "set_model" {
+            case "set_model":
                 handleSetModelResponse(response, requestID: id)
-                return
-            }
-
-            if command == "cycle_model" {
+            case "cycle_model":
                 handleCycleModelResponse(response)
-                return
-            }
-
-            if command == "cycle_thinking_level" {
+            case "cycle_thinking_level":
                 handleCycleThinkingLevelResponse(response)
-                return
-            }
-
-            if command == "set_thinking_level" {
+            case "set_thinking_level":
                 handleSetThinkingLevelResponse(response, requestID: id)
-                return
-            }
-
-            if command == "set_steering_mode" {
+            case "set_steering_mode":
                 handleSetSteeringModeResponse(response, requestID: id)
-                return
-            }
-
-            if command == "set_follow_up_mode" {
+            case "set_follow_up_mode":
                 handleSetFollowUpModeResponse(response, requestID: id)
-                return
-            }
-
-            if command == "compact" {
+            case "compact":
                 handleCompactResponse(response)
-                return
-            }
-
-            if command == "set_auto_compaction" {
+            case "set_auto_compaction":
                 handleSetAutoCompactionResponse(response, requestID: id)
-                return
-            }
-
-            if command == "set_auto_retry" {
+            case "set_auto_retry":
                 handleSetAutoRetryResponse(response, requestID: id)
-                return
-            }
-
-            if command == "abort_retry" {
+            case "abort_retry":
                 handleAbortRetryResponse(response)
-                return
-            }
-
-            if command == "get_fork_messages" {
+            case "get_fork_messages":
                 handleGetForkMessagesResponse(response)
-                return
-            }
-
-            if command == "bash" {
+            case "bash":
                 handleBashResponse(response, requestID: id)
-                return
-            }
-
-            if command == "abort_bash" {
+            case "abort_bash":
                 handleAbortBashResponse(response)
-                return
-            }
-
-            if command == "export_html" {
+            case "export_html":
                 handleExportHTMLResponse(response, requestID: id)
-                return
-            }
-
-            if command == "get_messages" {
+            case "get_messages":
                 handleGetMessagesResponse(response)
-                return
-            }
-
-            if command == "get_session_stats" {
+            case "get_session_stats":
                 handleGetSessionStatsResponse(response, requestID: id)
-                return
-            }
-
-            if command == "get_last_assistant_text" {
+            case "get_last_assistant_text":
                 handleGetLastAssistantTextResponse(response)
-                return
-            }
-
-            if command == "fork" {
+            case "fork":
                 handleForkResponse(response)
-                return
-            }
-
-            if command == "clone" {
+            case "clone":
                 handleCloneResponse(response)
-                return
-            }
-
-            if command == "set_session_name" {
+            case "set_session_name":
                 handleSetSessionNameResponse(response, requestID: id)
-                return
-            }
-
-            if command == "prompt", bool(for: "success", in: response) == true {
-                requestSlashCommands()
+            case "new_session":
+                handleSessionTransitionResponse(response, successText: "Started a new session", cancelledText: "New session cancelled")
+            case "switch_session":
+                handleSessionTransitionResponse(response, successText: "Switched session", cancelledText: "Session switch cancelled")
+            case "prompt":
+                if bool(for: "success", in: response) == true {
+                    lock.lock()
+                    awaitingPromptAcceptance = false
+                    lock.unlock()
+                    requestSlashCommands()
+                } else {
+                    handlePromptSubmissionRejected(response)
+                }
+            default:
+                handleUnhandledResponse(response)
             }
         }
 
@@ -1464,6 +1444,8 @@
             switch type {
             case "agent_start":
                 notifyChange()
+            case "extension_error":
+                handleExtensionError(object)
             case "agent_end":
                 handleAgentEnd(object)
             case "message_update":
@@ -1826,6 +1808,18 @@
                 notifyChange()
             case "toolcall_end":
                 handleToolCallEnd(assistantMessageEvent)
+            case "done":
+                applyAssistantMessageStopReason(
+                    fromAssistantMessageEvent: assistantMessageEvent,
+                    object: object,
+                    defaultStopReason: "stop"
+                )
+            case "error":
+                applyAssistantMessageStopReason(
+                    fromAssistantMessageEvent: assistantMessageEvent,
+                    object: object,
+                    defaultStopReason: "error"
+                )
             default:
                 return
             }
@@ -1887,6 +1881,47 @@
             }
 
             let stopReason = string(for: "stopReason", in: message) ?? "stop"
+            applyAssistantMessageStopReason(
+                message: message,
+                stopReason: stopReason,
+                errorMessage: trimmedString(for: "errorMessage", in: message)
+            )
+        }
+
+        /// Pi RPC: `message_end` and `message_update` (`done` / `error`) share the same stop-reason handling.
+        private func applyAssistantMessageStopReason(
+            fromAssistantMessageEvent assistantMessageEvent: [String: Any],
+            object: [String: Any],
+            defaultStopReason: String
+        ) {
+            let message =
+                (assistantMessageEvent["message"] as? [String: Any])
+                ?? (object["message"] as? [String: Any])
+            guard let message,
+                string(for: "role", in: message) == "assistant"
+            else {
+                return
+            }
+
+            let stopReason =
+                string(for: "reason", in: assistantMessageEvent)
+                ?? string(for: "stopReason", in: message)
+                ?? defaultStopReason
+            let errorMessage =
+                trimmedString(for: "error", in: assistantMessageEvent)
+                ?? trimmedString(for: "errorMessage", in: message)
+            applyAssistantMessageStopReason(
+                message: message,
+                stopReason: stopReason,
+                errorMessage: errorMessage
+            )
+        }
+
+        private func applyAssistantMessageStopReason(
+            message: [String: Any],
+            stopReason: String,
+            errorMessage: String?
+        ) {
             let resolvedText = resolvedPiAssistantFinalText(from: message)
 
             lock.lock()
@@ -1895,7 +1930,7 @@
             switch stopReason {
             case "aborted", "error":
                 let errorText =
-                    trimmedString(for: "errorMessage", in: message)
+                    errorMessage
                     ?? (stopReason == "aborted" ? "Operation aborted" : "Error")
                 if resolvedText.isEmpty == false {
                     ensureAssistantTranscriptEntryLocked()
@@ -1910,8 +1945,7 @@
                 requestSlashCommands()
                 notifyChange()
             case "stop", "length", "toolUse":
-                // Pi RPC: assistant `message_end` can arrive before `turn_end` (e.g. toolUse). Record
-                // provisional assistant text in activity order; keep the user-visible turn open until `turn_end`.
+                // Provisional assistant text; user prompt stays open until `agent_end`.
                 if resolvedText.isEmpty == false {
                     appendActivityItemLocked(SessionActivityItem(kind: .message, text: "Pi: \(resolvedText)"))
                 }
@@ -1924,6 +1958,38 @@
                 clearAssistantStreamingDraftBuffersLocked()
                 notifyChange()
             }
+        }
+
+        private func handlePromptSubmissionRejected(_ response: [String: Any]) {
+            let detail = string(for: "error", in: response) ?? "Pi rejected the prompt."
+            lock.lock()
+            if awaitingPromptAcceptance {
+                awaitingPromptAcceptance = false
+                finishPiAgentTurnLocked(stopReason: "error")
+            }
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: detail))
+            lock.unlock()
+            notifyChange()
+        }
+
+        private func handleExtensionError(_ object: [String: Any]) {
+            let path = trimmedString(for: "extensionPath", in: object) ?? "extension"
+            let eventName = trimmedString(for: "event", in: object) ?? "event"
+            let error = trimmedString(for: "error", in: object) ?? "Unknown extension error"
+            lock.lock()
+            appendActivityItemLocked(
+                SessionActivityItem(kind: .error, text: "Extension error (\(path), \(eventName)): \(error)"))
+            lock.unlock()
+            notifyChange()
+        }
+
+        /// Pi RPC `prompt.streamingBehavior` when the agent is already running (`docs/rpc.md`).
+        private func piStreamingBehavior(for prompt: SessionPrompt) -> String {
+            let trimmed = prompt.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.hasPrefix("/follow-up ") || trimmed.hasPrefix("/follow_up ") {
+                return "followUp"
+            }
+            return "steer"
         }
 
         private func handleToolExecutionStart(_ object: [String: Any]) {
@@ -2072,8 +2138,9 @@
             toolAgentsByCallID.removeAll()
         }
 
-        /// Ends the user-visible agent turn (Thinking… + scroll policy) at `turn_end`.
+        /// Ends the user-visible agent turn (Thinking… + scroll policy) at `agent_end` or terminal failure.
         private func finishPiAgentTurnLocked(stopReason: String) {
+            awaitingPromptAcceptance = false
             clearAssistantStreamingBuffersLocked()
             streamingObservationThrottle.reset()
             isStreaming = false
@@ -2231,6 +2298,9 @@
                 lock.lock()
                 updateSessionLinkageLocked(from: response)
                 updateCurrentStateLocked(from: response)
+                if let data = response["data"] as? [String: Any] {
+                    reconcilePromptTurnFromPiGetStateLocked(data)
+                }
                 shouldQueueTransition =
                     requestID.map { pendingSessionTransitionStateRequestIDs.remove($0) != nil } ?? false
                 if shouldQueueTransition,
@@ -2562,6 +2632,45 @@
             notifyChange()
         }
 
+        private func handleSessionTransitionResponse(
+            _ response: [String: Any],
+            successText: String,
+            cancelledText: String
+        ) {
+            guard bool(for: "success", in: response) == true else {
+                handleUnhandledResponse(response)
+                return
+            }
+
+            let data = response["data"] as? [String: Any]
+            if bool(for: "cancelled", in: data ?? [:]) == true {
+                lock.lock()
+                appendActivityItemLocked(SessionActivityItem(kind: .status, text: cancelledText))
+                lock.unlock()
+                notifyChange()
+                return
+            }
+
+            lock.lock()
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: successText))
+            lock.unlock()
+            notifyChange()
+            requestState(forSessionTransition: true)
+        }
+
+        private func handleUnhandledResponse(_ response: [String: Any]) {
+            guard bool(for: "success", in: response) != true else {
+                return
+            }
+
+            let command = string(for: "command", in: response) ?? "rpc"
+            let detail = string(for: "error", in: response) ?? "Pi command failed: \(command)"
+            lock.lock()
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: detail))
+            lock.unlock()
+            notifyChange()
+        }
+
         private func handleBashResponse(_ response: [String: Any], requestID: String?) {
             lock.lock()
             let requestedCommand = requestID.flatMap { pendingBashCommandsByRequestID.removeValue(forKey: $0) }
@@ -2689,9 +2798,17 @@
 
         private func handleForkResponse(_ response: [String: Any]) {
             if bool(for: "success", in: response) == true {
-                if let data = response["data"] as? [String: Any],
-                    let selectedText = trimmedString(for: "text", in: data)
-                {
+                let data = response["data"] as? [String: Any]
+                let cancelled = bool(for: "cancelled", in: data ?? [:]) == true
+                if cancelled {
+                    lock.lock()
+                    appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Fork cancelled"))
+                    lock.unlock()
+                    notifyChange()
+                    return
+                }
+
+                if let selectedText = trimmedString(for: "text", in: data ?? [:]) {
                     lock.lock()
                     appendActivityItemLocked(
                         SessionActivityItem(
@@ -2710,6 +2827,15 @@
 
         private func handleCloneResponse(_ response: [String: Any]) {
             if bool(for: "success", in: response) == true {
+                let data = response["data"] as? [String: Any]
+                if bool(for: "cancelled", in: data ?? [:]) == true {
+                    lock.lock()
+                    appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Clone cancelled"))
+                    lock.unlock()
+                    notifyChange()
+                    return
+                }
+
                 lock.lock()
                 appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Cloned the current session"))
                 lock.unlock()
@@ -2809,13 +2935,38 @@
                     return nil
                 }
 
+                let sourceInfo = command["sourceInfo"] as? [String: Any]
+                let path =
+                    string(for: "path", in: command)
+                    ?? sourceInfo.flatMap { string(for: "path", in: $0) }
+                let location =
+                    string(for: "location", in: command).flatMap(SessionSlashCommandLocation.init(rawValue:))
+                    ?? slashCommandLocation(fromSourceInfo: sourceInfo, fallbackPath: path)
+
                 return SessionSlashCommand(
                     name: name,
                     description: string(for: "description", in: command),
                     source: source,
-                    location: string(for: "location", in: command).flatMap(SessionSlashCommandLocation.init(rawValue:)),
-                    path: string(for: "path", in: command)
+                    location: location,
+                    path: path
                 )
+            }
+        }
+
+        private func slashCommandLocation(fromSourceInfo sourceInfo: [String: Any]?, fallbackPath: String?) -> SessionSlashCommandLocation? {
+            guard let sourceInfo else {
+                return fallbackPath == nil ? nil : .path
+            }
+
+            switch trimmedString(for: "scope", in: sourceInfo) {
+            case "user":
+                return .user
+            case "project":
+                return .project
+            case "temporary":
+                return .path
+            default:
+                return fallbackPath == nil ? nil : .path
             }
         }
 
