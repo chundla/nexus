@@ -3579,11 +3579,13 @@
             if let persistedActivityItems, persistedActivityItems.isEmpty == false {
                 switch session.state {
                 case .failed, .interrupted:
-                    let errorItem = SessionActivityItem(kind: .error, text: transcript)
-                    if persistedActivityItems.last == errorItem {
+                    let failureText = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if failureText.isEmpty == false,
+                        persistedActivityItems.last(where: { $0.kind == .error })?.text == failureText
+                    {
                         return persistedActivityItems
                     }
-                    return persistedActivityItems + [errorItem]
+                    return persistedActivityItems + [SessionActivityItem(kind: .error, text: transcript)]
                 case .ready, .exited:
                     return persistedActivityItems
                 }
