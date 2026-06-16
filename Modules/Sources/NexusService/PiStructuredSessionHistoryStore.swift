@@ -211,7 +211,11 @@
             previous: [SessionActivityItem],
             current: [SessionActivityItem]
         ) -> [SessionActivityItem] {
-            deduplicatedActivityItems(explicitOverflow + evictedActivityItems(previous: previous, current: current))
+            let implicitEvicted =
+                explicitOverflow.isEmpty
+                ? evictedActivityItems(previous: previous, current: current)
+                : []
+            return deduplicatedActivityItems(explicitOverflow + implicitEvicted)
         }
 
         private func evictedActivityItems(
@@ -225,7 +229,10 @@
                 return previous
             }
             guard let overlapIndex = previous.firstIndex(where: { $0.id == firstCurrentID }) else {
-                return previous
+                return []
+            }
+            guard overlapIndex > 0 else {
+                return []
             }
             return Array(previous.prefix(overlapIndex))
         }
@@ -235,7 +242,11 @@
             previous: [SessionProviderEvent],
             current: [SessionProviderEvent]
         ) -> [SessionProviderEvent] {
-            deduplicatedProviderEvents(explicitOverflow + evictedProviderEvents(previous: previous, current: current))
+            let implicitEvicted =
+                explicitOverflow.isEmpty
+                ? evictedProviderEvents(previous: previous, current: current)
+                : []
+            return deduplicatedProviderEvents(explicitOverflow + implicitEvicted)
         }
 
         private func evictedProviderEvents(
@@ -249,7 +260,10 @@
                 return previous
             }
             guard let overlapIndex = previous.firstIndex(where: { $0.sequence == firstCurrentSequence }) else {
-                return previous
+                return []
+            }
+            guard overlapIndex > 0 else {
+                return []
             }
             return Array(previous.prefix(overlapIndex))
         }

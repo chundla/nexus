@@ -64,7 +64,7 @@
                 activityItems: activityItems,
                 approvalRequests: approvalRequests,
                 extensionUIState: extensionUIStateLocked(),
-                providerEvents: []
+                providerEvents: providerEvents
             )
         }
 

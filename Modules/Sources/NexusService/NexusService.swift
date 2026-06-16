@@ -3106,12 +3106,29 @@
             for session: Session,
             source: SessionRecordAdapterMetadataLaunchSource
         ) throws -> SessionRecordAdapterMetadata? {
+            let base: SessionRecordAdapterMetadata?
             switch source {
             case .stored:
-                try sessionRecordStore.sessionRecordAdapterMetadata(sessionID: session.id)
+                base = try sessionRecordStore.sessionRecordAdapterMetadata(sessionID: session.id)
             case .explicit(let metadata):
-                metadata
+                base = metadata
             }
+
+            guard session.providerID == .pi else {
+                return base
+            }
+            guard let historyState = try piStructuredSessionHistoryStore.persistedState(sessionID: session.id) else {
+                return base
+            }
+
+            let linkage = base?.piSessionLinkage
+            return SessionRecordAdapterMetadata.pi(
+                linkage: linkage,
+                activityItems: historyState.activityItems,
+                approvalRequests: historyState.approvalRequests,
+                extensionUIState: historyState.extensionUIState,
+                providerEvents: historyState.providerEvents
+            ) ?? base
         }
 
         private func persistRuntimeLinkageIfNeeded(for session: Session) throws {
@@ -3304,6 +3321,7 @@
         private func sessionScreenAfterPiRedirectIfNeeded(sourceSessionID: UUID, fallback: SessionScreen)
             -> SessionScreen
         {
+            handlePiSessionTransitionAfterRuntimeChange(sessionID: sourceSessionID)
             guard let redirectedSessionID = consumePiSessionRedirect(for: sourceSessionID),
                 let redirectedScreen = try? getSessionScreen(sessionID: redirectedSessionID)
             else {
