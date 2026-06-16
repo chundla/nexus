@@ -6,24 +6,19 @@
             let result = LockedAsyncOperationResult<T>()
             let finished = DispatchSemaphore(value: 0)
 
-            // Park semaphore.wait on a dedicated pthread so Swift Testing cooperative threads are
-            // not held while nested Task { await ... } needs the same executor.
-            let waiter = Thread {
-                let group = DispatchGroup()
-                group.enter()
-                Task {
-                    defer { group.leave() }
-                    do {
-                        result.store(.success(try await operation()))
-                    } catch {
-                        result.store(.failure(error))
-                    }
+            Task.detached(priority: .userInitiated) {
+                do {
+                    result.store(.success(try await operation()))
+                } catch {
+                    result.store(.failure(error))
                 }
-                group.wait()
                 finished.signal()
             }
-            waiter.start()
-            finished.wait()
+
+            // Never semaphore.wait on a Swift Testing cooperative thread.
+            DispatchQueue.global(qos: .userInitiated).asyncAndWait {
+                finished.wait()
+            }
             return try result.value().get()
         }
     }
