@@ -51,11 +51,7 @@
                 rootURL: rootURL,
                 providerHealthEvaluator: PerformanceBaselineIBMBobProviderHealthFacts(),
                 sessionRuntimeManager: InMemorySessionRuntimeManager(
-                    launcher: ProcessSessionRuntimeLauncher(
-                        ibmBobTransportFactory: { _, _, _ in
-                            PerformanceBaselineIBMBobSyncTransport()
-                        }
-                    )
+                    launcher: PerformanceBaselineIBMBobRuntimeLauncher()
                 )
             )
             let group = try service.createWorkspaceGroup(name: "Solo Group")
@@ -367,28 +363,58 @@
         }
     }
 
-    private final class PerformanceBaselineIBMBobSyncTransport: IBMBobTransporting, @unchecked Sendable {
-        private var stdoutLineHandler: (@Sendable (String) -> Void)?
-        private var stderrLineHandler: (@Sendable (String) -> Void)?
-        private var terminationHandler: (@Sendable (Int32) -> Void)?
+    private final class PerformanceBaselineIBMBobRuntimeLauncher: SessionRuntimeLaunching, @unchecked Sendable {
+        func makeRuntime(
+            session: Session,
+            workspace: Workspace,
+            launchConfiguration: SessionRuntimeLaunchConfiguration
+        ) async throws -> any SessionRuntime {
+            _ = workspace
+            _ = launchConfiguration
+            return PerformanceBaselineIBMBobRuntime(session: session)
+        }
+    }
 
-        func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
-            stdoutLineHandler = handler
+    private final class PerformanceBaselineIBMBobRuntime: SessionRuntime, @unchecked Sendable {
+        private let session: Session
+
+        init(session: Session) {
+            self.session = session
         }
 
-        func setStderrLineHandler(_ handler: (@Sendable (String) -> Void)?) {
-            stderrLineHandler = handler
+        var state: Session.State { .ready }
+        var sessionRecordAdapterMetadata: SessionRecordAdapterMetadata? { nil }
+
+        func sessionScreen(for session: Session) -> SessionScreen {
+            SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                transcript: "",
+                activityItems: [
+                    SessionActivityItem(
+                        kind: .status,
+                        text: "IBM Bob Session ready. Send a prompt to start IBM Bob."
+                    )
+                ]
+            )
         }
 
-        func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?) {
-            terminationHandler = handler
+        func setChangeHandler(_ handler: (@Sendable () -> Void)?) { _ = handler }
+        func stop() throws {}
+        func sendInput(_ text: String) throws { _ = text }
+        func sendText(_ text: String) throws { _ = text }
+        func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool) throws {
+            _ = key
+            _ = applicationCursorMode
         }
-
-        func start() throws {
-            terminationHandler?(0)
+        func respondToApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision) throws {
+            _ = approvalRequestID
+            _ = decision
         }
-
-        func terminate() throws {}
+        func resize(columns: Int, rows: Int) throws {
+            _ = columns
+            _ = rows
+        }
     }
 
     struct PerformanceBaselineReport {

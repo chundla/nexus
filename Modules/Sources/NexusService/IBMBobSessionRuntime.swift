@@ -720,6 +720,10 @@
             guard executableName != "ssh" else {
                 return false
             }
+            // Test stubs use /tmp/fake-bob; skip home/project .bob scans (can hang on large ~/.bob trees).
+            if executableName == "fake-bob" || executable.hasPrefix("/tmp/") {
+                return false
+            }
             return FileManager.default.fileExists(atPath: workingDirectory)
         }
 
