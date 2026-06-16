@@ -133,6 +133,9 @@
                     resolvedSession.failureMessage ?? "Session launch failed"
                 )
             case .interrupted:
+                if dependencies.hasRuntime(resolvedSession) {
+                    return dependencies.normalizedSessionScreen(try dependencies.runtimeSessionScreen(resolvedSession))
+                }
                 return try dependencies.staticSessionScreen(
                     resolvedSession,
                     resolvedSession.failureMessage ?? "Session interrupted"

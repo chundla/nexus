@@ -321,6 +321,17 @@
         }
 
         func reconcileSessionRuntimeState(_ session: Session) throws -> Session {
+            if session.state == .interrupted || session.state == .exited,
+                dependencies.sessionRuntimeManager.hasRuntime(for: session),
+                dependencies.sessionRuntimeManager.runtimeState(for: session) == .ready
+            {
+                return try dependencies.sessionRecordStore.updateSession(
+                    id: session.id,
+                    state: .ready,
+                    failureMessage: nil
+                )
+            }
+
             guard session.state == .ready else {
                 return session
             }

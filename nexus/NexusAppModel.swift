@@ -489,6 +489,8 @@
 
         func launchOrResumeSession(sessionID: UUID, workspaceID: UUID, providerID: ProviderID) async throws -> Session {
             let session = try await client.launchOrResumeSession(sessionID: sessionID)
+            let screen = try await client.getSessionScreen(sessionID: session.id)
+            try await applyFocusedSessionScreen(screen)
             try await focusSession(sessionID: session.id)
             try await refreshWorkspaceOverview(for: workspaceID)
             try await refreshProviderDetailIfLoaded(workspaceID: workspaceID, providerID: providerID)

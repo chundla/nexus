@@ -5069,5 +5069,53 @@
             #expect(screen.isAgentTurnInProgress == false)
             #expect(screen.activityItems.contains { $0.kind == .error && $0.text.contains("Pi stopped responding") })
         }
+
+        @Test func relaunchedPiSessionScreenDropsInterruptedErrorWhenLiveRuntimeExists() async throws {
+            let rootURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusServiceTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
+            try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
+
+            let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
+                TestPiRPCTransport()
+            })
+            func makeService() throws -> NexusService {
+                try NexusService.bootstrapForTests(
+                    rootURL: rootURL,
+                    providerHealthEvaluator: ProviderHealthFacts(
+                        executableResolver: PiStreamStubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
+                        commandRunner: PiStreamStubCommandRunner(results: [
+                            .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(
+                                stdout: "0.9.0\n"),
+                            .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(
+                                stdout: "Usage: pi\n"),
+                        ]),
+                        localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+                    ),
+                    sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+                )
+            }
+
+            let service = try makeService()
+            let group = try service.createWorkspaceGroup(name: "Solo Group")
+            let workspace = try service.createLocalWorkspace(
+                name: "Local Pi",
+                folderPath: workspaceFolder.path(percentEncoded: false),
+                primaryGroupID: group.id
+            )
+            let session = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+
+            let restarted = try makeService()
+            let interruptedScreen = try restarted.getSessionScreen(sessionID: session.id)
+            #expect(interruptedScreen.session.state == .interrupted)
+
+            _ = try await restarted.launchOrResumeSession(sessionID: session.id)
+            let liveScreen = try restarted.getSessionScreen(sessionID: session.id)
+
+            #expect(liveScreen.session.state == .ready)
+            #expect(liveScreen.activityItems.contains(where: { $0.kind == .error }) == false)
+            #expect(liveScreen.activityItems.contains(where: { $0.text == "Session stream connected" }))
+        }
     }
 #endif
