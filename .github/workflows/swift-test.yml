@@ -1,0 +1,36 @@
+name: Swift tests
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+jobs:
+  modules:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache SwiftPM
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.swiftpm
+            Modules/.build
+          key: swiftpm-${{ runner.os }}-${{ hashFiles('Modules/Package.swift', 'Modules/Package.resolved') }}
+          restore-keys: |
+            swiftpm-${{ runner.os }}-
+
+      - name: Test Modules (SwiftPM)
+        run: swift test --package-path Modules
+        env:
+          # Keep output reasonable in CI
+          SWIFT_TEST_TIMEOUT: 300
+
+  # Future: app + IPC integration + UI tests
+  # app:
+  #   runs-on: macos-15
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: xcodebuild test (nexus scheme)
+  #       run: xcodebuild test -scheme nexus -project nexus.xcodeproj -destination 'platform=macOS'
