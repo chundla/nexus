@@ -53,6 +53,14 @@ Requires [swift-format](https://github.com/swiftlang/swift-format) and [SwiftLin
 
 Enforces **swift-format** on `Modules/`, `nexus/`, and test targets, and SwiftLint **`force_try`** only.
 
+**Git hooks (optional, recommended):**
+
+```bash
+./scripts/install-git-hooks.sh
+```
+
+Pre-commit lints **staged** `.swift` only. `SKIP_LINT=1 git commit` bypasses lint once. Bob Shell note cleanup still runs when `.bob/` exists.
+
 ## Repo layout
 
 - `nexus/` — multiplatform app (macOS UI + iOS **Remote Client**)

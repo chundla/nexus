@@ -58,6 +58,8 @@ swift test --package-path Modules --filter <TestTypeOrMethodName>
 
 Strict on `swift format lint` and SwiftLint `force_try` only. After editing Swift, you may run `swift format -i` on touched files.
 
+**Git hooks:** `./scripts/install-git-hooks.sh` sets `core.hooksPath=.githooks` (staged Swift lint + Bob notes when `.bob/` exists). `SKIP_LINT=1 git commit` to bypass lint once.
+
 **Performance / baseline workflows:** `docs/performance-baselines.md` (Xcode UI launch tests, `NexusServicePerformanceBaselineTests`, Instruments harness in `docs/structured-session-instruments-harness.md`).
 
 For Xcode/iOS/macOS tasks, prefer **XcodeBuildMCP** (`xcodebuildmcp`) over raw `xcodebuild` when the skill is available.
