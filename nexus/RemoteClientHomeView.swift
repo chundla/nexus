@@ -2273,20 +2273,17 @@
                             )
                         )
                 }
-                .onChange(of: structuredSessionEffectiveAgentTurnInProgress(for: presentation)) { _, turnOpen in
-                    if turnOpen {
-                        structuredSessionFeedScrollPosition = ScrollPosition()
-                        structuredSessionPinState = StructuredSessionFeedPinState(
-                            isFollowingBottom: false,
-                            userHasDetachedFromBottom: true
-                        )
-                    } else {
-                        structuredSessionFeedScrollPosition = ScrollPosition()
-                        structuredSessionPinState = StructuredSessionFeedPinState(
-                            isFollowingBottom: true,
-                            userHasDetachedFromBottom: false
-                        )
-                    }
+                .onChange(of: structuredSessionEffectiveAgentTurnInProgress(for: presentation)) { _, _ in
+                    // Turn open/close changes content height a lot (Thinking, tool rows, final streaming).
+                    // Reset the ScrollPosition binding to avoid sticking to a row that is growing/replaced.
+                    // Do NOT hard-force pinState detached/following here.
+                    // The live onScrollGeometryChange always runs distance-based pin logic
+                    // (structuredSessionFeedPinStateIfChangedDuringOpenAgentTurn delegates to normal
+                    // distance rule). This gives classic autoscroll:
+                    // - viewport near bottom (distance <= 48pt) → isFollowingBottom = true → follow tail
+                    // - user scrolled away (distance > threshold) → detached, no auto-scroll
+                    // - user scrolls viewport back to bottom → geometry re-enables following
+                    structuredSessionFeedScrollPosition = ScrollPosition()
                 }
 
                 .onChange(of: presentation.session.id) { _, _ in

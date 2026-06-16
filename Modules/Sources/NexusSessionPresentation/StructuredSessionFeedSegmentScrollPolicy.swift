@@ -158,9 +158,14 @@ public func structuredSessionFeedScrollSnapshot(
         growthToken = nil
     }
 
+    // Only suppress programmatic bottom-follow for the narrow case of an interim standalone
+    // Pi: assistant bubble that appears after an open agent turn (historical layout stickiness).
+    // Normal open-turn content (tool rows, final streaming, Thinking indicator) should
+    // follow the bottom when the user is pinned (distanceFromBottom <= threshold).
+    // This restores classic "autoscroll unless user scrolled away" behavior.
+    // Re-follow happens automatically because pinState is distance-driven even during turns.
     let suppressBottomScroll =
-        structuredSessionEffectiveAgentTurnInProgress(for: presentation)
-        || structuredSessionFeedHasInterimPiAssistantAfterOpenTurn(in: presentation.feed.feedSegments)
+        structuredSessionFeedHasInterimPiAssistantAfterOpenTurn(in: presentation.feed.feedSegments)
 
     return StructuredSessionFeedScrollSnapshot(
         feedScrollTarget: target,
@@ -179,7 +184,13 @@ public func structuredSessionFeedUsesBottomEdgeScrollPositionBinding(
     return false
 }
 
-/// While an open turn is effective, do not treat scroll geometry as “pinned to bottom” (avoids tail stickiness).
+/// Distance-based pin/follow logic. Even while an agent turn is open (Thinking…, tool rows,
+/// final streaming), we follow the tail **unless** the user has scrolled away far enough that
+/// distanceFromBottom > pinThreshold. Scrolling back to within the threshold re-enables
+/// automatic bottom following. This is the classic chat "stay at bottom unless user reads history"
+/// behavior. Previous forcing of detached=true during open turns was removed to support
+/// re-follow on scroll-to-bottom; snapshot suppression + draft throttling protect against
+/// excessive scrolls during rapid content growth.
 public func structuredSessionFeedPinStateDuringOpenAgentTurn(
     previous: StructuredSessionFeedPinState,
     sample: StructuredSessionScrollGeometrySample,
@@ -187,15 +198,15 @@ public func structuredSessionFeedPinStateDuringOpenAgentTurn(
     pinThreshold: CGFloat = 48,
     topContentOffsetTolerance: CGFloat = 8
 ) -> StructuredSessionFeedPinState {
-    guard effectiveTurnInProgress else {
-        return structuredSessionFeedPinState(
-            previous: previous,
-            sample: sample,
-            pinThreshold: pinThreshold,
-            topContentOffsetTolerance: topContentOffsetTolerance
-        )
-    }
-    return StructuredSessionFeedPinState(isFollowingBottom: false, userHasDetachedFromBottom: true)
+    // Use the normal distance-based rule regardless of whether a turn is open.
+    // The effectiveTurnInProgress parameter is kept for call-site compatibility and
+    // future policy tweaks, but no longer forces detached state.
+    return structuredSessionFeedPinState(
+        previous: previous,
+        sample: sample,
+        pinThreshold: pinThreshold,
+        topContentOffsetTolerance: topContentOffsetTolerance
+    )
 }
 
 public func structuredSessionFeedPinStateIfChangedDuringOpenAgentTurn(

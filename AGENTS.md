@@ -64,7 +64,6 @@ For Xcode/iOS/macOS tasks, prefer **XcodeBuildMCP** (`xcodebuildmcp`) over raw `
 
 ### Building and testing (agent rules)
 
-- Do not run test commands with `bash` `usePTY=true`.
 - Cap tool timeouts initially at **120s**; increase only for that specific run if the command is actively progressing. Do not default to long timeouts (e.g. 1200s).
 - Do not run multiple SwiftPM or XcodeBuildMCP test commands **in parallel** — shared build state contends on locks.
 - Prefer narrow `swift test --filter ...` over broad suite filters; if a filtered run times out, narrow the filter before assuming failure.

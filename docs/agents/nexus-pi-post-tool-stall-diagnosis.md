@@ -33,6 +33,25 @@ log show --last 5m --predicate 'subsystem == "com.chundla.nexus" AND category ==
 - jsonl frozen + no `piAgentEnd` ⇒ Pi agent loop wedged **after** persisting tool rows to disk.
 - jsonl growing + no `piAgentEnd` ⇒ still running (slow) or streaming without lifecycle events.
 
+### E. Slow stdout drain (backpressure experiment #1)
+
+From repo root, **Terminal** (not Xcode):
+
+```bash
+chmod +x scripts/repro-pi-rpc-slow-stdout-drain.sh   # once
+./scripts/repro-pi-rpc-slow-stdout-drain.sh
+```
+
+Default: **50ms sleep after each stdout line** before the next `readline` (mimics Nexus doing work per RPC line). Compare to fast:
+
+```bash
+./scripts/repro-pi-rpc-nexus-like-prompt.sh
+```
+
+Tune delay: `STDOUT_DRAIN_DELAY_SEC=0.02 ./scripts/repro-pi-rpc-slow-stdout-drain.sh`
+
+Exit **4/5** on slow + **0** on fast ⇒ backpressure hypothesis is plausible.
+
 ### D. Module integration (no UI)
 
 ```bash

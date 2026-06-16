@@ -12402,6 +12402,14 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
             sessionID: sessionID, activityItems: [], providerEvents: [], nextCursor: nil)
     }
 
+    func getStructuredSessionArtifactFile(sessionID: UUID, hostPath: String) async throws
+        -> StructuredSessionArtifactFile
+    {
+        _ = sessionID
+        _ = hostPath
+        return StructuredSessionArtifactFile(fileName: "artifact", contentType: "application/octet-stream", data: Data())
+    }
+
     func observeSessionScreen(sessionID: UUID, onUpdate: @escaping @Sendable (SessionScreen) -> Void) async throws
         -> any SessionScreenObservation
     {
@@ -12769,6 +12777,14 @@ private struct FailingServiceClient: NexusServiceClient {
         _ = sessionID
         _ = pageSize
         _ = cursor
+        throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
+    }
+
+    func getStructuredSessionArtifactFile(sessionID: UUID, hostPath: String) async throws
+        -> StructuredSessionArtifactFile
+    {
+        _ = sessionID
+        _ = hostPath
         throw NSError(domain: "Test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Background Service unavailable"])
     }
 

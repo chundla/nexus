@@ -42,33 +42,37 @@
                     contentOffsetY: geometry.contentOffset.y
                 )
             } action: { _, sample in
-                // Geometry-driven pin updates fight growing final-answer layout on AppKit (#hang).
-                guard effectiveTurnOpen == false else {
-                    if let next = structuredSessionFeedPinStateIfChangedDuringOpenAgentTurn(
-                        previous: pinState,
-                        sample: sample,
-                        effectiveTurnInProgress: true
-                    ) {
-                        pinState = next
-                    }
-                    return
+                // Drive pin/follow state from viewport distance at all times (including during
+                // open agent turns with Thinking/tool rows/final streaming). The distance-based
+                // rule (see structuredSessionFeedPinState / DuringOpenAgentTurn) sets
+                // isFollowingBottom when distanceFromBottom <= pinThreshold. This gives classic
+                // autoscroll-to-bottom unless the user has scrolled away to read history.
+                // Scrolling the viewport back to the bottom (small distance) re-enables following
+                // and subsequent snapshot transitions will request bottom scroll.
+                if let next = structuredSessionFeedPinStateIfChangedDuringOpenAgentTurn(
+                    previous: pinState,
+                    sample: sample,
+                    effectiveTurnInProgress: effectiveTurnOpen
+                ) {
+                    pinState = next
                 }
             }
             .onAppear {
                 onAppearSetup()
                 applyScrollSnapshotTransition(previous: nil, current: presentation.structuredSessionFeedScrollSnapshot)
             }
-            .onChange(of: effectiveTurnOpen) { _, turnOpen in
-                if turnOpen {
-                    // Detach bottom-edge binding only; do not `scrollTo(turnID)` — that pins the viewport
-                    // while the agent-turn card grows and leaves interim `Pi:` stuck at the bottom.
-                    scrollPosition = ScrollPosition()
-                    pinState = StructuredSessionFeedPinState(isFollowingBottom: false, userHasDetachedFromBottom: true)
-                } else {
-                    // Do not bind bottom edge or re-enable tail-follow while final markdown lays out.
-                    scrollPosition = ScrollPosition()
-                    pinState = StructuredSessionFeedPinState(isFollowingBottom: false, userHasDetachedFromBottom: true)
-                }
+            .onChange(of: effectiveTurnOpen) { _, _ in
+                // Turn open/close (Thinking / tool execution / final streaming) changes content height
+                // dramatically. Reset the ScrollPosition binding (avoids sticking to a row ID that is
+                // about to grow or be replaced). Do NOT hard-force pinState here.
+                //
+                // The live onScrollGeometryChange action always runs the distance-based pin logic
+                // (structuredSessionFeedPinStateIfChangedDuringOpenAgentTurn → normal distance rule).
+                // This restores classic autoscroll behavior:
+                // - If viewport is near bottom (distance ≤ 48pt) → isFollowingBottom = true → follow new content.
+                // - If user scrolled up to read history (distance > threshold) → detached; no auto-scroll.
+                // - User scrolls back to bottom → geometry sample re-enables following for subsequent updates.
+                scrollPosition = ScrollPosition()
             }
             .onChange(of: presentation.session.id) { _, _ in
                 onSessionIdentityChange()

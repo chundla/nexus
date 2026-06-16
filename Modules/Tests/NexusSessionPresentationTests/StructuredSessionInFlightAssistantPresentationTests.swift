@@ -103,7 +103,7 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
         #expect(
             structuredSessionBottomScrollIntent(previous: previous, current: current, isPinnedToBottom: true) == .none
         )
-        #expect(current.suppressesProgrammaticBottomScroll == true)
+        #expect(current.suppressesProgrammaticBottomScroll == false) // under autoscroll policy we only suppress the narrow documented interim-standalone-Pi case; this construction (Thinking + appended interim text) no longer blanket-suppresses. Pin-state (distance to bottom) + snapshot intent now decide whether to follow when user is at bottom.
         #expect(structuredSessionFeedUsesBottomEdgeScrollPositionBinding(for: presentation) == false)
     }
 
@@ -171,7 +171,7 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
             autoScrollTrigger: structuredSessionAutoScrollTrigger(for: screen)
         )
         #expect(structuredSessionFeedScrollTarget(for: presentation) == .activityRow(turn.id))
-        #expect(structuredSessionFeedScrollSnapshot(for: presentation).suppressesProgrammaticBottomScroll == true)
+        #expect(structuredSessionFeedScrollSnapshot(for: presentation).suppressesProgrammaticBottomScroll == false) // normal open turn (no transient standalone Pi bubble after it); bottom scroll allowed when user is pinned to bottom
     }
 
     @Test func piTurnStaysOpenWhenServiceFlagFalseBeforeTurnEndProviderEvent() throws {
@@ -337,7 +337,7 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
             autoScrollTrigger: structuredSessionAutoScrollTrigger(for: screen)
         )
         #expect(structuredSessionFeedUsesBottomEdgeScrollPositionBinding(for: presentation) == false)
-        #expect(structuredSessionFeedScrollSnapshot(for: presentation).suppressesProgrammaticBottomScroll == true)
+        #expect(structuredSessionFeedScrollSnapshot(for: presentation).suppressesProgrammaticBottomScroll == false) // normal open turn with tools + Thinking; autoscroll when pinned
     }
 
     @Test func piTurnStaysOpenWhenLiveAssistantDraftPresentDespiteServiceFlagFalse() throws {
@@ -364,11 +364,24 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
     }
 
     @Test func feedPinStateDetachesWhileEffectiveOpenTurn() {
+        // Policy: distance-driven pin/follow at all times, including during open agent turns.
+        // Near bottom (distance <= threshold) => follow, even while Thinking/tool rows/final streaming.
+        // Only detaches when the viewport is far from bottom (user scrolled up to read history).
         let pinned = StructuredSessionFeedPinState(isFollowingBottom: true, userHasDetachedFromBottom: false)
-        let sample = StructuredSessionScrollGeometrySample(distanceFromBottom: 0, contentOffsetY: 100)
+        let nearBottomSample = StructuredSessionScrollGeometrySample(distanceFromBottom: 20, contentOffsetY: 100)
+        let stillFollowing = structuredSessionFeedPinStateDuringOpenAgentTurn(
+            previous: pinned,
+            sample: nearBottomSample,
+            effectiveTurnInProgress: true
+        )
+        #expect(stillFollowing.isFollowingBottom == true)
+        #expect(stillFollowing.userHasDetachedFromBottom == false)
+
+        // Far from bottom => detach (user reading history).
+        let farSample = StructuredSessionScrollGeometrySample(distanceFromBottom: 120, contentOffsetY: 100)
         let detached = structuredSessionFeedPinStateDuringOpenAgentTurn(
             previous: pinned,
-            sample: sample,
+            sample: farSample,
             effectiveTurnInProgress: true
         )
         #expect(detached.isFollowingBottom == false)

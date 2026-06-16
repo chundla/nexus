@@ -73,12 +73,20 @@
             switch type {
             case "message_update":
                 guard let assistantMessageEvent = payload["assistantMessageEvent"] as? [String: Any],
-                    assistantMessageEvent["type"] as? String == "text_delta",
-                    let delta = assistantMessageEvent["delta"] as? String
+                    let updateType = assistantMessageEvent["type"] as? String
                 else {
                     continue
                 }
-                draft += delta
+                switch updateType {
+                case "text_delta":
+                    if let delta = assistantMessageEvent["delta"] as? String {
+                        draft += delta
+                    }
+                case "done", "error":
+                    draft = ""
+                default:
+                    continue
+                }
             case "turn_end", "message_end":
                 draft = ""
             default:
