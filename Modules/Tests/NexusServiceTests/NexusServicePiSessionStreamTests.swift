@@ -6,7 +6,7 @@
     import Testing
 
     struct NexusServicePiSessionStreamTests {
-        @Test func localPiDefaultSessionLaunchAndResumePreserveSharedActivity() throws {
+        @Test func localPiDefaultSessionLaunchAndResumePreserveSharedActivity() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -14,10 +14,13 @@
             try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
 
             let launchCounter = LaunchCounter()
-            let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
-                launchCounter.increment()
-                return TestPiRPCTransport()
-            })
+            let launcher = ProcessSessionRuntimeLauncher(
+                localShellEnvironmentResolver: PiStreamStubShellEnvironmentResolver(),
+                piTransportFactory: { _, _, _ in
+                    launchCounter.increment()
+                    return TestPiRPCTransport()
+                }
+            )
 
             let service = try NexusService.bootstrapForTests(
                 rootURL: rootURL,
@@ -41,9 +44,9 @@
                 primaryGroupID: group.id
             )
 
-            let firstSession = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+            let firstSession = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
             let firstScreen = try service.getSessionScreen(sessionID: firstSession.id)
-            let resumedSession = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+            let resumedSession = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
 
             #expect(firstSession.providerID == .pi)
             #expect(firstSession.isDefault)
@@ -3719,6 +3722,12 @@
             #expect(finalPage.activityItems.contains(where: { $0.text == "Message 1 — user: History 0" }))
             #expect(finalPage.activityItems.contains(where: { $0.text == "Message 20 — user: History 19" }))
             #expect(finalPage.nextCursor == nil)
+        }
+    }
+
+    private struct PiStreamStubShellEnvironmentResolver: LocalShellEnvironmentResolving {
+        func resolvedEnvironment() -> [String: String]? {
+            ["SHELL": "/bin/zsh", "PATH": "/tmp/bin"]
         }
     }
 

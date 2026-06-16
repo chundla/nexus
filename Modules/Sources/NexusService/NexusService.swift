@@ -366,12 +366,12 @@
         ) async throws {
             let (shouldCreateRuntime, replacedExistingRuntime) = try withLock {
                 let hadRuntime = runtimes[session.id] != nil
+                if let runtime = runtimes[session.id], runtime.state == .ready {
+                    return (false, hadRuntime)
+                }
                 if launchConfiguration.replaceExistingRuntime, hadRuntime {
                     runtimes.removeValue(forKey: session.id)?.setChangeHandler(nil)
                     return (true, true)
-                }
-                if let runtime = runtimes[session.id], runtime.state == .ready {
-                    return (false, hadRuntime)
                 }
                 return (true, hadRuntime)
             }
