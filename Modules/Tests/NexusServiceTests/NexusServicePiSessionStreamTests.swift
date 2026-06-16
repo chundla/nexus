@@ -92,33 +92,36 @@
             #expect(screen.activityItems.map(\.kind) == [.status, .status])
         }
 
-        @Test func localPiSessionScreenIncludesLiveSlashCommandsFromRpc() throws {
+        @Test func localPiSessionScreenIncludesLiveSlashCommandsFromRpc() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
             let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
             try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
 
-            let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
-                TestPiRPCTransport(
-                    slashCommands: [
-                        TestPiRPCCommand(
-                            name: "review-changes",
-                            description: "Summarize the current diff.",
-                            source: .prompt,
-                            location: .project,
-                            path: "/tmp/project/.pi/prompts/review-changes.md"
-                        ),
-                        TestPiRPCCommand(
-                            name: "skill:create-cli",
-                            description: "CLI UX/spec: args, flags, help, output, errors, config, dry-run.",
-                            source: .skill,
-                            location: .user,
-                            path: "/Users/tester/.pi/agent/skills/create-cli/SKILL.md"
-                        ),
-                    ]
-                )
-            })
+            let launcher = ProcessSessionRuntimeLauncher(
+                localShellEnvironmentResolver: PiStreamStubShellEnvironmentResolver(),
+                piTransportFactory: { _, _, _ in
+                    TestPiRPCTransport(
+                        slashCommands: [
+                            TestPiRPCCommand(
+                                name: "review-changes",
+                                description: "Summarize the current diff.",
+                                source: .prompt,
+                                location: .project,
+                                path: "/tmp/project/.pi/prompts/review-changes.md"
+                            ),
+                            TestPiRPCCommand(
+                                name: "skill:create-cli",
+                                description: "CLI UX/spec: args, flags, help, output, errors, config, dry-run.",
+                                source: .skill,
+                                location: .user,
+                                path: "/Users/tester/.pi/agent/skills/create-cli/SKILL.md"
+                            ),
+                        ]
+                    )
+                }
+            )
 
             let service = try NexusService.bootstrapForTests(
                 rootURL: rootURL,
@@ -142,7 +145,7 @@
                 primaryGroupID: group.id
             )
 
-            let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+            let session = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
             let screen = try service.getSessionScreen(sessionID: session.id)
             let slashCommands = try #require(screen.slashCommands)
 
