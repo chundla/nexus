@@ -25,7 +25,7 @@ fi
 echo "== swift-format lint =="
 swift format lint --recursive "${PATHS[@]}"
 
-echo "== swiftlint (force_try error only) =="
-swiftlint lint --config .swiftlint.yml --quiet
+echo "== swiftlint (opted-in rules, warnings are errors) =="
+swiftlint lint --strict --config .swiftlint.yml --quiet
 
 echo "OK"

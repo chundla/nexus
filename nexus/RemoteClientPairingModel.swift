@@ -298,8 +298,7 @@ final class RemoteClientPairingModel {
         self.client = client
         self.store = store
         self.focusedSessionObservationStartupTimeoutNanoseconds = focusedSessionObservationStartupTimeoutNanoseconds
-        self.structuredSessionHistoryPagingController = StructuredSessionHistoryPagingController {
-            sessionID, pageSize, cursor in
+        self.structuredSessionHistoryPagingController = StructuredSessionHistoryPagingController { sessionID, pageSize, cursor in
             let pairedMac = try await MainActor.run {
                 let pairedMacs = store.loadPairedMacs()
                 guard pairedMacs.isEmpty == false else {

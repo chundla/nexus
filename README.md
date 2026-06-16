@@ -51,7 +51,7 @@ Requires [swift-format](https://github.com/swiftlang/swift-format) and [SwiftLin
 ./scripts/lint-swift.sh
 ```
 
-Enforces **swift-format** on `Modules/`, `nexus/`, and test targets, and SwiftLint **`force_try`** only.
+Enforces **swift-format** on `Modules/`, `nexus/`, and test targets, and SwiftLint **opted-in rules** (see `.swiftlint.yml`; CI uses `--strict`).
 
 **Git hooks (optional, recommended):**
 

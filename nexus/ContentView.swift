@@ -269,8 +269,7 @@
                         workspaceDetail(presentation: presentation)
                     }
                 case .provider(let workspaceID, let providerID):
-                    ProviderDetailBoundary(appModel: appModel, workspaceID: workspaceID, providerID: providerID) {
-                        detail in
+                    ProviderDetailBoundary(appModel: appModel, workspaceID: workspaceID, providerID: providerID) { detail in
                         providerDetail(workspaceID: workspaceID, providerID: providerID, detail: detail)
                     }
                 case .session(let sessionID):

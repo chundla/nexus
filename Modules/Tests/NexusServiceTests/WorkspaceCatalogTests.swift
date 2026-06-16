@@ -291,8 +291,7 @@
                 providerHealthEvaluator: evaluator,
                 providerModuleRegistry: ProviderModuleRegistry(
                     modules: [
-                        ProviderID.claude: TestProviderModule(providerID: .claude) {
-                            workspace, remoteContext, providerHealthEvaluator in
+                        ProviderID.claude: TestProviderModule(providerID: .claude) { workspace, remoteContext, providerHealthEvaluator in
                             await providerHealthEvaluator.healthSummary(
                                 for: .claude, workspace: workspace, remoteContext: remoteContext)
                         }
@@ -333,8 +332,7 @@
                 providerHealthEvaluator: evaluator,
                 providerModuleRegistry: ProviderModuleRegistry(
                     modules: [
-                        ProviderID.claude: TestProviderModule(providerID: .claude) {
-                            workspace, remoteContext, providerHealthEvaluator in
+                        ProviderID.claude: TestProviderModule(providerID: .claude) { workspace, remoteContext, providerHealthEvaluator in
                             await providerHealthEvaluator.healthSummary(
                                 for: .claude, workspace: workspace, remoteContext: remoteContext)
                         }
@@ -399,8 +397,7 @@
                 workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
                 providerModuleRegistry: ProviderModuleRegistry(
                     modules: [
-                        ProviderID.claude: TestProviderModule(providerID: .claude) {
-                            workspace, remoteContext, providerHealthEvaluator in
+                        ProviderID.claude: TestProviderModule(providerID: .claude) { workspace, remoteContext, providerHealthEvaluator in
                             await providerHealthEvaluator.healthSummary(
                                 for: .claude, workspace: workspace, remoteContext: remoteContext)
                         }
@@ -485,8 +482,7 @@
                 remoteWorkspaceProbeCollector: collector,
                 providerModuleRegistry: ProviderModuleRegistry(
                     modules: [
-                        ProviderID.claude: TestProviderModule(providerID: .claude) {
-                            workspace, remoteContext, providerHealthEvaluator in
+                        ProviderID.claude: TestProviderModule(providerID: .claude) { workspace, remoteContext, providerHealthEvaluator in
                             await providerHealthEvaluator.healthSummary(
                                 for: .claude, workspace: workspace, remoteContext: remoteContext)
                         }

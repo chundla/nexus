@@ -8,7 +8,10 @@
         guard let data = try? JSONSerialization.data(withJSONObject: object) else {
             preconditionFailure("invalid test JSON object")
         }
-        return String(decoding: data, as: UTF8.self)
+        guard let string = String(data: data, encoding: .utf8) else {
+            preconditionFailure("invalid UTF-8 JSON")
+        }
+        return string
     }
 
     struct NexusServiceCodexApprovalFlowTests {

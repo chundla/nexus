@@ -56,7 +56,7 @@ swift test --package-path Modules --filter <TestTypeOrMethodName>
 ./scripts/lint-swift.sh
 ```
 
-Strict on `swift format lint` and SwiftLint `force_try` only. After editing Swift, you may run `swift format -i` on touched files.
+Strict on `swift format lint` and SwiftLint opted-in rules (`--strict`; see `.swiftlint.yml`). After editing Swift, you may run `swift format -i` on touched files.
 
 **Git hooks:** `./scripts/install-git-hooks.sh` sets `core.hooksPath=.githooks` (staged Swift lint + Bob notes when `.bob/` exists). `SKIP_LINT=1 git commit` to bypass lint once.
 

@@ -167,8 +167,7 @@
             self.embeddedService = embeddedService
             self.bootstrapInitialSelection = bootstrapInitialSelection
             self.remotePairingServer = remotePairingServer
-            self.structuredSessionHistoryPagingController = StructuredSessionHistoryPagingController {
-                sessionID, pageSize, cursor in
+            self.structuredSessionHistoryPagingController = StructuredSessionHistoryPagingController { sessionID, pageSize, cursor in
                 try await client.getStructuredSessionHistoryPage(
                     sessionID: sessionID,
                     pageSize: pageSize,

@@ -3638,12 +3638,10 @@
             let snapshotData = try Data(
                 contentsOf: historyDirectory.appendingPathComponent("current.json", isDirectory: false))
             let persistedState = try JSONDecoder().decode(PiStructuredSessionPersistedState.self, from: snapshotData)
-            let overflowLines = try String(
-                decoding: Data(
-                    contentsOf: historyDirectory.appendingPathComponent("activity-items.jsonl", isDirectory: false)),
-                as: UTF8.self
-            )
-            .split(separator: "\n")
+            let overflowData = try Data(
+                contentsOf: historyDirectory.appendingPathComponent("activity-items.jsonl", isDirectory: false))
+            let overflowText = try #require(String(data: overflowData, encoding: .utf8))
+            let overflowLines = overflowText.split(separator: "\n")
             let overflowItems = try overflowLines.map { line in
                 try JSONDecoder().decode(SessionActivityItem.self, from: Data(line.utf8))
             }

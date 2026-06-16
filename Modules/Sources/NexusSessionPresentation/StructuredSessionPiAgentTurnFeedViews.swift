@@ -68,8 +68,7 @@ public struct StructuredSessionPiFeedSegmentView: View {
         standaloneRow: @escaping (StructuredSessionActivityRow) -> AnyView,
         onShowFullAssistantResponse: ((StructuredSessionAssistantFullResponsePresentation) -> Void)? = nil,
         artifactActions:
-            @escaping (StructuredSessionFeedArtifactPresentation) -> StructuredSessionFeedArtifactActionPresentation = {
-                artifact in
+            @escaping (StructuredSessionFeedArtifactPresentation) -> StructuredSessionFeedArtifactActionPresentation = { artifact in
                 structuredSessionFeedArtifactActionPresentation(
                     for: artifact,
                     hasWriterAuthority: true,
