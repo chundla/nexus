@@ -359,6 +359,14 @@ private func structuredSessionPiAgentTurnActivitySlice(
             continue
         }
 
+        if item.kind == .message,
+            structuredSessionPiAgentTurnIsDuplicateRawToolOutput(item.text, tools: tools)
+        {
+            consumedAny = true
+            cursor += 1
+            continue
+        }
+
         if structuredSessionPiFeedSegmentIsOutsideStackRow(item) {
             break
         }
@@ -495,6 +503,19 @@ private func structuredSessionPiBashOutputBody(from text: String) -> String? {
     }
     let body = split.body.trimmingCharacters(in: .whitespacesAndNewlines)
     return body.isEmpty ? nil : body
+}
+
+private func structuredSessionPiAgentTurnIsDuplicateRawToolOutput(
+    _ rawText: String,
+    tools: [StructuredSessionFeedAgentTurnToolSegment]
+) -> Bool {
+    let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard trimmed.isEmpty == false else {
+        return false
+    }
+    return tools.contains { tool in
+        tool.detailText?.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed
+    }
 }
 
 private func structuredSessionPiAgentTurnAttachBashOutput(

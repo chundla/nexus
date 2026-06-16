@@ -564,6 +564,44 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
         #expect(turn.toolStackItems[1].detailText == nil)
     }
 
+    @Test func piRawAssistantMessagesThatOnlyEchoToolOutputStayInsideToolAccordion() throws {
+        let shellOutput = "a865ced fix(Modules): surface Pi tool output"
+        let readOutput = "# Nexus\n\nWorkspace-first control center"
+        let screen = SessionScreen(
+            session: piSession(),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(
+                    kind: .message,
+                    text: "You: Lets perform a code review on nexus",
+                    prompt: SessionPrompt(text: "Lets perform a code review on nexus")
+                ),
+                SessionActivityItem(kind: .command, text: "Shell: git log", detailText: shellOutput),
+                SessionActivityItem(kind: .command, text: "Read: ARCHITECTURE.md", detailText: readOutput),
+                SessionActivityItem(kind: .message, text: shellOutput),
+                SessionActivityItem(kind: .message, text: readOutput),
+            ],
+            isAgentTurnInProgress: false
+        )
+
+        let segments = try #require(structuredSessionPiFeedSegments(for: screen))
+        #expect(segments.count == 2)
+        #expect(
+            segments.contains {
+                if case .standalone = $0 { return true }
+                return false
+            } == false)
+        guard case .agentTurn(let turn) = segments[1] else {
+            Issue.record("Expected agent turn")
+            return
+        }
+        #expect(turn.toolStackItems.count == 2)
+        #expect(turn.toolStackItems[0].detailText == shellOutput)
+        #expect(turn.toolStackItems[1].detailText == readOutput)
+        #expect(turn.finalAnswer == nil)
+    }
+
     @Test func piToolErrorDoesNotSplitTurnIntoLegacyRows() throws {
         let screen = SessionScreen(
             session: piSession(),
