@@ -1645,7 +1645,7 @@
             #expect(screen.activityItems.map(\.kind) == [.status, .command, .message])
         }
 
-        @Test func localPiDefaultSessionRelaunchKeepsPiConversationLinkageAcrossServiceRestart() throws {
+        @Test func localPiDefaultSessionRelaunchKeepsPiConversationLinkageAcrossServiceRestart() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1654,9 +1654,12 @@
 
             let transportHarness = PersistentPiTransportHarness()
             func makeService() throws -> NexusService {
-                let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, arguments, _ in
-                    transportHarness.makeTransport(arguments: arguments)
-                })
+                let launcher = ProcessSessionRuntimeLauncher(
+                    localShellEnvironmentResolver: PiStreamStubShellEnvironmentResolver(),
+                    piTransportFactory: { _, arguments, _ in
+                        transportHarness.makeTransport(arguments: arguments)
+                    }
+                )
 
                 return try NexusService.bootstrapForTests(
                     rootURL: rootURL,
@@ -1674,23 +1677,31 @@
                 )
             }
 
-            let service = try makeService()
-            let group = try service.createWorkspaceGroup(name: "Solo Group")
-            let workspace = try service.createLocalWorkspace(
-                name: "Local Pi",
-                folderPath: workspaceFolder.path(percentEncoded: false),
-                primaryGroupID: group.id
-            )
-
-            let firstSession = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
-            _ = try service.sendSessionText(sessionID: firstSession.id, text: "alpha")
-            let firstTurn = try service.sendSessionInputKey(sessionID: firstSession.id, key: .enter)
+            let group: WorkspaceGroup
+            let workspace: Workspace
+            let firstSession: Session
+            let firstTurn: SessionScreen
+            do {
+                let service = try makeService()
+                group = try service.createWorkspaceGroup(name: "Solo Group")
+                workspace = try service.createLocalWorkspace(
+                    name: "Local Pi",
+                    folderPath: workspaceFolder.path(percentEncoded: false),
+                    primaryGroupID: group.id
+                )
+                firstSession = try await service.launchOrResumeDefaultSession(
+                    workspaceID: workspace.id, providerID: .pi)
+                _ = try await service.sendSessionText(sessionID: firstSession.id, text: "alpha")
+                firstTurn = try await service.sendSessionInputKey(sessionID: firstSession.id, key: .enter)
+            }
 
             let restartedService = try makeService()
-            let relaunchedSession = try restartedService.launchOrResumeDefaultSession(
+            let relaunchedSession = try await restartedService.launchOrResumeDefaultSession(
                 workspaceID: workspace.id, providerID: .pi)
-            _ = try restartedService.sendSessionText(sessionID: relaunchedSession.id, text: "what was my last message?")
-            let resumedTurn = try restartedService.sendSessionInputKey(sessionID: relaunchedSession.id, key: .enter)
+            _ = try await restartedService.sendSessionText(
+                sessionID: relaunchedSession.id, text: "what was my last message?")
+            let resumedTurn = try await restartedService.sendSessionInputKey(
+                sessionID: relaunchedSession.id, key: .enter)
 
             #expect(firstTurn.activityItems.suffix(2).map(\.text) == ["You: alpha", "Pi: alpha"])
             #expect(relaunchedSession.id == firstSession.id)
