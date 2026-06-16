@@ -1708,7 +1708,7 @@
             #expect(resumedTurn.activityItems.suffix(2).map(\.text) == ["You: what was my last message?", "Pi: alpha"])
         }
 
-        @Test func localPiNewCommandResetsCurrentSessionHistoryAndStartsFreshPiSession() throws {
+        @Test func localPiNewCommandResetsCurrentSessionHistoryAndStartsFreshPiSession() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1717,9 +1717,12 @@
 
             let transportHarness = PersistentPiTransportHarness()
             func makeService() throws -> NexusService {
-                let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, arguments, _ in
-                    transportHarness.makeTransport(arguments: arguments)
-                })
+                let launcher = ProcessSessionRuntimeLauncher(
+                    localShellEnvironmentResolver: PiStreamStubShellEnvironmentResolver(),
+                    piTransportFactory: { _, arguments, _ in
+                        transportHarness.makeTransport(arguments: arguments)
+                    }
+                )
 
                 return try NexusService.bootstrapForTests(
                     rootURL: rootURL,
@@ -1745,10 +1748,11 @@
                 primaryGroupID: group.id
             )
 
-            let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
-            let firstTurn = try service.sendSessionInput(sessionID: session.id, text: "alpha")
-            let resetScreen = try service.sendSessionInput(sessionID: session.id, text: "/new")
-            let nextTurn = try service.sendSessionInput(sessionID: session.id, text: "what was my last message?")
+            let session = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+            let firstTurn = try await service.sendSessionInput(sessionID: session.id, text: "alpha")
+            let resetScreen = try await service.sendSessionInput(sessionID: session.id, text: "/new")
+            let nextTurn = try await service.sendSessionInput(
+                sessionID: session.id, text: "what was my last message?")
 
             #expect(firstTurn.activityItems.suffix(2).map(\.text) == ["You: alpha", "Pi: alpha"])
             #expect(resetScreen.session.id == session.id)
