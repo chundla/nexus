@@ -31,7 +31,7 @@ if ! command -v swiftlint >/dev/null 2>&1; then
 fi
 
 echo "pre-commit: swift-format lint (${#STAGED_SWIFT[@]} staged file(s))"
-swift format lint "${STAGED_SWIFT[@]}"
+swift format lint --strict "${STAGED_SWIFT[@]}"
 
-echo "pre-commit: swiftlint force_try (${#STAGED_SWIFT[@]} staged file(s))"
-swiftlint lint --config .swiftlint.yml --quiet -- "${STAGED_SWIFT[@]}"
+echo "pre-commit: swiftlint (${#STAGED_SWIFT[@]} staged file(s))"
+swiftlint lint --strict --config .swiftlint.yml --quiet -- "${STAGED_SWIFT[@]}"

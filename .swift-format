@@ -4,5 +4,8 @@
   "indentation": {
     "spaces": 4
   },
-  "respectsExistingLineBreaks": true
+  "respectsExistingLineBreaks": true,
+  "rules": {
+    "TypeNamesShouldBeCapitalized": false
+  }
 }

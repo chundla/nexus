@@ -9786,7 +9786,8 @@ struct nexusTests {
         }
 
         let relaunchedSession = try await model.relaunchFocusedSession()
-        let readyScreen = try await waitForFocusedSessionScreen(model: model, sessionID: relaunchedSession.id) { screen in
+        let readyScreen = try await waitForFocusedSessionScreen(model: model, sessionID: relaunchedSession.id) {
+            screen in
             screen.session.state == .ready && screen.transcript.contains("Claude relaunched")
         }
 
@@ -11805,7 +11806,8 @@ private final class ControlledWorkspaceOverviewLoader: @unchecked Sendable {
             (workspaceID, appendRequestedWorkspaceID(workspaceID))
         }
 
-        return try await withThrowingTaskGroup(of: (Int, WorkspaceOverview).self, returning: [WorkspaceOverview].self) { group in
+        return try await withThrowingTaskGroup(of: (Int, WorkspaceOverview).self, returning: [WorkspaceOverview].self) {
+            group in
             for (index, request) in requests.enumerated() {
                 let (workspaceID, mode) = request
                 switch mode {

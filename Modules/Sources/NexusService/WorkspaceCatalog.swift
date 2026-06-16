@@ -140,7 +140,8 @@
         }
 
         func workspaceOverviews(workspaceIDs: [UUID]) async throws -> [WorkspaceOverview] {
-            try await withThrowingTaskGroup(of: (Int, WorkspaceOverview).self, returning: [WorkspaceOverview].self) { group in
+            try await withThrowingTaskGroup(of: (Int, WorkspaceOverview).self, returning: [WorkspaceOverview].self) {
+                group in
                 for (index, workspaceID) in workspaceIDs.enumerated() {
                     group.addTask { [self] in
                         (index, try await workspaceOverview(workspaceID: workspaceID))

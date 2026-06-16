@@ -33,8 +33,8 @@
         @Test func extractsTextDeltaContentBlocks() {
             let update: [String: Any] = [
                 "content": [
-                    ["type": "text_delta", "delta": "line one\nline two"],
-                ],
+                    ["type": "text_delta", "delta": "line one\nline two"]
+                ]
             ]
             #expect(PiToolExecutionResultText.extract(from: update) == "line one\nline two")
         }

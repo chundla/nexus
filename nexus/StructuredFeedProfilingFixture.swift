@@ -11,7 +11,8 @@ nonisolated enum StructuredFeedProfilingFixture {
     enum Phase: Equatable {
         case drafting(step: Int)
         case finalized
-        case finalizedDwell(remaining: Int)  // post-turn_end dwell: isAgent=false, finalOutputDiagnostic present, activity rows stable (no appends), but providerEventSequence and extensionUI notifications continue to tick every 200 ms. Provides a reliable multi-tick window (~1 s) for observers to sample turn-end state before the next turn's startTurn appends You+progress rows.
+        /// Post-turn_end dwell: stable activity rows; provider events still tick every 200 ms (~1 s window).
+        case finalizedDwell(remaining: Int)
     }
 
     private static let postTurnDwellTicks = 5

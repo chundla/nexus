@@ -148,7 +148,9 @@
             #expect(finalPage.nextCursor?.providerEventOffset != nil)
         }
 
-        @Test func localIBMBobPersistsStructuredHistoryOverflowOnDiskWhileKeepingSessionRecordLinkageSeparate() async throws {
+        @Test func localIBMBobPersistsStructuredHistoryOverflowOnDiskWhileKeepingSessionRecordLinkageSeparate()
+            async throws
+        {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -355,7 +357,7 @@
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: CodexHistoryPersistenceExecutableResolver(executables: [
-                    "codex": "/tmp/fake-codex",
+                    "codex": "/tmp/fake-codex"
                 ]),
                 commandRunner: CodexHistoryPersistenceCommandRunner(results: [
                     .init(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
@@ -384,7 +386,7 @@
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: IBMBobHistoryPersistenceExecutableResolver(executables: [
-                    "bob": "/tmp/fake-bob",
+                    "bob": "/tmp/fake-bob"
                 ]),
                 commandRunner: IBMBobHistoryPersistenceCommandRunner(results: [
                     .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--version'"]): .success(

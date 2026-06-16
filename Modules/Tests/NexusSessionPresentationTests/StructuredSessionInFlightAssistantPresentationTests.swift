@@ -103,7 +103,9 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
         #expect(
             structuredSessionBottomScrollIntent(previous: previous, current: current, isPinnedToBottom: true) == .none
         )
-        #expect(current.suppressesProgrammaticBottomScroll == false) // under autoscroll policy we only suppress the narrow documented interim-standalone-Pi case; this construction (Thinking + appended interim text) no longer blanket-suppresses. Pin-state (distance to bottom) + snapshot intent now decide whether to follow when user is at bottom.
+        // Under autoscroll policy we only suppress the narrow documented interim-standalone-Pi case;
+        // Thinking + appended interim text no longer blanket-suppresses. Pin-state decides follow.
+        #expect(current.suppressesProgrammaticBottomScroll == false)
         #expect(structuredSessionFeedUsesBottomEdgeScrollPositionBinding(for: presentation) == false)
     }
 
@@ -171,7 +173,8 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
             autoScrollTrigger: structuredSessionAutoScrollTrigger(for: screen)
         )
         #expect(structuredSessionFeedScrollTarget(for: presentation) == .activityRow(turn.id))
-        #expect(structuredSessionFeedScrollSnapshot(for: presentation).suppressesProgrammaticBottomScroll == false) // normal open turn (no transient standalone Pi bubble after it); bottom scroll allowed when user is pinned to bottom
+        // Normal open turn; bottom scroll allowed when user is pinned to bottom.
+        #expect(structuredSessionFeedScrollSnapshot(for: presentation).suppressesProgrammaticBottomScroll == false)
     }
 
     @Test func piTurnStaysOpenWhenServiceFlagFalseBeforeTurnEndProviderEvent() throws {
@@ -337,7 +340,8 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
             autoScrollTrigger: structuredSessionAutoScrollTrigger(for: screen)
         )
         #expect(structuredSessionFeedUsesBottomEdgeScrollPositionBinding(for: presentation) == false)
-        #expect(structuredSessionFeedScrollSnapshot(for: presentation).suppressesProgrammaticBottomScroll == false) // normal open turn with tools + Thinking; autoscroll when pinned
+        // Normal open turn with tools + Thinking; autoscroll when pinned.
+        #expect(structuredSessionFeedScrollSnapshot(for: presentation).suppressesProgrammaticBottomScroll == false)
     }
 
     @Test func piTurnStaysOpenWhenLiveAssistantDraftPresentDespiteServiceFlagFalse() throws {
@@ -353,7 +357,7 @@ struct StructuredSessionOpenTurnAssistantBubbleTests {
             transcript: "",
             activityItems: [
                 SessionActivityItem(kind: .message, text: "You: go", prompt: SessionPrompt(text: "go")),
-                SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Working.")
+                SessionActivityItem(kind: .status, text: "thoughts:", detailText: "Working."),
             ],
             providerFacts: StructuredSessionProviderFacts(liveAssistantDraftText: "streaming chunk"),
             isAgentTurnInProgress: false

@@ -42,9 +42,11 @@
                 primaryGroupID: group.id
             )
 
-            let firstSession = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+            let firstSession = try await service.launchOrResumeDefaultSession(
+                workspaceID: workspace.id, providerID: .pi)
             let firstScreen = try service.getSessionScreen(sessionID: firstSession.id)
-            let resumedSession = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+            let resumedSession = try await service.launchOrResumeDefaultSession(
+                workspaceID: workspace.id, providerID: .pi)
 
             #expect(firstSession.providerID == .pi)
             #expect(firstSession.isDefault)
@@ -100,22 +102,22 @@
             let launcher = makePiStreamTestLauncher(piTransportFactory: { _, _, _ in
                 TestPiRPCTransport(
                     slashCommands: [
-                            TestPiRPCCommand(
-                                name: "review-changes",
-                                description: "Summarize the current diff.",
-                                source: .prompt,
-                                location: .project,
-                                path: "/tmp/project/.pi/prompts/review-changes.md"
-                            ),
-                            TestPiRPCCommand(
-                                name: "skill:create-cli",
-                                description: "CLI UX/spec: args, flags, help, output, errors, config, dry-run.",
-                                source: .skill,
-                                location: .user,
-                                path: "/Users/tester/.pi/agent/skills/create-cli/SKILL.md"
-                            ),
-                        ]
-                    )
+                        TestPiRPCCommand(
+                            name: "review-changes",
+                            description: "Summarize the current diff.",
+                            source: .prompt,
+                            location: .project,
+                            path: "/tmp/project/.pi/prompts/review-changes.md"
+                        ),
+                        TestPiRPCCommand(
+                            name: "skill:create-cli",
+                            description: "CLI UX/spec: args, flags, help, output, errors, config, dry-run.",
+                            source: .skill,
+                            location: .user,
+                            path: "/Users/tester/.pi/agent/skills/create-cli/SKILL.md"
+                        ),
+                    ]
+                )
             })
 
             let service = try NexusService.bootstrapForTests(
@@ -1844,7 +1846,8 @@
 
             let restartedService = try makeService()
             let overview = try await restartedService.getWorkspaceOverview(workspaceID: workspace.id)
-            let providerDetail = try await restartedService.getProviderDetail(workspaceID: workspace.id, providerID: .pi)
+            let providerDetail = try await restartedService.getProviderDetail(
+                workspaceID: workspace.id, providerID: .pi)
             let interruptedDefaultScreen = try restartedService.getSessionScreen(sessionID: defaultSession.id)
             let interruptedNamedScreen = try restartedService.getSessionScreen(sessionID: namedSession.id)
 
@@ -1944,7 +1947,8 @@
             #expect(interruptedScreen.activityItems.last?.text == expectedFailureMessage)
         }
 
-        @Test func localPiNamedSessionCanBeStoppedRelaunchedAndDeletedWhilePreservingConversationLinkage() async throws {
+        @Test func localPiNamedSessionCanBeStoppedRelaunchedAndDeletedWhilePreservingConversationLinkage() async throws
+        {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1996,11 +2000,14 @@
 
             let restartedService = try makeService()
             let relaunchedSession = try await restartedService.launchOrResumeSession(sessionID: namedSession.id)
-            _ = try await restartedService.sendSessionText(sessionID: relaunchedSession.id, text: "what was my last message?")
-            let resumedTurn = try await restartedService.sendSessionInputKey(sessionID: relaunchedSession.id, key: .enter)
+            _ = try await restartedService.sendSessionText(
+                sessionID: relaunchedSession.id, text: "what was my last message?")
+            let resumedTurn = try await restartedService.sendSessionInputKey(
+                sessionID: relaunchedSession.id, key: .enter)
             _ = try restartedService.stopSession(sessionID: namedSession.id)
             let deleted = try restartedService.deleteSessionRecord(sessionID: namedSession.id)
-            let providerDetail = try await restartedService.getProviderDetail(workspaceID: workspace.id, providerID: .pi)
+            let providerDetail = try await restartedService.getProviderDetail(
+                workspaceID: workspace.id, providerID: .pi)
 
             #expect(namedSession.providerID == .pi)
             #expect(namedSession.name == "Review")
@@ -3576,7 +3583,8 @@
             unblockObserver.signal()
         }
 
-        @Test func localPiPersistsStructuredHistoryOverflowOnDiskAndRestoresRecentTailAcrossInspectPaths() async throws {
+        @Test func localPiPersistsStructuredHistoryOverflowOnDiskAndRestoresRecentTailAcrossInspectPaths() async throws
+        {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -3750,7 +3758,6 @@
             #expect(finalPage.nextCursor == nil)
         }
     }
-
 
     private func makePiStreamTestLauncher(
         piTransportFactory: @escaping PiRPCSessionRuntime.TransportFactory

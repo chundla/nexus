@@ -99,7 +99,9 @@ private actor AsyncGate {
         isOpen = true
         let continuations = waiters
         waiters.removeAll(keepingCapacity: false)
-        continuations.forEach { $0.resume() }
+        for continuation in continuations {
+            continuation.resume()
+        }
     }
 }
 

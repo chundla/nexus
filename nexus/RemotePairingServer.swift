@@ -81,7 +81,8 @@
         }
 
         private func receive(on connection: NWConnection, accumulated: Data) {
-            connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { [weak self] data, _, isComplete, error in
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) {
+                [weak self] data, _, isComplete, error in
                 guard let self else {
                     connection.cancel()
                     return
