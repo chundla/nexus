@@ -3456,6 +3456,99 @@
             #expect(finalScreen.extensionUI?.editorText == "This text was set by the rpc-demo extension.")
         }
 
+        @Test func inMemorySessionRuntimeManagerDoesNotBlockRuntimeChangeDrainOnObservers() async throws {
+            let session = Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            )
+            let workspace = Workspace(
+                id: session.workspaceID,
+                name: "Local Pi",
+                kind: .local,
+                folderPath: "/tmp",
+                primaryGroupID: UUID(),
+                remoteHostID: nil
+            )
+            let runtime = BlockingObserverProbeSessionRuntime(sessionID: session.id)
+            let manager = InMemorySessionRuntimeManager(
+                launcher: StaticSessionRuntimeLauncher(runtime: runtime)
+            )
+
+            let observerEntered = DispatchSemaphore(value: 0)
+            let unblockObserver = DispatchSemaphore(value: 0)
+            let secondChangeTriggered = DispatchSemaphore(value: 0)
+            let blockOnce = OnceBox()
+            let observationID = UUID()
+
+            manager.addUpdateObserver(id: observationID, for: session) {
+                let screen = runtime.sessionScreen(for: session)
+                guard screen.activityItems.contains(where: { $0.kind == .command && $0.text == "read CONTEXT.md" }),
+                    blockOnce.take()
+                else {
+                    return
+                }
+                observerEntered.signal()
+                _ = unblockObserver.wait(timeout: .now() + .seconds(1))
+            }
+            defer { manager.removeUpdateObserver(id: observationID) }
+
+            try await manager.launchOrResume(
+                session: session,
+                workspace: workspace,
+                launchConfiguration: SessionRuntimeLaunchConfiguration(
+                    executable: "/tmp/fake-pi",
+                    workingDirectory: "/tmp",
+                    remoteHost: nil
+                )
+            )
+
+            DispatchQueue.global().async {
+                runtime.replaceScreen(
+                    SessionScreen(
+                        session: session,
+                        primarySurface: .structuredActivityFeed,
+                        controller: .mac,
+                        transcript: "",
+                        terminalColumns: 80,
+                        terminalRows: 24,
+                        activityItems: [SessionActivityItem(kind: .command, text: "read CONTEXT.md")],
+                        isAgentTurnInProgress: true
+                    )
+                )
+                runtime.triggerChange()
+                runtime.replaceScreen(
+                    SessionScreen(
+                        session: session,
+                        primarySurface: .structuredActivityFeed,
+                        controller: .mac,
+                        transcript: "",
+                        terminalColumns: 80,
+                        terminalRows: 24,
+                        activityItems: [
+                            SessionActivityItem(kind: .command, text: "read CONTEXT.md"),
+                            SessionActivityItem(kind: .command, text: "LS"),
+                        ],
+                        isAgentTurnInProgress: false
+                    )
+                )
+                runtime.triggerChange()
+                secondChangeTriggered.signal()
+            }
+
+            #expect(await waitForSemaphore(observerEntered))
+            #expect(await waitForSemaphore(secondChangeTriggered))
+
+            let blockedScreen = try manager.sessionScreen(for: session)
+            #expect(blockedScreen.activityItems.contains { $0.kind == .command && $0.text == "read CONTEXT.md" })
+            #expect(blockedScreen.activityItems.contains { $0.kind == .command && $0.text == "LS" })
+            #expect(blockedScreen.isAgentTurnInProgress == false)
+
+            unblockObserver.signal()
+        }
+
         @Test func localPiPersistsStructuredHistoryOverflowOnDiskAndRestoresRecentTailAcrossInspectPaths() throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
@@ -4180,6 +4273,21 @@
         var value: SessionScreenObservationAccumulator?
     }
 
+    private final class OnceBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var fired = false
+
+        func take() -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            guard fired == false else {
+                return false
+            }
+            fired = true
+            return true
+        }
+    }
+
     private actor SessionScreenSink {
         private var screens: [SessionScreen] = []
 
@@ -4197,6 +4305,18 @@
                 try? await Task.sleep(nanoseconds: 10_000_000)
             }
             return nil
+        }
+    }
+
+    private func waitForSemaphore(
+        _ semaphore: DispatchSemaphore,
+        timeoutNanoseconds: UInt64 = 1_000_000_000
+    ) async -> Bool {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global().async {
+                let timeout = DispatchTime.now() + .nanoseconds(Int(timeoutNanoseconds))
+                continuation.resume(returning: semaphore.wait(timeout: timeout) == .success)
+            }
         }
     }
 
@@ -4501,6 +4621,81 @@
             }
             stdoutLineHandler?(line)
         }
+    }
+
+    private struct StaticSessionRuntimeLauncher: SessionRuntimeLaunching {
+        let runtime: any SessionRuntime
+
+        func makeRuntime(
+            session: Session,
+            workspace: Workspace,
+            launchConfiguration: SessionRuntimeLaunchConfiguration
+        ) async throws -> any SessionRuntime {
+            _ = session
+            _ = workspace
+            _ = launchConfiguration
+            return runtime
+        }
+    }
+
+    private final class BlockingObserverProbeSessionRuntime: SessionRuntime, @unchecked Sendable {
+        private let lock = NSLock()
+        private var changeHandler: (@Sendable () -> Void)?
+        private var transcript = ""
+        private var activityItems: [SessionActivityItem] = []
+        private var isAgentTurnInProgress = false
+
+        init(sessionID: UUID) {
+            _ = sessionID
+        }
+
+        var state: Session.State { .ready }
+        var sessionRecordAdapterMetadata: SessionRecordAdapterMetadata? { nil }
+
+        func sessionScreen(for session: Session) -> SessionScreen {
+            lock.lock()
+            defer { lock.unlock() }
+            return SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                controller: .mac,
+                transcript: transcript,
+                terminalColumns: 80,
+                terminalRows: 24,
+                activityItems: activityItems,
+                isAgentTurnInProgress: isAgentTurnInProgress
+            )
+        }
+
+        func setChangeHandler(_ handler: (@Sendable () -> Void)?) {
+            lock.lock()
+            changeHandler = handler
+            lock.unlock()
+        }
+
+        func replaceScreen(_ screen: SessionScreen) {
+            lock.lock()
+            transcript = screen.transcript
+            activityItems = screen.activityItems
+            isAgentTurnInProgress = screen.isAgentTurnInProgress
+            lock.unlock()
+        }
+
+        func triggerChange() {
+            let handler: (@Sendable () -> Void)?
+            lock.lock()
+            handler = changeHandler
+            lock.unlock()
+            handler?()
+        }
+
+        func stop() throws {}
+        func sendInput(_ text: String) throws {}
+        func sendInput(_ prompt: SessionPrompt) throws {}
+        func sendText(_ text: String) throws {}
+        func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool) throws {}
+        func respondToApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision) throws {}
+        func resize(columns: Int, rows: Int) throws {}
     }
 
     private final class StreamingToolPiRPCTransport: PiRPCTransporting, @unchecked Sendable {

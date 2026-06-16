@@ -333,12 +333,17 @@
 
     final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Sendable {
         private let launcher: any SessionRuntimeLaunching
+        private let runtimeChangeNotificationQueue = DispatchQueue(
+            label: "NexusService.InMemorySessionRuntimeManager.runtime-change")
         private let lock = NSLock()
         private var runtimes: [UUID: any SessionRuntime] = [:]
         private var updateObservers: [UUID: [UUID: @Sendable () -> Void]] = [:]
         private var observedSessionIDs: [UUID: UUID] = [:]
         private var runtimeChangePreObserverHandler: (@Sendable (UUID) -> Void)?
         private var runtimeChangePostObserverHandler: (@Sendable (UUID) -> Void)?
+        private var pendingRuntimeChangeSessionIDs: Set<UUID> = []
+        private var runtimeChangeNotificationOrder: [UUID] = []
+        private var runtimeChangeNotificationsScheduled = false
 
         init(launcher: any SessionRuntimeLaunching = ProcessSessionRuntimeLauncher()) {
             self.launcher = launcher
@@ -378,7 +383,7 @@
             let runtime = try await launcher.makeRuntime(
                 session: session, workspace: workspace, launchConfiguration: launchConfiguration)
             runtime.setChangeHandler { [weak self] in
-                self?.notifyRuntimeChange(for: session.id)
+                self?.enqueueRuntimeChangeNotification(for: session.id)
             }
 
             try withLock {
@@ -475,7 +480,7 @@
 
             replacedRuntime?.setChangeHandler(nil)
             runtime?.setChangeHandler { [weak self] in
-                self?.notifyRuntimeChange(for: targetSessionID)
+                self?.enqueueRuntimeChangeNotification(for: targetSessionID)
             }
             notifyRuntimeChange(for: targetSessionID)
         }
@@ -609,6 +614,45 @@
                 observer()
             }
             runtimeChangePostObserverHandler?(sessionID)
+        }
+
+        private func enqueueRuntimeChangeNotification(for sessionID: UUID) {
+            let shouldSchedule: Bool
+            lock.lock()
+            if pendingRuntimeChangeSessionIDs.insert(sessionID).inserted {
+                runtimeChangeNotificationOrder.append(sessionID)
+            }
+            shouldSchedule = runtimeChangeNotificationsScheduled == false
+            if shouldSchedule {
+                runtimeChangeNotificationsScheduled = true
+            }
+            lock.unlock()
+
+            guard shouldSchedule else {
+                return
+            }
+
+            runtimeChangeNotificationQueue.async { [weak self] in
+                self?.drainRuntimeChangeNotifications()
+            }
+        }
+
+        private func drainRuntimeChangeNotifications() {
+            while true {
+                let sessionID: UUID
+                lock.lock()
+                guard let nextSessionID = runtimeChangeNotificationOrder.first else {
+                    runtimeChangeNotificationsScheduled = false
+                    lock.unlock()
+                    return
+                }
+                runtimeChangeNotificationOrder.removeFirst()
+                pendingRuntimeChangeSessionIDs.remove(nextSessionID)
+                sessionID = nextSessionID
+                lock.unlock()
+
+                notifyRuntimeChange(for: sessionID)
+            }
         }
 
         private func withLock<T>(_ operation: () throws -> T) throws -> T {
