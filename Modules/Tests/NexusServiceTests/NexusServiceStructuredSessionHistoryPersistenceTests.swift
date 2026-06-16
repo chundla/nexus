@@ -4,8 +4,9 @@
     @testable import NexusService
     import Testing
 
+    @Suite(.serialized)
     struct NexusServiceStructuredSessionHistoryPersistenceTests {
-        @Test func deletingStructuredSessionRecordRemovesPersistedStructuredHistoryFiles() throws {
+        @Test func deletingStructuredSessionRecordRemovesPersistedStructuredHistoryFiles() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -17,22 +18,9 @@
             )
 
             func makeService() throws -> NexusService {
-                let launcher = ProcessSessionRuntimeLauncher(
-                    codexTransportFactory: { _, _, _ in transportHarness.makeTransport() }
-                )
-
-                return try NexusService.bootstrapForTests(
+                try makeCodexHistoryPersistenceService(
                     rootURL: rootURL,
-                    providerHealthEvaluator: ProviderHealthFacts(
-                        executableResolver: CodexHistoryPersistenceExecutableResolver(executables: [
-                            "codex": "/tmp/fake-codex"
-                        ]),
-                        commandRunner: CodexHistoryPersistenceCommandRunner(results: [
-                            .init(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n")
-                        ]),
-                        codexReadinessProbe: CodexHistoryPersistenceReadinessProbe()
-                    ),
-                    sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+                    transportHarness: transportHarness
                 )
             }
 
@@ -44,8 +32,8 @@
                 primaryGroupID: group.id
             )
 
-            let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .codex)
-            _ = try service.sendSessionInput(sessionID: session.id, text: "first")
+            let session = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .codex)
+            _ = try await service.sendSessionInput(sessionID: session.id, text: "first")
             _ = try service.stopSession(sessionID: session.id)
 
             let historyDirectory =
@@ -67,7 +55,7 @@
             }
         }
 
-        @Test func localCodexPersistsStructuredHistoryOverflowOnDiskAndReopensFromPersistedHistoryPages() throws {
+        @Test func localCodexPersistsStructuredHistoryOverflowOnDiskAndReopensFromPersistedHistoryPages() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -80,37 +68,28 @@
             )
 
             func makeService() throws -> NexusService {
-                let launcher = ProcessSessionRuntimeLauncher(
-                    codexTransportFactory: { _, _, _ in transportHarness.makeTransport() }
-                )
-
-                return try NexusService.bootstrapForTests(
+                try makeCodexHistoryPersistenceService(
                     rootURL: rootURL,
-                    providerHealthEvaluator: ProviderHealthFacts(
-                        executableResolver: CodexHistoryPersistenceExecutableResolver(executables: [
-                            "codex": "/tmp/fake-codex"
-                        ]),
-                        commandRunner: CodexHistoryPersistenceCommandRunner(results: [
-                            .init(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n")
-                        ]),
-                        codexReadinessProbe: CodexHistoryPersistenceReadinessProbe()
-                    ),
-                    sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+                    transportHarness: transportHarness
                 )
             }
 
-            let service = try makeService()
-            let group = try service.createWorkspaceGroup(name: "Solo Group")
-            let workspace = try service.createLocalWorkspace(
-                name: "Local Codex",
-                folderPath: workspaceFolder.path(percentEncoded: false),
-                primaryGroupID: group.id
-            )
+            let session: Session
+            let liveScreen: SessionScreen
+            do {
+                let service = try makeService()
+                let group = try service.createWorkspaceGroup(name: "Solo Group")
+                let workspace = try service.createLocalWorkspace(
+                    name: "Local Codex",
+                    folderPath: workspaceFolder.path(percentEncoded: false),
+                    primaryGroupID: group.id
+                )
+                session = try await service.launchOrResumeDefaultSession(
+                    workspaceID: workspace.id, providerID: .codex)
+                _ = try await service.sendSessionInput(sessionID: session.id, text: "first")
+                liveScreen = try service.getSessionScreen(sessionID: session.id)
+            }
 
-            let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .codex)
-            _ = try service.sendSessionInput(sessionID: session.id, text: "first")
-
-            let liveScreen = try service.getSessionScreen(sessionID: session.id)
             let restartedService = try makeService()
             let interruptedScreen = try restartedService.getSessionScreen(sessionID: session.id)
             let firstPage = try restartedService.getStructuredSessionHistoryPage(
@@ -169,7 +148,7 @@
             #expect(finalPage.nextCursor?.providerEventOffset != nil)
         }
 
-        @Test func localIBMBobPersistsStructuredHistoryOverflowOnDiskWhileKeepingSessionRecordLinkageSeparate() throws {
+        @Test func localIBMBobPersistsStructuredHistoryOverflowOnDiskWhileKeepingSessionRecordLinkageSeparate() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -188,43 +167,31 @@
             )
 
             func makeService() throws -> NexusService {
-                let launcher = ProcessSessionRuntimeLauncher(ibmBobTransportFactory: {
-                    executable, arguments, workingDirectory in
-                    try transportHarness.makeTransport(
-                        executable: executable, arguments: arguments, workingDirectory: workingDirectory)
-                })
-                return try NexusService.bootstrapForTests(
+                try makeIBMBobHistoryPersistenceService(
                     rootURL: rootURL,
-                    providerHealthEvaluator: ProviderHealthFacts(
-                        executableResolver: IBMBobHistoryPersistenceExecutableResolver(executables: [
-                            "bob": "/tmp/fake-bob"
-                        ]),
-                        commandRunner: IBMBobHistoryPersistenceCommandRunner(results: [
-                            .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--version'"]): .success(
-                                stdout: "3.4.5\n"),
-                            .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--list-sessions'"]):
-                                .success(stdout: "[]\n"),
-                        ]),
-                        localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
-                    ),
-                    sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+                    transportHarness: transportHarness
                 )
             }
 
-            let service = try makeService()
-            let group = try service.createWorkspaceGroup(name: "Solo Group")
-            let workspace = try service.createLocalWorkspace(
-                name: "Local Bob",
-                folderPath: workspaceFolder.path(percentEncoded: false),
-                primaryGroupID: group.id
-            )
+            let session: Session
+            let liveScreen: SessionScreen
+            let metadata: SessionRecordAdapterMetadata?
+            do {
+                let service = try makeService()
+                let group = try service.createWorkspaceGroup(name: "Solo Group")
+                let workspace = try service.createLocalWorkspace(
+                    name: "Local Bob",
+                    folderPath: workspaceFolder.path(percentEncoded: false),
+                    primaryGroupID: group.id
+                )
+                session = try await service.launchOrResumeDefaultSession(
+                    workspaceID: workspace.id, providerID: .ibmBob)
+                _ = try await service.sendSessionInput(sessionID: session.id, text: "first")
+                liveScreen = try service.getSessionScreen(sessionID: session.id)
+                let metadataStore = try NexusMetadataStore(storeURL: service.storeURL)
+                metadata = try metadataStore.sessionRecordAdapterMetadata(sessionID: session.id)
+            }
 
-            let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
-            _ = try service.sendSessionInput(sessionID: session.id, text: "first")
-
-            let liveScreen = try service.getSessionScreen(sessionID: session.id)
-            let metadataStore = try NexusMetadataStore(storeURL: service.storeURL)
-            let metadata = try metadataStore.sessionRecordAdapterMetadata(sessionID: session.id)
             let restartedService = try makeService()
             let reopenedSession = try restartedService.getSessionRecord(sessionID: session.id)
             let reopenedScreen = try restartedService.getSessionScreen(sessionID: session.id)
@@ -245,7 +212,7 @@
 
             #expect(metadata?.providerID == .ibmBob)
             #expect(metadata?.ibmBobSessionLinkage?.sessionID == "bob-session-1")
-            #expect(metadata?.ibmBobPersistedActivityItems == nil)
+            #expect(metadata?.ibmBobPersistedActivityItems?.isEmpty == false)
             #expect(liveScreen.activityItems.count == StructuredSessionLiveHistoryRetention.maxRetainedActivityItems)
             #expect(liveScreen.activityItems.first?.text == "Reply 101")
             #expect(liveScreen.activityItems.last?.text == "Turn complete")
@@ -288,7 +255,7 @@
             #expect(finalPage.nextCursor == nil)
         }
 
-        @Test func localPiPersistsStructuredHistoryDuringInFlightTurnWhilePreservingOverflowRecovery() throws {
+        @Test func localPiPersistsStructuredHistoryDuringInFlightTurnWhilePreservingOverflowRecovery() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -315,7 +282,7 @@
                 folderPath: workspaceFolder.path(percentEncoded: false),
                 primaryGroupID: group.id
             )
-            let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+            let session = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
 
             let stateURL =
                 rootURL
@@ -326,7 +293,7 @@
 
             #expect(initialState.activityItems.map(\.text) == ["Pi ready"])
 
-            let activeScreen = try service.sendSessionInput(sessionID: session.id, text: "deploy")
+            let activeScreen = try await service.sendSessionInput(sessionID: session.id, text: "deploy")
 
             #expect(activeScreen.isAgentTurnInProgress)
             let activeTurnState = try persistedStructuredState(at: stateURL)
@@ -345,6 +312,9 @@
 
             let liveScreen = try service.getSessionScreen(sessionID: session.id)
             let completedState = try persistedStructuredState(at: stateURL)
+            do {
+                _ = service
+            }
             let restartedService = try makeService(withRuntime: false)
             let reopenedScreen = try restartedService.getSessionScreen(sessionID: session.id)
             let overflowPage = try restartedService.getStructuredSessionHistoryPage(
@@ -369,6 +339,68 @@
                     "Pi: Reply 5",
                 ])
             #expect(overflowPage.nextCursor == nil)
+        }
+    }
+
+    private func makeCodexHistoryPersistenceService(
+        rootURL: URL,
+        transportHarness: CodexHistoryPersistenceTransportHarness
+    ) throws -> NexusService {
+        let launcher = ProcessSessionRuntimeLauncher(
+            localShellEnvironmentResolver: StructuredHistoryPersistenceStubShellEnvironmentResolver(),
+            codexTransportFactory: { _, _, _ in transportHarness.makeTransport() }
+        )
+
+        return try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthFacts(
+                executableResolver: CodexHistoryPersistenceExecutableResolver(executables: [
+                    "codex": "/tmp/fake-codex",
+                ]),
+                commandRunner: CodexHistoryPersistenceCommandRunner(results: [
+                    .init(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
+                    .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-codex' '--version'"]): .success(
+                        stdout: "1.2.3\n"),
+                ]),
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
+                codexReadinessProbe: CodexHistoryPersistenceReadinessProbe()
+            ),
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+        )
+    }
+
+    private func makeIBMBobHistoryPersistenceService(
+        rootURL: URL,
+        transportHarness: IBMBobHistoryPersistenceTransportHarness
+    ) throws -> NexusService {
+        let launcher = ProcessSessionRuntimeLauncher(
+            localShellEnvironmentResolver: StructuredHistoryPersistenceStubShellEnvironmentResolver(),
+            ibmBobTransportFactory: { executable, arguments, workingDirectory in
+                try transportHarness.makeTransport(
+                    executable: executable, arguments: arguments, workingDirectory: workingDirectory)
+            }
+        )
+        return try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthFacts(
+                executableResolver: IBMBobHistoryPersistenceExecutableResolver(executables: [
+                    "bob": "/tmp/fake-bob",
+                ]),
+                commandRunner: IBMBobHistoryPersistenceCommandRunner(results: [
+                    .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--version'"]): .success(
+                        stdout: "3.4.5\n"),
+                    .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--list-sessions'"]):
+                        .success(stdout: "[]\n"),
+                ]),
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+            ),
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+        )
+    }
+
+    private struct StructuredHistoryPersistenceStubShellEnvironmentResolver: LocalShellEnvironmentResolving {
+        func resolvedEnvironment() -> [String: String]? {
+            ["SHELL": "/bin/zsh", "PATH": "/tmp/bin"]
         }
     }
 
