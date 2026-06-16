@@ -90,7 +90,6 @@
         }
 
         private let lock = NSLock()
-        private let changeNotificationQueue = DispatchQueue(label: "PiRPCSessionRuntime.change-notify")
         private let transport: any PiRPCTransporting
         private let stopHandler: (() throws -> Void)?
         private let terminationStatusMessageBuilder: (Int32) -> String
@@ -132,8 +131,6 @@
         private var sessionLinkage: PiSessionLinkage?
         private var pendingSessionTransitions: [SessionRuntimeSessionTransition] = []
         private var changeHandler: (@Sendable () -> Void)?
-        private var changeNotificationPending = false
-        private var changeNotificationScheduled = false
         private var isStreaming = false
         /// True after a user `prompt` is accepted until `agent_end` (or error/aborted `message_end` / process exit).
         private var promptTurnCommitted = false
@@ -4085,45 +4082,12 @@
             }
         }
 
-        private func withLock<T>(_ operation: () -> T) -> T {
-            lock.lock()
-            defer { lock.unlock() }
-            return operation()
-        }
-
         private func notifyChange() {
-            let shouldSchedule = withLock {
-                changeNotificationPending = true
-                guard changeNotificationScheduled == false else {
-                    return false
-                }
-                changeNotificationScheduled = true
-                return true
-            }
-            guard shouldSchedule else {
-                return
-            }
-
-            changeNotificationQueue.async { [weak self] in
-                self?.drainChangeNotifications()
-            }
-        }
-
-        private func drainChangeNotifications() {
-            while true {
-                let handler: (@Sendable () -> Void)? = withLock {
-                    guard changeNotificationPending else {
-                        changeNotificationScheduled = false
-                        return nil
-                    }
-                    changeNotificationPending = false
-                    return changeHandler
-                }
-                guard let handler else {
-                    return
-                }
-                handler()
-            }
+            let handler: (@Sendable () -> Void)?
+            lock.lock()
+            handler = changeHandler
+            lock.unlock()
+            handler?()
         }
 
         private func notifyChangeThrottledForAssistantTextDelta() {
