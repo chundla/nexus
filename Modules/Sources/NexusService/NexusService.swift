@@ -660,6 +660,14 @@
             }
         }
 
+        /// Drains queued runtime-change notifications synchronously. Tests use this after bulk stub
+        /// updates so structured history persistence observes the latest screen before reading disk.
+        func flushPendingRuntimeChangeNotificationsForTests() {
+            runtimeChangeNotificationQueue.sync {
+                drainRuntimeChangeNotifications()
+            }
+        }
+
         private func withLock<T>(_ operation: () throws -> T) throws -> T {
             lock.lock()
             defer { lock.unlock() }

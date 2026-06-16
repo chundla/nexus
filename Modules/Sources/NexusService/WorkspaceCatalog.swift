@@ -193,6 +193,13 @@
                 return storedContext
             }
 
+            if let storedContext = try storedRemoteWorkspaceHealthContext(for: workspace),
+                storedContext.hostValidation?.state == .available,
+                storedContext.workspaceAvailability?.state == .available
+            {
+                return storedContext
+            }
+
             let (remoteTarget, _, remoteProbeFacts) = try workspaceOverviewRemoteTargetOverview(
                 for: workspace, mode: .forceFresh)
             return remoteTarget.map {

@@ -265,15 +265,15 @@
             try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
 
             let runtime = DeferredPiHistoryPersistenceRuntime()
+            let runtimeManager = InMemorySessionRuntimeManager(
+                launcher: DeferredPiHistoryPersistenceRuntimeLauncher(runtime: runtime)
+            )
 
             func makeService(withRuntime: Bool) throws -> NexusService {
                 try NexusService.bootstrapForTests(
                     rootURL: rootURL,
                     providerHealthEvaluator: DeferredPiHistoryPersistenceProviderHealthFacts(),
-                    sessionRuntimeManager: withRuntime
-                        ? InMemorySessionRuntimeManager(
-                            launcher: DeferredPiHistoryPersistenceRuntimeLauncher(runtime: runtime))
-                        : nil
+                    sessionRuntimeManager: withRuntime ? runtimeManager : nil
                 )
             }
 
@@ -305,12 +305,14 @@
             for index in 0..<streamedReplyCount {
                 runtime.recordAssistantReply("Reply \(index)")
             }
+            runtimeManager.flushPendingRuntimeChangeNotificationsForTests()
 
             let midTurnState = try persistedStructuredState(at: stateURL)
             #expect(midTurnState.activityItems.count == StructuredSessionLiveHistoryRetention.maxRetainedActivityItems)
             #expect(midTurnState.activityItems.last?.text == "Pi: Reply \(streamedReplyCount - 1)")
 
             runtime.finishTurn(with: "Done")
+            runtimeManager.flushPendingRuntimeChangeNotificationsForTests()
 
             let liveScreen = try service.getSessionScreen(sessionID: session.id)
             let completedState = try persistedStructuredState(at: stateURL)

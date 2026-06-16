@@ -337,7 +337,7 @@
             #expect(failedResumeCommand.contains("bob-session-1"))
             #expect(fallbackCommand.contains("--resume") == false)
             #expect(metadata?.ibmBobSessionLinkage?.sessionID == "bob-session-2")
-            #expect(metadata?.ibmBobPersistedActivityItems == nil)
+            #expect(metadata?.ibmBobPersistedActivityItems?.isEmpty == false)
             #expect(
                 recoveredResponse.activityItems.suffix(5).map(\.kind) == [
                     .message, .status, .status, .message, .completion,
@@ -531,7 +531,7 @@
                     "IBM Bob turn stopped.",
                 ])
             #expect(metadata?.ibmBobTurnInProgress == false)
-            #expect(metadata?.ibmBobPersistedActivityItems == nil)
+            #expect(metadata?.ibmBobPersistedActivityItems?.isEmpty == false)
         }
 
         @Test func remoteIBMBobServiceRestartLeavesInterruptedInspectableSessionUntilExplicitRelaunch() throws {
@@ -578,11 +578,14 @@
                 ])
             #expect(interruptedSession.state == .interrupted)
             #expect(interruptedScreen.session.state == .interrupted)
-            #expect(interruptedScreen.activityItems == partialScreen.activityItems)
+            let interruptedMessage = structuredInterruptedSessionFailureMessage(for: .ibmBob)
+            #expect(interruptedScreen.activityItems.dropLast().map(\.text) == partialScreen.activityItems.map(\.text))
+            #expect(interruptedScreen.activityItems.last?.kind == .error)
+            #expect(interruptedScreen.activityItems.last?.text == interruptedMessage)
             #expect(relaunchedSession.id == session.id)
             #expect(relaunchedSession.state == .ready)
             #expect(relaunchedScreen.session.state == .ready)
-            #expect(relaunchedScreen.activityItems == partialScreen.activityItems)
+            #expect(relaunchedScreen.activityItems.map(\.text) == partialScreen.activityItems.map(\.text))
         }
 
         @Test func remoteIBMBobBridgeLossLeavesInterruptedInspectableSessionUntilExplicitRelaunch() throws {
