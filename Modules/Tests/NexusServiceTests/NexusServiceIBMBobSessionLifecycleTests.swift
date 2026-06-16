@@ -4,8 +4,9 @@
     @testable import NexusService
     import Testing
 
+    @Suite(.serialized)
     struct NexusServiceIBMBobSessionLifecycleTests {
-        @Test func localIBMBobDefaultSessionLaunchOpensStructuredIdleScreen() throws {
+        @Test func localIBMBobDefaultSessionLaunchOpensStructuredIdleScreen() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -20,12 +21,12 @@
                 primaryGroupID: group.id
             )
 
-            let prelaunchOverview = try service.getWorkspaceOverview(workspaceID: workspace.id)
-            let launchedSession = try service.launchOrResumeDefaultSession(
+            let prelaunchOverview = try await service.getWorkspaceOverview(workspaceID: workspace.id)
+            let launchedSession = try await service.launchOrResumeDefaultSession(
                 workspaceID: workspace.id, providerID: .ibmBob)
             let screen = try service.getSessionScreen(sessionID: launchedSession.id)
-            let overview = try service.getWorkspaceOverview(workspaceID: workspace.id)
-            let providerDetail = try service.getProviderDetail(workspaceID: workspace.id, providerID: .ibmBob)
+            let overview = try await service.getWorkspaceOverview(workspaceID: workspace.id)
+            let providerDetail = try await service.getProviderDetail(workspaceID: workspace.id, providerID: .ibmBob)
 
             let prelaunchProviderCard = try #require(
                 prelaunchOverview.providerCards.first(where: { $0.provider.id == .ibmBob }))
@@ -47,7 +48,7 @@
             #expect(providerDetail.defaultSession?.id == launchedSession.id)
         }
 
-        @Test func localIBMBobNamedSessionUsesSharedNamingAndIdleStructuredScreen() throws {
+        @Test func localIBMBobNamedSessionUsesSharedNamingAndIdleStructuredScreen() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -62,12 +63,12 @@
                 primaryGroupID: group.id
             )
 
-            let firstNamedSession = try service.createNamedSession(
+            let firstNamedSession = try await service.createNamedSession(
                 workspaceID: workspace.id, providerID: .ibmBob, name: nil)
-            let secondNamedSession = try service.createNamedSession(
+            let secondNamedSession = try await service.createNamedSession(
                 workspaceID: workspace.id, providerID: .ibmBob, name: nil)
             let firstScreen = try service.getSessionScreen(sessionID: firstNamedSession.id)
-            let providerDetail = try service.getProviderDetail(workspaceID: workspace.id, providerID: .ibmBob)
+            let providerDetail = try await service.getProviderDetail(workspaceID: workspace.id, providerID: .ibmBob)
 
             #expect(firstNamedSession.isDefault == false)
             #expect(firstNamedSession.name == "Session 1")
@@ -77,7 +78,7 @@
             #expect(providerDetail.alternateSessions.map(\.name) == ["Session 1", "Session 2"])
         }
 
-        @Test func localIBMBobIdleReadySessionRejectsStopAndStaysResumable() throws {
+        @Test func localIBMBobIdleReadySessionRejectsStopAndStaysResumable() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -92,7 +93,7 @@
                 primaryGroupID: group.id
             )
 
-            let launchedSession = try service.launchOrResumeDefaultSession(
+            let launchedSession = try await service.launchOrResumeDefaultSession(
                 workspaceID: workspace.id, providerID: .ibmBob)
 
             do {
@@ -103,7 +104,7 @@
             }
 
             let idleScreen = try service.getSessionScreen(sessionID: launchedSession.id)
-            let overview = try service.getWorkspaceOverview(workspaceID: workspace.id)
+            let overview = try await service.getWorkspaceOverview(workspaceID: workspace.id)
             let providerCard = try #require(overview.providerCards.first(where: { $0.provider.id == .ibmBob }))
 
             #expect(idleScreen.session.state == .ready)
@@ -113,7 +114,7 @@
             #expect(providerCard.defaultSession.actionTitle == "Resume")
         }
 
-        @Test func localIBMBobIdleReadySessionRecordDeletesWithoutStoredContinuity() throws {
+        @Test func localIBMBobIdleReadySessionRecordDeletesWithoutStoredContinuity() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -128,10 +129,10 @@
                 primaryGroupID: group.id
             )
 
-            let launchedSession = try service.launchOrResumeDefaultSession(
+            let launchedSession = try await service.launchOrResumeDefaultSession(
                 workspaceID: workspace.id, providerID: .ibmBob)
             let deleted = try service.deleteSessionRecord(sessionID: launchedSession.id)
-            let providerDetail = try service.getProviderDetail(workspaceID: workspace.id, providerID: .ibmBob)
+            let providerDetail = try await service.getProviderDetail(workspaceID: workspace.id, providerID: .ibmBob)
 
             #expect(deleted)
             #expect(providerDetail.defaultSession == nil)
@@ -164,12 +165,19 @@
             ),
             sessionRuntimeManager: InMemorySessionRuntimeManager(
                 launcher: ProcessSessionRuntimeLauncher(
+                    localShellEnvironmentResolver: IBMBobSessionStubShellEnvironmentResolver(),
                     ibmBobTransportFactory: { _, _, _ in
                         IBMBobSessionLifecycleSyncTransport()
                     }
                 )
             )
         )
+    }
+
+    private struct IBMBobSessionStubShellEnvironmentResolver: LocalShellEnvironmentResolving {
+        func resolvedEnvironment() -> [String: String]? {
+            ["SHELL": "/bin/zsh", "PATH": "/tmp/bin"]
+        }
     }
 
     private final class IBMBobSessionLifecycleSyncTransport: IBMBobTransporting, @unchecked Sendable {
