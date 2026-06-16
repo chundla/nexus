@@ -5,7 +5,7 @@
     import Testing
 
     struct NexusServicePerformanceDiagnosticsTests {
-        @Test func workspaceOverviewIsListedInRecentPerformanceDiagnostics() throws {
+        @Test func workspaceOverviewIsListedInRecentPerformanceDiagnostics() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -28,7 +28,7 @@
                 primaryGroupID: group.id
             )
 
-            _ = try service.getWorkspaceOverview(workspaceID: workspace.id)
+            _ = try await service.getWorkspaceOverview(workspaceID: workspace.id)
             let diagnostics = try service.listPerformanceDiagnostics(limit: 10)
             let record = try #require(diagnostics.first)
 
@@ -41,7 +41,7 @@
             #expect(record.steps.contains(where: { $0.name == "readProviderCatalog.pi" }))
         }
 
-        @Test func providerDetailIsListedInRecentPerformanceDiagnostics() throws {
+        @Test func providerDetailIsListedInRecentPerformanceDiagnostics() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -64,7 +64,7 @@
                 primaryGroupID: group.id
             )
 
-            _ = try service.getProviderDetail(workspaceID: workspace.id, providerID: .claude)
+            _ = try await service.getProviderDetail(workspaceID: workspace.id, providerID: .claude)
             let diagnostics = try service.listPerformanceDiagnostics(limit: 10)
             let record = try #require(diagnostics.first)
 
@@ -77,7 +77,7 @@
             #expect(record.steps.contains(where: { $0.name == "readProviderCatalog" }))
         }
 
-        @Test func defaultSessionLaunchIsListedInRecentPerformanceDiagnostics() throws {
+        @Test func defaultSessionLaunchIsListedInRecentPerformanceDiagnostics() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -92,7 +92,7 @@
                 primaryGroupID: group.id
             )
 
-            _ = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
+            _ = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
             let diagnostics = try service.listPerformanceDiagnostics(limit: 10)
             let record = try #require(diagnostics.first)
 
@@ -121,8 +121,38 @@
                         stdout: "[]\n"),
                 ]),
                 localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+            ),
+            sessionRuntimeManager: InMemorySessionRuntimeManager(
+                launcher: ProcessSessionRuntimeLauncher(
+                    localShellEnvironmentResolver: PerformanceDiagnosticStubShellEnvironmentResolver(),
+                    ibmBobTransportFactory: { _, _, _ in
+                        PerformanceDiagnosticIBMBobNoopTransport()
+                    }
+                )
             )
         )
+    }
+
+    private struct PerformanceDiagnosticStubShellEnvironmentResolver: LocalShellEnvironmentResolving {
+        func resolvedEnvironment() -> [String: String]? {
+            ["SHELL": "/bin/zsh", "PATH": "/tmp/bin"]
+        }
+    }
+
+    private final class PerformanceDiagnosticIBMBobNoopTransport: IBMBobTransporting, @unchecked Sendable {
+        private var terminationHandler: (@Sendable (Int32) -> Void)?
+
+        func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {}
+        func setStderrLineHandler(_ handler: (@Sendable (String) -> Void)?) {}
+        func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?) {
+            terminationHandler = handler
+        }
+
+        func start() throws {
+            terminationHandler?(0)
+        }
+
+        func terminate() throws {}
     }
 
     private struct PerformanceDiagnosticIBMBobExecutableResolver: ProviderExecutableResolving {
