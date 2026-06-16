@@ -45,7 +45,7 @@
             #expect(providerCard.defaultSession.actionTitle == "Relaunch")
         }
 
-        @Test func localIBMBobRelaunchReturnsFailedSessionRecordToReadyWithoutReplayingPrompt() throws {
+        @Test func localIBMBobRelaunchReturnsFailedSessionRecordToReadyWithoutReplayingPrompt() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -55,25 +55,7 @@
             let transportHarness = IBMBobServiceTransportHarness(turns: [
                 .init(stdoutLines: [], stderrLines: ["Bob startup failed"], terminationStatus: 1)
             ])
-            let launcher = ProcessSessionRuntimeLauncher(ibmBobTransportFactory: {
-                executable, arguments, workingDirectory in
-                try transportHarness.makeTransport(
-                    executable: executable, arguments: arguments, workingDirectory: workingDirectory)
-            })
-            let service = try NexusService.bootstrapForTests(
-                rootURL: rootURL,
-                providerHealthEvaluator: ProviderHealthFacts(
-                    executableResolver: IBMBobPromptStubExecutableResolver(executables: ["bob": "/tmp/fake-bob"]),
-                    commandRunner: IBMBobPromptStubCommandRunner(results: [
-                        .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--version'"]): .success(
-                            stdout: "3.4.5\n"),
-                        .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--list-sessions'"]):
-                            .success(stdout: "[]\n"),
-                    ]),
-                    localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
-                ),
-                sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
-            )
+            let service = try makeIBMBobPromptFlowService(rootURL: rootURL, transportHarness: transportHarness)
 
             let group = try service.createWorkspaceGroup(name: "Solo Group")
             let workspace = try service.createLocalWorkspace(
@@ -82,10 +64,10 @@
                 primaryGroupID: group.id
             )
 
-            let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
-            _ = try service.sendSessionInput(sessionID: session.id, text: "ship it")
+            let session = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
+            _ = try await service.sendSessionInput(sessionID: session.id, text: "ship it")
 
-            let relaunchedSession = try service.launchOrResumeDefaultSession(
+            let relaunchedSession = try await service.launchOrResumeDefaultSession(
                 workspaceID: workspace.id, providerID: .ibmBob)
             let relaunchedScreen = try service.getSessionScreen(sessionID: session.id)
 
