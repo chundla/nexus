@@ -460,7 +460,14 @@ private func structuredSessionPiFeedSegmentIsInTurnSessionStatusRow(_ item: Sess
     guard item.kind == .status else {
         return false
     }
-    return structuredSessionPiFeedSegmentIsThoughtsStatus(item) == false
+    if structuredSessionPiFeedSegmentIsThoughtsStatus(item) {
+        return false
+    }
+    // Pi HTML export rows are feed artifact cards, not turn notices (#243).
+    if structuredSessionFeedArtifactPresentation(for: item) != nil {
+        return false
+    }
+    return true
 }
 
 private func structuredSessionPiFeedSegmentIsInTurnCompletionOrDiffRow(_ item: SessionActivityItem) -> Bool {
@@ -631,7 +638,10 @@ func structuredSessionPiFeedSegmentIsThoughtsStatus(_ item: SessionActivityItem)
 private func structuredSessionPiFeedSegmentIsOutsideStackRow(_ item: SessionActivityItem) -> Bool {
     switch item.kind {
     case .status:
-        return structuredSessionPiFeedSegmentIsThoughtsStatus(item) == false
+        if structuredSessionPiFeedSegmentIsThoughtsStatus(item) {
+            return false
+        }
+        return true
     case .message:
         if structuredSessionPiFeedSegmentIsPromptAnchoredUserMessage(item) {
             return false
