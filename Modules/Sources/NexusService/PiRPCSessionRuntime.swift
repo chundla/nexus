@@ -294,7 +294,11 @@
                 extensionTitle = extensionUIState.title
                 pendingExtensionDialogs = extensionUIState.pendingDialogs
                 extensionNotifications = extensionUIState.notifications
-                extensionStatuses = extensionUIState.statuses
+                extensionStatuses = extensionUIState.statuses.map { status in
+                    SessionExtensionUIStatus(
+                        key: status.key,
+                        text: TerminalEscapeSequences.stripForPlainDisplay(status.text))
+                }
                 extensionWidgets = extensionUIState.widgets
                 extensionEditorText = extensionUIState.editorText
             }
@@ -3911,7 +3915,8 @@
 
         private func upsertExtensionStatusLocked(_ status: SessionExtensionUIStatus) {
             extensionStatuses.removeAll { $0.key == status.key }
-            extensionStatuses.append(status)
+            let plainText = TerminalEscapeSequences.stripForPlainDisplay(status.text)
+            extensionStatuses.append(SessionExtensionUIStatus(key: status.key, text: plainText))
         }
 
         private func upsertExtensionWidgetLocked(_ widget: SessionExtensionUIWidget) {
@@ -3941,12 +3946,15 @@
         }
 
         private func appendActivityItemLocked(_ item: SessionActivityItem) {
-            let trimmedText = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedText = TerminalEscapeSequences.stripForPlainDisplay(
+                item.text.trimmingCharacters(in: .whitespacesAndNewlines))
             guard trimmedText.isEmpty == false else {
                 return
             }
 
-            let trimmedDetailText = item.detailText?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedDetailText = item.detailText.map {
+                TerminalEscapeSequences.stripForPlainDisplay($0.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
             activityItems.append(
                 SessionActivityItem(
                     id: item.id,
@@ -3973,7 +3981,8 @@
                 return
             }
 
-            let trimmedDetailText = detailText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedDetailText = TerminalEscapeSequences.stripForPlainDisplay(
+                detailText.trimmingCharacters(in: .whitespacesAndNewlines))
             let updatedItem = SessionActivityItem(
                 id: activityItems[index].id,
                 kind: activityItems[index].kind,

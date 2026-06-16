@@ -3447,7 +3447,7 @@
             #expect(finalScreen.extensionUI?.notifications.first?.kind == .info)
             #expect(finalScreen.extensionUI?.notifications.first?.message == "Editor prefilled")
             #expect(
-                finalScreen.extensionUI?.statuses == [SessionExtensionUIStatus(key: "rpc-demo", text: "Turn ready")])
+                finalScreen.extensionUI?.statuses == [SessionExtensionUIStatus(key: "rpc-demo", text: "MCP: 0/1 servers")])
             #expect(
                 finalScreen.extensionUI?.widgets == [
                     SessionExtensionUIWidget(
@@ -4589,7 +4589,7 @@
                 "id": "status-1",
                 "method": "setStatus",
                 "statusKey": "rpc-demo",
-                "statusText": "Turn ready",
+                "statusText": "\u{001B}[38;5;109mMCP: 0/1 servers\u{001B}[39m",
             ])
             emit([
                 "type": "extension_ui_request",

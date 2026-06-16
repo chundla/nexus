@@ -1168,7 +1168,8 @@
         }
 
         private func appendActivityItemLocked(_ item: SessionActivityItem) {
-            let trimmedText = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedText = TerminalEscapeSequences.stripForPlainDisplay(
+                item.text.trimmingCharacters(in: .whitespacesAndNewlines))
             guard trimmedText.isEmpty == false else {
                 return
             }

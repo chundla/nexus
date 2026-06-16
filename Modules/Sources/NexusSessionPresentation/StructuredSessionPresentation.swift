@@ -718,13 +718,15 @@ public func structuredSessionFeedPresentation(for screen: SessionScreen) -> Stru
 
 func structuredSessionActivityRows(for activityItems: [SessionActivityItem]) -> [StructuredSessionActivityRow] {
     activityItems.map { item in
-        let detailPreview = item.detailText.map { structuredSessionDetailTextPreview(for: $0) }
+        let plainText = TerminalEscapeSequences.stripForPlainDisplay(item.text)
+        let plainDetailText = item.detailText.map { TerminalEscapeSequences.stripForPlainDisplay($0) }
+        let detailPreview = plainDetailText.map { structuredSessionDetailTextPreview(for: $0) }
 
         return StructuredSessionActivityRow(
             id: item.id,
             title: structuredSessionActivityTitle(for: item.kind),
             systemImage: structuredSessionActivitySystemImage(for: item.kind),
-            text: item.text,
+            text: plainText,
             detailText: detailPreview?.text,
             isDetailTextTruncated: detailPreview?.isTruncated ?? false,
             emphasis: structuredSessionActivityEmphasis(for: item.kind)
