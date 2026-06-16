@@ -1162,7 +1162,7 @@
 
         private let pid: pid_t
         private let terminalHandle: FileHandle
-        private let ptyMasterFileDescriptor: Int32
+        private let ptyFileDescriptor: Int32
         private let readSource: DispatchSourceRead
         private let terminationSource: DispatchSourceProcess
         private let stopHandler: (() throws -> Void)?
@@ -1196,9 +1196,9 @@
             self.stopHandler = stopHandler
             self.terminationStatusMessageBuilder = terminationStatusMessageBuilder
 
-            var ptyMasterFileDescriptor: Int32 = -1
+            var ptyFileDescriptor: Int32 = -1
             var initialWindowSize = winsize(ws_row: 24, ws_col: 80, ws_xpixel: 0, ws_ypixel: 0)
-            let pid = forkpty(&ptyMasterFileDescriptor, nil, nil, &initialWindowSize)
+            let pid = forkpty(&ptyFileDescriptor, nil, nil, &initialWindowSize)
             guard pid >= 0 else {
                 throw NSError(
                     domain: NSPOSIXErrorDomain, code: Int(errno),
@@ -1219,9 +1219,9 @@
             }
 
             self.pid = pid
-            self.ptyMasterFileDescriptor = ptyMasterFileDescriptor
-            self.terminalHandle = FileHandle(fileDescriptor: ptyMasterFileDescriptor, closeOnDealloc: true)
-            self.readSource = DispatchSource.makeReadSource(fileDescriptor: ptyMasterFileDescriptor, queue: .global())
+            self.ptyFileDescriptor = ptyFileDescriptor
+            self.terminalHandle = FileHandle(fileDescriptor: ptyFileDescriptor, closeOnDealloc: true)
+            self.readSource = DispatchSource.makeReadSource(fileDescriptor: ptyFileDescriptor, queue: .global())
             self.terminationSource = DispatchSource.makeProcessSource(
                 identifier: pid, eventMask: .exit, queue: .global())
 
@@ -1232,7 +1232,7 @@
 
                 let estimatedBytes = max(Int(self.readSource.data), 1)
                 var buffer = [UInt8](repeating: 0, count: estimatedBytes)
-                let bytesRead = Darwin.read(self.ptyMasterFileDescriptor, &buffer, buffer.count)
+                let bytesRead = Darwin.read(self.ptyFileDescriptor, &buffer, buffer.count)
                 guard bytesRead > 0 else {
                     return
                 }
@@ -1401,7 +1401,7 @@
 
             var windowSize = winsize(
                 ws_row: UInt16(clampedRows), ws_col: UInt16(clampedColumns), ws_xpixel: 0, ws_ypixel: 0)
-            guard ioctl(ptyMasterFileDescriptor, TIOCSWINSZ, &windowSize) == 0 else {
+            guard ioctl(ptyFileDescriptor, TIOCSWINSZ, &windowSize) == 0 else {
                 throw NSError(
                     domain: NSPOSIXErrorDomain, code: Int(errno),
                     userInfo: [NSLocalizedDescriptionKey: String(cString: strerror(errno))])
