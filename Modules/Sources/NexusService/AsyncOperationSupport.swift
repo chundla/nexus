@@ -3,27 +3,27 @@
 
     struct AsyncOperationSupport {
         static func blocking<T>(_ operation: @escaping @Sendable () async throws -> T) throws -> T {
-            let semaphore = DispatchSemaphore(value: 0)
             let result = LockedAsyncOperationResult<T>()
+            let finished = DispatchSemaphore(value: 0)
 
-            // Never block a Swift Testing / cooperative executor thread on semaphore.wait while the
-            // inner async work needs that same pool (e.g. CodexAppServerRuntime.completeStartup).
-            DispatchQueue.global(qos: .userInitiated).async {
+            // Park semaphore.wait on a dedicated pthread so Swift Testing cooperative threads are
+            // not held while nested Task { await ... } needs the same executor.
+            let waiter = Thread {
+                let group = DispatchGroup()
+                group.enter()
                 Task {
+                    defer { group.leave() }
                     do {
                         result.store(.success(try await operation()))
                     } catch {
                         result.store(.failure(error))
                     }
-                    DispatchQueue.global(qos: .userInitiated).async {
-                        semaphore.signal()
-                    }
                 }
+                group.wait()
+                finished.signal()
             }
-
-            DispatchQueue.global(qos: .userInitiated).asyncAndWait {
-                semaphore.wait()
-            }
+            waiter.start()
+            finished.wait()
             return try result.value().get()
         }
     }

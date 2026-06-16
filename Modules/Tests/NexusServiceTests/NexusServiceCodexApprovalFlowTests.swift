@@ -21,6 +21,7 @@
 
             let transportHarness = CodexApprovalTransportHarness()
             let launcher = ProcessSessionRuntimeLauncher(
+                localShellEnvironmentResolver: CodexApprovalStubShellEnvironmentResolver(),
                 codexTransportFactory: { _, _, _ in transportHarness.transport }
             )
 
@@ -115,6 +116,12 @@
 
     private struct CodexApprovalReadinessProbe: CodexReadinessProbing {
         func probe(executable: String, workingDirectory: String) async throws {}
+    }
+
+    private struct CodexApprovalStubShellEnvironmentResolver: LocalShellEnvironmentResolving {
+        func resolvedEnvironment() -> [String: String]? {
+            ["SHELL": "/bin/zsh", "PATH": "/tmp/bin"]
+        }
     }
 
     private final class CodexApprovalTransportHarness: @unchecked Sendable {
