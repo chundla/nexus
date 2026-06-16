@@ -310,7 +310,7 @@ public func structuredSessionHistoryPagingRowAffectingDraftKey(for screen: Sessi
         return nil
     }
     if let draft = screen.providerFacts.liveAssistantDraftText?.trimmingCharacters(in: .whitespacesAndNewlines),
-       draft.isEmpty == false
+        draft.isEmpty == false
     {
         return structuredSessionLiveDraftScrollGrowthToken(for: draft)
     }

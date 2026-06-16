@@ -16,7 +16,7 @@ func structuredSessionPiFeedSegmentTurnInProgress(for screen: SessionScreen) -> 
         return true
     }
     if let draft = screen.providerFacts.liveAssistantDraftText?.trimmingCharacters(in: .whitespacesAndNewlines),
-       draft.isEmpty == false
+        draft.isEmpty == false
     {
         return true
     }
@@ -87,7 +87,8 @@ func structuredSessionPiActivityTailSuggestsOpenTurn(_ activityItems: [SessionAc
 }
 
 /// Post–interim-`Pi:` thoughts, tools, and progress still belong to the same user prompt until `turn_end`.
-private func structuredSessionPiTailIsOpenTurnContinuationAfterInterimAssistant(_ items: [SessionActivityItem]) -> Bool {
+private func structuredSessionPiTailIsOpenTurnContinuationAfterInterimAssistant(_ items: [SessionActivityItem]) -> Bool
+{
     guard items.isEmpty == false else {
         return false
     }

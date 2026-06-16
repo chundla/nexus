@@ -55,7 +55,8 @@ public func structuredSessionEffectiveAgentTurnInProgress(for screen: SessionScr
         return true
     }
     if screen.session.providerID == .pi,
-       structuredSessionPiFeedSegmentTurnInProgress(for: screen) {
+        structuredSessionPiFeedSegmentTurnInProgress(for: screen)
+    {
         return true
     }
     let segments = structuredSessionAgentTurnFeedSegments(for: screen)

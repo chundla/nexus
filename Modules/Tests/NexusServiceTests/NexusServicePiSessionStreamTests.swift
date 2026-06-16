@@ -2771,7 +2771,8 @@
             try runtime.sendInput("hello")
             let screen = runtime.sessionScreen(for: session)
 
-            #expect(screen.activityItems.contains { $0.kind == .error && $0.text == "Steering is unavailable right now." })
+            #expect(
+                screen.activityItems.contains { $0.kind == .error && $0.text == "Steering is unavailable right now." })
         }
 
         @Test func localPiRuntimeSurfacesExtensionErrorEvent() throws {
@@ -2863,7 +2864,7 @@
 
             try runtime.sendInput("hello")
             try runtime.sendInput("/follow-up After that, summarize")
-            let _ = runtime.sessionScreen(for: session)
+            _ = runtime.sessionScreen(for: session)
 
             #expect(
                 transport.sentLines.contains(where: {
@@ -3447,7 +3448,9 @@
             #expect(finalScreen.extensionUI?.notifications.first?.kind == .info)
             #expect(finalScreen.extensionUI?.notifications.first?.message == "Editor prefilled")
             #expect(
-                finalScreen.extensionUI?.statuses == [SessionExtensionUIStatus(key: "rpc-demo", text: "MCP: 0/1 servers")])
+                finalScreen.extensionUI?.statuses == [
+                    SessionExtensionUIStatus(key: "rpc-demo", text: "MCP: 0/1 servers")
+                ])
             #expect(
                 finalScreen.extensionUI?.widgets == [
                     SessionExtensionUIWidget(

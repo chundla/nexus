@@ -143,8 +143,9 @@ public func structuredSessionPiShouldRenderStandaloneFeedSegment(
     guard structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage(item) else {
         return true
     }
-    guard let body = structuredSessionPiPrimaryAssistantBody(from: item.text)?
-        .trimmingCharacters(in: .whitespacesAndNewlines),
+    guard
+        let body = structuredSessionPiPrimaryAssistantBody(from: item.text)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
         body.isEmpty == false
     else {
         return true

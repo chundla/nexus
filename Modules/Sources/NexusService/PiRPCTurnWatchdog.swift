@@ -13,7 +13,8 @@
         static let defaultWatchdogTickNanoseconds: UInt64 = 5 * 1_000_000_000
 
         static func configuredStallThresholdNanoseconds() -> UInt64 {
-            configuredNanoseconds(environmentKey: "NEXUS_PI_RPC_TURN_STALL_SEC", default: defaultStallThresholdNanoseconds)
+            configuredNanoseconds(
+                environmentKey: "NEXUS_PI_RPC_TURN_STALL_SEC", default: defaultStallThresholdNanoseconds)
         }
 
         static func configuredPollIntervalNanoseconds() -> UInt64 {
@@ -21,7 +22,8 @@
         }
 
         static func configuredWatchdogTickNanoseconds() -> UInt64 {
-            configuredNanoseconds(environmentKey: "NEXUS_PI_RPC_TURN_WATCHDOG_TICK_SEC", default: defaultWatchdogTickNanoseconds)
+            configuredNanoseconds(
+                environmentKey: "NEXUS_PI_RPC_TURN_WATCHDOG_TICK_SEC", default: defaultWatchdogTickNanoseconds)
         }
 
         /// Meaningful Pi agent progress for stall detection (see `PiRPCSessionRuntime` stdout handler).
@@ -50,7 +52,9 @@
         }
 
         private static func configuredNanoseconds(environmentKey: String, default defaultValue: UInt64) -> UInt64 {
-            guard let raw = ProcessInfo.processInfo.environment[environmentKey]?.trimmingCharacters(in: .whitespacesAndNewlines),
+            guard
+                let raw = ProcessInfo.processInfo.environment[environmentKey]?.trimmingCharacters(
+                    in: .whitespacesAndNewlines),
                 let seconds = Double(raw),
                 seconds > 0
             else {
@@ -77,7 +81,8 @@
                 return .none
             }
 
-            let idleNanoseconds = nowUptimeNanoseconds >= lastActivity
+            let idleNanoseconds =
+                nowUptimeNanoseconds >= lastActivity
                 ? nowUptimeNanoseconds - lastActivity
                 : 0
 

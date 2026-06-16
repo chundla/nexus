@@ -1910,7 +1910,7 @@ struct nexusTests {
             ): .success(stdout: "/usr/local/bin/claude\n9.9.9 (Claude Code)\n")
         ])
         let runtimeManager = StubSessionRuntimeManager(
-            launchTranscriptForConfiguration: { configuration, session, _ in
+            launchTranscriptForConfiguration: { configuration, _, _ in
                 let hostTarget = configuration.remoteHost.map { "\($0.sshTarget):\($0.port ?? 22)" } ?? "local"
                 return
                     "ssh \(hostTarget) \(configuration.workingDirectory) \(configuration.executable) session:\(configuration.remoteRuntimeIdentifier ?? "missing")"
@@ -1987,7 +1987,7 @@ struct nexusTests {
             ): .success(stdout: "/usr/local/bin/codex\n1.2.3\n")
         ])
         let runtimeManager = StubSessionRuntimeManager(
-            launchTranscriptForConfiguration: { configuration, session, _ in
+            launchTranscriptForConfiguration: { configuration, _, _ in
                 let hostTarget = configuration.remoteHost.map { "\($0.sshTarget):\($0.port ?? 22)" } ?? "local"
                 return
                     "ssh \(hostTarget) \(configuration.workingDirectory) \(configuration.executable) session:\(configuration.remoteRuntimeIdentifier ?? "missing")"
@@ -2252,7 +2252,7 @@ struct nexusTests {
             ): .success(stdout: "/home/chundla/.local/bin/claude\n9.9.9 (Claude Code)\n"),
         ])
         let runtimeManager = StubSessionRuntimeManager(
-            launchTranscriptForConfiguration: { configuration, session, _ in
+            launchTranscriptForConfiguration: { configuration, _, _ in
                 "\(configuration.executable) @ \(configuration.workingDirectory) session:\(configuration.remoteRuntimeIdentifier ?? "missing")"
             }
         )
@@ -12407,7 +12407,8 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
     {
         _ = sessionID
         _ = hostPath
-        return StructuredSessionArtifactFile(fileName: "artifact", contentType: "application/octet-stream", data: Data())
+        return StructuredSessionArtifactFile(
+            fileName: "artifact", contentType: "application/octet-stream", data: Data())
     }
 
     func observeSessionScreen(sessionID: UUID, onUpdate: @escaping @Sendable (SessionScreen) -> Void) async throws

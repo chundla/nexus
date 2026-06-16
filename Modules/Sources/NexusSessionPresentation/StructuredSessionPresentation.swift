@@ -2695,8 +2695,8 @@ public func structuredSessionFeedAgentTurnFinalAnswerMarkdownDisplayPolicy(
     for text: String,
     charactersPerLine: Int
 ) -> StructuredSessionFeedAssistantMarkdownDisplayPolicy {
-    let _ = charactersPerLine
-    let _ = text
+    _ = charactersPerLine
+    _ = text
     return StructuredSessionFeedAssistantMarkdownDisplayPolicy(
         showsCollapsedPreview: false,
         previewLineLimit: structuredSessionFeedAssistantMarkdownPreviewLineLimit

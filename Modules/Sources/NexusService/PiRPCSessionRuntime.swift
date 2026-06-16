@@ -1062,15 +1062,16 @@
         }
 
         private func runTurnWatchdogTick() {
-            let snapshot: (
-                committed: Bool,
-                declared: Bool,
-                lastActivity: UInt64?,
-                lastPoll: UInt64?,
-                polls: Int,
-                sessionID: UUID?,
-                sessionFile: String?
-            )
+            let snapshot:
+                (
+                    committed: Bool,
+                    declared: Bool,
+                    lastActivity: UInt64?,
+                    lastPoll: UInt64?,
+                    polls: Int,
+                    sessionID: UUID?,
+                    sessionFile: String?
+                )
             lock.lock()
             snapshot = (
                 promptTurnCommitted,
@@ -1588,9 +1589,11 @@
             case "set_session_name":
                 handleSetSessionNameResponse(response, requestID: id)
             case "new_session":
-                handleSessionTransitionResponse(response, successText: "Started a new session", cancelledText: "New session cancelled")
+                handleSessionTransitionResponse(
+                    response, successText: "Started a new session", cancelledText: "New session cancelled")
             case "switch_session":
-                handleSessionTransitionResponse(response, successText: "Switched session", cancelledText: "Session switch cancelled")
+                handleSessionTransitionResponse(
+                    response, successText: "Switched session", cancelledText: "Session switch cancelled")
             case "prompt":
                 if bool(for: "success", in: response) == true {
                     lock.lock()
@@ -3191,7 +3194,9 @@
             }
         }
 
-        private func slashCommandLocation(fromSourceInfo sourceInfo: [String: Any]?, fallbackPath: String?) -> SessionSlashCommandLocation? {
+        private func slashCommandLocation(fromSourceInfo sourceInfo: [String: Any]?, fallbackPath: String?)
+            -> SessionSlashCommandLocation?
+        {
             guard let sourceInfo else {
                 return fallbackPath == nil ? nil : .path
             }
@@ -4453,8 +4458,9 @@
         }
 
         private static func appendWireRecord(stream: String, line: String, nexusSessionID: UUID?) {
-            guard let base = ProcessInfo.processInfo.environment["NEXUS_PI_RPC_RECORD_DIR"]?
-                .trimmingCharacters(in: .whitespacesAndNewlines),
+            guard
+                let base = ProcessInfo.processInfo.environment["NEXUS_PI_RPC_RECORD_DIR"]?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
                 base.isEmpty == false
             else {
                 return
