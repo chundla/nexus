@@ -269,8 +269,7 @@
                         workspaceDetail(presentation: presentation)
                     }
                 case .provider(let workspaceID, let providerID):
-                    ProviderDetailBoundary(appModel: appModel, workspaceID: workspaceID, providerID: providerID) {
-                        detail in
+                    ProviderDetailBoundary(appModel: appModel, workspaceID: workspaceID, providerID: providerID) { detail in
                         providerDetail(workspaceID: workspaceID, providerID: providerID, detail: detail)
                     }
                 case .session(let sessionID):
@@ -1562,19 +1561,20 @@
                             structuredSessionAgentTurnDisclosureState.reset()
                             structuredSessionFeedScrollPosition = ScrollPosition()
                             structuredSessionScheduleMacOSFeedActivityRowsIfNeeded()
+                        },
+                        content: {
+                            MacStructuredSessionFeedScrollContent(
+                                structuredPresentation: structuredPresentation,
+                                feedPresentation: feedPresentation,
+                                visibleTailRowCount: structuredSessionMacOSFeedVisibleTailRowCount,
+                                disclosureState: structuredSessionAgentTurnDisclosureState,
+                                historyPaging: { structuredSessionHistoryPagingControls() },
+                                activityRow: { structuredSessionActivityRowView($0) },
+                                onShowFullAssistantResponse: { presentedStructuredSessionAssistantFullResponse = $0 },
+                                thinkingIndicator: { structuredSessionThinkingIndicatorView($0) }
+                            )
                         }
-                    ) {
-                        MacStructuredSessionFeedScrollContent(
-                            structuredPresentation: structuredPresentation,
-                            feedPresentation: feedPresentation,
-                            visibleTailRowCount: structuredSessionMacOSFeedVisibleTailRowCount,
-                            disclosureState: structuredSessionAgentTurnDisclosureState,
-                            historyPaging: { structuredSessionHistoryPagingControls() },
-                            activityRow: { structuredSessionActivityRowView($0) },
-                            onShowFullAssistantResponse: { presentedStructuredSessionAssistantFullResponse = $0 },
-                            thinkingIndicator: { structuredSessionThinkingIndicatorView($0) }
-                        )
-                    }
+                    )
 
                     if isReady, let structuredChrome {
                         MacStructuredSessionComposerSection(

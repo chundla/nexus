@@ -3,9 +3,7 @@ import NexusDomain
 
 /// File-scoped merge closure so `@MainActor` models can pass it to `CoalescingMainActorValuePump`
 /// without inheriting MainActor on the function value (Swift 6).
-let preferredSessionScreenMergePendingValue: CoalescingMainActorValuePump<SessionScreen>.MergePendingValue = {
-    pending,
-    candidate in
+let preferredSessionScreenMergePendingValue: CoalescingMainActorValuePump<SessionScreen>.MergePendingValue = { pending, candidate in
     preferredSessionScreenUpdate(pending: pending, new: candidate)
 }
 
