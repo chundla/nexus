@@ -49,7 +49,14 @@
 
             let service = try NexusService.bootstrapForTests(
                 rootURL: rootURL,
-                providerHealthEvaluator: PerformanceBaselineIBMBobProviderHealthFacts()
+                providerHealthEvaluator: PerformanceBaselineIBMBobProviderHealthFacts(),
+                sessionRuntimeManager: InMemorySessionRuntimeManager(
+                    launcher: ProcessSessionRuntimeLauncher(
+                        ibmBobTransportFactory: { _, _, _ in
+                            PerformanceBaselineIBMBobSyncTransport()
+                        }
+                    )
+                )
             )
             let group = try service.createWorkspaceGroup(name: "Solo Group")
             let workspace = try service.createLocalWorkspace(
@@ -358,6 +365,30 @@
             _ = columns
             _ = rows
         }
+    }
+
+    private final class PerformanceBaselineIBMBobSyncTransport: IBMBobTransporting, @unchecked Sendable {
+        private var stdoutLineHandler: (@Sendable (String) -> Void)?
+        private var stderrLineHandler: (@Sendable (String) -> Void)?
+        private var terminationHandler: (@Sendable (Int32) -> Void)?
+
+        func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
+            stdoutLineHandler = handler
+        }
+
+        func setStderrLineHandler(_ handler: (@Sendable (String) -> Void)?) {
+            stderrLineHandler = handler
+        }
+
+        func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?) {
+            terminationHandler = handler
+        }
+
+        func start() throws {
+            terminationHandler?(0)
+        }
+
+        func terminate() throws {}
     }
 
     struct PerformanceBaselineReport {

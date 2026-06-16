@@ -161,8 +161,31 @@
                         stdout: "[]\n"),
                 ]),
                 localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+            ),
+            sessionRuntimeManager: InMemorySessionRuntimeManager(
+                launcher: ProcessSessionRuntimeLauncher(
+                    ibmBobTransportFactory: { _, _, _ in
+                        IBMBobSessionLifecycleSyncTransport()
+                    }
+                )
             )
         )
+    }
+
+    private final class IBMBobSessionLifecycleSyncTransport: IBMBobTransporting, @unchecked Sendable {
+        private var terminationHandler: (@Sendable (Int32) -> Void)?
+
+        func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {}
+        func setStderrLineHandler(_ handler: (@Sendable (String) -> Void)?) {}
+        func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?) {
+            terminationHandler = handler
+        }
+
+        func start() throws {
+            terminationHandler?(0)
+        }
+
+        func terminate() throws {}
     }
 
     private struct IBMBobSessionStubExecutableResolver: ProviderExecutableResolving {
