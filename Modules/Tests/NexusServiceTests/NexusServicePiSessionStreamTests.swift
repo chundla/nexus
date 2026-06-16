@@ -5,6 +5,7 @@
     @testable import NexusService
     import Testing
 
+    @Suite(.serialized)
     struct NexusServicePiSessionStreamTests {
         @Test func localPiDefaultSessionLaunchAndResumePreserveSharedActivity() async throws {
             let rootURL = FileManager.default.temporaryDirectory
@@ -14,13 +15,10 @@
             try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
 
             let launchCounter = LaunchCounter()
-            let launcher = ProcessSessionRuntimeLauncher(
-                localShellEnvironmentResolver: PiStreamStubShellEnvironmentResolver(),
-                piTransportFactory: { _, _, _ in
-                    launchCounter.increment()
-                    return TestPiRPCTransport()
-                }
-            )
+            let launcher = makePiStreamTestLauncher(piTransportFactory: { _, _, _ in
+                launchCounter.increment()
+                return TestPiRPCTransport()
+            })
 
             let service = try NexusService.bootstrapForTests(
                 rootURL: rootURL,
@@ -99,11 +97,9 @@
             let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
             try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
 
-            let launcher = ProcessSessionRuntimeLauncher(
-                localShellEnvironmentResolver: PiStreamStubShellEnvironmentResolver(),
-                piTransportFactory: { _, _, _ in
-                    TestPiRPCTransport(
-                        slashCommands: [
+            let launcher = makePiStreamTestLauncher(piTransportFactory: { _, _, _ in
+                TestPiRPCTransport(
+                    slashCommands: [
                             TestPiRPCCommand(
                                 name: "review-changes",
                                 description: "Summarize the current diff.",
@@ -120,8 +116,7 @@
                             ),
                         ]
                     )
-                }
-            )
+            })
 
             let service = try NexusService.bootstrapForTests(
                 rootURL: rootURL,
@@ -1654,12 +1649,9 @@
 
             let transportHarness = PersistentPiTransportHarness()
             func makeService() throws -> NexusService {
-                let launcher = ProcessSessionRuntimeLauncher(
-                    localShellEnvironmentResolver: PiStreamStubShellEnvironmentResolver(),
-                    piTransportFactory: { _, arguments, _ in
-                        transportHarness.makeTransport(arguments: arguments)
-                    }
-                )
+                let launcher = makePiStreamTestLauncher(piTransportFactory: { _, arguments, _ in
+                    transportHarness.makeTransport(arguments: arguments)
+                })
 
                 return try NexusService.bootstrapForTests(
                     rootURL: rootURL,
@@ -1717,12 +1709,9 @@
 
             let transportHarness = PersistentPiTransportHarness()
             func makeService() throws -> NexusService {
-                let launcher = ProcessSessionRuntimeLauncher(
-                    localShellEnvironmentResolver: PiStreamStubShellEnvironmentResolver(),
-                    piTransportFactory: { _, arguments, _ in
-                        transportHarness.makeTransport(arguments: arguments)
-                    }
-                )
+                let launcher = makePiStreamTestLauncher(piTransportFactory: { _, arguments, _ in
+                    transportHarness.makeTransport(arguments: arguments)
+                })
 
                 return try NexusService.bootstrapForTests(
                     rootURL: rootURL,
@@ -1761,7 +1750,7 @@
             #expect(nextTurn.activityItems.suffix(2).map(\.text) == ["You: what was my last message?", "Pi: (none)"])
         }
 
-        @Test func localPiClearCommandResetsCurrentSessionHistoryAndStartsFreshPiSession() throws {
+        @Test func localPiClearCommandResetsCurrentSessionHistoryAndStartsFreshPiSession() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1770,7 +1759,7 @@
 
             let transportHarness = PersistentPiTransportHarness()
             func makeService() throws -> NexusService {
-                let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, arguments, _ in
+                let launcher = makePiStreamTestLauncher(piTransportFactory: { _, arguments, _ in
                     transportHarness.makeTransport(arguments: arguments)
                 })
 
@@ -1798,17 +1787,17 @@
                 primaryGroupID: group.id
             )
 
-            let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
-            _ = try service.sendSessionInput(sessionID: session.id, text: "alpha")
-            let resetScreen = try service.sendSessionInput(sessionID: session.id, text: "/clear")
-            let nextTurn = try service.sendSessionInput(sessionID: session.id, text: "what was my last message?")
+            let session = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+            _ = try await service.sendSessionInput(sessionID: session.id, text: "alpha")
+            let resetScreen = try await service.sendSessionInput(sessionID: session.id, text: "/clear")
+            let nextTurn = try await service.sendSessionInput(sessionID: session.id, text: "what was my last message?")
 
             #expect(resetScreen.session.id == session.id)
             #expect(resetScreen.activityItems.map(\.text) == ["Session stream connected"])
             #expect(nextTurn.activityItems.suffix(2).map(\.text) == ["You: what was my last message?", "Pi: (none)"])
         }
 
-        @Test func localPiRestartedSessionShowsInterruptedLostRuntimeCopyAcrossInspectableSurfaces() throws {
+        @Test func localPiRestartedSessionShowsInterruptedLostRuntimeCopyAcrossInspectableSurfaces() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1816,7 +1805,7 @@
             try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
 
             func makeService() throws -> NexusService {
-                let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
+                let launcher = makePiStreamTestLauncher(piTransportFactory: { _, _, _ in
                     TestPiRPCTransport()
                 })
 
@@ -1836,21 +1825,26 @@
                 )
             }
 
-            let service = try makeService()
-            let group = try service.createWorkspaceGroup(name: "Solo Group")
-            let workspace = try service.createLocalWorkspace(
-                name: "Local Pi",
-                folderPath: workspaceFolder.path(percentEncoded: false),
-                primaryGroupID: group.id
-            )
-
-            let defaultSession = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
-            let namedSession = try service.createNamedSession(
-                workspaceID: workspace.id, providerID: .pi, name: "Review")
+            let workspace: Workspace
+            let defaultSession: Session
+            let namedSession: Session
+            do {
+                let service = try makeService()
+                let group = try service.createWorkspaceGroup(name: "Solo Group")
+                workspace = try service.createLocalWorkspace(
+                    name: "Local Pi",
+                    folderPath: workspaceFolder.path(percentEncoded: false),
+                    primaryGroupID: group.id
+                )
+                defaultSession = try await service.launchOrResumeDefaultSession(
+                    workspaceID: workspace.id, providerID: .pi)
+                namedSession = try await service.createNamedSession(
+                    workspaceID: workspace.id, providerID: .pi, name: "Review")
+            }
 
             let restartedService = try makeService()
-            let overview = try restartedService.getWorkspaceOverview(workspaceID: workspace.id)
-            let providerDetail = try restartedService.getProviderDetail(workspaceID: workspace.id, providerID: .pi)
+            let overview = try await restartedService.getWorkspaceOverview(workspaceID: workspace.id)
+            let providerDetail = try await restartedService.getProviderDetail(workspaceID: workspace.id, providerID: .pi)
             let interruptedDefaultScreen = try restartedService.getSessionScreen(sessionID: defaultSession.id)
             let interruptedNamedScreen = try restartedService.getSessionScreen(sessionID: namedSession.id)
 
@@ -1879,7 +1873,7 @@
 
         @Test
         func localPiInFlightTurnBecomesInterruptedAfterServiceRestartWhileKeepingPartialAssistantOutputInspectable()
-            throws
+            async throws
         {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
@@ -1899,7 +1893,7 @@
             ])
 
             func makeService() throws -> NexusService {
-                let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in transport })
+                let launcher = makePiStreamTestLauncher(piTransportFactory: { _, _, _ in transport })
                 return try NexusService.bootstrapForTests(
                     rootURL: rootURL,
                     providerHealthEvaluator: ProviderHealthFacts(
@@ -1916,16 +1910,19 @@
                 )
             }
 
-            let service = try makeService()
-            let group = try service.createWorkspaceGroup(name: "Solo Group")
-            let workspace = try service.createLocalWorkspace(
-                name: "Local Pi",
-                folderPath: workspaceFolder.path(percentEncoded: false),
-                primaryGroupID: group.id
-            )
-
-            let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
-            let partialScreen = try service.sendSessionInput(sessionID: session.id, text: "first")
+            let session: Session
+            let partialScreen: SessionScreen
+            do {
+                let service = try makeService()
+                let group = try service.createWorkspaceGroup(name: "Solo Group")
+                let workspace = try service.createLocalWorkspace(
+                    name: "Local Pi",
+                    folderPath: workspaceFolder.path(percentEncoded: false),
+                    primaryGroupID: group.id
+                )
+                session = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+                partialScreen = try await service.sendSessionInput(sessionID: session.id, text: "first")
+            }
 
             let restartedService = try makeService()
             let interruptedSession = try restartedService.getSessionRecord(sessionID: session.id)
@@ -1947,7 +1944,7 @@
             #expect(interruptedScreen.activityItems.last?.text == expectedFailureMessage)
         }
 
-        @Test func localPiNamedSessionCanBeStoppedRelaunchedAndDeletedWhilePreservingConversationLinkage() throws {
+        @Test func localPiNamedSessionCanBeStoppedRelaunchedAndDeletedWhilePreservingConversationLinkage() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1956,7 +1953,7 @@
 
             let transportHarness = PersistentPiTransportHarness()
             func makeService() throws -> NexusService {
-                let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, arguments, _ in
+                let launcher = makePiStreamTestLauncher(piTransportFactory: { _, arguments, _ in
                     transportHarness.makeTransport(arguments: arguments)
                 })
 
@@ -1976,28 +1973,34 @@
                 )
             }
 
-            let service = try makeService()
-            let group = try service.createWorkspaceGroup(name: "Solo Group")
-            let workspace = try service.createLocalWorkspace(
-                name: "Local Pi",
-                folderPath: workspaceFolder.path(percentEncoded: false),
-                primaryGroupID: group.id
-            )
-
-            let namedSession = try service.createNamedSession(
-                workspaceID: workspace.id, providerID: .pi, name: "Review")
-            _ = try service.sendSessionText(sessionID: namedSession.id, text: "alpha")
-            let firstTurn = try service.sendSessionInputKey(sessionID: namedSession.id, key: .enter)
-            let stoppedSession = try service.stopSession(sessionID: namedSession.id)
-            let stoppedRecord = try service.getSessionRecord(sessionID: namedSession.id)
+            let workspace: Workspace
+            let namedSession: Session
+            let firstTurn: SessionScreen
+            let stoppedSession: Session
+            let stoppedRecord: Session
+            do {
+                let service = try makeService()
+                let group = try service.createWorkspaceGroup(name: "Solo Group")
+                workspace = try service.createLocalWorkspace(
+                    name: "Local Pi",
+                    folderPath: workspaceFolder.path(percentEncoded: false),
+                    primaryGroupID: group.id
+                )
+                namedSession = try await service.createNamedSession(
+                    workspaceID: workspace.id, providerID: .pi, name: "Review")
+                _ = try await service.sendSessionText(sessionID: namedSession.id, text: "alpha")
+                firstTurn = try await service.sendSessionInputKey(sessionID: namedSession.id, key: .enter)
+                stoppedSession = try service.stopSession(sessionID: namedSession.id)
+                stoppedRecord = try service.getSessionRecord(sessionID: namedSession.id)
+            }
 
             let restartedService = try makeService()
-            let relaunchedSession = try restartedService.launchOrResumeSession(sessionID: namedSession.id)
-            _ = try restartedService.sendSessionText(sessionID: relaunchedSession.id, text: "what was my last message?")
-            let resumedTurn = try restartedService.sendSessionInputKey(sessionID: relaunchedSession.id, key: .enter)
+            let relaunchedSession = try await restartedService.launchOrResumeSession(sessionID: namedSession.id)
+            _ = try await restartedService.sendSessionText(sessionID: relaunchedSession.id, text: "what was my last message?")
+            let resumedTurn = try await restartedService.sendSessionInputKey(sessionID: relaunchedSession.id, key: .enter)
             _ = try restartedService.stopSession(sessionID: namedSession.id)
             let deleted = try restartedService.deleteSessionRecord(sessionID: namedSession.id)
-            let providerDetail = try restartedService.getProviderDetail(workspaceID: workspace.id, providerID: .pi)
+            let providerDetail = try await restartedService.getProviderDetail(workspaceID: workspace.id, providerID: .pi)
 
             #expect(namedSession.providerID == .pi)
             #expect(namedSession.name == "Review")
@@ -3315,14 +3318,14 @@
                     ))
         }
 
-        @Test func localPiExtensionDialogResponseContinuesSessionWithoutChangingProviderHealth() throws {
+        @Test func localPiExtensionDialogResponseContinuesSessionWithoutChangingProviderHealth() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
             let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
             try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
 
-            let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
+            let launcher = makePiStreamTestLauncher(piTransportFactory: { _, _, _ in
                 ExtensionDialogTestPiRPCTransport()
             })
 
@@ -3348,16 +3351,16 @@
                 primaryGroupID: group.id
             )
 
-            let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
-            let pendingScreen = try service.sendSessionInput(sessionID: session.id, text: "deploy")
+            let session = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+            let pendingScreen = try await service.sendSessionInput(sessionID: session.id, text: "deploy")
             let dialog = try #require(pendingScreen.extensionUI?.pendingDialogs.first)
 
-            let approvedScreen = try service.respondToExtensionDialog(
+            let approvedScreen = try await service.respondToExtensionDialog(
                 sessionID: session.id,
                 dialogID: dialog.id,
                 response: .confirmed(true)
             )
-            let providerDetail = try service.getProviderDetail(workspaceID: workspace.id, providerID: .pi)
+            let providerDetail = try await service.getProviderDetail(workspaceID: workspace.id, providerID: .pi)
 
             #expect(pendingScreen.extensionUI?.pendingDialogs == [dialog])
             #expect(approvedScreen.extensionUI == nil || approvedScreen.extensionUI?.pendingDialogs.isEmpty == true)
@@ -3419,7 +3422,7 @@
             try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
 
             let transport = FireAndForgetExtensionUITestPiRPCTransport()
-            let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in transport })
+            let launcher = makePiStreamTestLauncher(piTransportFactory: { _, _, _ in transport })
             let service = try NexusService.bootstrapForTests(
                 rootURL: rootURL,
                 providerHealthEvaluator: ProviderHealthFacts(
@@ -3573,7 +3576,7 @@
             unblockObserver.signal()
         }
 
-        @Test func localPiPersistsStructuredHistoryOverflowOnDiskAndRestoresRecentTailAcrossInspectPaths() throws {
+        @Test func localPiPersistsStructuredHistoryOverflowOnDiskAndRestoresRecentTailAcrossInspectPaths() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -3589,7 +3592,7 @@
             }
 
             func makeService() throws -> NexusService {
-                let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
+                let launcher = makePiStreamTestLauncher(piTransportFactory: { _, _, _ in
                     TestPiRPCTransport(messages: messages)
                 })
 
@@ -3609,17 +3612,21 @@
                 )
             }
 
-            let service = try makeService()
-            let group = try service.createWorkspaceGroup(name: "Solo Group")
-            let workspace = try service.createLocalWorkspace(
-                name: "Local Pi",
-                folderPath: workspaceFolder.path(percentEncoded: false),
-                primaryGroupID: group.id
-            )
-            let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
-            _ = try service.sendSessionInput(sessionID: session.id, text: "/messages")
+            let session: Session
+            let liveScreen: SessionScreen
+            do {
+                let service = try makeService()
+                let group = try service.createWorkspaceGroup(name: "Solo Group")
+                let workspace = try service.createLocalWorkspace(
+                    name: "Local Pi",
+                    folderPath: workspaceFolder.path(percentEncoded: false),
+                    primaryGroupID: group.id
+                )
+                session = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+                _ = try await service.sendSessionInput(sessionID: session.id, text: "/messages")
+                liveScreen = try service.getSessionScreen(sessionID: session.id)
+            }
 
-            let liveScreen = try service.getSessionScreen(sessionID: session.id)
             let restartedService = try makeService()
             let interruptedScreen = try restartedService.getSessionScreen(sessionID: session.id)
             let observationSnapshot = try restartedService.getSessionScreenObservationSnapshot(sessionID: session.id)
@@ -3660,7 +3667,7 @@
             )
         }
 
-        @Test func localPiLoadsOlderStructuredHistoryPagesFromPersistedOverflowWithoutGrowingLiveTail() throws {
+        @Test func localPiLoadsOlderStructuredHistoryPagesFromPersistedOverflowWithoutGrowingLiveTail() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -3677,7 +3684,7 @@
             }
 
             func makeService() throws -> NexusService {
-                let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
+                let launcher = makePiStreamTestLauncher(piTransportFactory: { _, _, _ in
                     TestPiRPCTransport(messages: messages)
                 })
 
@@ -3697,15 +3704,18 @@
                 )
             }
 
-            let service = try makeService()
-            let group = try service.createWorkspaceGroup(name: "Solo Group")
-            let workspace = try service.createLocalWorkspace(
-                name: "Local Pi",
-                folderPath: workspaceFolder.path(percentEncoded: false),
-                primaryGroupID: group.id
-            )
-            let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
-            _ = try service.sendSessionInput(sessionID: session.id, text: "/messages")
+            let session: Session
+            do {
+                let service = try makeService()
+                let group = try service.createWorkspaceGroup(name: "Solo Group")
+                let workspace = try service.createLocalWorkspace(
+                    name: "Local Pi",
+                    folderPath: workspaceFolder.path(percentEncoded: false),
+                    primaryGroupID: group.id
+                )
+                session = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+                _ = try await service.sendSessionInput(sessionID: session.id, text: "/messages")
+            }
 
             let restartedService = try makeService()
             let liveScreen = try restartedService.getSessionScreen(sessionID: session.id)
@@ -3741,6 +3751,16 @@
             #expect(finalPage.activityItems.contains(where: { $0.text == "Message 20 — user: History 19" }))
             #expect(finalPage.nextCursor == nil)
         }
+    }
+
+
+    private func makePiStreamTestLauncher(
+        piTransportFactory: @escaping PiRPCSessionRuntime.TransportFactory
+    ) -> ProcessSessionRuntimeLauncher {
+        ProcessSessionRuntimeLauncher(
+            localShellEnvironmentResolver: PiStreamStubShellEnvironmentResolver(),
+            piTransportFactory: piTransportFactory
+        )
     }
 
     private struct PiStreamStubShellEnvironmentResolver: LocalShellEnvironmentResolving {
@@ -5343,7 +5363,7 @@
             let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
             try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
 
-            let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
+            let launcher = makePiStreamTestLauncher(piTransportFactory: { _, _, _ in
                 TestPiRPCTransport()
             })
             func makeService() throws -> NexusService {
