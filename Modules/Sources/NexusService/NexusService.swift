@@ -530,6 +530,7 @@
             }
 
             try runtime.sendInput(prompt)
+            notifyRuntimeChange(for: session.id)
             return runtime.sessionScreen(for: session)
         }
 
@@ -542,6 +543,7 @@
             }
 
             try runtime.sendText(text)
+            notifyRuntimeChange(for: session.id)
             return runtime.sessionScreen(for: session)
         }
 
@@ -556,6 +558,7 @@
             }
 
             try runtime.sendInputKey(key, applicationCursorMode: applicationCursorMode)
+            notifyRuntimeChange(for: session.id)
             return runtime.sessionScreen(for: session)
         }
 
@@ -570,6 +573,7 @@
             }
 
             try runtime.respondToApprovalRequest(approvalRequestID, decision: decision)
+            notifyRuntimeChange(for: session.id)
             return runtime.sessionScreen(for: session)
         }
 
@@ -584,6 +588,7 @@
             }
 
             try runtime.respondToExtensionDialog(dialogID, response: response)
+            notifyRuntimeChange(for: session.id)
             return runtime.sessionScreen(for: session)
         }
 
@@ -2347,10 +2352,12 @@
         }
 
         func sendSessionInput(sessionID: UUID, prompt: SessionPrompt) async throws -> SessionScreen {
-            sessionScreenAfterPiRedirectIfNeeded(
+            let screen = sessionScreenAfterPiRedirectIfNeeded(
                 sourceSessionID: sessionID,
                 fallback: try await sessionInteraction.sendSessionInput(sessionID: sessionID, prompt: prompt)
             )
+            structuredSessionObservationStore.recordChange(for: screen)
+            return screen
         }
 
         func sendSessionText(sessionID: UUID, text: String) throws -> SessionScreen {
@@ -2438,7 +2445,7 @@
             approvalRequestID: UUID,
             decision: ApprovalRequestDecision
         ) async throws -> SessionScreen {
-            sessionScreenAfterPiRedirectIfNeeded(
+            let screen = sessionScreenAfterPiRedirectIfNeeded(
                 sourceSessionID: sessionID,
                 fallback: try await sessionInteraction.respondToApprovalRequest(
                     sessionID: sessionID,
@@ -2446,6 +2453,8 @@
                     decision: decision
                 )
             )
+            structuredSessionObservationStore.recordChange(for: screen)
+            return screen
         }
 
         func respondToExtensionDialog(

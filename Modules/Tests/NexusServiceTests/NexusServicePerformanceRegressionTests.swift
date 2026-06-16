@@ -50,6 +50,8 @@
                     matching: {
                         $0.operation == .structuredSessionObservation
                             && $0.metrics["deltaBuildCount"] == 1
+                            && $0.metrics["changeCount"] == 3
+                            && $0.sessionID == session.id
                     }
                 )
             )

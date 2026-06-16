@@ -70,9 +70,12 @@
 
             let diagnostics = try service.listPerformanceDiagnostics(limit: 10)
             let record = try #require(
-                diagnostics.filter {
-                    $0.operation == .structuredSessionObservation && $0.metrics["deltaBuildCount"] == 1
-                }.first)
+                diagnostics.first {
+                    $0.operation == .structuredSessionObservation
+                        && $0.metrics["deltaBuildCount"] == 1
+                        && $0.metrics["changeCount"] == 3
+                        && $0.sessionID == session.id
+                })
 
             #expect(record.workspaceID == workspace.id)
             #expect(record.providerID == .pi)
