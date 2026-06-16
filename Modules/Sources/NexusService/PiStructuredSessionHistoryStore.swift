@@ -199,7 +199,7 @@
                 return []
             }
 
-            let lines = try String(decoding: Data(contentsOf: url), as: UTF8.self)
+            let lines = (try String(data: Data(contentsOf: url), encoding: .utf8) ?? "")
                 .split(separator: "\n")
             return try lines.map { line in
                 try decoder.decode(T.self, from: Data(line.utf8))

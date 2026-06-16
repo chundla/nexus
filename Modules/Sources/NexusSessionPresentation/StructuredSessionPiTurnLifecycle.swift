@@ -38,11 +38,9 @@ func structuredSessionPiActivityTailSuggestsOpenTurn(_ activityItems: [SessionAc
     }
 
     var firstPrimaryPiIndex: Int?
-    for (index, item) in tail.enumerated() {
-        if structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage(item) {
-            firstPrimaryPiIndex = index
-            break
-        }
+    for (index, item) in tail.enumerated() where structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage(item) {
+        firstPrimaryPiIndex = index
+        break
     }
 
     if let firstPrimaryPiIndex {

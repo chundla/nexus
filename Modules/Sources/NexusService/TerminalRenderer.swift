@@ -35,7 +35,7 @@
                 return ""
             }
 
-            let decoded = String(decoding: pending, as: UTF8.self)
+            let decoded = String(data: pending, encoding: .utf8) ?? ""
             pending.removeAll()
             return decoded
         }
