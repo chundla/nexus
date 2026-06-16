@@ -2667,7 +2667,7 @@
                     "Session stream connected",
                     "You: review",
                     "Pi: \(interimText)",
-                    "read: README.md",
+                    "read README.md",
                     "Pi: Final answer after tools.",
                 ])
         }

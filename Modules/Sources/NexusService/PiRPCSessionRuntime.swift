@@ -2092,10 +2092,9 @@
             errorMessage: String?
         ) {
             let resolvedText = resolvedPiAssistantFinalText(from: message)
+            let shouldRequestSlashCommands: Bool
 
             lock.lock()
-            defer { lock.unlock() }
-
             switch stopReason {
             case "aborted", "error":
                 let errorText =
@@ -2111,22 +2110,27 @@
                 }
                 finishPiAgentTurnLocked(stopReason: stopReason)
                 appendActivityItemLocked(SessionActivityItem(kind: .error, text: errorText))
-                requestSlashCommands()
-                notifyChange()
+                shouldRequestSlashCommands = true
             case "stop", "length", "toolUse":
                 // Provisional assistant text; user prompt stays open until `agent_end`.
                 if resolvedText.isEmpty == false {
                     appendActivityItemLocked(SessionActivityItem(kind: .message, text: "Pi: \(resolvedText)"))
                 }
                 clearAssistantStreamingDraftBuffersLocked()
-                notifyChange()
+                shouldRequestSlashCommands = false
             default:
                 if resolvedText.isEmpty == false {
                     appendActivityItemLocked(SessionActivityItem(kind: .message, text: "Pi: \(resolvedText)"))
                 }
                 clearAssistantStreamingDraftBuffersLocked()
-                notifyChange()
+                shouldRequestSlashCommands = false
             }
+            lock.unlock()
+
+            if shouldRequestSlashCommands {
+                requestSlashCommands()
+            }
+            notifyChange()
         }
 
         private func handlePromptSubmissionRejected(_ response: [String: Any]) {
