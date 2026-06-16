@@ -3161,6 +3161,47 @@
                 ])
         }
 
+        @Test func localPiRuntimeSurfacesReadToolOutputFromResultDetailsWhenContentEmpty() throws {
+            let transport = PromptEventPiRPCTransport(promptEvents: [
+                ["type": "agent_start", "agent": "pi"],
+                [
+                    "type": "tool_execution_start",
+                    "toolCallId": "tool-read",
+                    "toolName": "read",
+                    "args": ["path": "AGENTS.md"],
+                ],
+                [
+                    "type": "tool_execution_end",
+                    "toolCallId": "tool-read",
+                    "toolName": "read",
+                    "result": [
+                        "content": [] as [Any],
+                        "details": ["diff": "# AGENTS\n\nBe concise."],
+                    ],
+                    "isError": false,
+                ],
+                ["type": "agent_end", "messages": []],
+            ])
+            let runtime = try PiRPCSessionRuntime(
+                executable: "/tmp/fake-pi",
+                workingDirectory: "/tmp",
+                terminationStatusMessageBuilder: { _ in "" },
+                transportFactory: { _, _, _ in transport }
+            )
+            let session = Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            )
+            try runtime.sendInput("read agents")
+            let screen = runtime.sessionScreen(for: session)
+            let command = try #require(screen.activityItems.first(where: { $0.kind == .command }))
+            #expect(command.text == "read AGENTS.md")
+            #expect(command.detailText == "# AGENTS\n\nBe concise.")
+        }
+
         @Test func localPiRuntimeStreamsToolExecutionUpdatesFromDeltaContentBlocksBeforeTurnEnds() throws {
             let transport = StreamingToolPiRPCTransport()
             let runtime = try PiRPCSessionRuntime(

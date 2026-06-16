@@ -3786,41 +3786,11 @@
         }
 
         private func toolExecutionResultText(_ object: [String: Any]?) -> String {
-            toolExecutionResultText(from: object)
+            PiToolExecutionResultText.extract(from: object)
         }
 
         private func toolExecutionResultText(from value: Any?) -> String {
-            switch value {
-            case let string as String:
-                return string.trimmingCharacters(in: .whitespacesAndNewlines)
-            case let object as [String: Any]:
-                if let text = string(for: "text", in: object)
-                    ?? string(for: "delta", in: object)
-                    ?? string(for: "message", in: object)
-                    ?? string(for: "output", in: object)
-                    ?? string(for: "summary", in: object)
-                {
-                    return text
-                }
-
-                for key in ["content", "result", "partialResult"] {
-                    let text = toolExecutionResultText(from: object[key])
-                    if text.isEmpty == false {
-                        return text
-                    }
-                }
-
-                return ""
-            case let array as [Any]:
-                let text =
-                    array
-                    .map { toolExecutionResultText(from: $0) }
-                    .filter { $0.isEmpty == false }
-                    .joined()
-                return text.trimmingCharacters(in: .whitespacesAndNewlines)
-            default:
-                return ""
-            }
+            PiToolExecutionResultText.extract(from: value)
         }
 
         private func incrementalToolOutput(from previousText: String, to nextText: String) -> String {
