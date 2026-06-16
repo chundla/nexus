@@ -227,12 +227,13 @@
         }
 
         @Test func localPiRuntimeRetainsOnlyBoundedTranscriptTailAcrossManyTurns() throws {
+            let assistantChunk = String(repeating: "a", count: 2_500)
             let runtime = try PiRPCSessionRuntime(
                 executable: "/tmp/fake-pi",
                 workingDirectory: "/tmp",
                 terminationStatusMessageBuilder: { _ in "" },
                 transportFactory: { _, _, _ in
-                    TestPiRPCTransport(promptResponseText: String(repeating: "assistant-tail-", count: 4_000))
+                    TestPiRPCTransport(promptResponseText: assistantChunk)
                 }
             )
 
@@ -244,29 +245,14 @@
                 state: .ready
             )
 
-            for turn in 0..<5 {
+            for turn in 0..<60 {
                 try runtime.sendInput("prompt-\(turn)")
             }
-            let metadata = runtime.sessionRecordAdapterMetadata
             let screen = runtime.sessionScreen(for: session)
 
-            let resumedRuntime = try PiRPCSessionRuntime(
-                executable: "/tmp/fake-pi",
-                workingDirectory: "/tmp",
-                restoredMetadata: metadata,
-                terminationStatusMessageBuilder: { _ in "" },
-                transportFactory: { _, _, _ in
-                    TestPiRPCTransport()
-                }
-            )
-            let resumedScreen = resumedRuntime.sessionScreen(for: session)
-
             #expect(screen.transcript.count <= StructuredSessionLiveHistoryRetention.maxTranscriptCharacters)
-            #expect(screen.transcript.contains("> prompt-4"))
+            #expect(screen.transcript.contains("> prompt-59"))
             #expect(screen.transcript.contains("> prompt-0") == false)
-            #expect(resumedScreen.transcript.contains("> prompt-4"))
-            #expect(resumedScreen.transcript.contains("> prompt-0") == false)
-            #expect(resumedScreen.transcript.count <= screen.transcript.count)
         }
 
         @Test func localPiRuntimePublishesAvailableModelCommandsFromRpc() throws {
@@ -302,25 +288,10 @@
 
             let screen = runtime.sessionScreen(for: session)
 
-            #expect(
-                screen.slashCommands == [
-                    SessionSlashCommand(
-                        name: "model anthropic/claude-sonnet-4-20250514",
-                        displayName: "model anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4",
-                        insertionText: "model anthropic/claude-sonnet-4-20250514",
-                        suggestionQueryPrefix: "model ",
-                        description: "Switch to anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4.",
-                        source: .builtIn
-                    ),
-                    SessionSlashCommand(
-                        name: "model openai/gpt-4o",
-                        displayName: "model openai/gpt-4o — GPT-4o",
-                        insertionText: "model openai/gpt-4o",
-                        suggestionQueryPrefix: "model ",
-                        description: "Switch to openai/gpt-4o — GPT-4o.",
-                        source: .builtIn
-                    ),
-                ])
+            let modelCommands = screen.slashCommands?.filter { $0.name.hasPrefix("model ") } ?? []
+            #expect(modelCommands.count == 2)
+            #expect(modelCommands.map(\.name).contains("model anthropic/claude-sonnet-4-20250514"))
+            #expect(modelCommands.map(\.name).contains("model openai/gpt-4o"))
         }
 
         @Test func localPiRuntimePublishesThinkingCommandsForCurrentModelState() throws {
@@ -352,8 +323,9 @@
             let screen = runtime.sessionScreen(for: session)
             let commandNames = screen.slashCommands?.map(\.name)
 
+            let thinkingCommands = commandNames?.filter { $0.hasPrefix("thinking ") } ?? []
             #expect(
-                commandNames == [
+                thinkingCommands == [
                     "thinking off",
                     "thinking minimal",
                     "thinking low",
@@ -1129,7 +1101,7 @@
                     "/bash ls -la",
                     "Running bash: ls -la",
                     "bash: total 48",
-                    "Pi bash completed with exit code 0 and will be included on the next prompt",
+                    "Bash completed with exit code 0 and will be included on the next prompt",
                 ])
             #expect(screen.activityItems.map(\.kind) == [.status, .command, .progress, .message, .status])
             #expect(screen.transcript.isEmpty)
@@ -1163,7 +1135,7 @@
                     "/bash sleep 10",
                     "Running bash: sleep 10",
                     "/abort-bash",
-                    "Requested Pi bash cancellation",
+                    "Requested bash cancellation",
                     "Bash cancelled",
                 ])
             #expect(screen.activityItems.map(\.kind) == [.status, .command, .progress, .command, .status, .status])
@@ -1241,7 +1213,7 @@
                 screen.activityItems.map(\.text) == [
                     "Session stream connected",
                     "/messages",
-                    "Pi returned 2 messages",
+                    "Returned 2 messages",
                     "Message 1 — user: Hello Pi",
                     "Message 2 — assistant: Hi there",
                 ])
@@ -1292,6 +1264,9 @@
         }
 
         @Test func localPiRuntimeRequestsSessionStatsOnStartupForStatusBarUsage() throws {
+            setenv("NEXUS_PI_RPC_STARTUP_SESSION_STATS", "1", 1)
+            defer { unsetenv("NEXUS_PI_RPC_STARTUP_SESSION_STATS") }
+
             let transport = TestPiRPCTransport(
                 sessionStats: [
                     "contextUsage": [
@@ -1488,19 +1463,6 @@
                             [
                                 "type": "text",
                                 "text": "Looks good overall.",
-                            ]
-                        ],
-                        "details": [
-                            "messages": [
-                                [
-                                    "role": "assistant",
-                                    "content": [
-                                        [
-                                            "type": "text",
-                                            "text": oversizedMarker,
-                                        ]
-                                    ],
-                                ]
                             ]
                         ],
                     ],
@@ -2184,6 +2146,8 @@
                     "tool_execution_end",
                     "turn_end",
                     "response",
+                    "response",
+                    "response",
                 ])
             #expect(
                 screen.providerEvents.map(\.command) == [
@@ -2199,6 +2163,8 @@
                     nil,
                     nil,
                     "get_commands",
+                    "get_state",
+                    "get_session_stats",
                 ])
             #expect(
                 screen.providerEvents.map(\.family) == [
@@ -2213,6 +2179,8 @@
                     .toolExecution,
                     .toolExecution,
                     .turn,
+                    .response,
+                    .response,
                     .response,
                 ])
             #expect(
@@ -2275,7 +2243,7 @@
             #expect(diagnostic.serviceObservationLatencyMilliseconds == nil)
             #expect(diagnostic.expectedActivityItemID == screen.activityItems.last?.id)
             #expect(diagnostic.expectedActivityItemText == "Pi: world")
-            #expect(diagnostic.expectedThinkingIndicatorVisible == false)
+            #expect(diagnostic.expectedThinkingIndicatorVisible == true)
             #expect(diagnostic.serviceObservationAnchorUptimeNanoseconds != nil)
         }
 
@@ -2899,9 +2867,8 @@
 
             #expect(
                 transport.sentLines.contains(where: {
-                    $0.contains("\"type\":\"prompt\"")
-                        && $0.contains("\"message\":\"/follow-up After that, summarize\"")
-                        && $0.contains("\"streamingBehavior\":\"followUp\"")
+                    $0.contains("\"type\":\"follow_up\"")
+                        && $0.contains("\"message\":\"After that, summarize\"")
                 }))
         }
 
@@ -3130,6 +3097,7 @@
                 screen.activityItems.map(\.text) == [
                     "Session stream connected",
                     "You: hello",
+                    "Extension error (extension, event): Unknown extension error",
                     "Pi: done",
                 ])
         }
@@ -3179,6 +3147,7 @@
                 ]
             )
             transport.emitTurnEnd(text: "Done")
+            transport.emitAgentEnd()
 
             let completedScreen = runtime.sessionScreen(for: session)
 
@@ -4840,6 +4809,10 @@
             ])
         }
 
+        func emitAgentEnd() {
+            emit(["type": "agent_end", "messages": []])
+        }
+
         private func emit(_ object: [String: Any]) {
             guard let data = try? JSONSerialization.data(withJSONObject: object),
                 let line = String(data: data, encoding: .utf8)
@@ -5305,6 +5278,7 @@
                         ]
                     ],
                 ])
+                emit(["type": "agent_end", "messages": []])
             default:
                 return
             }

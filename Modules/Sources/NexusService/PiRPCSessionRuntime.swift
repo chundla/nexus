@@ -2342,7 +2342,7 @@
                     trigger: .turnEnd,
                     activityItem: finalActivityItem,
                     providerRuntimeLatencyMilliseconds: elapsedMilliseconds(since: startedAt),
-                    expectedThinkingIndicatorVisible: promptTurnCommitted
+                    expectedThinkingIndicatorVisible: promptTurnCommitted && isStreaming
                 )
             }
             // Pi agent loop emits `turn_end` after every tool cycle; only `agent_end` ends the user prompt.
