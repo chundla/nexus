@@ -6,8 +6,8 @@
             let semaphore = DispatchSemaphore(value: 0)
             let result = LockedAsyncOperationResult<T>()
 
-            // Run off the Swift concurrency pool: blocking wait + Task on the same executor can deadlock
-            // when many tests run in parallel (swift test default).
+            // Never block a Swift Testing / cooperative executor thread on semaphore.wait while the
+            // inner async work needs that same pool (e.g. CodexAppServerRuntime.completeStartup).
             DispatchQueue.global(qos: .userInitiated).async {
                 Task {
                     do {
@@ -15,11 +15,15 @@
                     } catch {
                         result.store(.failure(error))
                     }
-                    semaphore.signal()
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        semaphore.signal()
+                    }
                 }
             }
 
-            semaphore.wait()
+            DispatchQueue.global(qos: .userInitiated).asyncAndWait {
+                semaphore.wait()
+            }
             return try result.value().get()
         }
     }

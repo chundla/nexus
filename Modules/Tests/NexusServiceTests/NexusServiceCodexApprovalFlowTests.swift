@@ -12,7 +12,7 @@
     }
 
     struct NexusServiceCodexApprovalFlowTests {
-        @Test func localCodexApprovalDecisionFlowsThroughSharedServiceContract() throws {
+        @Test func localCodexApprovalDecisionFlowsThroughSharedServiceContract() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -44,7 +44,8 @@
                 folderPath: workspaceFolder.path(percentEncoded: false),
                 primaryGroupID: group.id
             )
-            let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .codex)
+            let session = try await service.launchOrResumeDefaultSession(
+                workspaceID: workspace.id, providerID: .codex)
 
             transportHarness.transport.emitCommandApprovalRequest(
                 requestID: "approval-1",
@@ -55,7 +56,7 @@
 
             let pendingScreen = try service.getSessionScreen(sessionID: session.id)
             let approvalRequest = try #require(pendingScreen.approvalRequests.first)
-            let approvedScreen = try service.respondToApprovalRequest(
+            let approvedScreen = try await service.respondToApprovalRequest(
                 sessionID: session.id,
                 approvalRequestID: approvalRequest.id,
                 decision: .approve
@@ -161,7 +162,7 @@
                             "platformOs": "macos",
                         ],
                     ]))
-            case "thread/start":
+            case "thread/start", "thread/resume":
                 stdoutLineHandler?(
                     codexApprovalTestTransportJSONLine([
                         "id": object["id"] ?? 0,
@@ -187,6 +188,14 @@
                             "approvalPolicy": "on-request",
                             "approvalsReviewer": "user",
                             "sandbox": ["type": "readOnly", "networkAccess": false],
+                        ],
+                    ]))
+            case "model/list":
+                stdoutLineHandler?(
+                    codexApprovalTestTransportJSONLine([
+                        "id": object["id"] ?? 0,
+                        "result": [
+                            "data": []
                         ],
                     ]))
             default:
