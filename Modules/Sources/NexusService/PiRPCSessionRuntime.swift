@@ -2195,12 +2195,28 @@
 
             let args = object["args"] as? [String: Any]
             let callText = toolExecutionCallText(toolName: toolName, args: args)
-            let activityItemID = UUID()
 
             lock.lock()
+            let activityItemID: UUID
+            if let existing = toolActivityItemIDByCallID[toolCallID] {
+                // Planning phase (toolcall_end) already created the .command row for this call.
+                // Reuse its ID so execution updates/end populate detailText on the
+                // originally-recorded tool row (the one the feed segments render).
+                activityItemID = existing
+            } else if let planned = mostRecentUnfilledCommandItemIDLocked(matchingToolName: toolName) {
+                // IDs from toolcall_end (planning) and tool_execution_start may differ.
+                // Link the execution stream to the planned row so output lands in the
+                // accordion the user sees and opens.
+                toolActivityItemIDByCallID[toolCallID] = planned
+                activityItemID = planned
+            } else {
+                activityItemID = UUID()
+                toolActivityItemIDByCallID[toolCallID] = activityItemID
+                appendActivityItemLocked(SessionActivityItem(id: activityItemID, kind: .command, text: callText))
+            }
+
             toolNamesByCallID[toolCallID] = toolName
             toolOutputByCallID[toolCallID] = ""
-            toolActivityItemIDByCallID[toolCallID] = activityItemID
             if toolName.caseInsensitiveCompare("subagent") == .orderedSame,
                 let agent = args.flatMap({ string(for: "agent", in: $0) })?.trimmingCharacters(
                     in: .whitespacesAndNewlines),
@@ -2208,7 +2224,6 @@
             {
                 toolAgentsByCallID[toolCallID] = agent
             }
-            appendActivityItemLocked(SessionActivityItem(id: activityItemID, kind: .command, text: callText))
             lock.unlock()
             notifyChange()
         }
@@ -2226,6 +2241,14 @@
 
             let shouldNotify: Bool
             lock.lock()
+            if toolActivityItemIDByCallID[toolCallID] == nil,
+                let planned = mostRecentUnfilledCommandItemIDLocked()
+            {
+                // Bridge execution update to the planned tool row (from toolcall_end) even
+                // if tool_execution_start was not seen or used a different toolCallId.
+                // This ensures partial results land in the accordion the user opens.
+                toolActivityItemIDByCallID[toolCallID] = planned
+            }
             let previousText = toolOutputByCallID[toolCallID] ?? ""
             if previousText != outputText,
                 let activityItemID = toolActivityItemIDByCallID[toolCallID]
@@ -2254,6 +2277,14 @@
 
             let shouldNotify: Bool
             lock.lock()
+            if toolActivityItemIDByCallID[toolCallID] == nil,
+                let planned = mostRecentUnfilledCommandItemIDLocked()
+            {
+                // Bridge final execution result back to the planning tool row created by toolcall_end
+                // (or the most recent unfilled .command). This is the row rendered as the accordion
+                // in the structured feed; without the link, output never appears inside the open tool bubble.
+                toolActivityItemIDByCallID[toolCallID] = planned
+            }
             if let activityItemID = toolActivityItemIDByCallID[toolCallID],
                 outputText.isEmpty == false
             {
@@ -3954,6 +3985,21 @@
             if let overflowIndex = persistedActivityItemOverflow.firstIndex(where: { $0.id == id }) {
                 persistedActivityItemOverflow[overflowIndex] = updatedItem
             }
+        }
+
+        /// Returns the ID of the most recent .command activity item that has no (or empty) detailText yet.
+        /// Used to bridge `toolcall_end` (planning phase, which creates the visible tool row in the feed)
+        /// to later `tool_execution_*` events (which may use a different toolCallId or arrive after
+        /// the planning map was not consulted). This ensures tool output appears inside the accordion
+        /// the user actually sees and expands.
+        private func mostRecentUnfilledCommandItemIDLocked(matchingToolName toolName: String? = nil) -> UUID? {
+            for item in activityItems.reversed() {
+                guard item.kind == .command else { continue }
+                let hasDetail = item.detailText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                if hasDetail { continue }
+                return item.id
+            }
+            return nil
         }
 
         private func assistantText(from message: [String: Any]?) -> String {
