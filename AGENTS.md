@@ -66,6 +66,10 @@ For Xcode/iOS/macOS tasks, prefer **XcodeBuildMCP** (`xcodebuildmcp`) over raw `
 
 ### Building and testing (agent rules)
 
+- Run `./scripts/lint-swift.sh` before every PR and before claiming "done".
+- On fresh clone or new workspace: run `./scripts/install-git-hooks.sh` once (enables staged Swift lint + Bob notes cleanup via `core.hooksPath=.githooks`).
+- Pre-commit hook only lints staged `.swift` files. It is not a substitute for the full script.
+- Use `SKIP_LINT=1 git commit` only when intentionally bypassing (rare).
 - Cap tool timeouts initially at **120s**; increase only for that specific run if the command is actively progressing. Do not default to long timeouts (e.g. 1200s).
 - Do not run multiple SwiftPM or XcodeBuildMCP test commands **in parallel** — shared build state contends on locks.
 - Prefer narrow `swift test --filter ...` over broad suite filters; if a filtered run times out, narrow the filter before assuming failure.
