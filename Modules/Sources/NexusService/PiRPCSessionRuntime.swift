@@ -1520,7 +1520,13 @@
                     lock.lock()
                     updateSessionLinkageLocked(from: response)
                     updateCurrentStateLocked(from: response)
-                    if activityItems.isEmpty {
+                    activityItems.removeAll {
+                        $0.kind == .error
+                            && $0.text.contains("Session stream disconnected")
+                    }
+                    if activityItems.contains(where: { $0.kind == .status && $0.text == "Session stream connected" })
+                        == false
+                    {
                         appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Session stream connected"))
                     }
                     if let currentModelStatus = currentModelStatusTextLocked(),

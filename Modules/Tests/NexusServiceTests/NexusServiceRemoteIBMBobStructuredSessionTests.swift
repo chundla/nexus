@@ -4,6 +4,7 @@
     @testable import NexusService
     import Testing
 
+    @Suite(.serialized)
     struct NexusServiceRemoteIBMBobStructuredSessionTests {
         @Test func remoteIBMBobDefaultSessionLaunchCreatesStructuredIdleSessionFromSharedProviderCapabilities() throws {
             let rootURL = FileManager.default.temporaryDirectory

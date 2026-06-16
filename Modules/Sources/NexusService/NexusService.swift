@@ -950,15 +950,16 @@
                 unexpectedTerminationMessageBuilder: { _ in
                     "Pi Session stream disconnected. Relaunch to reconnect to the tmux-backed remote runtime."
                 },
-                stopHandler: {
-                    try Self.runCommand(
-                        executable: "/usr/bin/ssh",
-                        arguments: self.remoteProtocolSessionCommandBuilder.stopArguments(
-                            runtimeIdentifier: runtimeIdentifier,
-                            host: remoteHost
+                stopHandler: self.piTransportFactory == nil
+                    ? {
+                        try Self.runCommand(
+                            executable: "/usr/bin/ssh",
+                            arguments: self.remoteProtocolSessionCommandBuilder.stopArguments(
+                                runtimeIdentifier: runtimeIdentifier,
+                                host: remoteHost
+                            )
                         )
-                    )
-                },
+                    } : nil,
                 nexusSessionID: nexusSessionID,
                 transportFactory: { _, _, _ in
                     if let piTransportFactory = self.piTransportFactory {

@@ -1464,7 +1464,7 @@
                                 "type": "text",
                                 "text": "Looks good overall.",
                             ]
-                        ],
+                        ]
                     ],
                 ],
                 [

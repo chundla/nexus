@@ -226,7 +226,7 @@
                 return []
             }
             guard let firstCurrentID = current.first?.id else {
-                return previous
+                return []
             }
             guard let overlapIndex = previous.firstIndex(where: { $0.id == firstCurrentID }) else {
                 return []
