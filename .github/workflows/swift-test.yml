@@ -22,9 +22,9 @@ jobs:
             swiftpm-${{ runner.os }}-
 
       - name: Test Modules (SwiftPM)
-        run: swift test --package-path Modules
+        # --no-parallel: avoids AsyncOperationSupport.blocking + parallel Swift Testing deadlocks on macOS.
+        run: swift test --package-path Modules --no-parallel
         env:
-          # Keep output reasonable in CI
           SWIFT_TEST_TIMEOUT: 300
 
   # Future: app + IPC integration + UI tests

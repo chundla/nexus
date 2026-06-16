@@ -6,13 +6,17 @@
             let semaphore = DispatchSemaphore(value: 0)
             let result = LockedAsyncOperationResult<T>()
 
-            Task {
-                do {
-                    result.store(.success(try await operation()))
-                } catch {
-                    result.store(.failure(error))
+            // Run off the Swift concurrency pool: blocking wait + Task on the same executor can deadlock
+            // when many tests run in parallel (swift test default).
+            DispatchQueue.global(qos: .userInitiated).async {
+                Task {
+                    do {
+                        result.store(.success(try await operation()))
+                    } catch {
+                        result.store(.failure(error))
+                    }
+                    semaphore.signal()
                 }
-                semaphore.signal()
             }
 
             semaphore.wait()
