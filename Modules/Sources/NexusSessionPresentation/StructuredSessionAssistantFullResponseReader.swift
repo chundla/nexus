@@ -36,15 +36,10 @@ public struct StructuredSessionAssistantFullResponseReader: View {
                             .enumerated()), id: \.offset
                 ) { _, segment in
                     if let chunk = segment.markdownChunk {
-                        Markdown(chunk)
-                            .markdownBlockStyle(\.codeBlock) { configuration in
-                                structuredSessionAssistantFullResponseCodeBlock(
-                                    configuration: configuration,
-                                    policy: codeBlockPolicy
-                                )
-                            }
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        structuredSessionAssistantFullResponseMarkdownChunkView(
+                            markdown: chunk,
+                            codeBlockPolicy: codeBlockPolicy
+                        )
                     } else if let math = segment.displayMath {
                         LaTeX("\\[\(math.latex)\\]")
                             .blockMode(.blockViews)
@@ -58,69 +53,74 @@ public struct StructuredSessionAssistantFullResponseReader: View {
         }
     }
 
-    @ViewBuilder
-    private func structuredSessionAssistantFullResponseCodeBlock(
-        configuration: CodeBlockConfiguration,
-        policy: StructuredSessionAssistantFullResponseCodeBlockPolicy
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if policy.showsCopyAction {
-                HStack(spacing: 8) {
-                    Text(configuration.language ?? "code")
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(.secondary)
-                        .textCase(.uppercase)
-                    Spacer(minLength: 0)
-                    Button("Copy") {
-                        structuredSessionAssistantFullResponseCopyToPasteboard(configuration.content)
-                    }
-                    .font(.caption.weight(.semibold))
-                    .buttonStyle(.borderless)
-                }
-                .padding(.horizontal, policy.contentPaddingPoints)
-                .padding(.vertical, 8)
+}
 
-                Divider()
-            }
-
-            Group {
-                if policy.usesHorizontalScrolling {
-                    ScrollView(.horizontal, showsIndicators: true) {
-                        structuredSessionAssistantFullResponseCodeBlockLabel(
-                            configuration: configuration, policy: policy)
-                    }
-                } else {
-                    structuredSessionAssistantFullResponseCodeBlockLabel(configuration: configuration, policy: policy)
+@available(macOS 12.0, iOS 15.0, *)
+@MainActor
+@ViewBuilder
+func structuredSessionAssistantFullResponseStyledCodeBlock(
+    configuration: CodeBlockConfiguration,
+    policy: StructuredSessionAssistantFullResponseCodeBlockPolicy
+) -> some View {
+    VStack(alignment: .leading, spacing: 0) {
+        if policy.showsCopyAction {
+            HStack(spacing: 8) {
+                Text(configuration.language ?? "code")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+                Spacer(minLength: 0)
+                Button("Copy") {
+                    structuredSessionAssistantFullResponseCopyToPasteboard(configuration.content)
                 }
+                .font(.caption.weight(.semibold))
+                .buttonStyle(.borderless)
             }
-            .padding(policy.contentPaddingPoints)
+            .padding(.horizontal, policy.contentPaddingPoints)
+            .padding(.vertical, 8)
+
+            Divider()
         }
-        .background(structuredSessionAssistantFullResponseCodeBlockBackgroundColor())
-        .clipShape(RoundedRectangle(cornerRadius: policy.blockCornerRadiusPoints, style: .continuous))
-        .markdownMargin(top: 0, bottom: 16)
+
+        Group {
+            if policy.usesHorizontalScrolling {
+                ScrollView(.horizontal, showsIndicators: true) {
+                    structuredSessionAssistantFullResponseCodeBlockLabel(
+                        configuration: configuration, policy: policy)
+                }
+            } else {
+                structuredSessionAssistantFullResponseCodeBlockLabel(configuration: configuration, policy: policy)
+            }
+        }
+        .padding(policy.contentPaddingPoints)
     }
+    .background(structuredSessionAssistantFullResponseCodeBlockBackgroundColor())
+    .clipShape(RoundedRectangle(cornerRadius: policy.blockCornerRadiusPoints, style: .continuous))
+    .markdownMargin(top: 0, bottom: 16)
+}
 
-    @ViewBuilder
-    private func structuredSessionAssistantFullResponseCodeBlockLabel(
-        configuration: CodeBlockConfiguration,
-        policy: StructuredSessionAssistantFullResponseCodeBlockPolicy
-    ) -> some View {
-        let label = configuration.label
-            .fixedSize(horizontal: false, vertical: true)
-            .relativeLineSpacing(.em(policy.lineSpacingEm))
-            .markdownTextStyle {
-                if policy.usesMonospacedPresentation {
-                    FontFamilyVariant(.monospaced)
-                    FontSize(.em(policy.monospacedFontScale))
-                }
+@available(macOS 12.0, iOS 15.0, *)
+@MainActor
+@ViewBuilder
+private func structuredSessionAssistantFullResponseCodeBlockLabel(
+    configuration: CodeBlockConfiguration,
+    policy: StructuredSessionAssistantFullResponseCodeBlockPolicy
+) -> some View {
+    let label = configuration.label
+        .fixedSize(horizontal: false, vertical: true)
+        .relativeLineSpacing(.em(policy.lineSpacingEm))
+        .markdownTextStyle {
+            if policy.usesMonospacedPresentation {
+                FontFamilyVariant(.monospaced)
+                FontSize(.em(policy.monospacedFontScale))
             }
-
-        if policy.enablesPerBlockTextSelection {
-            label.textSelection(.enabled)
-        } else {
-            label
         }
+
+    if policy.enablesPerBlockTextSelection {
+        label.textSelection(.enabled)
+    } else {
+        label
     }
 }
 

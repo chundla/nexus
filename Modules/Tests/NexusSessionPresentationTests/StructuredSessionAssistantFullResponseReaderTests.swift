@@ -143,4 +143,71 @@ struct StructuredSessionAssistantFullResponseReaderTests {
         let blocks = structuredSessionAssistantFullResponseDisplayMathBlocks(in: markdown)
         #expect(blocks.isEmpty)
     }
+
+    @Test func structuredSessionAssistantFullResponseInlineMathPolicyCapsExpressionsPerDocument() {
+        let policy = structuredSessionAssistantFullResponseInlineMathPolicy()
+        #expect(policy.detectsSingleDollarDelimiters)
+        #expect(policy.maxInlineMathExpressionsPerDocument > 0)
+    }
+
+    @Test func structuredSessionAssistantFullResponseExtractsInlineMathFromProse() {
+        let markdown = "The identity $e^{i\\pi}+1=0$ holds."
+        let segments = structuredSessionAssistantFullResponseProseSegments(in: markdown)
+        #expect(segments.count == 3)
+        #expect(segments[0] == .text("The identity "))
+        if case .inlineMath(let latex) = segments[1] {
+            #expect(latex == "e^{i\\pi}+1=0")
+        } else {
+            Issue.record("Expected inline math segment")
+        }
+        #expect(segments[2] == .text(" holds."))
+    }
+
+    @Test func structuredSessionAssistantFullResponseIgnoresInlineMathInsideFencedCode() {
+        let markdown = """
+            ```text
+            cost is $5
+            ```
+            """
+        let segments = structuredSessionAssistantFullResponseProseSegments(in: markdown)
+        #expect(segments.count == 1)
+        if case .text(let text) = segments[0] {
+            #expect(text.contains("cost is $5"))
+            #expect(text.contains("```text"))
+            #expect(structuredSessionAssistantFullResponseProseContainsExtractedInlineMath(in: text) == false)
+        } else {
+            Issue.record("Expected single text segment for fenced code")
+        }
+    }
+
+    @Test func structuredSessionAssistantFullResponseIgnoresEscapedDollarDelimiters() {
+        let markdown = "Price \\$5 and $x$ math."
+        let segments = structuredSessionAssistantFullResponseProseSegments(in: markdown)
+        #expect(segments.count == 3)
+        #expect(segments[0] == .text("Price $5 and "))
+        if case .inlineMath(let latex) = segments[1] {
+            #expect(latex == "x")
+        } else {
+            Issue.record("Expected inline math segment")
+        }
+        #expect(segments[2] == .text(" math."))
+    }
+
+    @Test func structuredSessionFeedPlainFallbackBypassesMarkdownParseForInlineMath() {
+        let markdown = "Answer: $\\alpha$"
+        #expect(structuredSessionFeedLaTeXMathUsesPlainAttributedFallback(for: markdown))
+
+        var parseCallCount = 0
+        let renderer = StructuredSessionMarkdownRenderer(
+            cacheLimit: 4,
+            parser: { text in
+                parseCallCount += 1
+                return AttributedString("parsed: \(text)")
+            }
+        )
+
+        let rendered = renderer.renderContent(markdown)
+        #expect(rendered == .plain(markdown))
+        #expect(parseCallCount == 0)
+    }
 }
