@@ -7,7 +7,7 @@ on:
 
 jobs:
   modules:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
@@ -29,16 +29,10 @@ jobs:
           SWIFT_TEST_TIMEOUT: 300
 
   app:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
-
-      - name: Install Swift lint tools
-        run: brew install swift-format swiftlint
-
-      - name: Swift lint
-        run: ./scripts/lint-swift.sh
 
       - name: Cache Xcode DerivedData
         uses: actions/cache@v5

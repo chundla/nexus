@@ -50,9 +50,9 @@ xcodebuild test -scheme nexus -project nexus.xcodeproj -destination 'platform=ma
 swift test --package-path Modules --filter <TestTypeOrMethodName>
 ```
 
-**CI:** `.github/workflows/swift-test.yml` — `swift test --package-path Modules --no-parallel`, then `./scripts/lint-swift.sh` and `xcodebuild test` (`-parallel-testing-enabled NO`) on `macos-15`.
+**CI:** `.github/workflows/swift-test.yml` — `swift test --package-path Modules --no-parallel`, then `xcodebuild test` (`-parallel-testing-enabled NO`) on `macos-26` (Xcode/SDK matches the project's `MACOSX_DEPLOYMENT_TARGET = 26.4`). `.github/workflows/swift-lint.yml` runs `./scripts/lint-swift.sh` separately on `macos-15`.
 
-**Swift lint (before PR; matches CI app job):**
+**Swift lint (before PR; matches CI lint job):**
 
 ```bash
 ./scripts/lint-swift.sh
