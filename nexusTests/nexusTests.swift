@@ -203,7 +203,7 @@ struct nexusTests {
     }
 
     @MainActor
-    @Test func terminalViewportResizeCoordinatorCoalescesRapidViewportChangesToFinalSize() async {
+    @Test func terminalViewportResizeCoordinatorCoalescesRapidViewportChangesToFinalSize() async throws {
         let sleeper = TerminalViewportResizeCoordinatorTestSleeper()
         let coordinator = TerminalViewportResizeCoordinator(delay: .milliseconds(100), sleep: sleeper.sleep(for:))
         var currentSize = TerminalViewportResizeCoordinator.Size(columns: 80, rows: 24)
@@ -236,9 +236,10 @@ struct nexusTests {
             },
             onError: { _ in }
         )
-        await Task.yield()
 
-        #expect(await sleeper.waiterCount == 1)
+        try await waitUntilAsync(timeoutNanoseconds: 1_000_000_000, pollIntervalNanoseconds: 1_000_000) {
+            await sleeper.waiterCount == 1
+        }
 
         await sleeper.resumeNext()
         await Task.yield()
@@ -7328,12 +7329,21 @@ struct nexusTests {
 
         await model.refresh()
 
-        #expect(model.workspaceOverview(for: workspace.id)?.remoteTarget?.workspaceAvailability.state == .blocked)
+        try await waitUntilAsync(timeoutNanoseconds: 5_000_000_000, pollIntervalNanoseconds: 50_000_000) {
+            await MainActor.run {
+                model.workspaceOverview(for: workspace.id)?.remoteTarget?.workspaceAvailability.state == .blocked
+            }
+        }
 
         _ = try await model.validateHost(hostID: host.id)
 
-        #expect(model.workspaceOverview(for: workspace.id)?.remoteTarget?.workspaceAvailability.state == .available)
-        #expect(model.workspaceOverview(for: workspace.id)?.remoteTarget?.hostValidation?.state == .available)
+        try await waitUntilAsync(timeoutNanoseconds: 5_000_000_000, pollIntervalNanoseconds: 50_000_000) {
+            await MainActor.run {
+                let overview = model.workspaceOverview(for: workspace.id)?.remoteTarget
+                return overview?.workspaceAvailability.state == .available
+                    && overview?.hostValidation?.state == .available
+            }
+        }
     }
 
     @MainActor
