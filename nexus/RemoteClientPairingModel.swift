@@ -530,10 +530,11 @@ final class RemoteClientPairingModel {
                 workspaceID: workspaceID,
                 providerID: providerID
             )
-            openRemoteSessionAndRefreshBrowseState(
+            await openRemoteSessionAndRefreshBrowseState(
                 sessionID: session.id,
                 workspaceID: workspaceID,
-                providerID: providerID
+                providerID: providerID,
+                forceFetchIfAlreadyFocused: false
             )
             return session
         } catch {
@@ -556,10 +557,11 @@ final class RemoteClientPairingModel {
                 workspaceID: workspaceID,
                 providerID: providerID
             )
-            openRemoteSessionAndRefreshBrowseState(
+            await openRemoteSessionAndRefreshBrowseState(
                 sessionID: session.id,
                 workspaceID: workspaceID,
-                providerID: providerID
+                providerID: providerID,
+                forceFetchIfAlreadyFocused: false
             )
             return session
         } catch {
@@ -578,10 +580,11 @@ final class RemoteClientPairingModel {
 
         do {
             let session = try await client.launchOrResumeSession(for: pairedMac, sessionID: sessionID)
-            openRemoteSessionAndRefreshBrowseState(
+            await openRemoteSessionAndRefreshBrowseState(
                 sessionID: session.id,
                 workspaceID: workspaceID,
-                providerID: providerID
+                providerID: providerID,
+                forceFetchIfAlreadyFocused: true
             )
             return session
         } catch {
@@ -646,10 +649,17 @@ final class RemoteClientPairingModel {
         }
     }
 
-    func focusRemoteSession(sessionID: UUID, workspaceID: UUID? = nil) async {
+    func focusRemoteSession(
+        sessionID: UUID,
+        workspaceID: UUID? = nil,
+        forceFetchIfAlreadyFocused: Bool = false
+    ) async {
         focusedSessionID = sessionID
         setFocusedSessionWorkspaceID(workspaceID ?? resolvedWorkspaceID(for: sessionID))
-        await startFocusedSessionObservation(forceRestart: true)
+        await startFocusedSessionObservation(
+            forceRestart: true,
+            forceFetchIfAlreadyFocused: forceFetchIfAlreadyFocused
+        )
     }
 
     func refreshFocusedSessionScreen() async {
@@ -673,7 +683,7 @@ final class RemoteClientPairingModel {
         }
 
         do {
-            applyFocusedSessionScreen(
+            await applyFocusedSessionScreen(
                 try await client.takeSessionControl(
                     for: pairedMac,
                     sessionID: sessionID,
@@ -702,7 +712,8 @@ final class RemoteClientPairingModel {
         }
 
         do {
-            applyFocusedSessionScreen(try await client.releaseSessionControl(for: pairedMac, sessionID: sessionID))
+            await applyFocusedSessionScreen(
+                try await client.releaseSessionControl(for: pairedMac, sessionID: sessionID))
             focusedSessionIsStale = false
             focusedSessionErrorMessage = nil
         } catch {
@@ -728,7 +739,7 @@ final class RemoteClientPairingModel {
         }
 
         do {
-            applyFocusedSessionScreen(
+            await applyFocusedSessionScreen(
                 try await client.takeSessionControl(
                     for: pairedMac,
                     sessionID: sessionID,
@@ -822,7 +833,7 @@ final class RemoteClientPairingModel {
 
         do {
             let screen = try await client.sendSessionInput(for: pairedMac, sessionID: sessionID, text: text)
-            applyFocusedSessionInputResponse(
+            await applyFocusedSessionInputResponse(
                 screen,
                 sessionID: sessionID,
                 screenBeforeRequest: screenBeforeRequest
@@ -858,7 +869,7 @@ final class RemoteClientPairingModel {
                 approvalRequestID: approvalRequestID,
                 decision: decision
             )
-            applyFocusedSessionInputResponse(
+            await applyFocusedSessionInputResponse(
                 screen,
                 sessionID: sessionID,
                 screenBeforeRequest: screenBeforeRequest
@@ -894,7 +905,7 @@ final class RemoteClientPairingModel {
                 dialogID: dialogID,
                 response: response
             )
-            applyFocusedSessionInputResponse(
+            await applyFocusedSessionInputResponse(
                 screen,
                 sessionID: sessionID,
                 screenBeforeRequest: screenBeforeRequest
@@ -923,7 +934,7 @@ final class RemoteClientPairingModel {
 
         do {
             let screen = try await client.sendSessionText(for: pairedMac, sessionID: sessionID, text: text)
-            applyFocusedSessionInputResponse(
+            await applyFocusedSessionInputResponse(
                 screen,
                 sessionID: sessionID,
                 screenBeforeRequest: screenBeforeRequest
@@ -952,7 +963,7 @@ final class RemoteClientPairingModel {
 
         do {
             let screen = try await client.sendSessionInputKey(for: pairedMac, sessionID: sessionID, key: key)
-            applyFocusedSessionInputResponse(
+            await applyFocusedSessionInputResponse(
                 screen,
                 sessionID: sessionID,
                 screenBeforeRequest: screenBeforeRequest
@@ -971,7 +982,7 @@ final class RemoteClientPairingModel {
         _ screen: SessionScreen,
         sessionID: UUID,
         screenBeforeRequest: SessionScreen?
-    ) {
+    ) async {
         guard focusedSessionID == sessionID else {
             return
         }
@@ -985,8 +996,10 @@ final class RemoteClientPairingModel {
             || receivedObservedUpdateDuringRequest == false
 
         if shouldApplyResponse {
-            applyFocusedSessionScreen(screen)
+            await applyFocusedSessionScreen(screen)
         }
+
+        await focusedSessionScreenUpdatePump.flush()
 
         focusedSessionIsStale = false
         focusedSessionErrorMessage = nil
@@ -1329,25 +1342,26 @@ final class RemoteClientPairingModel {
         syncFocusedSessionWorkspaceLocation()
     }
 
-    private func applyCoalescedFocusedSessionScreenUpdate(_ screen: SessionScreen) {
+    private func applyCoalescedFocusedSessionScreenUpdate(_ screen: SessionScreen) async {
         guard focusedSessionID == screen.session.id else {
             return
         }
 
         if let currentScreen = focusedSessionScreen,
             currentScreen.session.id == screen.session.id,
+            screen.activityItems.count >= currentScreen.activityItems.count,
             sessionScreenAppearsToAdvance(currentScreen, beyond: screen),
             sessionScreenAppearsToAdvance(screen, beyond: currentScreen) == false
         {
             return
         }
 
-        applyFocusedSessionScreen(screen)
+        await applyFocusedSessionScreen(screen)
         focusedSessionIsStale = false
         focusedSessionErrorMessage = nil
     }
 
-    private func applyFocusedSessionScreen(_ screen: SessionScreen) {
+    private func applyFocusedSessionScreen(_ screen: SessionScreen) async {
         let previousScreen = focusedSessionScreen?.session.id == screen.session.id ? focusedSessionScreen : nil
         focusedSessionScreen = screen
         syncFocusedStructuredSessionHistoryPagingState(for: screen)
@@ -1373,18 +1387,13 @@ final class RemoteClientPairingModel {
             return
         }
 
-        Task { @MainActor [weak self] in
-            guard let self else {
-                return
-            }
-            await self.structuredSessionHistoryPagingController.recoverPersistedGapIfNeeded(
-                from: previousScreen, to: screen)
-            guard self.focusedSessionScreen?.session.id == screen.session.id else {
-                return
-            }
-            self.syncFocusedStructuredSessionHistoryPagingState(for: self.focusedSessionScreen)
-            self.syncFocusedStructuredSessionPresentation(for: self.focusedSessionScreen)
+        await structuredSessionHistoryPagingController.recoverPersistedGapIfNeeded(
+            from: previousScreen, to: screen)
+        guard focusedSessionScreen?.session.id == screen.session.id else {
+            return
         }
+        syncFocusedStructuredSessionHistoryPagingState(for: focusedSessionScreen)
+        syncFocusedStructuredSessionPresentation(for: focusedSessionScreen)
     }
 
     private func syncFocusedStructuredSessionPresentation(for screen: SessionScreen?) {
@@ -1450,23 +1459,30 @@ final class RemoteClientPairingModel {
     private func openRemoteSessionAndRefreshBrowseState(
         sessionID: UUID,
         workspaceID: UUID,
-        providerID: ProviderID
-    ) {
+        providerID: ProviderID,
+        forceFetchIfAlreadyFocused: Bool
+    ) async {
         focusedSessionID = sessionID
         setFocusedSessionWorkspaceID(workspaceID)
+        await focusRemoteSession(
+            sessionID: sessionID,
+            workspaceID: workspaceID,
+            forceFetchIfAlreadyFocused: forceFetchIfAlreadyFocused
+        )
 
         Task { @MainActor [weak self] in
             guard let self else {
                 return
             }
-
-            await self.focusRemoteSession(sessionID: sessionID, workspaceID: workspaceID)
             await self.refreshActivePairedMacCatalog()
             await self.loadProviderDetail(workspaceID: workspaceID, providerID: providerID)
         }
     }
 
-    private func startFocusedSessionObservation(forceRestart: Bool) async {
+    private func startFocusedSessionObservation(
+        forceRestart: Bool,
+        forceFetchIfAlreadyFocused: Bool = false
+    ) async {
         guard let sessionID = focusedSessionID else {
             focusedSessionScreen = nil
             syncFocusedStructuredSessionPresentation(for: nil)
@@ -1503,13 +1519,21 @@ final class RemoteClientPairingModel {
             guard let self else {
                 return
             }
-            await self.establishFocusedSessionObservation(sessionID: sessionID, pairedMac: pairedMac)
+            await self.establishFocusedSessionObservation(
+                sessionID: sessionID,
+                pairedMac: pairedMac,
+                forceFetchIfAlreadyFocused: forceFetchIfAlreadyFocused
+            )
         }
         focusedSessionObservationStartupTask = startupTask
         await startupTask.value
     }
 
-    private func establishFocusedSessionObservation(sessionID: UUID, pairedMac: PairedMac) async {
+    private func establishFocusedSessionObservation(
+        sessionID: UUID,
+        pairedMac: PairedMac,
+        forceFetchIfAlreadyFocused: Bool = false
+    ) async {
         defer {
             focusedSessionObservationStartupTask = nil
         }
@@ -1540,19 +1564,30 @@ final class RemoteClientPairingModel {
             }
         }
 
-        do {
-            let initialScreen = try await client.fetchSessionScreen(for: pairedMac, sessionID: sessionID)
-            if focusedSessionID == sessionID,
-                focusedSessionScreen?.session.id != sessionID
-            {
-                applyFocusedSessionScreen(initialScreen)
-                focusedSessionIsStale = false
-                focusedSessionErrorMessage = nil
-            }
-        } catch {
-            if handleUnauthorizedPairedMac(error, pairedMacID: pairedMac.id) {
-                observationTask.cancel()
-                return
+        for _ in 0..<30 where focusedSessionScreen?.session.id != sessionID {
+            await Task.yield()
+        }
+
+        let shouldFetchInitialScreen =
+            focusedSessionID == sessionID
+            && (focusedSessionScreen?.session.id != sessionID
+                || (forceFetchIfAlreadyFocused && focusedSessionScreen != nil))
+        if shouldFetchInitialScreen {
+            do {
+                let initialScreen = try await client.fetchSessionScreen(for: pairedMac, sessionID: sessionID)
+                if focusedSessionID == sessionID,
+                    focusedSessionScreen?.session.id != sessionID
+                        || (forceFetchIfAlreadyFocused && focusedSessionScreen != nil)
+                {
+                    await applyFocusedSessionScreen(initialScreen)
+                    focusedSessionIsStale = false
+                    focusedSessionErrorMessage = nil
+                }
+            } catch {
+                if handleUnauthorizedPairedMac(error, pairedMacID: pairedMac.id) {
+                    observationTask.cancel()
+                    return
+                }
             }
         }
 

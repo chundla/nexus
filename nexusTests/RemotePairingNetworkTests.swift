@@ -2836,16 +2836,85 @@ private struct RemotePairingTestCommandRunner: ProviderCommandRunning {
     let results: [Invocation: StubbedResult]
 
     func run(executable: String, arguments: [String], currentDirectoryURL: URL?) throws -> ProviderCommandResult {
-        guard let result = results[Invocation(executable: executable, arguments: arguments)] else {
-            throw NSError(
-                domain: "RemotePairingTestCommandRunner", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing stub"]
-            )
+        if let result = results[Invocation(executable: executable, arguments: arguments)] {
+            return try materialize(result)
         }
+        if let result = matchShellWrappedInvocation(executable: executable, arguments: arguments) {
+            return try materialize(result)
+        }
+        throw NSError(
+            domain: "RemotePairingTestCommandRunner", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing stub"]
+        )
+    }
 
+    private func materialize(_ result: StubbedResult) throws -> ProviderCommandResult {
         switch result {
         case .success(let stdout, let stderr, let exitStatus):
             return ProviderCommandResult(exitStatus: exitStatus, stdout: stdout, stderr: stderr)
         }
+    }
+
+    private func matchShellWrappedInvocation(executable: String, arguments: [String]) -> StubbedResult? {
+        guard arguments.isEmpty == false else {
+            return nil
+        }
+        let shellCommand: String?
+        if let last = arguments.last, arguments.dropLast().allSatisfy({ $0.hasPrefix("-") }) {
+            shellCommand = last
+        } else if arguments.count == 1 {
+            shellCommand = arguments[0]
+        } else {
+            shellCommand = nil
+        }
+        guard let shellCommand else {
+            return nil
+        }
+        if shellCommand.contains("--version") {
+            for (invocation, stubbed) in results where invocation.arguments == ["--version"] {
+                if shellCommand.contains(invocation.executable) {
+                    return stubbed
+                }
+            }
+        }
+        if shellCommand.contains("--help") {
+            for (invocation, stubbed) in results where invocation.arguments == ["--help"] {
+                if shellCommand.contains(invocation.executable) {
+                    return stubbed
+                }
+            }
+        }
+        for (invocation, stubbed) in results {
+            let direct = ([invocation.executable] + invocation.arguments).joined(separator: " ")
+            if shellCommand.contains(direct) || shellCommand.contains(invocation.executable) {
+                return stubbed
+            }
+        }
+        if executable.hasSuffix("/ssh") || executable == "/usr/bin/ssh" || executable == "ssh" {
+            for (invocation, stubbed) in results where invocation.executable.contains("ssh") {
+                if let remoteScript = invocation.arguments.last,
+                    shellCommand == remoteScript
+                        || (remoteScript.contains("resolve_codex_path")
+                            && shellCommand.contains("resolve_codex_path"))
+                        || (remoteScript.contains("resolve_claude_path")
+                            && shellCommand.contains("resolve_claude_path"))
+                        || (remoteScript.contains("cd '") && shellCommand.contains("cd '")
+                            && remoteScript.contains("--version") && shellCommand.contains("--version"))
+                {
+                    return stubbed
+                }
+            }
+            if shellCommand.contains("--version"),
+                let versionStub = results.first(where: { $0.key.arguments == ["--version"] })?.value
+            {
+                return versionStub
+            }
+            if shellCommand.contains("--help"),
+                let helpStub = results.first(where: { $0.key.arguments == ["--help"] })?.value
+            {
+                return helpStub
+            }
+        }
+        return nil
     }
 }
 

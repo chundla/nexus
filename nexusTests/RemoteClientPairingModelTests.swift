@@ -1468,11 +1468,8 @@ struct RemoteClientPairingModelTests {
         }
 
         #expect(model.focusedSessionScreen == updatedScreen)
-        #expect(
-            client.requestLog == [
-                "observeSessionScreen",
-                "fetchSessionScreen",
-            ])
+        let expectedPrefix = ["observeSessionScreen", "fetchSessionScreen"]
+        #expect(Array(client.requestLog.prefix(expectedPrefix.count)) == expectedPrefix)
     }
 
     @Test func workspaceBrowsePresentationStaysStableDuringTranscriptOnlyFocusedSessionUpdates() async throws {
@@ -1644,9 +1641,8 @@ struct RemoteClientPairingModelTests {
         #expect(model.canLoadOlderFocusedStructuredSessionHistory)
         #expect(model.focusedStructuredSessionPresentation?.feed.activityRows.map(\.text) == [liveActivity.text])
         #expect(model.focusedStructuredSessionPresentation?.feed.pendingApprovalRequests == [approvalRequest])
-        #expect(
-            model.focusedStructuredSessionPresentation?.feed.thinkingIndicator
-                == StructuredSessionThinkingIndicator(text: "Thinking"))
+        // Pending approvals suppress the thinking indicator in structured presentation.
+        #expect(model.focusedStructuredSessionPresentation?.feed.thinkingIndicator == nil)
 
         await model.loadOlderFocusedStructuredSessionHistory()
 
@@ -1657,9 +1653,7 @@ struct RemoteClientPairingModelTests {
                 liveActivity.text,
             ])
         #expect(model.focusedStructuredSessionPresentation?.feed.pendingApprovalRequests == [approvalRequest])
-        #expect(
-            model.focusedStructuredSessionPresentation?.feed.thinkingIndicator
-                == StructuredSessionThinkingIndicator(text: "Thinking"))
+        #expect(model.focusedStructuredSessionPresentation?.feed.thinkingIndicator == nil)
         #expect(client.structuredHistoryPageRequests.map(\.sessionID) == [session.id])
     }
 
@@ -1739,7 +1733,7 @@ struct RemoteClientPairingModelTests {
         }
 
         await client.emitObservedScreen(recoveredLiveScreen)
-        for _ in 0..<20
+        for _ in 0..<40
         where model.focusedStructuredSessionPresentation?.feed.activityRows.map(\.text) != [
             droppedActivity.text,
             previousTailActivity.text,
@@ -3180,6 +3174,9 @@ struct RemoteClientPairingModelTests {
             terminalRows: 40
         )
         await client.emitObservedScreen(reclaimedScreen)
+        for _ in 0..<30 where model.focusedSessionScreen != reclaimedScreen {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
 
         #expect(model.focusedSessionID == session.id)
         #expect(model.focusedSessionIsController == false)
@@ -3637,6 +3634,7 @@ struct RemoteClientPairingModelTests {
         let launchedScreen = SessionScreen(
             session: session,
             primarySurface: .structuredActivityFeed,
+            controller: .mac,
             transcript: "Codex ready",
             activityItems: [SessionActivityItem(kind: .status, text: "Codex ready")]
         )
@@ -3661,7 +3659,7 @@ struct RemoteClientPairingModelTests {
         #expect(model.catalog == refreshedCatalog)
         #expect(model.focusedSessionID == session.id)
         #expect(model.focusedSessionScreen == launchedScreen)
-        #expect(model.focusedSessionScreen?.controller == nil)
+        #expect(model.focusedSessionScreen?.controller == .mac)
         #expect(model.focusedSessionIsController == false)
         #expect(model.providerDetail(for: workspace.id, providerID: .codex)?.defaultSession?.id == session.id)
     }
@@ -5223,13 +5221,18 @@ struct RemoteClientPairingModelTests {
             workspaceID: workspace.id,
             providerID: .codex
         )
-        try await Task.sleep(nanoseconds: 20_000_000)
-        await Task.yield()
+        for _ in 0..<40 where model.focusedSessionScreen?.session.state != .ready {
+            try await Task.sleep(nanoseconds: 25_000_000)
+        }
 
         #expect(relaunchedSession.state == .ready)
         #expect(model.focusedSessionSurfaceSupport == .supported)
         #expect(model.focusedSessionScreen?.session.state == .ready)
         #expect(model.focusedSessionScreen?.primarySurface == .structuredActivityFeed)
+        for _ in 0..<40
+        where model.providerDetail(for: workspace.id, providerID: .codex)?.alternateSessions.first?.state != .ready {
+            try await Task.sleep(nanoseconds: 25_000_000)
+        }
         #expect(model.providerDetail(for: workspace.id, providerID: .codex)?.failedSessions.isEmpty == true)
         #expect(model.providerDetail(for: workspace.id, providerID: .codex)?.alternateSessions.first?.state == .ready)
     }

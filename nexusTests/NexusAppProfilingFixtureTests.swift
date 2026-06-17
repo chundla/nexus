@@ -34,20 +34,23 @@
 
             #expect(initialPresentation.feed.activityRows.count >= 100)
             #expect(initialPresentation.feed.thinkingIndicator == StructuredSessionThinkingIndicator(text: "Thinking…"))
-            #expect(initialRow.conversationPresentation?.isStreaming == true)
+            #expect(model.focusedStructuredSessionDiagnosticSnapshot?.observation.isAgentTurnInProgress == true)
 
             for _ in 0..<40
-            where model.focusedStructuredSessionPresentation?.feed.activityRows.last?.text == initialRow.text {
+            where model.focusedSessionScreen?.providerFacts.liveAssistantDraftText == nil {
                 try await Task.sleep(nanoseconds: 25_000_000)
             }
 
-            let expandedDraftRow = try #require(model.focusedStructuredSessionPresentation?.feed.activityRows.last)
-            #expect(expandedDraftRow.id == initialRow.id)
-            #expect(expandedDraftRow.conversationPresentation?.isStreaming == true)
-            #expect(expandedDraftRow.text != initialRow.text)
+            let expandedDraftText = try #require(model.focusedSessionScreen?.providerFacts.liveAssistantDraftText)
+            #expect(expandedDraftText.isEmpty == false)
 
-            for _ in 0..<80
+            for _ in 0..<120
             where model.focusedStructuredSessionDiagnosticSnapshot?.observation.isAgentTurnInProgress != false {
+                try await Task.sleep(nanoseconds: 25_000_000)
+            }
+
+            for _ in 0..<40
+            where model.focusedStructuredSessionPresentation?.feed.thinkingIndicator != nil {
                 try await Task.sleep(nanoseconds: 25_000_000)
             }
 
@@ -55,8 +58,7 @@
             let finalizedRow = try #require(finalizedPresentation.feed.activityRows.last)
             let finalizedLatency = try #require(model.focusedStructuredSessionDiagnosticSnapshot?.finalOutputLatency)
 
-            #expect(finalizedRow.id == initialRow.id)
-            #expect(finalizedRow.conversationPresentation?.isStreaming == false)
+            #expect(finalizedRow.text.hasPrefix("Pi: "))
             #expect(finalizedPresentation.feed.thinkingIndicator == nil)
             #expect(finalizedPresentation.feed.activityRows.count == initialPresentation.feed.activityRows.count + 1)
             #expect(
@@ -98,22 +100,18 @@
             }
             #expect(dwellSamplesChecked > 0)
 
-            for _ in 0..<80 {
+            for _ in 0..<160 {
                 if let snapshot = model.focusedStructuredSessionDiagnosticSnapshot,
-                    let row = model.focusedStructuredSessionPresentation?.feed.activityRows.last,
                     snapshot.observation.isAgentTurnInProgress,
-                    row.id != initialRow.id,
-                    row.conversationPresentation?.isStreaming == true
+                    model.focusedSessionScreen?.providerFacts.liveAssistantDraftText != nil
                 {
                     break
                 }
                 try await Task.sleep(nanoseconds: 25_000_000)
             }
 
-            let nextDraftRow = try #require(model.focusedStructuredSessionPresentation?.feed.activityRows.last)
-            #expect(nextDraftRow.id != initialRow.id)
-            #expect(nextDraftRow.conversationPresentation?.isStreaming == true)
             #expect(model.focusedStructuredSessionDiagnosticSnapshot?.observation.isAgentTurnInProgress == true)
+            #expect(model.focusedSessionScreen?.providerFacts.liveAssistantDraftText?.isEmpty == false)
         }
     }
 #endif

@@ -55,6 +55,19 @@ final class CoalescingMainActorValuePump<Value>: @unchecked Sendable {
         }
     }
 
+    /// Waits until any submitted values have been delivered (for tests and action/observation ordering).
+    nonisolated func flush() async {
+        while true {
+            let shouldWait = withLock {
+                pendingValue != nil || isDraining
+            }
+            guard shouldWait else {
+                return
+            }
+            await Task.yield()
+        }
+    }
+
     nonisolated private func drain() async {
         while let value = nextValueForDrain() {
             guard let deliver = currentDeliver() else {
