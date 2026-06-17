@@ -8152,9 +8152,7 @@ struct nexusTests {
         #expect(model.canLoadOlderFocusedStructuredSessionHistory)
         #expect(model.focusedStructuredSessionPresentation?.feed.activityRows.map(\.text) == [liveActivity.text])
         #expect(model.focusedStructuredSessionPresentation?.feed.pendingApprovalRequests == [approvalRequest])
-        #expect(
-            model.focusedStructuredSessionPresentation?.feed.thinkingIndicator
-                == StructuredSessionThinkingIndicator(text: "Thinking…"))
+        #expect(model.focusedStructuredSessionPresentation?.feed.thinkingIndicator == nil)
 
         await model.loadOlderFocusedStructuredSessionHistory()
 
@@ -8165,9 +8163,7 @@ struct nexusTests {
                 liveActivity.text,
             ])
         #expect(model.focusedStructuredSessionPresentation?.feed.pendingApprovalRequests == [approvalRequest])
-        #expect(
-            model.focusedStructuredSessionPresentation?.feed.thinkingIndicator
-                == StructuredSessionThinkingIndicator(text: "Thinking…"))
+        #expect(model.focusedStructuredSessionPresentation?.feed.thinkingIndicator == nil)
         #expect(client.structuredHistoryPageRequests.map(\.sessionID) == [session.id])
     }
 

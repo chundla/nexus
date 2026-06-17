@@ -545,6 +545,7 @@
                 submitToCoalescingMainActorValuePump(updatePump, value: screen)
             }
             focusedSessionObservation = observation
+            await focusedSessionScreenUpdatePump.flush()
         }
 
         func stopFocusingSession() async {
@@ -1136,6 +1137,7 @@
 
             if currentScreen == baselineScreen {
                 try await applyFocusedSessionScreen(screen)
+                await focusedSessionScreenUpdatePump.flush()
                 return
             }
 
@@ -1145,6 +1147,7 @@
                 }
 
                 try await applyFocusedSessionScreen(refreshedScreen)
+                await focusedSessionScreenUpdatePump.flush()
                 return
             }
 
@@ -1154,6 +1157,7 @@
             }
 
             try await applyFocusedSessionScreen(screen)
+            await focusedSessionScreenUpdatePump.flush()
         }
 
         private func actionResponseAppearsToAdvanceFocusedSession(
@@ -1170,6 +1174,7 @@
 
             if let currentScreen = focusedSessionScreen,
                 currentScreen.session.id == screen.session.id,
+                screen.activityItems.count >= currentScreen.activityItems.count,
                 sessionScreenAppearsToAdvance(currentScreen, beyond: screen),
                 sessionScreenAppearsToAdvance(screen, beyond: currentScreen) == false
             {
