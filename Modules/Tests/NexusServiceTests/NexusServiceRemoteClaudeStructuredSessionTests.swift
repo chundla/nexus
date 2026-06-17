@@ -147,12 +147,65 @@
             #expect(resumedLaunch.arguments.last?.contains("tmux has-session") == true)
             #expect(resumedLaunch.arguments.last?.contains("tmux new-session") == false)
         }
+
+        @Test func remoteClaudeApprovalRequestsUseTheHostCapableHookBridge() async throws {
+            let rootURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusServiceTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+            let transportHarness = RemoteClaudeTransportHarness()
+            let approvalHarness = RemoteClaudeApprovalHookBridgeHarness()
+            let service = try makeRemoteClaudeService(
+                rootURL: rootURL,
+                transportHarness: transportHarness,
+                approvalHarness: approvalHarness
+            )
+
+            let group = try service.createWorkspaceGroup(name: "Remote")
+            let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: nil)
+            _ = try service.validateHost(hostID: host.id)
+            let workspace = try service.createRemoteWorkspace(
+                name: "Remote Claude",
+                hostID: host.id,
+                remotePath: "/srv/api",
+                primaryGroupID: group.id
+            )
+
+            let session = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+            let bridge = try #require(approvalHarness.latestBridge())
+            bridge.simulateRequest(
+                ClaudeApprovalHookRequest(
+                    id: "remote-hook-1",
+                    toolName: "Write",
+                    toolInputPreview: "/srv/api/README.md"
+                ))
+
+            let pendingScreen = try service.getSessionScreen(sessionID: session.id)
+            let request = try #require(pendingScreen.approvalRequests.first)
+            let approvedScreen = try await service.respondToApprovalRequest(
+                sessionID: session.id,
+                approvalRequestID: request.id,
+                decision: .approve
+            )
+
+            #expect(pendingScreen.approvalRequests.first?.title == "Write")
+            #expect(pendingScreen.approvalRequests.first?.text == "Write: /srv/api/README.md")
+            #expect(bridge.resolvedDecisions.map(\.requestID) == ["remote-hook-1"])
+            #expect(bridge.resolvedDecisions.map(\.decision) == [.allow])
+            #expect(approvedScreen.approvalRequests.first?.state == .approved)
+            #expect(approvedScreen.activityItems.last?.text == "Approved: Write")
+        }
     }
 
-    private func makeRemoteClaudeService(rootURL: URL, transportHarness: RemoteClaudeTransportHarness) throws
-        -> NexusService
-    {
-        let launcher = ProcessSessionRuntimeLauncher(claudeTransportFactory: transportHarness.makeTransport)
+    private func makeRemoteClaudeService(
+        rootURL: URL,
+        transportHarness: RemoteClaudeTransportHarness,
+        approvalHarness: RemoteClaudeApprovalHookBridgeHarness = RemoteClaudeApprovalHookBridgeHarness()
+    ) throws -> NexusService {
+        let launcher = ProcessSessionRuntimeLauncher(
+            claudeTransportFactory: transportHarness.makeTransport,
+            remoteClaudeApprovalHookBridgeFactory: { _, _ in approvalHarness.makeBridge() }
+        )
 
         return try NexusService.bootstrapForTests(
             rootURL: rootURL,
@@ -306,6 +359,25 @@
         }
     }
 
+    private final class RemoteClaudeApprovalHookBridgeHarness: @unchecked Sendable {
+        private let lock = NSLock()
+        private var bridges: [FakeRemoteClaudeApprovalHookBridge] = []
+
+        func makeBridge() -> any ClaudeApprovalHookBridging {
+            let bridge = FakeRemoteClaudeApprovalHookBridge()
+            lock.lock()
+            bridges.append(bridge)
+            lock.unlock()
+            return bridge
+        }
+
+        func latestBridge() -> FakeRemoteClaudeApprovalHookBridge? {
+            lock.lock()
+            defer { lock.unlock() }
+            return bridges.last
+        }
+    }
+
     private final class RemoteClaudeTransport: ClaudeStreamJSONTransporting, @unchecked Sendable {
         private let executable: String
         private let arguments: [String]
@@ -440,6 +512,29 @@
                 }
             }
             return "/srv/api"
+        }
+    }
+
+    private final class FakeRemoteClaudeApprovalHookBridge: ClaudeApprovalHookBridging, @unchecked Sendable {
+        let settingsJSON = "FAKE_REMOTE_CLAUDE_APPROVAL_SETTINGS"
+        private(set) var resolvedDecisions:
+            [(requestID: String, decision: ClaudeApprovalHookDecision, reason: String)] = []
+        private var handler: (@Sendable (ClaudeApprovalHookRequest) -> Void)?
+
+        func setRequestHandler(_ handler: (@Sendable (ClaudeApprovalHookRequest) -> Void)?) {
+            self.handler = handler
+        }
+
+        func start() throws {}
+
+        func resolve(requestID: String, decision: ClaudeApprovalHookDecision, reason: String) throws {
+            resolvedDecisions.append((requestID, decision, reason))
+        }
+
+        func stop() {}
+
+        func simulateRequest(_ request: ClaudeApprovalHookRequest) {
+            handler?(request)
         }
     }
 #endif

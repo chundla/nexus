@@ -766,6 +766,8 @@
         private let codexTransportFactory: CodexAppServerRuntime.TransportFactory?
         private let ibmBobTransportFactory: IBMBobSessionRuntime.TransportFactory?
         private let claudeTransportFactory: ClaudeStreamJSONRuntime.TransportFactory?
+        private let remoteClaudeApprovalHookBridgeFactory:
+            ((_ host: NexusDomain.Host, _ runtimeIdentifier: String) -> any ClaudeApprovalHookBridging)?
         private let remoteProtocolSessionCommandBuilder: RemoteProtocolSessionCommandBuilder
         private let remoteIBMBobCommandBuilder: RemoteIBMBobCommandBuilder
 
@@ -777,6 +779,8 @@
             codexTransportFactory: CodexAppServerRuntime.TransportFactory? = nil,
             ibmBobTransportFactory: IBMBobSessionRuntime.TransportFactory? = nil,
             claudeTransportFactory: ClaudeStreamJSONRuntime.TransportFactory? = nil,
+            remoteClaudeApprovalHookBridgeFactory:
+                ((_ host: NexusDomain.Host, _ runtimeIdentifier: String) -> any ClaudeApprovalHookBridging)? = nil,
             remoteProtocolSessionCommandBuilder: RemoteProtocolSessionCommandBuilder =
                 RemoteProtocolSessionCommandBuilder(),
             remoteIBMBobCommandBuilder: RemoteIBMBobCommandBuilder = RemoteIBMBobCommandBuilder()
@@ -790,6 +794,7 @@
             self.codexTransportFactory = codexTransportFactory
             self.ibmBobTransportFactory = ibmBobTransportFactory
             self.claudeTransportFactory = claudeTransportFactory
+            self.remoteClaudeApprovalHookBridgeFactory = remoteClaudeApprovalHookBridgeFactory
             self.remoteProtocolSessionCommandBuilder = remoteProtocolSessionCommandBuilder
             self.remoteIBMBobCommandBuilder = remoteIBMBobCommandBuilder
         }
@@ -1107,6 +1112,10 @@
                 )
             }
 
+            let approvalHookBridge =
+                self.remoteClaudeApprovalHookBridgeFactory?(remoteHost, runtimeIdentifier)
+                ?? RemoteClaudeApprovalHookBridge(host: remoteHost, runtimeIdentifier: runtimeIdentifier)
+
             return try ClaudeStreamJSONRuntime(
                 executable: launchConfiguration.executable,
                 workingDirectory: launchConfiguration.workingDirectory,
@@ -1125,6 +1134,7 @@
                         )
                     )
                 },
+                approvalHookBridge: approvalHookBridge,
                 transportFactory: { executable, arguments, workingDirectory in
                     let bridgeArguments = self.remoteProtocolSessionCommandBuilder.bridgeArguments(
                         host: remoteHost,
