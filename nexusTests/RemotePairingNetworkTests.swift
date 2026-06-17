@@ -9,6 +9,22 @@ import Testing
 @MainActor
 @Suite(.serialized)
 struct RemotePairingNetworkTests {
+    private func bootstrapClaudeReadyService(rootURL: URL) throws -> NexusService {
+        try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthFacts(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
+                ])
+            ),
+            sessionRuntimeManager: StructuredPromptSessionRuntimeManager(providerName: "Claude")
+        )
+    }
+
     @Test func fetchesReachablePairedMacStatusOverDedicatedNetworkAPI() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)
@@ -261,7 +277,7 @@ struct RemotePairingNetworkTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let service = try bootstrapClaudeReadyService(rootURL: rootURL)
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
         let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
 
@@ -1088,7 +1104,7 @@ struct RemotePairingNetworkTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let service = try bootstrapClaudeReadyService(rootURL: rootURL)
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
         let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
 
@@ -1134,7 +1150,7 @@ struct RemotePairingNetworkTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let service = try bootstrapClaudeReadyService(rootURL: rootURL)
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
         let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
 
@@ -1184,7 +1200,7 @@ struct RemotePairingNetworkTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let service = try bootstrapClaudeReadyService(rootURL: rootURL)
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
         let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
 
@@ -1353,7 +1369,7 @@ struct RemotePairingNetworkTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let service = try bootstrapClaudeReadyService(rootURL: rootURL)
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
         let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
 
@@ -1498,7 +1514,7 @@ struct RemotePairingNetworkTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let service = try bootstrapClaudeReadyService(rootURL: rootURL)
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
         let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
 
@@ -1543,7 +1559,7 @@ struct RemotePairingNetworkTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let service = try bootstrapClaudeReadyService(rootURL: rootURL)
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
         let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
 
@@ -1581,7 +1597,7 @@ struct RemotePairingNetworkTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let service = try bootstrapClaudeReadyService(rootURL: rootURL)
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
         let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
 
@@ -3310,6 +3326,7 @@ private final class StructuredPromptSessionRuntimeManager: SessionRuntimeManagin
         var terminalRows: Int = 24
         var activityItems: [SessionActivityItem]
         var approvalRequests: [SessionApprovalRequest]
+        var isStopped: Bool = false
     }
 
     private let lock = NSLock()
@@ -3348,7 +3365,7 @@ private final class StructuredPromptSessionRuntimeManager: SessionRuntimeManagin
 
     func stop(session: Session) throws {
         lock.lock()
-        runtimes.removeValue(forKey: session.id)
+        runtimes[session.id]?.isStopped = true
         lock.unlock()
         notifyUpdateObservers(for: session.id)
     }
@@ -3374,7 +3391,10 @@ private final class StructuredPromptSessionRuntimeManager: SessionRuntimeManagin
     }
 
     func runtimeState(for session: Session) -> Session.State? {
-        hasRuntime(for: session) ? .ready : nil
+        lock.lock()
+        defer { lock.unlock() }
+        guard let runtime = runtimes[session.id] else { return nil }
+        return runtime.isStopped ? .exited : .ready
     }
 
     func sessionRecordAdapterMetadata(for session: Session) -> SessionRecordAdapterMetadata? {

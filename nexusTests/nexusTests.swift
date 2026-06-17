@@ -1516,7 +1516,15 @@ struct nexusTests {
     }
 
     @Test func workspaceOverviewShowsAllSupportedProvidersOverIPC() async throws {
-        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests()
+        let service = try NexusService.bootstrapForTests(
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true),
+            providerHealthEvaluator: ProviderHealthFacts(
+                executableResolver: StubExecutableResolver(executables: [:]),
+                commandRunner: StubCommandRunner(results: [:])
+            )
+        )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
         _ = try await client.createWorkspaceGroup(name: "Solo Group")
         let workspace = try await client.createLocalWorkspace(
@@ -1530,7 +1538,7 @@ struct nexusTests {
             overview.providerCards.map(\.defaultSession.state) == [.notCreated, .notCreated, .notCreated, .notCreated])
         #expect(
             overview.providerCards.filter { [.ibmBob, .pi].contains($0.provider.id) }.map(\.health.state) == [
-                .misconfigured, .misconfigured,
+                .unavailable, .unavailable,
             ])
     }
 
