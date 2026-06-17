@@ -33,7 +33,7 @@ struct StructuredSessionFeedArtifactTests {
     }
 
     @Test func unrelatedStatusRowsDoNotMapToArtifacts() {
-        let item = SessionActivityItem(kind: .status, text: "Session stream connected")
+        let item = SessionActivityItem(kind: .status, text: "Pi shared Session stream connected")
 
         #expect(structuredSessionFeedArtifactPresentation(for: item) == nil)
     }

@@ -575,6 +575,11 @@
             try await applyFocusedSessionScreen(screen)
         }
 
+        /// Drains coalesced focused-session observation updates (for tests and action/observation ordering).
+        func flushFocusedSessionScreenCoalescingForTests() async {
+            await focusedSessionScreenUpdatePump.flush()
+        }
+
         func loadOlderFocusedStructuredSessionHistory() async {
             guard let screen = focusedSessionScreen else {
                 return
@@ -1169,6 +1174,14 @@
 
         private func applyCoalescedFocusedSessionScreenUpdate(_ screen: SessionScreen) async {
             guard focusedSessionID == screen.session.id else {
+                return
+            }
+
+            if let currentScreen = focusedSessionScreen,
+                currentScreen.session.id == screen.session.id,
+                currentScreen.session.state != screen.session.state
+            {
+                try? await applyFocusedSessionScreen(screen)
                 return
             }
 

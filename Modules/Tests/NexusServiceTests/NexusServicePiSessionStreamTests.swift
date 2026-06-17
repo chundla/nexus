@@ -51,7 +51,7 @@
             #expect(firstSession.providerID == .pi)
             #expect(firstSession.isDefault)
             #expect(resumedSession.id == firstSession.id)
-            #expect(firstScreen.activityItems.map(\.text) == ["Session stream connected"])
+            #expect(firstScreen.activityItems.map(\.text) == ["Pi shared Session stream connected"])
             #expect(firstScreen.activityItems.map(\.kind) == [.status])
             #expect(firstScreen.transcript.isEmpty)
             #expect(launchCounter.value == 1)
@@ -86,7 +86,7 @@
 
             #expect(
                 screen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "Current Model: anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4 (thinking: medium)",
                 ])
             #expect(screen.activityItems.map(\.kind) == [.status, .status])
@@ -425,7 +425,7 @@
             #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"set_model\"") }))
             #expect(
                 screen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "/model anthropic/claude-sonnet-4-20250514",
                     "Model switched to anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4",
                     "Current Model: anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4",
@@ -465,7 +465,7 @@
             #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"set_thinking_level\"") }))
             #expect(
                 screen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "Current Model: anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4 (thinking: medium)",
                     "/thinking high",
                     "Thinking level set to high",
@@ -510,7 +510,7 @@
             #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"cycle_model\"") }))
             #expect(
                 screen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "Current Model: anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4 (thinking: medium)",
                     "/cycle-model",
                     "Model cycled to openai/gpt-4o — GPT-4o",
@@ -551,7 +551,7 @@
             #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"cycle_thinking_level\"") }))
             #expect(
                 screen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "Current Model: anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4 (thinking: medium)",
                     "/cycle-thinking-level",
                     "Thinking level cycled to high",
@@ -588,7 +588,7 @@
                 }))
             #expect(
                 screen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "/compact Focus on the latest code changes",
                     "Compacted the session context",
                     "Compaction summary: Focus on the latest code changes",
@@ -629,7 +629,7 @@
             #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"abort_retry\"") }))
             #expect(
                 screen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "/auto-compaction off",
                     "Auto-compaction disabled",
                     "/auto-retry on",
@@ -676,7 +676,7 @@
             #expect(images[0]["mimeType"] as? String == "image/png")
             #expect(
                 screen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "You: What changed in this screenshot? [1 image]",
                 ])
             #expect(screen.activityItems.last?.prompt == prompt)
@@ -716,7 +716,7 @@
             #expect(images[0]["mimeType"] as? String == "image/gif")
             #expect(
                 screen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "Queued steering: Focus on this image instead [1 image]",
                     "Queue updated — steering: Focus on this image instead",
                 ])
@@ -753,7 +753,7 @@
             #expect(screen.providerEvents.contains(where: { $0.type == "queue_update" && $0.family == .queue }))
             #expect(
                 screen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "Queued steering: Focus on error handling",
                     "Queue updated — steering: Focus on error handling",
                 ])
@@ -793,7 +793,7 @@
             #expect(images[0]["mimeType"] as? String == "image/jpeg")
             #expect(
                 screen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "Queued follow-up: Also check this screenshot [1 image]",
                     "Queue updated — follow-up: Also check this screenshot",
                 ])
@@ -831,7 +831,7 @@
             #expect(screen.providerEvents.contains(where: { $0.type == "queue_update" && $0.family == .queue }))
             #expect(
                 screen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "Queued follow-up: After that, summarize the result",
                     "Queue updated — follow-up: After that, summarize the result",
                 ])
@@ -874,7 +874,7 @@
             #expect(screen.providerEvents.contains(where: { $0.type == "queue_update" && $0.family == .queue }))
             #expect(
                 screen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "You: hello",
                     "Queued steering: Focus on error handling",
                     "Queue updated — steering: Focus on error handling",
@@ -914,7 +914,7 @@
                 }))
             #expect(
                 screen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "/steering-mode all",
                     "Steering mode set to all",
                     "/follow-up-mode all",
@@ -978,7 +978,7 @@
             #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"get_fork_messages\"") }))
             #expect(
                 screen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "/fork-messages",
                     "Fork message abc123: First prompt...",
                     "Fork message def456: Second prompt...",
@@ -1060,7 +1060,7 @@
             #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"abort\"") }))
             #expect(
                 screen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "You: hello",
                     "/abort",
                     "Operation aborted",
@@ -1097,7 +1097,7 @@
                 }))
             #expect(
                 screen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "/bash ls -la",
                     "Running bash: ls -la",
                     "bash: total 48",
@@ -1131,7 +1131,7 @@
             #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"abort_bash\"") }))
             #expect(
                 screen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "/bash sleep 10",
                     "Running bash: sleep 10",
                     "/abort-bash",
@@ -1167,7 +1167,7 @@
                 }))
             #expect(
                 screen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "/export-html /tmp/pi-session.html",
                     "Exported session HTML to /tmp/pi-session.html",
                 ])
@@ -1211,7 +1211,7 @@
             #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"get_messages\"") }))
             #expect(
                 screen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "/messages",
                     "Returned 2 messages",
                     "Message 1 — user: Hello Pi",
@@ -1255,7 +1255,7 @@
             #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"get_session_stats\"") }))
             #expect(
                 screen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "/session-stats",
                     "Session stats — user: 5 · assistant: 4 · tool calls: 12 · tool results: 12 · total: 21 · cost: $0.45",
                     "Context usage — 60000 / 200000 tokens (30%)",
@@ -1597,7 +1597,7 @@
             #expect(transport.sentLines.contains(where: { $0.contains("\"type\":\"get_last_assistant_text\"") }))
             #expect(
                 screen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "/last-assistant-text",
                     "Last assistant message: Summarized answer",
                 ])
@@ -1709,7 +1709,7 @@
 
             #expect(firstTurn.activityItems.suffix(2).map(\.text) == ["You: alpha", "Pi: alpha"])
             #expect(resetScreen.session.id == session.id)
-            #expect(resetScreen.activityItems.map(\.text) == ["Session stream connected"])
+            #expect(resetScreen.activityItems.map(\.text) == ["Pi shared Session stream connected"])
             #expect(nextTurn.session.id == session.id)
             #expect(nextTurn.activityItems.suffix(2).map(\.text) == ["You: what was my last message?", "Pi: (none)"])
         }
@@ -1757,7 +1757,7 @@
             let nextTurn = try await service.sendSessionInput(sessionID: session.id, text: "what was my last message?")
 
             #expect(resetScreen.session.id == session.id)
-            #expect(resetScreen.activityItems.map(\.text) == ["Session stream connected"])
+            #expect(resetScreen.activityItems.map(\.text) == ["Pi shared Session stream connected"])
             #expect(nextTurn.activityItems.suffix(2).map(\.text) == ["You: what was my last message?", "Pi: (none)"])
         }
 
@@ -1830,10 +1830,15 @@
             #expect(interruptedDefaultScreen.transcript == expectedMessage)
             #expect(interruptedDefaultScreen.activityItems.map(\.kind) == [.status, .error])
             #expect(
-                interruptedDefaultScreen.activityItems.map(\.text) == ["Session stream connected", expectedMessage])
+                interruptedDefaultScreen.activityItems.map(\.text) == [
+                    "Pi shared Session stream connected", expectedMessage,
+                ])
             #expect(interruptedNamedScreen.session.state == .interrupted)
             #expect(interruptedNamedScreen.activityItems.map(\.kind) == [.status, .error])
-            #expect(interruptedNamedScreen.activityItems.map(\.text) == ["Session stream connected", expectedMessage])
+            #expect(
+                interruptedNamedScreen.activityItems.map(\.text) == [
+                    "Pi shared Session stream connected", expectedMessage,
+                ])
         }
 
         @Test
@@ -2053,7 +2058,7 @@
 
             #expect(
                 screen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "You: hello",
                     "Pi: world",
                 ])
@@ -2185,7 +2190,7 @@
                 ])
             #expect(
                 screen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "You: hello",
                     "subagent reviewer: Review the latest diff",
                     "reviewer: Looks good overall.",
@@ -2349,7 +2354,7 @@
                 ])
             #expect(
                 screen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "You: inspect auth",
                     "thoughts:",
                     "subagent reviewer: Inspect the auth flow",
@@ -2416,7 +2421,7 @@
 
             #expect(
                 screen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "You: inspect auth",
                     "Pi: Partial answer",
                     "Provider overloaded",
@@ -2663,7 +2668,7 @@
             #expect(screen.providerFacts.liveAssistantDraftText == nil)
             #expect(
                 screen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "You: review",
                     "Pi: \(interimText)",
                     "read README.md",
@@ -3020,7 +3025,7 @@
                 ])
             #expect(
                 screen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "You: hello",
                     "Compacting the session context",
                     "Compacted the session context",
@@ -3095,7 +3100,7 @@
                     "\"ticket\":7"))
             #expect(
                 screen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "You: hello",
                     "Extension error (extension, event): Unknown extension error",
                     "Pi: done",
@@ -3125,7 +3130,7 @@
             #expect(runningScreen.isAgentTurnInProgress)
             #expect(
                 runningScreen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "You: delegate",
                 ])
 
@@ -3154,7 +3159,7 @@
             #expect(completedScreen.isAgentTurnInProgress == false)
             #expect(
                 completedScreen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "You: delegate",
                     "subagent reviewer: Review the latest diff and summarize issues",
                     "reviewer: Looks good overall. Watch the new error path.",
@@ -3243,7 +3248,7 @@
             #expect(streamedScreen.isAgentTurnInProgress)
             #expect(
                 streamedScreen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "You: delegate",
                     "subagent reviewer: Review the latest diff and summarize issues",
                 ])
@@ -3275,7 +3280,7 @@
             #expect(screen.activityItems.map(\.kind) == [.status, .message])
             #expect(
                 screen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "You: deploy",
                 ])
             #expect(screen.approvalRequests.isEmpty)
@@ -5380,7 +5385,7 @@
 
             #expect(liveScreen.session.state == .ready)
             #expect(liveScreen.activityItems.contains(where: { $0.kind == .error }) == false)
-            #expect(liveScreen.activityItems.contains(where: { $0.text == "Session stream connected" }))
+            #expect(liveScreen.activityItems.contains(where: { $0.text == "Pi shared Session stream connected" }))
         }
     }
 #endif

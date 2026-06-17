@@ -18,7 +18,7 @@ struct StructuredSessionFeedSegmentIterationPolicyTests {
             primarySurface: .structuredActivityFeed,
             transcript: "",
             activityItems: [
-                SessionActivityItem(kind: .status, text: "Session stream connected"),
+                SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"),
                 SessionActivityItem(kind: .message, text: "You: one", prompt: SessionPrompt(text: "one")),
                 SessionActivityItem(kind: .message, text: "Pi: a"),
                 SessionActivityItem(kind: .message, text: "You: two", prompt: SessionPrompt(text: "two")),

@@ -27,7 +27,7 @@ struct StructuredSessionFeedSegmentScrollPolicyTests {
             primarySurface: .structuredActivityFeed,
             transcript: "",
             activityItems: [
-                SessionActivityItem(id: connectedID, kind: .status, text: "Session stream connected"),
+                SessionActivityItem(id: connectedID, kind: .status, text: "Pi shared Session stream connected"),
                 SessionActivityItem(
                     id: userID,
                     kind: .message,

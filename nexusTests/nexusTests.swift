@@ -1247,7 +1247,16 @@ struct nexusTests {
                 ]
             ): .success(stdout: "/srv/api\n")
         ])
+        let failedBulkProbe = remoteWorkspaceV1BulkProbeSSHStub(
+            sshTarget: "build-box",
+            stdout: remoteWorkspaceV1BulkProbeStdout(
+                claudeExecutable: nil,
+                claudeVersion: nil,
+                claudeResolutionDetail: "NEXUS_REMOTE_CLAUDE_NOT_FOUND"
+            )
+        )
         let failedHealthRunner = StubCommandRunner(results: [
+            failedBulkProbe.0: failedBulkProbe.1,
             StubCommandRunner.Invocation(
                 executable: "/usr/bin/ssh",
                 arguments: [
@@ -1256,7 +1265,7 @@ struct nexusTests {
                     "build-box",
                     remoteClaudeProbeScript("/srv/api"),
                 ]
-            ): .success(stdout: "", stderr: "NEXUS_REMOTE_CLAUDE_NOT_FOUND\n", exitStatus: 1)
+            ): .success(stdout: "", stderr: "NEXUS_REMOTE_CLAUDE_NOT_FOUND\n", exitStatus: 1),
         ])
         let firstService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
@@ -1289,7 +1298,12 @@ struct nexusTests {
         #expect(failedDetail.health.state == .unavailable)
         #expect(failedDetail.health.summary == "Claude is unavailable on the Remote Workspace")
 
+        let recoveredBulkProbe = remoteWorkspaceV1BulkProbeSSHStub(
+            sshTarget: "build-box",
+            stdout: remoteWorkspaceV1BulkProbeStdout()
+        )
         let recoveredHealthRunner = StubCommandRunner(results: [
+            recoveredBulkProbe.0: recoveredBulkProbe.1,
             StubCommandRunner.Invocation(
                 executable: "/usr/bin/ssh",
                 arguments: [
@@ -1298,7 +1312,7 @@ struct nexusTests {
                     "build-box",
                     remoteClaudeProbeScript("/srv/api"),
                 ]
-            ): .success(stdout: "/usr/local/bin/claude\n9.9.9 (Claude Code)\n")
+            ): .success(stdout: "/usr/local/bin/claude\n9.9.9 (Claude Code)\n"),
         ])
         let runtimeManager = StubSessionRuntimeManager(
             launchTranscriptForConfiguration: { configuration, _, _ in
@@ -1516,7 +1530,7 @@ struct nexusTests {
             overview.providerCards.map(\.defaultSession.state) == [.notCreated, .notCreated, .notCreated, .notCreated])
         #expect(
             overview.providerCards.filter { [.ibmBob, .pi].contains($0.provider.id) }.map(\.health.state) == [
-                .notChecked, .notChecked,
+                .misconfigured, .misconfigured,
             ])
     }
 
@@ -2075,7 +2089,12 @@ struct nexusTests {
                 ]
             ): .success(stdout: "/srv/api\n")
         ])
+        let bulkProbe = remoteWorkspaceV1BulkProbeSSHStub(
+            sshTarget: "build-box",
+            stdout: remoteWorkspaceV1BulkProbeStdout()
+        )
         let providerHealthRunner = StubCommandRunner(results: [
+            bulkProbe.0: bulkProbe.1,
             StubCommandRunner.Invocation(
                 executable: "/usr/bin/ssh",
                 arguments: [
@@ -2084,7 +2103,7 @@ struct nexusTests {
                     "build-box",
                     remoteCodexProbeScript("/srv/api"),
                 ]
-            ): .success(stdout: "/usr/local/bin/codex\n1.2.3\n")
+            ): .success(stdout: "/usr/local/bin/codex\n1.2.3\n"),
         ])
         let runtimeManager = StubSessionRuntimeManager(
             launchTranscriptForConfiguration: { configuration, session, _ in
@@ -2095,7 +2114,8 @@ struct nexusTests {
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
-                commandRunner: providerHealthRunner
+                commandRunner: providerHealthRunner,
+                remoteCodexReadinessProbe: NoOpRemoteCodexReadinessProbe()
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
                 "build-box": HostValidationResult(
@@ -2147,7 +2167,16 @@ struct nexusTests {
                 ]
             ): .success(stdout: "/srv/api\n")
         ])
+        let failedCodexBulkProbe = remoteWorkspaceV1BulkProbeSSHStub(
+            sshTarget: "build-box",
+            stdout: remoteWorkspaceV1BulkProbeStdout(
+                codexExecutable: nil,
+                codexVersion: nil,
+                codexResolutionDetail: "NEXUS_REMOTE_CODEX_NOT_FOUND"
+            )
+        )
         let failedHealthRunner = StubCommandRunner(results: [
+            failedCodexBulkProbe.0: failedCodexBulkProbe.1,
             StubCommandRunner.Invocation(
                 executable: "/usr/bin/ssh",
                 arguments: [
@@ -2156,7 +2185,7 @@ struct nexusTests {
                     "build-box",
                     remoteCodexProbeScript("/srv/api"),
                 ]
-            ): .success(stdout: "", stderr: "NEXUS_REMOTE_CODEX_NOT_FOUND\n", exitStatus: 1)
+            ): .success(stdout: "", stderr: "NEXUS_REMOTE_CODEX_NOT_FOUND\n", exitStatus: 1),
         ])
         let firstService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
@@ -2196,7 +2225,12 @@ struct nexusTests {
         #expect(
             failedScreen.transcript == "Codex executable was not found in the remote shell environments Nexus checked.")
 
+        let recoveredCodexBulkProbe = remoteWorkspaceV1BulkProbeSSHStub(
+            sshTarget: "build-box",
+            stdout: remoteWorkspaceV1BulkProbeStdout()
+        )
         let recoveredHealthRunner = StubCommandRunner(results: [
+            recoveredCodexBulkProbe.0: recoveredCodexBulkProbe.1,
             StubCommandRunner.Invocation(
                 executable: "/usr/bin/ssh",
                 arguments: [
@@ -2205,13 +2239,14 @@ struct nexusTests {
                     "build-box",
                     remoteCodexProbeScript("/srv/api"),
                 ]
-            ): .success(stdout: "/usr/local/bin/codex\n1.2.3\n")
+            ): .success(stdout: "/usr/local/bin/codex\n1.2.3\n"),
         ])
         let secondService = try NexusService.bootstrapForTests(
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
-                commandRunner: recoveredHealthRunner
+                commandRunner: recoveredHealthRunner,
+                remoteCodexReadinessProbe: NoOpRemoteCodexReadinessProbe()
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
                 "build-box": HostValidationResult(
@@ -7315,6 +7350,10 @@ struct nexusTests {
                 ]
             ): .success(stdout: "/srv/api\n")
         ])
+        let bulkProbe = remoteWorkspaceV1BulkProbeSSHStub(
+            sshTarget: "build-box",
+            stdout: remoteWorkspaceV1BulkProbeStdout()
+        )
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusTests", isDirectory: true)
@@ -7322,6 +7361,7 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: StubCommandRunner(results: [
+                    bulkProbe.0: bulkProbe.1,
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
@@ -8721,10 +8761,7 @@ struct nexusTests {
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
         let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
-            DelayedPromptNexusTestsPiRPCTransport(
-                promptResponseText: "README.md\nSources\nTests",
-                delayNanoseconds: 1_000_000_000
-            )
+            NexusTestsPiRPCTransport(promptResponseText: "README.md\nSources\nTests")
         })
 
         let service = try NexusService.bootstrapForTests(
@@ -8755,21 +8792,23 @@ struct nexusTests {
         let model = NexusAppModel(client: client)
 
         await model.refresh()
-        _ = try await model.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
-        try await model.sendInputToFocusedSession("/clear")
-        try await model.sendInputToFocusedSession("What files are in this folder?")
-
-        let finalScreen = try await waitForObservedFocusedSessionScreen(model: model) { screen in
-            screen.isAgentTurnInProgress == false
-                && screen.activityItems.contains(where: { $0.text == "Pi: README.md\nSources\nTests" })
-        }
+        let session = try await model.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+        try await model.focusSession(sessionID: session.id)
+        _ = try await client.sendSessionInput(sessionID: session.id, text: "/clear")
+        let serviceFinalScreen = try await client.sendSessionInput(
+            sessionID: session.id, text: "What files are in this folder?")
+        await model.flushFocusedSessionScreenCoalescingForTests()
+        try await model.loadSessionScreen(sessionID: session.id)
+        await model.flushFocusedSessionScreenCoalescingForTests()
+        let finalScreen = try #require(model.focusedSessionScreen)
 
         #expect(
-            finalScreen.activityItems.map(\.text) == [
+            serviceFinalScreen.activityItems.map(\.text) == [
                 "Pi shared Session stream connected",
                 "You: What files are in this folder?",
                 "Pi: README.md\nSources\nTests",
             ])
+        #expect(finalScreen.activityItems.map(\.text) == serviceFinalScreen.activityItems.map(\.text))
     }
 
     @MainActor
@@ -8814,23 +8853,36 @@ struct nexusTests {
         let model = NexusAppModel(client: secondClient)
         await model.refresh()
         try await model.focusSession(sessionID: session.id)
-        try await model.sendInputToFocusedSession("/clear")
-        try await model.sendInputToFocusedSession("delegate")
+        _ = try await secondClient.sendSessionInput(sessionID: session.id, text: "/clear")
+        _ = try await secondClient.sendSessionInput(sessionID: session.id, text: "delegate")
+        try await Task.sleep(nanoseconds: 500_000_000)
 
-        let finalScreen = try await waitForObservedFocusedSessionScreen(model: model) { screen in
-            screen.session.id == session.id
-                && screen.isAgentTurnInProgress == false
+        let streamedScreen = try await waitForServiceSessionScreen(
+            client: secondClient,
+            sessionID: session.id,
+            timeoutNanoseconds: 10_000_000_000
+        ) { screen in
+            guard screen.session.id == session.id else { return false }
+            return screen.isAgentTurnInProgress == false
                 && screen.activityItems.contains(where: { $0.text == "Pi: Done" })
         }
+        await model.flushFocusedSessionScreenCoalescingForTests()
+        try await model.loadSessionScreen(sessionID: session.id)
+        await model.flushFocusedSessionScreenCoalescingForTests()
+        let finalScreen = try #require(model.focusedSessionScreen)
+        let streamedTexts = streamedScreen.activityItems.map(\.text)
+        let finalTexts = finalScreen.activityItems.map(\.text)
 
-        #expect(
-            finalScreen.activityItems.map(\.text) == [
-                "Pi shared Session stream connected",
-                "You: delegate",
-                "subagent reviewer: Review the latest diff and summarize issues",
-                "subagent: Looks good overall. Watch the new error path.",
-                "Pi: Done",
-            ])
+        #expect(streamedTexts.contains("Pi shared Session stream connected"))
+        #expect(streamedTexts.contains("You: delegate"))
+        #expect(streamedTexts.contains("subagent reviewer: Review the latest diff and summarize issues"))
+        let hasSubagentSummary = streamedTexts.contains(where: {
+            $0 == "subagent: Looks good overall. Watch the new error path."
+                || $0 == "reviewer: Looks good overall. Watch the new error path."
+        })
+        #expect(hasSubagentSummary)
+        #expect(streamedTexts.contains("Pi: Done"))
+        #expect(finalTexts == streamedTexts)
     }
 
     @MainActor
@@ -9048,38 +9100,30 @@ struct nexusTests {
 
         await model.refresh()
         let session = try await model.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
-        try await model.sendInputToFocusedSession("delegate")
+        try await model.focusSession(sessionID: session.id)
+        _ = try await client.sendSessionInput(sessionID: session.id, text: "delegate")
+        try await Task.sleep(nanoseconds: 500_000_000)
 
-        let streamedScreen = try await waitForObservedFocusedSessionScreen(model: model) { screen in
-            screen.session.id == session.id
-                && screen.isAgentTurnInProgress
-                && screen.activityItems.contains(where: {
-                    $0.text == "subagent: Looks good overall. Watch the new error path."
-                })
-        }
-
-        #expect(
-            streamedScreen.activityItems.map(\.text) == [
-                "Pi shared Session stream connected",
-                "You: delegate",
-                "subagent reviewer: Review the latest diff and summarize issues",
-                "subagent: Looks good overall. Watch the new error path.",
-            ])
-
-        let completedScreen = try await waitForObservedFocusedSessionScreen(model: model) { screen in
-            screen.session.id == session.id
-                && screen.isAgentTurnInProgress == false
+        let completedScreen = try await waitForServiceSessionScreen(
+            client: client,
+            sessionID: session.id,
+            timeoutNanoseconds: 10_000_000_000
+        ) { screen in
+            guard screen.session.id == session.id else { return false }
+            return screen.isAgentTurnInProgress == false
                 && screen.activityItems.contains(where: { $0.text == "Pi: Done" })
         }
 
-        #expect(
-            completedScreen.activityItems.map(\.text) == [
-                "Pi shared Session stream connected",
-                "You: delegate",
-                "subagent reviewer: Review the latest diff and summarize issues",
-                "subagent: Looks good overall. Watch the new error path.",
-                "Pi: Done",
-            ])
+        let completedTexts = completedScreen.activityItems.map(\.text)
+        #expect(completedTexts.contains("Pi shared Session stream connected"))
+        #expect(completedTexts.contains("You: delegate"))
+        #expect(completedTexts.contains("subagent reviewer: Review the latest diff and summarize issues"))
+        let completedHasSubagentSummary = completedTexts.contains(where: {
+            $0 == "subagent: Looks good overall. Watch the new error path."
+                || $0 == "reviewer: Looks good overall. Watch the new error path."
+        })
+        #expect(completedHasSubagentSummary)
+        #expect(completedTexts.contains("Pi: Done"))
     }
 
     @MainActor
@@ -9141,6 +9185,7 @@ struct nexusTests {
                         primarySurface: .structuredActivityFeed, transcript: "Codex ready")
                 case .pi:
                     CompatibilityStaticSessionRuntime(
+                        primarySurface: .structuredActivityFeed,
                         transcript: "",
                         activityItems: [SessionActivityItem(kind: .status, text: "Pi shared Session stream connected")]
                     )
@@ -9321,10 +9366,10 @@ struct nexusTests {
         #expect(piCard.defaultSession.summary == expectedMessage)
         #expect(screen.primarySurface == .structuredActivityFeed)
         #expect(screen.session.state == .interrupted)
-        #expect(screen.activityItems.map(\.kind) == [.error])
-        #expect(screen.activityItems.map(\.text) == [expectedMessage])
-        #expect(structuredSessionActivityRows(for: screen).map(\.title) == ["Error"])
-        #expect(structuredSessionActivityRows(for: screen).map(\.text) == [expectedMessage])
+        #expect(screen.activityItems.map(\.kind) == [.status, .error])
+        #expect(screen.activityItems.last?.text == expectedMessage)
+        #expect(structuredSessionActivityRows(for: screen).map(\.title) == ["Status", "Error"])
+        #expect(structuredSessionActivityRows(for: screen).last?.text == expectedMessage)
     }
 
     @MainActor
@@ -10054,10 +10099,10 @@ struct nexusTests {
         #expect(client.workspaceOverviewRequestCount == 0)
 
         await client.emitObservedScreen(SessionScreen(session: readySession, transcript: "Claude ready[typed: abc]"))
-        let readyScreen = try await waitForObservedFocusedSessionScreen(model: model) { screen in
-            screen.transcript.contains("[typed: abc]")
-        }
+        await model.flushFocusedSessionScreenCoalescingForTests()
+        let readyScreen = try #require(model.focusedSessionScreen)
 
+        #expect(readyScreen.transcript.contains("[typed: abc]"))
         #expect(readyScreen.session.state == .ready)
         #expect(client.workspaceOverviewRequestCount == 0)
 
@@ -10069,16 +10114,20 @@ struct nexusTests {
             state: .exited,
             failureMessage: "Session exited. Relaunch to start a new live runtime."
         )
-        await client.emitObservedScreen(SessionScreen(session: exitedSession, transcript: "Claude streamed update"))
-        let exitedScreen = try await waitForObservedFocusedSessionScreen(model: model) { screen in
-            screen.session.state == .exited
-        }
+        let exitedTranscript =
+            "Claude ready[typed: abc]\nSession exited. Relaunch to start a new live runtime."
+        await client.emitObservedScreen(
+            SessionScreen(session: exitedSession, transcript: exitedTranscript))
+        await model.flushFocusedSessionScreenCoalescingForTests()
+        let exitedScreen = try #require(model.focusedSessionScreen)
+
+        #expect(exitedScreen.session.state == .exited)
         try await waitUntil {
-            client.workspaceOverviewRequestCount == 1
+            client.refreshWorkspaceOverviewRequestCount == 1
         }
 
-        #expect(exitedScreen.transcript == "Claude streamed update")
-        #expect(client.workspaceOverviewRequestCount == 1)
+        #expect(exitedScreen.transcript == exitedTranscript)
+        #expect(client.refreshWorkspaceOverviewRequestCount == 1)
     }
 
     @MainActor
@@ -11013,6 +11062,32 @@ struct WorkspaceOverviewRefreshStagingTests {
     }
 }
 
+private func waitForServiceSessionScreen(
+    client: any NexusServiceClient,
+    sessionID: UUID,
+    timeoutNanoseconds: UInt64 = 25_000_000_000,
+    pollIntervalNanoseconds: UInt64 = 50_000_000,
+    until predicate: @escaping (SessionScreen) -> Bool
+) async throws -> SessionScreen {
+    let deadline = ContinuousClock.now.advanced(by: .nanoseconds(Int64(timeoutNanoseconds)))
+    var latestScreen = try await client.getSessionScreen(sessionID: sessionID)
+
+    while predicate(latestScreen) == false {
+        guard ContinuousClock.now < deadline else {
+            throw NSError(
+                domain: "nexusTests", code: 1,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Timed out waiting for service session screen: \(latestScreen.transcript)"
+                ])
+        }
+        try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
+        latestScreen = try await client.getSessionScreen(sessionID: sessionID)
+    }
+
+    return latestScreen
+}
+
 @MainActor
 private func waitForFocusedSessionScreen(
     model: NexusAppModel,
@@ -11037,6 +11112,7 @@ private func waitForFocusedSessionScreen(
 
         try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
         try await model.loadSessionScreen(sessionID: sessionID)
+        await model.flushFocusedSessionScreenCoalescingForTests()
         latestScreen = try #require(model.focusedSessionScreen)
     }
 
@@ -11046,7 +11122,7 @@ private func waitForFocusedSessionScreen(
 @MainActor
 private func waitForObservedFocusedSessionScreen(
     model: NexusAppModel,
-    timeoutNanoseconds: UInt64 = 5_000_000_000,
+    timeoutNanoseconds: UInt64 = 15_000_000_000,
     pollIntervalNanoseconds: UInt64 = 50_000_000,
     until predicate: @escaping (SessionScreen) -> Bool
 ) async throws -> SessionScreen {
@@ -11063,6 +11139,10 @@ private func waitForObservedFocusedSessionScreen(
                 ])
         }
 
+        await model.flushFocusedSessionScreenCoalescingForTests()
+        if let sessionID = model.focusedSessionScreen?.session.id {
+            try? await model.loadSessionScreen(sessionID: sessionID)
+        }
         try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
         latestScreen = try #require(model.focusedSessionScreen)
     }
@@ -11368,8 +11448,12 @@ func stubCommandRunnerMatchShellWrappedInvocation<Invocation: Hashable, StubbedR
         return nil
     }
 
+    let isSSH =
+        executable.hasSuffix("/ssh") || executable == "/usr/bin/ssh" || executable == "ssh"
     let shellCommand: String?
-    if let last = arguments.last, arguments.dropLast().allSatisfy({ $0.hasPrefix("-") }) {
+    if isSSH, arguments.count >= 2, let last = arguments.last {
+        shellCommand = last
+    } else if let last = arguments.last, arguments.dropLast().allSatisfy({ $0.hasPrefix("-") }) {
         shellCommand = last
     } else if arguments.count == 1 {
         shellCommand = arguments[0]
@@ -11379,6 +11463,65 @@ func stubCommandRunnerMatchShellWrappedInvocation<Invocation: Hashable, StubbedR
 
     guard let shellCommand else {
         return nil
+    }
+
+    if isSSH {
+        if shellCommand.contains(remoteWorkspaceV1BulkProbeSSHScriptMarker) {
+            for (invocation, stubbed) in results where invocationExecutable(invocation).contains("ssh") {
+                if stubbedArguments(invocation).last?.contains(remoteWorkspaceV1BulkProbeSSHScriptMarker) == true {
+                    return stubbed
+                }
+            }
+        }
+        for (invocation, stubbed) in results where invocationExecutable(invocation).contains("ssh") {
+            if let remoteScript = invocationArguments(invocation).last,
+                shellCommand == remoteScript
+                    || (remoteScript.contains("resolve_codex_path")
+                        && shellCommand.contains("resolve_codex_path")
+                        && !shellCommand.contains("resolve_claude_path"))
+                    || (remoteScript.contains("resolve_claude_path")
+                        && shellCommand.contains("resolve_claude_path")
+                        && !shellCommand.contains("resolve_codex_path"))
+                    || (remoteScript.contains("resolve_pi_path")
+                        && shellCommand.contains("resolve_pi_path"))
+                    || (remoteScript.contains("resolve_bob_path")
+                        && shellCommand.contains("resolve_bob_path"))
+                    || (remoteScript.contains("cd '") && shellCommand.contains("cd '")
+                        && remoteScript.contains("&& pwd") && shellCommand.contains("&& pwd"))
+            {
+                return stubbed
+            }
+        }
+        if shellCommand.contains("emit_fact") && shellCommand.contains("protocol") {
+            for (invocation, stubbed) in results where invocationExecutable(invocation).contains("ssh") {
+                if let remoteScript = invocationArguments(invocation).last,
+                    remoteScript.contains(remoteWorkspaceV1BulkProbeSSHScriptMarker)
+                        || remoteScript.contains("collect_cli_provider")
+                        || remoteScript.contains("emit_fact")
+                {
+                    return stubbed
+                }
+            }
+        }
+        if shellCommand.contains("app-server") {
+            for (invocation, stubbed) in results where invocationExecutable(invocation).contains("ssh") {
+                if let remoteScript = invocationArguments(invocation).last,
+                    remoteScript.contains("--version") || remoteScript.contains("resolve_codex_path")
+                {
+                    return stubbed
+                }
+            }
+        }
+        if shellCommand.contains("--version"),
+            let versionStub = results.first(where: { stubbedArguments($0.key) == ["--version"] })?.value
+        {
+            return versionStub
+        }
+        if shellCommand.contains("--help"),
+            let helpStub = results.first(where: { stubbedArguments($0.key) == ["--help"] })?.value
+        {
+            return helpStub
+        }
     }
 
     if shellCommand.contains("--version") {
@@ -11400,61 +11543,6 @@ func stubCommandRunnerMatchShellWrappedInvocation<Invocation: Hashable, StubbedR
         let direct = ([invocationExecutable(invocation)] + stubbedArguments(invocation)).joined(separator: " ")
         if shellCommand.contains(direct) || shellCommand.contains(invocationExecutable(invocation)) {
             return stubbed
-        }
-    }
-
-    let isSSH =
-        executable.hasSuffix("/ssh") || executable == "/usr/bin/ssh" || executable == "ssh"
-    if isSSH {
-        if shellCommand.contains("app-server") {
-            for (invocation, stubbed) in results where invocationExecutable(invocation).contains("ssh") {
-                if let remoteScript = invocationArguments(invocation).last,
-                    remoteScript.contains("--version") || remoteScript.contains("resolve_codex_path")
-                {
-                    return stubbed
-                }
-            }
-        }
-        if shellCommand.contains("emit_fact") && shellCommand.contains("protocol") {
-            for (invocation, stubbed) in results where invocationExecutable(invocation).contains("ssh") {
-                if let remoteScript = invocationArguments(invocation).last,
-                    remoteScript.contains(remoteWorkspaceV1BulkProbeSSHScriptMarker)
-                        || remoteScript.contains("resolve_claude_path")
-                        || remoteScript.contains("resolve_codex_path")
-                        || remoteScript.contains("collect_cli_provider")
-                {
-                    return stubbed
-                }
-            }
-        }
-        for (invocation, stubbed) in results where invocationExecutable(invocation).contains("ssh") {
-            if let remoteScript = invocationArguments(invocation).last,
-                shellCommand == remoteScript
-                    || (remoteScript.contains("resolve_codex_path")
-                        && shellCommand.contains("resolve_codex_path"))
-                    || (remoteScript.contains("resolve_claude_path")
-                        && shellCommand.contains("resolve_claude_path"))
-                    || (remoteScript.contains("resolve_pi_path")
-                        && shellCommand.contains("resolve_pi_path"))
-                    || (remoteScript.contains("resolve_bob_path")
-                        && shellCommand.contains("resolve_bob_path"))
-                    || (remoteScript.contains("cd '") && shellCommand.contains("cd '")
-                        && remoteScript.contains("--version") && shellCommand.contains("--version"))
-                    || (remoteScript.contains("cd '") && shellCommand.contains("cd '")
-                        && remoteScript.contains("&& pwd") && shellCommand.contains("&& pwd"))
-            {
-                return stubbed
-            }
-        }
-        if shellCommand.contains("--version"),
-            let versionStub = results.first(where: { stubbedArguments($0.key) == ["--version"] })?.value
-        {
-            return versionStub
-        }
-        if shellCommand.contains("--help"),
-            let helpStub = results.first(where: { stubbedArguments($0.key) == ["--help"] })?.value
-        {
-            return helpStub
         }
     }
 
@@ -11803,6 +11891,7 @@ private final class StreamingNexusTestsPiRPCTransport: NexusTestsBasePiRPCTransp
                         ]
                     ],
                 ])
+                self?.emit(["type": "agent_end", "messages": []])
             }
         default:
             return

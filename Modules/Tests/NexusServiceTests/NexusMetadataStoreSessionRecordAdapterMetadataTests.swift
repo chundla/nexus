@@ -41,7 +41,7 @@
                         sessionFile: "/tmp/pi-session-1.jsonl"
                     ),
                     activityItems: [
-                        SessionActivityItem(kind: .status, text: "Session stream connected"),
+                        SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"),
                         SessionActivityItem(kind: .message, text: "You: deploy"),
                     ],
                     approvalRequests: [
@@ -80,7 +80,8 @@
             #expect(storedMetadata == metadata)
             #expect(storedMetadata.piSessionLinkage?.piSessionID == "pi-session-1")
             #expect(
-                storedMetadata.piPersistedActivityItems?.map(\.text) == ["Session stream connected", "You: deploy"])
+                storedMetadata.piPersistedActivityItems?.map(\.text)
+                    == ["Pi shared Session stream connected", "You: deploy"])
             #expect(storedMetadata.piPersistedApprovalRequests?.map(\.title) == ["Approve deploy"])
             #expect(
                 storedMetadata.piPersistedExtensionUIState?.pendingDialogs.map(\.title) == ["Deploy to production?"])
@@ -107,7 +108,7 @@
             let oversizedDetail = String(repeating: "oversized-command-output-", count: 1_024)
             let oversizedImageData = Data(repeating: 0xAB, count: 8_192)
             let activityItems = [
-                SessionActivityItem(kind: .status, text: "Session stream connected"),
+                SessionActivityItem(kind: .status, text: "Pi shared Session stream connected"),
                 SessionActivityItem(
                     kind: .command,
                     text: "read /tmp/huge-file.txt",
