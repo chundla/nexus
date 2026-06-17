@@ -1,26 +1,8 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/bash
 
-ROOT=$(git rev-parse --show-toplevel)
-cd "$ROOT"
-
-HOOKS_DIR="$ROOT/.githooks"
-
-# Bob Shell: pending-notes cleanup when .bob is present
-if [ -d "$ROOT/.bob" ] && [ -f "$HOOKS_DIR/bob-pre-commit.sh" ]; then
-    # shellcheck source=/dev/null
-    source "$HOOKS_DIR/bob-pre-commit.sh"
-    run_bob_pre_commit
-fi
-
-# Nexus Swift lint (staged .swift only)
-# shellcheck source=/dev/null
-source "$HOOKS_DIR/lint-staged-swift.sh"
-
-# BEGIN Bob Shell PRE-COMMIT HOOK
-# Bob Shell pre-commit hook
-# Cleans up stale notes before commit
-# This handles git reset scenarios (no post-reset hook exists)
+# BEGIN Bob Shell POST-MERGE HOOK
+# Bob Shell post-merge hook
+# Cleans up pending notes after merge to remove notes for resolved conflicts
 
 
 # Shared function to filter notes based on modified files
@@ -62,15 +44,14 @@ filter_notes_by_modified_files() {
 
 NOTES_FILE=".bob/notes/pending-notes.txt"
 
-# Get list of files with uncommitted changes (staged + unstaged)
-STAGED_FILES=$(git diff --cached --name-only 2>/dev/null)
+# Get list of files with uncommitted changes after merge
+UNCOMMITTED_FILES=$(git diff --name-only HEAD 2>/dev/null)
 UNSTAGED_FILES=$(git diff --name-only 2>/dev/null)
-UNTRACKED_FILES=$(git ls-files --others --exclude-standard 2>/dev/null)
 
 # Combine all modified files
 ALL_MODIFIED=$(printf '%s
-' "$STAGED_FILES" "$UNSTAGED_FILES" "$UNTRACKED_FILES" | sort -u)
+' "$UNCOMMITTED_FILES" "$UNSTAGED_FILES" | sort -u)
 
 # Filter notes using shared function
 filter_notes_by_modified_files "$NOTES_FILE" "$ALL_MODIFIED"
-# END Bob Shell PRE-COMMIT HOOK
+# END Bob Shell POST-MERGE HOOK
