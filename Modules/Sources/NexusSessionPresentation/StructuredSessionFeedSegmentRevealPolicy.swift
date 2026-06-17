@@ -76,10 +76,12 @@ public enum StructuredSessionFeedSegmentRevealPolicy {
 public struct StructuredSessionAgentTurnDisclosureExpansionDefaults: Equatable, Sendable {
     public let tools: Bool
     public let toolRows: [Bool]
+    public let activity: Bool
 
-    public init(tools: Bool, toolRows: [Bool]) {
+    public init(tools: Bool, toolRows: [Bool], activity: Bool = false) {
         self.tools = tools
         self.toolRows = toolRows
+        self.activity = activity
     }
 }
 
@@ -93,7 +95,8 @@ public func structuredSessionAgentTurnDisclosureExpansionDefaults(
     }.count
     return StructuredSessionAgentTurnDisclosureExpansionDefaults(
         tools: false,
-        toolRows: Array(repeating: false, count: toolCount)
+        toolRows: Array(repeating: false, count: toolCount),
+        activity: false
     )
 }
 

@@ -35,4 +35,17 @@ struct StructuredSessionAgentTurnToolPresentationTests {
                 == nil
         )
     }
+
+    @Test func activityCollapsedSummaryUsesLastNoticeLine() {
+        let notices: [StructuredSessionFeedAgentTurnNotice] = [
+            .progress("Auto-compacting the session context"),
+            .progress("Turn complete"),
+        ]
+        #expect(structuredSessionAgentTurnActivityCollapsedSummary(for: notices) == "Turn complete")
+    }
+
+    @Test func activityCollapsedSummaryUsesErrorText() {
+        let notices: [StructuredSessionFeedAgentTurnNotice] = [.error("Operation aborted")]
+        #expect(structuredSessionAgentTurnActivityCollapsedSummary(for: notices) == "Operation aborted")
+    }
 }

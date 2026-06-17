@@ -66,6 +66,19 @@ private func structuredSessionAgentTurnToolDisplayVerb(_ raw: String) -> String 
     }
 }
 
+/// Collapsed one-line preview for in-turn Activity notices (last line wins).
+public func structuredSessionAgentTurnActivityCollapsedSummary(
+    for notices: [StructuredSessionFeedAgentTurnNotice]
+) -> String {
+    guard let last = notices.last else {
+        return "Activity"
+    }
+    switch last {
+    case .progress(let text), .error(let text):
+        return text
+    }
+}
+
 /// Collapsed one-line preview for a single reasoning block (last paragraph within that block).
 public func structuredSessionAgentTurnReasoningCollapsedPreview(markdownBody: String) -> String {
     let trimmed = markdownBody.trimmingCharacters(in: .whitespacesAndNewlines)
