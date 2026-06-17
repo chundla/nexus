@@ -42,3 +42,5 @@ Initial set:
 34. Provider Modules are the single Provider seam
 35. Persisted structured Session history is Session Record scoped, with explicit export
 36. Structured session feed: iOS GPU offscreen pass mitigations
+37. Structured Session Agent Turn feed segments
+38. Claude structured Sessions use the Claude Code CLI stream-json protocol
