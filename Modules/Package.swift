@@ -5,7 +5,7 @@ let package = Package(
     name: "Modules",
     platforms: [
         .macOS(.v12),
-        .iOS(.v15)
+        .iOS(.v15),
     ],
     products: [
         .library(
@@ -27,11 +27,11 @@ let package = Package(
             name: "NexusService",
             type: .static,
             targets: ["NexusService"]
-        )
+        ),
     ],
     dependencies: [
         .package(url: "https://github.com/gonzalezreal/swift-markdown-ui", from: "2.4.1"),
-        .package(url: "https://github.com/colinc86/LaTeXSwiftUI", from: "2.0.0")
+        .package(url: "https://github.com/colinc86/LaTeXSwiftUI", from: "2.0.0"),
     ],
     targets: [
         .target(
@@ -46,7 +46,7 @@ let package = Package(
             dependencies: [
                 "NexusDomain",
                 .product(name: "MarkdownUI", package: "swift-markdown-ui"),
-                .product(name: "LaTeXSwiftUI", package: "LaTeXSwiftUI")
+                .product(name: "LaTeXSwiftUI", package: "LaTeXSwiftUI"),
             ]
         ),
         .target(
@@ -62,7 +62,7 @@ let package = Package(
         ),
         .testTarget(
             name: "NexusServiceTests",
-            dependencies: ["NexusService", "NexusIPC"]
-        )
+            dependencies: ["NexusService", "NexusIPC", "NexusSessionPresentation"]
+        ),
     ]
 )
