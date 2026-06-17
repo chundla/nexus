@@ -14,6 +14,7 @@
                 terminationStatusMessageBuilder: { "Claude exited with status \($0)." },
                 unexpectedTerminationState: .failed,
                 sessionIDGenerator: { "generated-session-id" },
+                approvalHookBridge: FakeApprovalHookBridge(),
                 transportFactory: { executable, arguments, workingDirectory in
                     transport.configure(
                         executable: executable, arguments: arguments, workingDirectory: workingDirectory)
@@ -33,6 +34,7 @@
                     "--permission-mode", "default",
                     "--add-dir", "/tmp/workspace",
                     "--session-id", "generated-session-id",
+                    "--settings", "FAKE_SETTINGS_JSON",
                 ])
             #expect(runtime.state == .ready)
         }
@@ -48,6 +50,7 @@
                 sessionIDGenerator: {
                     Issue.record("should not generate a fresh id when one is stored"); return "x"
                 },
+                approvalHookBridge: FakeApprovalHookBridge(),
                 transportFactory: { executable, arguments, workingDirectory in
                     transport.configure(
                         executable: executable, arguments: arguments, workingDirectory: workingDirectory)
@@ -56,8 +59,129 @@
             )
 
             #expect(transport.launchedArguments.contains("--resume"))
-            #expect(transport.launchedArguments.last == "stored-session-id")
             #expect(transport.launchedArguments.contains("--session-id") == false)
+            let resumeIndex = try #require(transport.launchedArguments.firstIndex(of: "--resume"))
+            #expect(transport.launchedArguments[resumeIndex + 1] == "stored-session-id")
+        }
+
+        @Test func registersAPendingApprovalRequestWhenTheHookBridgeReceivesAPreToolUseCall() throws {
+            let bridge = FakeApprovalHookBridge()
+            let runtime = try ClaudeStreamJSONRuntime(
+                executable: "/tmp/fake-claude",
+                workingDirectory: "/tmp/workspace",
+                sessionLinkage: nil,
+                terminationStatusMessageBuilder: { "Claude exited with status \($0)." },
+                unexpectedTerminationState: .failed,
+                sessionIDGenerator: { "generated-session-id" },
+                approvalHookBridge: bridge,
+                transportFactory: { executable, arguments, workingDirectory in
+                    let transport = ScriptedClaudeTransport()
+                    transport.configure(
+                        executable: executable, arguments: arguments, workingDirectory: workingDirectory)
+                    return transport
+                }
+            )
+
+            bridge.simulateRequest(
+                ClaudeApprovalHookRequest(id: "hook-1", toolName: "Write", toolInputPreview: "/tmp/workspace/file.txt"))
+
+            let session = Session(
+                id: UUID(), workspaceID: UUID(), providerID: .claude, isDefault: true, state: .ready)
+            let screen = runtime.sessionScreen(for: session)
+
+            #expect(screen.approvalRequests.count == 1)
+            #expect(screen.approvalRequests.first?.state == .pending)
+            #expect(screen.approvalRequests.first?.title == "Write")
+            #expect(screen.activityItems.last?.kind == .approvalRequest)
+            #expect(screen.activityItems.last?.text == "Approval Request: Write")
+        }
+
+        @Test func approvingAnApprovalRequestResolvesTheHookBridgeWithAnAllowDecision() throws {
+            let bridge = FakeApprovalHookBridge()
+            let runtime = try ClaudeStreamJSONRuntime(
+                executable: "/tmp/fake-claude",
+                workingDirectory: "/tmp/workspace",
+                sessionLinkage: nil,
+                terminationStatusMessageBuilder: { "Claude exited with status \($0)." },
+                unexpectedTerminationState: .failed,
+                sessionIDGenerator: { "generated-session-id" },
+                approvalHookBridge: bridge,
+                transportFactory: { executable, arguments, workingDirectory in
+                    let transport = ScriptedClaudeTransport()
+                    transport.configure(
+                        executable: executable, arguments: arguments, workingDirectory: workingDirectory)
+                    return transport
+                }
+            )
+
+            bridge.simulateRequest(
+                ClaudeApprovalHookRequest(id: "hook-1", toolName: "Write", toolInputPreview: "/tmp/workspace/file.txt"))
+            let session = Session(
+                id: UUID(), workspaceID: UUID(), providerID: .claude, isDefault: true, state: .ready)
+            let pendingApprovalRequestID = try #require(runtime.sessionScreen(for: session).approvalRequests.first?.id)
+
+            try runtime.respondToApprovalRequest(pendingApprovalRequestID, decision: .approve)
+
+            #expect(bridge.resolvedDecisions.map(\.requestID) == ["hook-1"])
+            #expect(bridge.resolvedDecisions.map(\.decision) == [.allow])
+            let screen = runtime.sessionScreen(for: session)
+            #expect(screen.approvalRequests.first?.state == .approved)
+            #expect(screen.activityItems.last?.kind == .approvalDecision)
+            #expect(screen.activityItems.last?.text == "Approved: Write")
+        }
+
+        @Test func denyingAnApprovalRequestResolvesTheHookBridgeWithADenyDecision() throws {
+            let bridge = FakeApprovalHookBridge()
+            let runtime = try ClaudeStreamJSONRuntime(
+                executable: "/tmp/fake-claude",
+                workingDirectory: "/tmp/workspace",
+                sessionLinkage: nil,
+                terminationStatusMessageBuilder: { "Claude exited with status \($0)." },
+                unexpectedTerminationState: .failed,
+                sessionIDGenerator: { "generated-session-id" },
+                approvalHookBridge: bridge,
+                transportFactory: { executable, arguments, workingDirectory in
+                    let transport = ScriptedClaudeTransport()
+                    transport.configure(
+                        executable: executable, arguments: arguments, workingDirectory: workingDirectory)
+                    return transport
+                }
+            )
+
+            bridge.simulateRequest(
+                ClaudeApprovalHookRequest(id: "hook-1", toolName: "Bash", toolInputPreview: "rm -rf /tmp/workspace"))
+            let session = Session(
+                id: UUID(), workspaceID: UUID(), providerID: .claude, isDefault: true, state: .ready)
+            let pendingApprovalRequestID = try #require(runtime.sessionScreen(for: session).approvalRequests.first?.id)
+
+            try runtime.respondToApprovalRequest(pendingApprovalRequestID, decision: .deny)
+
+            #expect(bridge.resolvedDecisions.map(\.decision) == [.deny])
+            let screen = runtime.sessionScreen(for: session)
+            #expect(screen.approvalRequests.first?.state == .denied)
+            #expect(screen.activityItems.last?.text == "Denied: Bash")
+        }
+
+        @Test func respondingToAnUnknownApprovalRequestIDThrows() throws {
+            let runtime = try ClaudeStreamJSONRuntime(
+                executable: "/tmp/fake-claude",
+                workingDirectory: "/tmp/workspace",
+                sessionLinkage: nil,
+                terminationStatusMessageBuilder: { "Claude exited with status \($0)." },
+                unexpectedTerminationState: .failed,
+                sessionIDGenerator: { "generated-session-id" },
+                approvalHookBridge: FakeApprovalHookBridge(),
+                transportFactory: { executable, arguments, workingDirectory in
+                    let transport = ScriptedClaudeTransport()
+                    transport.configure(
+                        executable: executable, arguments: arguments, workingDirectory: workingDirectory)
+                    return transport
+                }
+            )
+
+            #expect(throws: Error.self) {
+                try runtime.respondToApprovalRequest(UUID(), decision: .approve)
+            }
         }
 
         @Test func projectsAssistantTextAndToolUseOntoStructuredActivityFeed() throws {
@@ -230,6 +354,30 @@
 
         func emitStderr(_ line: String) {
             stderrLineHandler?(line)
+        }
+    }
+
+    private final class FakeApprovalHookBridge: ClaudeApprovalHookBridging, @unchecked Sendable {
+        let settingsJSON = "FAKE_SETTINGS_JSON"
+        private(set) var resolvedDecisions:
+            [(requestID: String, decision: ClaudeApprovalHookDecision, reason: String)] =
+                []
+        private var handler: (@Sendable (ClaudeApprovalHookRequest) -> Void)?
+
+        func setRequestHandler(_ handler: (@Sendable (ClaudeApprovalHookRequest) -> Void)?) {
+            self.handler = handler
+        }
+
+        func start() throws {}
+
+        func resolve(requestID: String, decision: ClaudeApprovalHookDecision, reason: String) throws {
+            resolvedDecisions.append((requestID, decision, reason))
+        }
+
+        func stop() {}
+
+        func simulateRequest(_ request: ClaudeApprovalHookRequest) {
+            handler?(request)
         }
     }
 #endif

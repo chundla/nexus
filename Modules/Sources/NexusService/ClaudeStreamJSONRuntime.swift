@@ -2,6 +2,17 @@
     import Foundation
     import NexusDomain
 
+    enum ClaudeStreamJSONRuntimeError: LocalizedError {
+        case approvalRequestNotFound
+
+        var errorDescription: String? {
+            switch self {
+            case .approvalRequestNotFound:
+                "That Claude Approval Request is no longer pending."
+            }
+        }
+    }
+
     protocol ClaudeStreamJSONTransporting: AnyObject {
         func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?)
         func setStderrLineHandler(_ handler: (@Sendable (String) -> Void)?)
@@ -32,6 +43,9 @@
         private var isTurnInProgress = false
         private var stderrLines: [String] = []
         private var changeHandler: (@Sendable () -> Void)?
+        private let approvalHookBridge: any ClaudeApprovalHookBridging
+        private var approvalRequests: [SessionApprovalRequest] = []
+        private var pendingApprovalHookRequestIDs: [UUID: String] = [:]
 
         var state: Session.State {
             lock.lock()
@@ -53,6 +67,7 @@
             unexpectedTerminationState: Session.State = .exited,
             processEnvironment: [String: String]? = nil,
             sessionIDGenerator: @escaping () -> String = { UUID().uuidString },
+            approvalHookBridge: (any ClaudeApprovalHookBridging)? = nil,
             transportFactory: TransportFactory? = nil
         ) throws {
             let resolvedTransportFactory =
@@ -72,6 +87,7 @@
                 terminationStatusMessageBuilder: terminationStatusMessageBuilder,
                 unexpectedTerminationState: unexpectedTerminationState,
                 sessionIDGenerator: sessionIDGenerator,
+                approvalHookBridge: approvalHookBridge ?? ClaudeApprovalHookBridge(),
                 transportFactory: resolvedTransportFactory
             )
         }
@@ -83,21 +99,26 @@
             terminationStatusMessageBuilder: @escaping (Int32) -> String,
             unexpectedTerminationState: Session.State,
             sessionIDGenerator: @escaping () -> String,
+            approvalHookBridge: any ClaudeApprovalHookBridging,
             transportFactory: TransportFactory
         ) throws {
             self.terminationStatusMessageBuilder = terminationStatusMessageBuilder
             self.unexpectedTerminationState = unexpectedTerminationState
             self.activityItems = Self.defaultActivityItems
+            self.approvalHookBridge = approvalHookBridge
             let isResuming = sessionLinkage?.isEmpty == false
             let resolvedLinkage =
                 isResuming
                 ? sessionLinkage
                 : ClaudeSessionLinkage(claudeSessionID: sessionIDGenerator())
             self.sessionLinkage = resolvedLinkage
+
+            try approvalHookBridge.start()
             self.transport = try transportFactory(
                 executable,
                 Self.launchArguments(
-                    workingDirectory: workingDirectory, sessionLinkage: resolvedLinkage, isResuming: isResuming),
+                    workingDirectory: workingDirectory, sessionLinkage: resolvedLinkage, isResuming: isResuming,
+                    approvalHookSettingsJSON: approvalHookBridge.settingsJSON),
                 workingDirectory
             )
 
@@ -111,6 +132,10 @@
                 self?.handleTermination(status: status)
             }
             try transport.start()
+
+            approvalHookBridge.setRequestHandler { [weak self] request in
+                self?.handleApprovalHookRequest(request)
+            }
         }
 
         func sessionScreen(for session: Session) -> SessionScreen {
@@ -120,6 +145,7 @@
             let terminalColumns = terminalColumns
             let terminalRows = terminalRows
             let turnInProgress = isTurnInProgress
+            let approvalRequests = approvalRequests
             lock.unlock()
 
             return SessionScreen(
@@ -137,6 +163,7 @@
                 terminalColumns: terminalColumns,
                 terminalRows: terminalRows,
                 activityItems: activityItems,
+                approvalRequests: approvalRequests,
                 isAgentTurnInProgress: turnInProgress
             )
         }
@@ -148,6 +175,7 @@
         }
 
         func stop() throws {
+            approvalHookBridge.stop()
             try transport.terminate()
         }
 
@@ -207,7 +235,57 @@
         }
 
         func respondToApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision) throws {
-            throw NexusSessionApprovalError.approvalRequestsUnavailable
+            lock.lock()
+            guard let hookRequestID = pendingApprovalHookRequestIDs[approvalRequestID],
+                let index = approvalRequests.firstIndex(where: { $0.id == approvalRequestID && $0.state == .pending })
+            else {
+                lock.unlock()
+                throw ClaudeStreamJSONRuntimeError.approvalRequestNotFound
+            }
+            let request = approvalRequests[index]
+            lock.unlock()
+
+            try approvalHookBridge.resolve(
+                requestID: hookRequestID,
+                decision: decision == .approve ? .allow : .deny,
+                reason: decision == .approve
+                    ? "Approved by the Nexus Controller." : "Denied by the Nexus Controller."
+            )
+
+            lock.lock()
+            pendingApprovalHookRequestIDs.removeValue(forKey: approvalRequestID)
+            if let index = approvalRequests.firstIndex(where: { $0.id == approvalRequestID }) {
+                approvalRequests[index] = SessionApprovalRequest(
+                    id: request.id,
+                    title: request.title,
+                    text: request.text,
+                    state: decision == .approve ? .approved : .denied
+                )
+            }
+            appendActivityItemLocked(
+                SessionActivityItem(
+                    kind: .approvalDecision,
+                    text: "\(decision == .approve ? "Approved" : "Denied"): \(request.title)"
+                )
+            )
+            lock.unlock()
+            notifyChange()
+        }
+
+        private func handleApprovalHookRequest(_ request: ClaudeApprovalHookRequest) {
+            let approvalRequest = SessionApprovalRequest(
+                title: request.toolName,
+                text: request.toolInputPreview.map { "\(request.toolName): \($0)" } ?? request.toolName,
+                state: .pending
+            )
+
+            lock.lock()
+            approvalRequests.append(approvalRequest)
+            pendingApprovalHookRequestIDs[approvalRequest.id] = request.id
+            appendActivityItemLocked(
+                SessionActivityItem(kind: .approvalRequest, text: "Approval Request: \(approvalRequest.title)"))
+            lock.unlock()
+            notifyChange()
         }
 
         func resize(columns: Int, rows: Int) throws {
@@ -422,7 +500,8 @@
         }
 
         static func launchArguments(
-            workingDirectory: String, sessionLinkage: ClaudeSessionLinkage?, isResuming: Bool
+            workingDirectory: String, sessionLinkage: ClaudeSessionLinkage?, isResuming: Bool,
+            approvalHookSettingsJSON: String
         ) -> [String] {
             var arguments = [
                 "-p",
@@ -438,6 +517,7 @@
             {
                 arguments += [isResuming ? "--resume" : "--session-id", sessionID]
             }
+            arguments += ["--settings", approvalHookSettingsJSON]
             return arguments
         }
 
