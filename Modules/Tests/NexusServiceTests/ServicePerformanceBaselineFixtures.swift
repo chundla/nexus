@@ -49,7 +49,10 @@
 
             let service = try NexusService.bootstrapForTests(
                 rootURL: rootURL,
-                providerHealthEvaluator: PerformanceBaselineIBMBobProviderHealthFacts()
+                providerHealthEvaluator: PerformanceBaselineIBMBobProviderHealthFacts(),
+                sessionRuntimeManager: InMemorySessionRuntimeManager(
+                    launcher: PerformanceBaselineIBMBobRuntimeLauncher()
+                )
             )
             let group = try service.createWorkspaceGroup(name: "Solo Group")
             let workspace = try service.createLocalWorkspace(
@@ -345,6 +348,60 @@
             changeHandler?()
         }
 
+        func sendText(_ text: String) throws { _ = text }
+        func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool) throws {
+            _ = key
+            _ = applicationCursorMode
+        }
+        func respondToApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision) throws {
+            _ = approvalRequestID
+            _ = decision
+        }
+        func resize(columns: Int, rows: Int) throws {
+            _ = columns
+            _ = rows
+        }
+    }
+
+    private final class PerformanceBaselineIBMBobRuntimeLauncher: SessionRuntimeLaunching, @unchecked Sendable {
+        func makeRuntime(
+            session: Session,
+            workspace: Workspace,
+            launchConfiguration: SessionRuntimeLaunchConfiguration
+        ) async throws -> any SessionRuntime {
+            _ = workspace
+            _ = launchConfiguration
+            return PerformanceBaselineIBMBobRuntime(session: session)
+        }
+    }
+
+    private final class PerformanceBaselineIBMBobRuntime: SessionRuntime, @unchecked Sendable {
+        private let session: Session
+
+        init(session: Session) {
+            self.session = session
+        }
+
+        var state: Session.State { .ready }
+        var sessionRecordAdapterMetadata: SessionRecordAdapterMetadata? { nil }
+
+        func sessionScreen(for session: Session) -> SessionScreen {
+            SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                transcript: "",
+                activityItems: [
+                    SessionActivityItem(
+                        kind: .status,
+                        text: "IBM Bob Session ready. Send a prompt to start IBM Bob."
+                    )
+                ]
+            )
+        }
+
+        func setChangeHandler(_ handler: (@Sendable () -> Void)?) { _ = handler }
+        func stop() throws {}
+        func sendInput(_ text: String) throws { _ = text }
         func sendText(_ text: String) throws { _ = text }
         func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool) throws {
             _ = key

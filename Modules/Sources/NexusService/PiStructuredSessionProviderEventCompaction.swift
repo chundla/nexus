@@ -101,10 +101,17 @@
 
         private static func compactedMessageEnd(_ object: [String: Any]) -> String? {
             var payload: [String: Any] = ["type": "message_end"]
-            if let message = object["message"] as? [String: Any],
-                let role = trimmedString(in: message, keys: ["role"])
-            {
-                payload["message"] = ["role": role]
+            if let message = object["message"] as? [String: Any] {
+                var compactMessage: [String: Any] = [:]
+                if let role = trimmedString(in: message, keys: ["role"]) {
+                    compactMessage["role"] = role
+                }
+                if let stopReason = trimmedString(in: message, keys: ["stopReason"]) {
+                    compactMessage["stopReason"] = stopReason
+                }
+                if compactMessage.isEmpty == false {
+                    payload["message"] = compactMessage
+                }
             }
             return jsonString(payload)
         }
@@ -241,32 +248,7 @@
         }
 
         private static func toolExecutionResultText(from value: Any?) -> String {
-            switch value {
-            case let string as String:
-                return string.trimmingCharacters(in: .whitespacesAndNewlines)
-            case let object as [String: Any]:
-                if let text = trimmedString(in: object, keys: ["text", "delta", "message", "output", "summary"]) {
-                    return text
-                }
-
-                for key in ["content", "result", "partialResult"] {
-                    let text = toolExecutionResultText(from: object[key])
-                    if text.isEmpty == false {
-                        return text
-                    }
-                }
-
-                return ""
-            case let array as [Any]:
-                return
-                    array
-                    .map { toolExecutionResultText(from: $0) }
-                    .filter { $0.isEmpty == false }
-                    .joined()
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-            default:
-                return ""
-            }
+            PiToolExecutionResultText.extract(from: value)
         }
 
         private static func intValue(in object: [String: Any], keys: [String]) -> Int? {

@@ -15,6 +15,22 @@
         func terminate() throws
     }
 
+    private func normalizedCodexRemoteStartupFailureMessage(_ raw: String) -> String {
+        let lines =
+            raw
+            .replacingOccurrences(of: "\r", with: "")
+            .split(whereSeparator: \.isNewline)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.isEmpty == false }
+        let meaningful =
+            lines.filter { line in
+                line.hasPrefix("bash: no job control") == false
+                    && line.hasPrefix("sh: no job control") == false
+            }
+        let candidate = meaningful.last ?? lines.last ?? raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return candidate.isEmpty ? raw.trimmingCharacters(in: .whitespacesAndNewlines) : candidate
+    }
+
     enum CodexAppServerRuntimeError: LocalizedError {
         case startupTimedOut
         case startupFailed(String)
@@ -25,7 +41,7 @@
             case .startupTimedOut:
                 return "Codex app-server did not finish startup in time."
             case .startupFailed(let message):
-                return message
+                return normalizedCodexRemoteStartupFailureMessage(message)
             case .approvalRequestNotFound:
                 return "Approval Request was not found for this Session."
             }
@@ -1168,7 +1184,8 @@
         }
 
         private func appendActivityItemLocked(_ item: SessionActivityItem) {
-            let trimmedText = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedText = TerminalEscapeSequences.stripForPlainDisplay(
+                item.text.trimmingCharacters(in: .whitespacesAndNewlines))
             guard trimmedText.isEmpty == false else {
                 return
             }
@@ -1266,7 +1283,7 @@
                 let stderr = termination.stderr?.trimmingCharacters(in: .whitespacesAndNewlines)
                 let message =
                     if let stderr, stderr.isEmpty == false {
-                        stderr
+                        normalizedCodexRemoteStartupFailureMessage(stderr)
                     } else if termination.status == 0 {
                         "Codex app-server exited before startup completed."
                     } else {

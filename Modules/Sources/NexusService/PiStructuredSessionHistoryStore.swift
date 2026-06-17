@@ -108,7 +108,7 @@
                     }
                 return StructuredSessionHistoryPage(
                     sessionID: sessionID,
-                    activityItems: activityPage.values,
+                    activityItems: deduplicatedContiguousOverflowBlocks(activityPage.values),
                     providerEvents: providerEventPage.values,
                     nextCursor: nextCursor
                 )
@@ -199,7 +199,7 @@
                 return []
             }
 
-            let lines = try String(decoding: Data(contentsOf: url), as: UTF8.self)
+            let lines = (try String(data: Data(contentsOf: url), encoding: .utf8) ?? "")
                 .split(separator: "\n")
             return try lines.map { line in
                 try decoder.decode(T.self, from: Data(line.utf8))
@@ -211,7 +211,11 @@
             previous: [SessionActivityItem],
             current: [SessionActivityItem]
         ) -> [SessionActivityItem] {
-            deduplicatedActivityItems(explicitOverflow + evictedActivityItems(previous: previous, current: current))
+            let implicitEvicted =
+                explicitOverflow.isEmpty
+                ? evictedActivityItems(previous: previous, current: current)
+                : []
+            return deduplicatedActivityItems(explicitOverflow + implicitEvicted)
         }
 
         private func evictedActivityItems(
@@ -222,10 +226,16 @@
                 return []
             }
             guard let firstCurrentID = current.first?.id else {
-                return previous
+                return []
             }
             guard let overlapIndex = previous.firstIndex(where: { $0.id == firstCurrentID }) else {
-                return previous
+                return []
+            }
+            guard overlapIndex > 0 else {
+                return []
+            }
+            if previous.count == current.count, previous.first?.id == current.first?.id {
+                return []
             }
             return Array(previous.prefix(overlapIndex))
         }
@@ -235,7 +245,11 @@
             previous: [SessionProviderEvent],
             current: [SessionProviderEvent]
         ) -> [SessionProviderEvent] {
-            deduplicatedProviderEvents(explicitOverflow + evictedProviderEvents(previous: previous, current: current))
+            let implicitEvicted =
+                explicitOverflow.isEmpty
+                ? evictedProviderEvents(previous: previous, current: current)
+                : []
+            return deduplicatedProviderEvents(explicitOverflow + implicitEvicted)
         }
 
         private func evictedProviderEvents(
@@ -249,9 +263,35 @@
                 return previous
             }
             guard let overlapIndex = previous.firstIndex(where: { $0.sequence == firstCurrentSequence }) else {
-                return previous
+                return []
+            }
+            guard overlapIndex > 0 else {
+                return []
             }
             return Array(previous.prefix(overlapIndex))
+        }
+
+        /// Collapses accidental double-writes where an overflow prefix was appended twice in one jsonl.
+        private func deduplicatedContiguousOverflowBlocks(_ items: [SessionActivityItem]) -> [SessionActivityItem] {
+            var result = items
+            while result.count >= 2 {
+                var merged = false
+                let maxBlock = result.count / 2
+                for blockSize in stride(from: maxBlock, through: 1, by: -1) {
+                    let first = Array(result.prefix(blockSize))
+                    let second = Array(result.dropFirst(blockSize).prefix(blockSize))
+                    guard first == second else {
+                        continue
+                    }
+                    result = first + Array(result.dropFirst(blockSize * 2))
+                    merged = true
+                    break
+                }
+                if merged == false {
+                    break
+                }
+            }
+            return result
         }
 
         private func deduplicatedActivityItems(_ items: [SessionActivityItem]) -> [SessionActivityItem] {

@@ -9,13 +9,17 @@ nonisolated func submitToCoalescingMainActorValuePump<Value>(
 
 final class CoalescingMainActorValuePump<Value>: @unchecked Sendable {
     typealias Deliver = @Sendable (Value) async -> Void
+    typealias MergePendingValue = @Sendable (Value, Value) -> Value
 
     private let lock = NSLock()
+    private let mergePendingValue: MergePendingValue?
     nonisolated(unsafe) private var deliver: Deliver?
     nonisolated(unsafe) private var pendingValue: Value?
     nonisolated(unsafe) private var isDraining = false
 
-    nonisolated init() {}
+    nonisolated init(mergePendingValue: MergePendingValue? = nil) {
+        self.mergePendingValue = mergePendingValue
+    }
 
     nonisolated func installDeliver(_ deliver: @escaping Deliver) {
         withLock {
@@ -25,7 +29,11 @@ final class CoalescingMainActorValuePump<Value>: @unchecked Sendable {
 
     nonisolated func submit(_ value: Value) {
         let shouldStartDrain = withLock {
-            pendingValue = value
+            if let pendingValue, let mergePendingValue {
+                self.pendingValue = mergePendingValue(pendingValue, value)
+            } else {
+                pendingValue = value
+            }
             guard isDraining == false else {
                 return false
             }

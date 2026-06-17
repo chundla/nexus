@@ -105,6 +105,65 @@ public enum StructuredSessionFeedSegment: Equatable, Identifiable, Sendable {
 }
 
 /// Pi v1 composite feed projection. Returns `nil` for non-Pi **Sessions** so clients keep flat row iteration.
+public struct StructuredSessionPiStandaloneAssistantPresentation: Equatable, Sendable {
+    public let activityItemID: UUID
+    public let label: String
+    public let text: String
+
+    public init(activityItemID: UUID, label: String, text: String) {
+        self.activityItemID = activityItemID
+        self.label = label
+        self.text = text
+    }
+}
+
+/// Primary standalone `Pi:` assistant rows render as Pi assistant bubbles, never as legacy activity-row previews.
+public func structuredSessionPiStandaloneAssistantPresentation(
+    for item: SessionActivityItem
+) -> StructuredSessionPiStandaloneAssistantPresentation? {
+    guard structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage(item),
+        let body = structuredSessionPiPrimaryAssistantBody(from: item.text)?.trimmingCharacters(
+            in: .whitespacesAndNewlines),
+        body.isEmpty == false
+    else {
+        return nil
+    }
+    return StructuredSessionPiStandaloneAssistantPresentation(
+        activityItemID: item.id,
+        label: "Pi",
+        text: body
+    )
+}
+
+/// Standalone `Pi:` rows duplicate agent-turn `finalAnswer` when history still carries the same message activity item.
+public func structuredSessionPiShouldRenderStandaloneFeedSegment(
+    item: SessionActivityItem,
+    in segments: [StructuredSessionFeedSegment]
+) -> Bool {
+    guard structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage(item) else {
+        return true
+    }
+    guard
+        let body = structuredSessionPiPrimaryAssistantBody(from: item.text)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+        body.isEmpty == false
+    else {
+        return true
+    }
+    for segment in segments {
+        guard case .agentTurn(let turn) = segment,
+            turn.isOpen == false,
+            let final = turn.finalAnswer
+        else {
+            continue
+        }
+        if final.text.trimmingCharacters(in: .whitespacesAndNewlines) == body {
+            return false
+        }
+    }
+    return true
+}
+
 public func structuredSessionPiFeedSegments(for screen: SessionScreen) -> [StructuredSessionFeedSegment]? {
     guard screen.session.providerID == .pi else {
         return nil
@@ -124,6 +183,7 @@ func structuredSessionPiFeedSegments(
 ) -> [StructuredSessionFeedSegment] {
     var segments: [StructuredSessionFeedSegment] = []
     var index = 0
+    let latestPromptIndex = activityItems.lastIndex(where: structuredSessionPiFeedSegmentIsPromptAnchoredUserMessage)
 
     while index < activityItems.count {
         let item = activityItems[index]
@@ -139,16 +199,27 @@ func structuredSessionPiFeedSegments(
                     )))
             index += 1
 
+            let turnIsInProgress = isAgentTurnInProgress && latestPromptIndex == activityItems.index(before: index)
             let turnSlice = structuredSessionPiAgentTurnActivitySlice(
                 activityItems: activityItems,
                 startIndex: index,
-                isAgentTurnInProgress: isAgentTurnInProgress,
-                liveAssistantDraftText: liveAssistantDraftText
+                isAgentTurnInProgress: turnIsInProgress,
+                liveAssistantDraftText: turnIsInProgress ? liveAssistantDraftText : nil
             )
             index = turnSlice.nextIndex
 
             if let turn = turnSlice.turn {
                 segments.append(.agentTurn(turn))
+            }
+
+            if turnIsInProgress {
+                structuredSessionPiAbsorbOpenTurnContinuationSlices(
+                    activityItems: activityItems,
+                    isAgentTurnInProgress: true,
+                    liveAssistantDraftText: liveAssistantDraftText,
+                    index: &index,
+                    segments: &segments
+                )
             }
             continue
         }
@@ -158,6 +229,44 @@ func structuredSessionPiFeedSegments(
     }
 
     return segments
+}
+
+/// After interim `Pi:` standalone, append further thoughts/tools as **new** agent-turn segments below it.
+/// Merging into the card above the `Pi:` bubble made the card grow upward while the bubble stayed fixed at the viewport bottom.
+private func structuredSessionPiAbsorbOpenTurnContinuationSlices(
+    activityItems: [SessionActivityItem],
+    isAgentTurnInProgress: Bool,
+    liveAssistantDraftText: String?,
+    index: inout Int,
+    segments: inout [StructuredSessionFeedSegment]
+) {
+    guard isAgentTurnInProgress else {
+        return
+    }
+
+    while index < activityItems.count {
+        if structuredSessionPiFeedSegmentIsPromptAnchoredUserMessage(activityItems[index]) {
+            return
+        }
+
+        if structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage(activityItems[index]) {
+            // Hide in-flight assistant text; Thinking… covers the open turn until final markdown mounts.
+            index += 1
+            continue
+        }
+
+        let continuation = structuredSessionPiAgentTurnActivitySlice(
+            activityItems: activityItems,
+            startIndex: index,
+            isAgentTurnInProgress: isAgentTurnInProgress,
+            liveAssistantDraftText: liveAssistantDraftText
+        )
+        index = continuation.nextIndex
+        guard let continuationTurn = continuation.turn else {
+            return
+        }
+        segments.append(.agentTurn(continuationTurn))
+    }
 }
 
 private struct StructuredSessionPiAgentTurnSlice {
@@ -251,6 +360,14 @@ private func structuredSessionPiAgentTurnActivitySlice(
             continue
         }
 
+        if item.kind == .message,
+            structuredSessionPiAgentTurnIsDuplicateRawToolOutput(item.text, tools: tools)
+        {
+            consumedAny = true
+            cursor += 1
+            continue
+        }
+
         if structuredSessionPiFeedSegmentIsOutsideStackRow(item) {
             break
         }
@@ -303,15 +420,14 @@ private func structuredSessionPiAgentTurnActivitySlice(
         }
 
         if structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage(item) {
-            if isAgentTurnInProgress {
-                // Interim assistant lines render as standalone bubbles after the open turn; do not stick scroll to them.
-                break
-            }
-            if let body = structuredSessionPiPrimaryAssistantBody(from: item.text) {
+            if isAgentTurnInProgress == false,
+                let body = structuredSessionPiPrimaryAssistantBody(from: item.text)
+            {
                 finalAnswer = StructuredSessionFeedAgentTurnFinalAnswerSegment(text: body, isStreaming: false)
             }
             consumedAny = true
             cursor += 1
+            // Open turn: hide assistant text but keep absorbing thoughts/tools. Closed: last Pi line wins.
             continue
         }
 
@@ -344,7 +460,14 @@ private func structuredSessionPiFeedSegmentIsInTurnSessionStatusRow(_ item: Sess
     guard item.kind == .status else {
         return false
     }
-    return structuredSessionPiFeedSegmentIsThoughtsStatus(item) == false
+    if structuredSessionPiFeedSegmentIsThoughtsStatus(item) {
+        return false
+    }
+    // Pi HTML export rows are feed artifact cards, not turn notices (#243).
+    if structuredSessionFeedArtifactPresentation(for: item) != nil {
+        return false
+    }
+    return true
 }
 
 private func structuredSessionPiFeedSegmentIsInTurnCompletionOrDiffRow(_ item: SessionActivityItem) -> Bool {
@@ -388,6 +511,19 @@ private func structuredSessionPiBashOutputBody(from text: String) -> String? {
     }
     let body = split.body.trimmingCharacters(in: .whitespacesAndNewlines)
     return body.isEmpty ? nil : body
+}
+
+private func structuredSessionPiAgentTurnIsDuplicateRawToolOutput(
+    _ rawText: String,
+    tools: [StructuredSessionFeedAgentTurnToolSegment]
+) -> Bool {
+    let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard trimmed.isEmpty == false else {
+        return false
+    }
+    return tools.contains { tool in
+        tool.detailText?.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed
+    }
 }
 
 private func structuredSessionPiAgentTurnAttachBashOutput(
@@ -491,7 +627,7 @@ private func structuredSessionPiUserMessageBody(from item: SessionActivityItem) 
 
 private let structuredSessionPiThoughtsStatusLabel = "thoughts:"
 
-private func structuredSessionPiFeedSegmentIsThoughtsStatus(_ item: SessionActivityItem) -> Bool {
+func structuredSessionPiFeedSegmentIsThoughtsStatus(_ item: SessionActivityItem) -> Bool {
     guard item.kind == .status else {
         return false
     }
@@ -502,7 +638,10 @@ private func structuredSessionPiFeedSegmentIsThoughtsStatus(_ item: SessionActiv
 private func structuredSessionPiFeedSegmentIsOutsideStackRow(_ item: SessionActivityItem) -> Bool {
     switch item.kind {
     case .status:
-        return structuredSessionPiFeedSegmentIsThoughtsStatus(item) == false
+        if structuredSessionPiFeedSegmentIsThoughtsStatus(item) {
+            return false
+        }
+        return true
     case .message:
         if structuredSessionPiFeedSegmentIsPromptAnchoredUserMessage(item) {
             return false
@@ -534,7 +673,7 @@ func structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage(_ item: SessionAc
     return split.label.caseInsensitiveCompare("Pi") == .orderedSame
 }
 
-private func structuredSessionPiPrimaryAssistantBody(from text: String) -> String? {
+func structuredSessionPiPrimaryAssistantBody(from text: String) -> String? {
     guard let split = structuredSessionPiConversationPrefixSplit(for: text) else {
         return nil
     }

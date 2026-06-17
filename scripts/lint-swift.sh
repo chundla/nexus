@@ -23,9 +23,9 @@ if ! command -v swiftlint >/dev/null 2>&1; then
 fi
 
 echo "== swift-format lint =="
-swift format lint --recursive "${PATHS[@]}"
+swift format lint --strict --recursive "${PATHS[@]}"
 
-echo "== swiftlint (force_try error only) =="
-swiftlint lint --config .swiftlint.yml --quiet
+echo "== swiftlint (opted-in rules, warnings are errors) =="
+swiftlint lint --strict --config .swiftlint.yml --quiet
 
 echo "OK"

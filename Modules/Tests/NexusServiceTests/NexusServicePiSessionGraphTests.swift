@@ -5,6 +5,7 @@
     @testable import NexusService
     import Testing
 
+    @Suite(.serialized)
     struct NexusServicePiSessionGraphTests {
         @Test func piNewSessionCreatesNamedSessionRecordAndMovesRemoteController() async throws {
             let fixture = try PiSessionGraphFixture()
@@ -293,6 +294,7 @@
                 text: "branch-observed"
             )
             while await sink.nextScreen(timeoutNanoseconds: 20_000_000) != nil {}
+            _ = await sink.nextScreen(timeoutNanoseconds: 50_000_000)
 
             let namedSession = try #require(
                 (try await fixture.service.getProviderDetail(workspaceID: fixture.workspace.id, providerID: .pi))
@@ -347,9 +349,12 @@
             let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
             try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
 
-            let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { [harness] _, arguments, _ in
-                harness.makeTransport(arguments: arguments)
-            })
+            let launcher = ProcessSessionRuntimeLauncher(
+                localShellEnvironmentResolver: PiGraphStubShellEnvironmentResolver(),
+                piTransportFactory: { [harness] _, arguments, _ in
+                    harness.makeTransport(arguments: arguments)
+                }
+            )
 
             service = try NexusService.bootstrapForTests(
                 rootURL: rootURL,
@@ -630,7 +635,9 @@
                     "command": "clone",
                     "success": true,
                     "data": [
-                        "cancelled": false
+                        "cancelled": false,
+                        "sessionId": transition.sessionID,
+                        "sessionFile": transition.sessionFile,
                     ],
                 ])
             case "prompt":
@@ -674,6 +681,10 @@
                     ]
                 ],
             ])
+            emit([
+                "type": "agent_end",
+                "messages": [],
+            ])
         }
 
         private func emit(_ object: [String: Any]) {
@@ -683,6 +694,12 @@
                 return
             }
             stdoutLineHandler?(line)
+        }
+    }
+
+    private struct PiGraphStubShellEnvironmentResolver: LocalShellEnvironmentResolving {
+        func resolvedEnvironment() -> [String: String]? {
+            ["SHELL": "/bin/zsh", "PATH": "/tmp/bin"]
         }
     }
 

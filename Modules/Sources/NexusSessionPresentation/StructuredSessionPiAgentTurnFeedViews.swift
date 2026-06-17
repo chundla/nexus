@@ -97,7 +97,9 @@ public struct StructuredSessionPiFeedSegmentView: View {
         case .agentTurn(let turn):
             agentTurnView(turn)
         case .standalone(let item):
-            if let artifact = structuredSessionFeedArtifactPresentation(for: item) {
+            if let assistant = structuredSessionPiStandaloneAssistantPresentation(for: item) {
+                standaloneAssistantView(assistant)
+            } else if let artifact = structuredSessionFeedArtifactPresentation(for: item) {
                 StructuredSessionFeedArtifactPreviewCard(
                     artifact: artifact,
                     actions: artifactActions(artifact),
@@ -109,6 +111,29 @@ public struct StructuredSessionPiFeedSegmentView: View {
                     structuredSessionAnnotatedActivityRow(for: item, providerDisplayName: providerDisplayName))
             }
         }
+    }
+
+    @ViewBuilder
+    private func standaloneAssistantView(_ assistant: StructuredSessionPiStandaloneAssistantPresentation) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(assistant.label)
+                .font(style.bodyFont(11, .caption, .medium))
+                .foregroundStyle(style.assistantLabelForeground)
+
+            // Standalone `Pi:` is provisional/in-flight. Keep it cheap and plain;
+            // completed turns render final-answer markdown exactly once inside the agent-turn stack.
+            Text(verbatim: assistant.text)
+                .font(style.bodyFont(15, nil, nil))
+                .foregroundStyle(style.assistantBodyForeground)
+                .structuredSessionFeedTextSelection()
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(style.assistantBubbleBackground, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .frame(maxWidth: 520, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .structuredSessionFeedRowCompositing()
     }
 
     @ViewBuilder
@@ -150,29 +175,7 @@ struct StructuredSessionPiAgentTurnFinalAnswerView: View {
     let onShowFullAssistantResponse: ((StructuredSessionAssistantFullResponsePresentation) -> Void)?
 
     var body: some View {
-        if conversation.isStreaming {
-            streamingBody
-        } else {
-            finalizedBody
-        }
-    }
-
-    @ViewBuilder
-    private var streamingBody: some View {
-        let policy = structuredSessionFeedStreamingAssistantDisplayPolicy(
-            for: "Pi: \(conversation.text)",
-            charactersPerLine: style.charactersPerLine
-        )
-        let display = structuredSessionFeedStreamingAssistantDisplayText(
-            for: "Pi: \(conversation.text)",
-            policy: policy
-        )
-        Text(verbatim: display.hasPrefix("Pi: ") ? String(display.dropFirst(4)) : display)
-            .font(style.bodyFont(15, nil, nil))
-            .foregroundStyle(style.assistantBodyForeground)
-            .structuredSessionFeedTextSelection()
-            .lineLimit(policy.previewLineLimit)
-            .fixedSize(horizontal: false, vertical: true)
+        finalizedBody
     }
 
     @ViewBuilder

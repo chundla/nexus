@@ -4,6 +4,7 @@
     @testable import NexusService
     import Testing
 
+    @Suite(.serialized)
     struct NexusServiceRemotePiStructuredSessionTests {
         @Test func remotePiDefaultSessionLaunchesStructuredSurfaceThroughSSHBridge() throws {
             let rootURL = FileManager.default.temporaryDirectory

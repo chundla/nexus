@@ -410,9 +410,11 @@ public enum StructuredSessionMarkdownRowHydrationScheduler {
 
         var pendingJobs: [Job] = []
         var isDraining = false
+        var scheduledJobCountForTesting = 0
 
         func enqueue(_ job: Job) -> Bool {
             pendingJobs.append(job)
+            scheduledJobCountForTesting += 1
             guard isDraining == false else {
                 return false
             }
@@ -450,6 +452,11 @@ public enum StructuredSessionMarkdownRowHydrationScheduler {
 
         func resetDeliveryFlushCountForTesting() {
             deliveryFlushCountForTesting = 0
+            scheduledJobCountForTesting = 0
+        }
+
+        func scheduledJobCountForTestingSnapshot() -> Int {
+            scheduledJobCountForTesting
         }
 
         func hasPendingOrDraining() -> Bool {
@@ -514,9 +521,25 @@ public enum StructuredSessionMarkdownRowHydrationScheduler {
         }
     }
 
+    /// Waits until detached schedulers have enqueued the expected jobs; for tests only.
+    public static func waitUntilHydrationJobsScheduledForTesting(
+        _ expectedCount: Int,
+        maxYields: Int = 16_384
+    ) async {
+        guard expectedCount > 0 else {
+            return
+        }
+        for _ in 0..<maxYields {
+            if await queue.scheduledJobCountForTestingSnapshot() >= expectedCount {
+                return
+            }
+            await Task.yield()
+        }
+    }
+
     /// Waits until scheduled hydration work finishes; for tests only.
     public static func drainForTesting() async {
-        for _ in 0..<512 {
+        for _ in 0..<16_384 {
             if await queue.hasPendingOrDraining() {
                 break
             }

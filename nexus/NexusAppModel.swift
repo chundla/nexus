@@ -131,7 +131,9 @@
         private let focusedStructuredSessionChromePresenter = FocusedStructuredSessionChromePresenter()
         private var focusedStructuredSessionFinalOutputLatencyTracker = StructuredSessionFinalOutputLatencyTracker()
         @ObservationIgnored
-        private let focusedSessionScreenUpdatePump = CoalescingMainActorValuePump<SessionScreen>()
+        private let focusedSessionScreenUpdatePump = CoalescingMainActorValuePump<SessionScreen>(
+            mergePendingValue: preferredSessionScreenMergePendingValue
+        )
         private let remotePairingServerFactory: (() throws -> any RemotePairingServing)?
         private var focusedSessionObservation: (any SessionScreenObservation)?
         private var staleWorkspaceOverviewRefreshTasks: [UUID: Task<Void, Never>] = [:]
@@ -176,9 +178,7 @@
             self.remotePairingServerFactory = remotePairingServerFactory
             self.remotePairingEndpoint = remotePairingServer?.endpoint
             focusedSessionScreenUpdatePump.installDeliver { [weak self] screen in
-                guard let self else {
-                    return
-                }
+                guard let self else { return }
                 await self.applyCoalescedFocusedSessionScreenUpdate(screen)
             }
         }
@@ -487,6 +487,8 @@
 
         func launchOrResumeSession(sessionID: UUID, workspaceID: UUID, providerID: ProviderID) async throws -> Session {
             let session = try await client.launchOrResumeSession(sessionID: sessionID)
+            let screen = try await client.getSessionScreen(sessionID: session.id)
+            try await applyFocusedSessionScreen(screen)
             try await focusSession(sessionID: session.id)
             try await refreshWorkspaceOverview(for: workspaceID)
             try await refreshProviderDetailIfLoaded(workspaceID: workspaceID, providerID: providerID)
@@ -1158,43 +1160,19 @@
             _ candidateScreen: SessionScreen,
             beyond currentScreen: SessionScreen
         ) -> Bool {
-            guard candidateScreen.session.id == currentScreen.session.id else {
-                return false
-            }
-
-            if candidateScreen == currentScreen {
-                return true
-            }
-
-            if currentScreen.isAgentTurnInProgress, candidateScreen.isAgentTurnInProgress == false {
-                return true
-            }
-
-            if candidateScreen.activityItems.count > currentScreen.activityItems.count {
-                return true
-            }
-
-            if candidateScreen.transcript.count > currentScreen.transcript.count {
-                return true
-            }
-
-            let currentProviderEventCount =
-                currentScreen.providerFacts.providerEventCount == 0
-                ? currentScreen.providerEvents.count
-                : currentScreen.providerFacts.providerEventCount
-            let candidateProviderEventCount =
-                candidateScreen.providerFacts.providerEventCount == 0
-                ? candidateScreen.providerEvents.count
-                : candidateScreen.providerFacts.providerEventCount
-            if candidateProviderEventCount > currentProviderEventCount {
-                return true
-            }
-
-            return false
+            sessionScreenAppearsToAdvance(candidateScreen, beyond: currentScreen)
         }
 
         private func applyCoalescedFocusedSessionScreenUpdate(_ screen: SessionScreen) async {
             guard focusedSessionID == screen.session.id else {
+                return
+            }
+
+            if let currentScreen = focusedSessionScreen,
+                currentScreen.session.id == screen.session.id,
+                sessionScreenAppearsToAdvance(currentScreen, beyond: screen),
+                sessionScreenAppearsToAdvance(screen, beyond: currentScreen) == false
+            {
                 return
             }
 

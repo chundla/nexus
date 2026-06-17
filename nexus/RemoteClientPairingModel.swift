@@ -91,6 +91,24 @@ extension RemotePairingClient {
             ]
         )
     }
+
+    func fetchStructuredSessionArtifactFile(
+        for pairedMac: PairedMac,
+        sessionID: UUID,
+        hostPath: String
+    ) async throws -> StructuredSessionArtifactFile {
+        _ = pairedMac
+        _ = sessionID
+        _ = hostPath
+        throw NSError(
+            domain: "RemotePairingClient",
+            code: 1,
+            userInfo: [
+                NSLocalizedDescriptionKey:
+                    "This remote pairing client does not support structured Session artifact download."
+            ]
+        )
+    }
 }
 
 extension RemotePairingHTTPClient: RemotePairingClient {}
@@ -239,7 +257,9 @@ final class RemoteClientPairingModel {
     private let focusedStructuredSessionChromePresenter = FocusedStructuredSessionChromePresenter()
     private var focusedStructuredSessionFinalOutputLatencyTracker = StructuredSessionFinalOutputLatencyTracker()
     @ObservationIgnored
-    private let focusedSessionScreenUpdatePump = CoalescingMainActorValuePump<SessionScreen>()
+    private let focusedSessionScreenUpdatePump = CoalescingMainActorValuePump<SessionScreen>(
+        mergePendingValue: preferredSessionScreenMergePendingValue
+    )
     private var focusedSessionObservation: (any SessionScreenObservation)?
     private var focusedSessionObservationStartupTask: Task<Void, Never>?
     private var focusedSessionReconnectTask: Task<Void, Never>?
@@ -1301,6 +1321,14 @@ final class RemoteClientPairingModel {
 
     private func applyCoalescedFocusedSessionScreenUpdate(_ screen: SessionScreen) {
         guard focusedSessionID == screen.session.id else {
+            return
+        }
+
+        if let currentScreen = focusedSessionScreen,
+            currentScreen.session.id == screen.session.id,
+            sessionScreenAppearsToAdvance(currentScreen, beyond: screen),
+            sessionScreenAppearsToAdvance(screen, beyond: currentScreen) == false
+        {
             return
         }
 

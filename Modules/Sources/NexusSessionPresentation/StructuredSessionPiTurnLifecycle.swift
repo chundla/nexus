@@ -9,10 +9,114 @@ func structuredSessionPiFeedSegmentTurnInProgress(for screen: SessionScreen) -> 
     guard screen.session.providerID == .pi else {
         return false
     }
-    return structuredSessionPiProviderTurnAwaitingTurnEnd(
+    if structuredSessionPiProviderTurnAwaitingTurnEnd(
         activityItems: screen.activityItems,
         providerEvents: screen.providerEvents
-    )
+    ) {
+        return true
+    }
+    if let draft = screen.providerFacts.liveAssistantDraftText?.trimmingCharacters(in: .whitespacesAndNewlines),
+        draft.isEmpty == false
+    {
+        return true
+    }
+    return structuredSessionPiActivityTailSuggestsOpenTurn(screen.activityItems)
+}
+
+/// Live observation often omits `providerEvents`; infer an open turn when post-prompt work continues after a provisional `Pi:` line.
+func structuredSessionPiActivityTailSuggestsOpenTurn(_ activityItems: [SessionActivityItem]) -> Bool {
+    guard
+        let lastUserIndex = activityItems.lastIndex(where: {
+            structuredSessionPiFeedSegmentIsPromptAnchoredUserMessage($0)
+        })
+    else {
+        return false
+    }
+    let tail = Array(activityItems[activityItems.index(after: lastUserIndex)...])
+    guard tail.isEmpty == false else {
+        return false
+    }
+
+    var firstPrimaryPiIndex: Int?
+    for (index, item) in tail.enumerated() where structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage(item) {
+        firstPrimaryPiIndex = index
+        break
+    }
+
+    if let firstPrimaryPiIndex {
+        let interimPiBody =
+            structuredSessionPiPrimaryAssistantBody(from: tail[firstPrimaryPiIndex].text) ?? ""
+        if firstPrimaryPiIndex < tail.count - 1 {
+            if let last = tail.last,
+                structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage(last)
+            {
+                return false
+            }
+            // Long interim `Pi:` with more activity after is a closed multi-phase turn (composite card absorbs tail).
+            guard interimPiBody.count < 40 else {
+                return false
+            }
+            let afterPi = Array(tail[(firstPrimaryPiIndex + 1)...])
+            if afterPi.contains(where: { $0.kind == .error }) {
+                return false
+            }
+            if structuredSessionPiTailIsOpenTurnContinuationAfterInterimAssistant(afterPi) {
+                return true
+            }
+            return false
+        }
+        let beforePi = Array(tail.prefix(firstPrimaryPiIndex))
+        guard beforePi.count <= 2 else {
+            return false
+        }
+        if beforePi.contains(where: { $0.kind == .command }) {
+            // Short trailing `Pi:` after tools is the final answer; long lines are still in-flight status.
+            return interimPiBody.count >= 40
+        }
+        if beforePi.contains(where: { structuredSessionPiFeedSegmentIsThoughtsStatus($0) }) {
+            return interimPiBody.count >= 40
+        }
+        return false
+    }
+
+    return tail.contains { item in
+        item.kind == .command || structuredSessionPiFeedSegmentIsThoughtsStatus(item) || item.kind == .progress
+    }
+}
+
+/// Post–interim-`Pi:` thoughts, tools, and progress still belong to the same user prompt until `turn_end`.
+private func structuredSessionPiTailIsOpenTurnContinuationAfterInterimAssistant(_ items: [SessionActivityItem]) -> Bool
+{
+    guard items.isEmpty == false else {
+        return false
+    }
+    guard
+        items.allSatisfy({
+            $0.kind == .command
+                || structuredSessionPiFeedSegmentIsThoughtsStatus($0)
+                || $0.kind == .progress
+                || $0.kind == .error
+                || structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage($0)
+        })
+    else {
+        return false
+    }
+    return items.contains {
+        $0.kind == .command || structuredSessionPiFeedSegmentIsThoughtsStatus($0) || $0.kind == .progress
+    }
+}
+
+private func structuredSessionPiThoughtsAppearBeforeAnyCommand(in items: [SessionActivityItem]) -> Bool {
+    var sawCommand = false
+    for item in items {
+        if item.kind == .command {
+            sawCommand = true
+        }
+        if structuredSessionPiFeedSegmentIsThoughtsStatus(item), sawCommand == false {
+            return true
+        }
+    }
+    return false
 }
 
 /// After the last prompt-anchored user message, the turn is still open until a `turn_end` provider event arrives.
@@ -39,5 +143,12 @@ func structuredSessionPiProviderTurnAwaitingTurnEnd(
         return false
     }
     let turnEndCount = providerEvents.filter { $0.type == "turn_end" }.count
+    let agentEndCount = providerEvents.filter { $0.type == "agent_end" }.count
+    let hasAnyAgentEnd = agentEndCount > 0
+    if hasAnyAgentEnd {
+        // Live Pi RPC: one `agent_end` per user prompt; intermediate `turn_end` does not close the prompt.
+        return agentEndCount < userPromptOrdinal
+    }
+    // History snapshots often record `turn_end` per completed prompt without `agent_end`.
     return turnEndCount < userPromptOrdinal
 }

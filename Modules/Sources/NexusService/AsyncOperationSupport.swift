@@ -3,19 +3,22 @@
 
     struct AsyncOperationSupport {
         static func blocking<T>(_ operation: @escaping @Sendable () async throws -> T) throws -> T {
-            let semaphore = DispatchSemaphore(value: 0)
             let result = LockedAsyncOperationResult<T>()
+            let finished = DispatchSemaphore(value: 0)
 
-            Task {
+            Task.detached(priority: .userInitiated) {
                 do {
                     result.store(.success(try await operation()))
                 } catch {
                     result.store(.failure(error))
                 }
-                semaphore.signal()
+                finished.signal()
             }
 
-            semaphore.wait()
+            // Never semaphore.wait on a Swift Testing cooperative thread.
+            DispatchQueue.global(qos: .userInitiated).asyncAndWait {
+                finished.wait()
+            }
             return try result.value().get()
         }
     }

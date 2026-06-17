@@ -4,8 +4,9 @@
     @testable import NexusService
     import Testing
 
+    @Suite(.serialized)
     struct NexusServiceIBMBobSessionDeletionTests {
-        @Test func localIBMBobDeleteAttemptsBestEffortNativeCleanupWhenStoredContinuityExists() throws {
+        @Test func localIBMBobDeleteAttemptsBestEffortNativeCleanupWhenStoredContinuityExists() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -52,8 +53,8 @@
                 primaryGroupID: group.id
             )
 
-            let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
-            _ = try service.sendSessionInput(sessionID: session.id, text: "ship it")
+            let session = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
+            _ = try await service.sendSessionInput(sessionID: session.id, text: "ship it")
             let deleted = try service.deleteSessionRecord(sessionID: session.id)
             let cleanupInvocation = try #require(commandRunner.invocations.last)
 
@@ -61,7 +62,7 @@
             #expect(cleanupInvocation.arguments == ["-lic", "'/tmp/fake-bob' '--delete-session' '2'"])
         }
 
-        @Test func localIBMBobDeleteStillRemovesSessionRecordWhenNativeCleanupFails() throws {
+        @Test func localIBMBobDeleteStillRemovesSessionRecordWhenNativeCleanupFails() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -108,10 +109,10 @@
                 primaryGroupID: group.id
             )
 
-            let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
-            _ = try service.sendSessionInput(sessionID: session.id, text: "ship it")
+            let session = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
+            _ = try await service.sendSessionInput(sessionID: session.id, text: "ship it")
             let deleted = try service.deleteSessionRecord(sessionID: session.id)
-            let providerDetail = try service.getProviderDetail(workspaceID: workspace.id, providerID: .ibmBob)
+            let providerDetail = try await service.getProviderDetail(workspaceID: workspace.id, providerID: .ibmBob)
 
             #expect(deleted)
             #expect(providerDetail.defaultSession == nil)
@@ -121,7 +122,7 @@
                 }))
         }
 
-        @Test func remoteIBMBobDeleteAttemptsBestEffortHostCleanupWhenStoredContinuityExists() throws {
+        @Test func remoteIBMBobDeleteAttemptsBestEffortHostCleanupWhenStoredContinuityExists() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -155,10 +156,10 @@
                 primaryGroupID: group.id
             )
 
-            let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
-            _ = try service.sendSessionInput(sessionID: session.id, text: "ship it")
+            let session = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
+            _ = try await service.sendSessionInput(sessionID: session.id, text: "ship it")
             let deleted = try service.deleteSessionRecord(sessionID: session.id)
-            let providerDetail = try service.getProviderDetail(workspaceID: workspace.id, providerID: .ibmBob)
+            let providerDetail = try await service.getProviderDetail(workspaceID: workspace.id, providerID: .ibmBob)
             let cleanupInvocation = commandRunner.invocations.first(where: { invocation in
                 invocation.executable == "/usr/bin/ssh"
                     && invocation.arguments.last?.contains("--delete-session") == true
@@ -171,7 +172,7 @@
             #expect(cleanupInvocation?.arguments.last?.contains("'2'") == true)
         }
 
-        @Test func remoteIBMBobDeleteStillRemovesSessionRecordWhenHostCleanupFails() throws {
+        @Test func remoteIBMBobDeleteStillRemovesSessionRecordWhenHostCleanupFails() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -207,10 +208,10 @@
                 primaryGroupID: group.id
             )
 
-            let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
-            _ = try service.sendSessionInput(sessionID: session.id, text: "ship it")
+            let session = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
+            _ = try await service.sendSessionInput(sessionID: session.id, text: "ship it")
             let deleted = try service.deleteSessionRecord(sessionID: session.id)
-            let providerDetail = try service.getProviderDetail(workspaceID: workspace.id, providerID: .ibmBob)
+            let providerDetail = try await service.getProviderDetail(workspaceID: workspace.id, providerID: .ibmBob)
             let cleanupInvocation = commandRunner.invocations.first(where: { invocation in
                 invocation.executable == "/usr/bin/ssh"
                     && invocation.arguments.last?.contains("--delete-session") == true
@@ -222,7 +223,7 @@
             #expect(cleanupInvocation?.arguments.last?.contains("--delete-session") == true)
         }
 
-        @Test func deleteSessionRecordRoutesIBMBobStoredContinuityCleanupThroughProviderModule() throws {
+        @Test func deleteSessionRecordRoutesIBMBobStoredContinuityCleanupThroughProviderModule() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -267,8 +268,8 @@
                 primaryGroupID: group.id
             )
 
-            let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
-            _ = try service.sendSessionInput(sessionID: session.id, text: "ship it")
+            let session = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .ibmBob)
+            _ = try await service.sendSessionInput(sessionID: session.id, text: "ship it")
 
             let deleted = try service.deleteSessionRecord(sessionID: session.id)
 
@@ -286,14 +287,16 @@
         ibmBobNativeSessionCleaner: (any IBMBobNativeSessionCleaning)? = nil
     ) throws -> NexusService {
         let transportHarness = IBMBobDeletionTransportHarness(turns: turns)
-        let launcher = ProcessSessionRuntimeLauncher(ibmBobTransportFactory: {
-            executable, arguments, workingDirectory in
-            try transportHarness.makeTransport(
-                executable: executable,
-                arguments: arguments,
-                workingDirectory: workingDirectory
-            )
-        })
+        let launcher = ProcessSessionRuntimeLauncher(
+            localShellEnvironmentResolver: IBMBobDeletionStubShellEnvironmentResolver(),
+            ibmBobTransportFactory: { executable, arguments, workingDirectory in
+                try transportHarness.makeTransport(
+                    executable: executable,
+                    arguments: arguments,
+                    workingDirectory: workingDirectory
+                )
+            }
+        )
         let resolvedNativeSessionCleaner =
             ibmBobNativeSessionCleaner
             ?? IBMBobNativeSessionCleaner(
@@ -321,14 +324,16 @@
         turns: [IBMBobDeletionTransportHarness.Turn]
     ) throws -> NexusService {
         let transportHarness = IBMBobDeletionTransportHarness(turns: turns)
-        let launcher = ProcessSessionRuntimeLauncher(ibmBobTransportFactory: {
-            executable, arguments, workingDirectory in
-            try transportHarness.makeTransport(
-                executable: executable,
-                arguments: arguments,
-                workingDirectory: workingDirectory
-            )
-        })
+        let launcher = ProcessSessionRuntimeLauncher(
+            localShellEnvironmentResolver: IBMBobDeletionStubShellEnvironmentResolver(),
+            ibmBobTransportFactory: { executable, arguments, workingDirectory in
+                try transportHarness.makeTransport(
+                    executable: executable,
+                    arguments: arguments,
+                    workingDirectory: workingDirectory
+                )
+            }
+        )
         return try NexusService.bootstrapForTests(
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
@@ -345,6 +350,12 @@
                 localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
             )
         )
+    }
+
+    private struct IBMBobDeletionStubShellEnvironmentResolver: LocalShellEnvironmentResolving {
+        func resolvedEnvironment() -> [String: String]? {
+            ["SHELL": "/bin/zsh", "PATH": "/tmp/bin"]
+        }
     }
 
     private struct IBMBobDeletionStubExecutableResolver: ProviderExecutableResolving {

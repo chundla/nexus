@@ -1,5 +1,10 @@
-# Nexus SwiftLint: strict on force_try only. Other rules disabled until we opt in.
+# Nexus SwiftLint: opted-in rules fail CI via scripts/lint-swift.sh --strict.
+# Style decisions:
+# - trailing_comma: disabled (we keep trailing commas in collection literals)
+# - closure_parameter_position: disabled (swift-format lineLength 120 wraps closures)
+# Other style rules remain disabled until explicitly opted in.
 disabled_rules:
+  - closure_parameter_position
   - line_length
   - function_body_length
   - type_name
@@ -16,6 +21,7 @@ disabled_rules:
   - type_body_length
   - todo
   - blanket_disable_command
+  - trailing_comma
 
 included:
   - Modules/Sources

@@ -4,6 +4,7 @@
     @testable import NexusService
     import Testing
 
+    @Suite(.serialized)
     struct RemoteProtocolSessionCommandBuilderTests {
         @Test func codexRuntimeSurfacesRemoteBridgeStartupFailureInsteadOfTimingOut() throws {
             let fixture = try makeRemoteBridgeFixture(

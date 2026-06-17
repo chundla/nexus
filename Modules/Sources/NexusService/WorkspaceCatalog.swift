@@ -193,6 +193,13 @@
                 return storedContext
             }
 
+            if let storedContext = try storedRemoteWorkspaceHealthContext(for: workspace),
+                storedContext.hostValidation?.state == .available,
+                storedContext.workspaceAvailability?.state == .available
+            {
+                return storedContext
+            }
+
             let (remoteTarget, _, remoteProbeFacts) = try workspaceOverviewRemoteTargetOverview(
                 for: workspace, mode: .forceFresh)
             return remoteTarget.map {
@@ -321,6 +328,17 @@
         }
 
         func reconcileSessionRuntimeState(_ session: Session) throws -> Session {
+            if session.state == .interrupted || session.state == .exited,
+                dependencies.sessionRuntimeManager.hasRuntime(for: session),
+                dependencies.sessionRuntimeManager.runtimeState(for: session) == .ready
+            {
+                return try dependencies.sessionRecordStore.updateSession(
+                    id: session.id,
+                    state: .ready,
+                    failureMessage: nil
+                )
+            }
+
             guard session.state == .ready else {
                 return session
             }

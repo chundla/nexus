@@ -16,7 +16,7 @@ enum StructuredSessionFeedProgressiveRevealPolicy {
     }
 
     static var allowsMarkdownHydrationDuringProgressiveReveal: Bool {
-        true
+        false
     }
 
     static func visibleActivityRows(

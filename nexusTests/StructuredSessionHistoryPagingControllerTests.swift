@@ -154,6 +154,33 @@ struct StructuredSessionHistoryPagingControllerTests {
         _ = try #require(controller.presentation(for: churnedScreen))
         #expect(controller.presentationRebuildCount == 1)
         #expect(first == controller.presentation(for: churnedScreen))
+
+        let draftScreen = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            terminalColumns: 80,
+            terminalRows: 24,
+            activityItems: [activity],
+            providerFacts: StructuredSessionProviderFacts(liveAssistantDraftText: String(repeating: "a", count: 50)),
+            isAgentTurnInProgress: true
+        )
+        _ = try #require(controller.presentation(for: draftScreen))
+        #expect(controller.presentationRebuildCount == 2)
+
+        let sameBucketDraft = SessionScreen(
+            session: session,
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            terminalColumns: 80,
+            terminalRows: 24,
+            activityItems: [activity],
+            providerFacts: StructuredSessionProviderFacts(liveAssistantDraftText: String(repeating: "a", count: 95)),
+            isAgentTurnInProgress: true
+        )
+        let afterBucket = try #require(controller.presentation(for: sameBucketDraft))
+        #expect(controller.presentationRebuildCount == 2)
+        #expect(afterBucket == controller.presentation(for: draftScreen))
     }
 
     @Test func loadingOlderActivityDoesNotMergeHistoricalProviderEventsIntoLivePresentation() async throws {

@@ -154,6 +154,16 @@ struct StructuredSessionPresentationTests {
         #expect(row.showsExpandedSystemCard == false)
     }
 
+    @Test func structuredSessionActivityRowsStripTerminalStylingFromStatusText() throws {
+        let rows = structuredSessionActivityRows(for: [
+            SessionActivityItem(
+                kind: .status,
+                text: "\u{001B}[38;5;109mMCP: 0/1 servers\u{001B}[39m")
+        ])
+        let row = try #require(rows.first)
+        #expect(row.text == "MCP: 0/1 servers")
+    }
+
     @Test func structuredSessionActivityRowsPrecomputeExpandedSystemCardsForLongOrDetailedUpdates() {
         let longStatus = String(repeating: "A", count: 81)
         let rows = structuredSessionActivityRows(for: [

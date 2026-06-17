@@ -4,6 +4,7 @@
     @testable import NexusService
     import Testing
 
+    @Suite(.serialized)
     struct ServiceSessionLifecycleScenariosTests {
         @Test func localClaudeDefaultSessionFreshOpenUsesProviderModuleSessionTransitionPlan() async throws {
             let fixture = try ServiceSessionLifecycleFixture()

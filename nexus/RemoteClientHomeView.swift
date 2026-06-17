@@ -1496,7 +1496,7 @@
         @State private var structuredSessionDraftGrowthScrollThrottle = StructuredSessionDraftGrowthScrollThrottle()
         @State private var structuredSessionPinState = StructuredSessionFeedPinState()
         @State private var structuredSessionFeedScrollSnapshot: StructuredSessionFeedScrollSnapshot?
-        @State private var structuredSessionFeedScrollPosition = ScrollPosition(edge: .bottom)
+        @State private var structuredSessionFeedScrollPosition = ScrollPosition()
         @State private var structuredSessionFeedVisibleTailRowCount = 0
         @State private var structuredSessionFeedScrollGeometrySample: StructuredSessionScrollGeometrySample?
         @State private var structuredSessionFeedScrollLastMovementAt = Date()
@@ -2245,9 +2245,10 @@
                             for: structuredPresentation
                         )
                     }
-                    if let next = structuredSessionFeedPinStateIfChanged(
+                    if let next = structuredSessionFeedPinStateIfChangedDuringOpenAgentTurn(
                         previous: structuredSessionPinState,
-                        sample: sample
+                        sample: sample,
+                        effectiveTurnInProgress: structuredSessionEffectiveAgentTurnInProgress(for: presentation)
                     ) {
                         structuredSessionPinState = next
                     }
@@ -2272,25 +2273,19 @@
                             )
                         )
                 }
-                .onChange(of: structuredSessionEffectiveAgentTurnInProgress(for: presentation)) { _, turnOpen in
-                    if turnOpen {
-                        structuredSessionFeedScrollPosition = ScrollPosition()
-                    } else {
-                        structuredSessionFeedScrollPosition = ScrollPosition(edge: .bottom)
-                    }
+                .onChange(of: structuredSessionEffectiveAgentTurnInProgress(for: presentation)) { _, _ in
+                    // Turn open/close changes content height a lot (Thinking, tool rows, final streaming).
+                    // Reset the ScrollPosition binding to avoid sticking to a row that is growing/replaced.
+                    // Do NOT hard-force pinState detached/following here.
+                    // The live onScrollGeometryChange always runs distance-based pin logic
+                    // (structuredSessionFeedPinStateIfChangedDuringOpenAgentTurn delegates to normal
+                    // distance rule). This gives classic autoscroll:
+                    // - viewport near bottom (distance <= 48pt) → isFollowingBottom = true → follow tail
+                    // - user scrolled away (distance > threshold) → detached, no auto-scroll
+                    // - user scrolls viewport back to bottom → geometry re-enables following
+                    structuredSessionFeedScrollPosition = ScrollPosition()
                 }
-                .onChange(of: structuredSessionFeedFollowScrollToken(for: presentation)) { _, _ in
-                    guard structuredSessionEffectiveAgentTurnInProgress(for: presentation),
-                        let turnID = structuredSessionFeedScrollAnchorTurnID(
-                            in: presentation.feed.feedSegments
-                        )
-                    else {
-                        return
-                    }
-                    var position = ScrollPosition()
-                    position.scrollTo(id: turnID)
-                    structuredSessionFeedScrollPosition = position
-                }
+
                 .onChange(of: presentation.session.id) { _, _ in
                     structuredSessionPinState = StructuredSessionFeedPinState()
                     structuredSessionFeedScrollSnapshot = nil
@@ -2301,6 +2296,7 @@
                     presentedStructuredSessionAssistantFullResponse = nil
                     structuredSessionFeedVisibleTailRowCount = 0
                     structuredSessionAgentTurnDisclosureState.reset()
+                    structuredSessionFeedScrollPosition = ScrollPosition()
                     structuredSessionScheduleFeedActivityRowsIfNeeded()
                 }
                 .onChange(of: presentation.structuredSessionFeedScrollSnapshot) { _, current in
@@ -2470,11 +2466,18 @@
             } else if feedPresentation.activityRows.isEmpty {
                 EmptyView()
             } else if feedPresentation.feedSegments != nil {
+                let allSegments = feedPresentation.feedSegments ?? []
                 let visibleSegments =
-                    structuredSessionVisibleFeedSegments(
+                    (structuredSessionVisibleFeedSegments(
                         in: feedPresentation,
                         visibleTailItemCount: structuredSessionFeedVisibleTailRowCount
-                    ) ?? []
+                    ) ?? [])
+                    .filter { segment in
+                        guard case .standalone(let item) = segment else {
+                            return true
+                        }
+                        return structuredSessionPiShouldRenderStandaloneFeedSegment(item: item, in: allSegments)
+                    }
                 ForEach(visibleSegments) { segment in
                     StructuredSessionPiFeedSegmentView(
                         segment: segment,

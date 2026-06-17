@@ -64,7 +64,7 @@
         ) throws {
             self.executable = executable
             self.workingDirectory = workingDirectory
-            self.sessionLinkage = sessionLinkage.map { IBMBobSessionLinkage(sessionID: $0.sessionID) }
+            self.sessionLinkage = sessionLinkage
             self.terminationStatusMessageBuilder = terminationStatusMessageBuilder
             self.unexpectedTerminationStateEvaluator =
                 unexpectedTerminationStateEvaluator ?? { _, _ in unexpectedTerminationState }
@@ -95,9 +95,11 @@
             lock.lock()
             let sessionID = sessionLinkage?.sessionID
             let turnInProgress = isStreaming
+            let persistedActivityItems = StructuredSessionLiveHistoryRetention.retainedActivityItems(activityItems)
             lock.unlock()
             return SessionRecordAdapterMetadata.ibmBob(
                 sessionID: sessionID,
+                activityItems: persistedActivityItems,
                 turnInProgress: turnInProgress
             )
         }
@@ -230,7 +232,12 @@
 
             lock.lock()
             if let sessionID = resolvedSessionID(from: object) {
-                sessionLinkage = IBMBobSessionLinkage(sessionID: sessionID)
+                sessionLinkage = IBMBobSessionLinkage(
+                    sessionID: sessionID,
+                    persistedActivityItems: StructuredSessionLiveHistoryRetention.retainedActivityItems(
+                        activityItems),
+                    turnInProgress: isStreaming
+                )
             }
             guard let event = bobEvent(from: object) else {
                 lock.unlock()
@@ -719,6 +726,10 @@
             let executableName = URL(fileURLWithPath: executable).lastPathComponent.lowercased()
             guard executableName != "ssh" else {
                 return false
+            }
+            // Non-ssh stubs under /tmp skip ~/.bob scans (can hang on large home trees) but still load project .bob.
+            if executableName != "ssh", executable.hasPrefix("/tmp/") {
+                return true
             }
             return FileManager.default.fileExists(atPath: workingDirectory)
         }

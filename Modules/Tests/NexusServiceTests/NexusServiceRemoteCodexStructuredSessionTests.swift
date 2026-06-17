@@ -4,6 +4,7 @@
     @testable import NexusService
     import Testing
 
+    @Suite(.serialized)
     struct NexusServiceRemoteCodexStructuredSessionTests {
         @Test func remoteCodexPrelaunchPrimarySurfaceIsStructuredInOverviewAndDetail() throws {
             let rootURL = FileManager.default.temporaryDirectory

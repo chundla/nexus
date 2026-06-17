@@ -2,6 +2,8 @@
     import Foundation
     import NexusDomain
 
+    // Pi RPC protocol: docs/pi-rpc.md (links to @earendil-works/pi-coding-agent docs/rpc.md).
+
     private let piBasicThinkingLevels = ["off", "minimal", "low", "medium", "high"]
     private let piExtendedThinkingLevels = piBasicThinkingLevels + ["xhigh"]
 
@@ -62,7 +64,7 @@
                 activityItems: activityItems,
                 approvalRequests: approvalRequests,
                 extensionUIState: extensionUIStateLocked(),
-                providerEvents: []
+                providerEvents: providerEvents
             )
         }
 
@@ -130,8 +132,10 @@
         private var pendingSessionTransitions: [SessionRuntimeSessionTransition] = []
         private var changeHandler: (@Sendable () -> Void)?
         private var isStreaming = false
-        /// True after a user `prompt` starts a turn until `turn_end` (Pi can clear `isStreaming` before the turn finishes).
+        /// True after a user `prompt` is accepted until `agent_end` (or error/aborted `message_end` / process exit).
         private var promptTurnCommitted = false
+        /// Set when a new-turn `prompt` is sent until Pi returns `response` for that command.
+        private var awaitingPromptAcceptance = false
         private var assistantTranscriptIndex: Int?
         private var currentAssistantText = ""
         /// Full assistant body accumulated from `text_delta` for the active turn (not subject to transcript trimming).
@@ -141,6 +145,7 @@
         private var toolNamesByCallID: [String: String] = [:]
         private var toolActivityItemIDByCallID: [String: UUID] = [:]
         private var toolAgentsByCallID: [String: String] = [:]
+        private var streamingObservationThrottle = PiRPCStreamingObservationThrottle()
         private var didRequestStop = false
         private var pendingSlashCommandsRequestID: String?
         private var pendingAvailableModelsRequestID: String?
@@ -161,6 +166,12 @@
         private var nextSetFollowUpModeRequestSequence = 0
         private var nextBashRequestSequence = 0
         private var nextExportHTMLRequestSequence = 0
+        private let nexusSessionID: UUID?
+        private var lastStdoutActivityUptimeNanoseconds: UInt64?
+        private var lastProviderPollUptimeNanoseconds: UInt64?
+        private var watchdogPollsSinceIdleThreshold = 0
+        private var providerStallDeclared = false
+        private var turnWatchdogTask: Task<Void, Never>?
 
         convenience init(
             executable: String,
@@ -172,15 +183,18 @@
             unexpectedTerminationMessageBuilder: ((Int32) -> String)? = nil,
             stopHandler: (() throws -> Void)? = nil,
             processEnvironment: [String: String]? = nil,
+            nexusSessionID: UUID? = nil,
             transportFactory: TransportFactory? = nil
         ) throws {
+            let sessionID = nexusSessionID
             let resolvedTransportFactory =
                 transportFactory ?? { executable, arguments, workingDirectory in
                     try ProcessPiRPCTransport(
                         executable: executable,
                         arguments: arguments,
                         workingDirectory: workingDirectory,
-                        environment: processEnvironment
+                        environment: processEnvironment,
+                        nexusSessionID: sessionID
                     )
                 }
 
@@ -193,6 +207,7 @@
                 unexpectedTerminationState: unexpectedTerminationState,
                 unexpectedTerminationMessageBuilder: unexpectedTerminationMessageBuilder,
                 stopHandler: stopHandler,
+                nexusSessionID: nexusSessionID,
                 transportFactory: resolvedTransportFactory,
                 performStartup: false
             )
@@ -209,15 +224,18 @@
             unexpectedTerminationMessageBuilder: ((Int32) -> String)? = nil,
             stopHandler: (() throws -> Void)? = nil,
             processEnvironment: [String: String]? = nil,
+            nexusSessionID: UUID? = nil,
             transportFactory: TransportFactory? = nil
         ) async throws {
+            let sessionID = nexusSessionID
             let resolvedTransportFactory =
                 transportFactory ?? { executable, arguments, workingDirectory in
                     try ProcessPiRPCTransport(
                         executable: executable,
                         arguments: arguments,
                         workingDirectory: workingDirectory,
-                        environment: processEnvironment
+                        environment: processEnvironment,
+                        nexusSessionID: sessionID
                     )
                 }
 
@@ -230,6 +248,7 @@
                 unexpectedTerminationState: unexpectedTerminationState,
                 unexpectedTerminationMessageBuilder: unexpectedTerminationMessageBuilder,
                 stopHandler: stopHandler,
+                nexusSessionID: nexusSessionID,
                 transportFactory: resolvedTransportFactory,
                 performStartup: false
             )
@@ -245,9 +264,11 @@
             unexpectedTerminationState: Session.State,
             unexpectedTerminationMessageBuilder: ((Int32) -> String)?,
             stopHandler: (() throws -> Void)?,
+            nexusSessionID: UUID?,
             transportFactory: TransportFactory,
             performStartup: Bool
         ) throws {
+            self.nexusSessionID = nexusSessionID
             self.stopHandler = stopHandler
             self.terminationStatusMessageBuilder = terminationStatusMessageBuilder
             self.unexpectedTerminationState = unexpectedTerminationState
@@ -273,7 +294,11 @@
                 extensionTitle = extensionUIState.title
                 pendingExtensionDialogs = extensionUIState.pendingDialogs
                 extensionNotifications = extensionUIState.notifications
-                extensionStatuses = extensionUIState.statuses
+                extensionStatuses = extensionUIState.statuses.map { status in
+                    SessionExtensionUIStatus(
+                        key: status.key,
+                        text: TerminalEscapeSequences.stripForPlainDisplay(status.text))
+                }
                 extensionWidgets = extensionUIState.widgets
                 extensionEditorText = extensionUIState.editorText
             }
@@ -335,10 +360,21 @@
                 throw startupError
             }
 
-            requestSessionStats()
+            if ProcessInfo.processInfo.environment["NEXUS_PI_RPC_STARTUP_SESSION_STATS"] == "1" {
+                requestSessionStats()
+            }
+            startTurnWatchdogIfNeeded()
+            if let nexusSessionID {
+                NexusSessionRuntimeDiagnostics.logPiTurnWatchdogStarted(
+                    sessionID: nexusSessionID,
+                    stallThresholdSeconds: Int(
+                        PiRPCTurnWatchdog.configuredStallThresholdNanoseconds() / 1_000_000_000)
+                )
+            }
         }
 
         deinit {
+            turnWatchdogTask?.cancel()
             try? transport.terminate()
         }
 
@@ -649,9 +685,18 @@
 
             lock.lock()
             let isCurrentlyStreaming = isStreaming
-            if isCurrentlyStreaming == false {
+            let startedNewTurn = isCurrentlyStreaming == false
+            if startedNewTurn {
                 isStreaming = true
                 promptTurnCommitted = true
+                awaitingPromptAcceptance = true
+                resetTurnWatchdogLocked()
+                if let nexusSessionID {
+                    NexusSessionRuntimeDiagnostics.logPiPromptDispatch(
+                        sessionID: nexusSessionID,
+                        startedNewTurn: true
+                    )
+                }
                 assistantTranscriptIndex = nil
                 currentAssistantText = ""
                 liveStreamedAssistantText = ""
@@ -673,7 +718,7 @@
 
             var payload = promptPayload(type: "prompt", prompt: resolvedPrompt)
             if isCurrentlyStreaming {
-                payload["streamingBehavior"] = "steer"
+                payload["streamingBehavior"] = piStreamingBehavior(for: resolvedPrompt)
             }
             try transport.sendLine(Self.jsonLine(payload))
         }
@@ -943,6 +988,12 @@
         }
 
         private func requestSessionStats() {
+            lock.lock()
+            let shouldReconcile = promptTurnCommitted
+            lock.unlock()
+            if shouldReconcile {
+                requestGetStateReconciliation()
+            }
             do {
                 try transport.sendLine(
                     Self.jsonLine([
@@ -952,6 +1003,157 @@
             } catch {
                 return
             }
+        }
+
+        /// Reconcile stuck Thinking… when Pi finished but lifecycle events were dropped (`get_state.isStreaming`).
+        private func requestGetStateReconciliation() {
+            do {
+                try transport.sendLine(
+                    Self.jsonLine([
+                        "id": "nexus-pi-reconcile-state-\(UUID().uuidString)",
+                        "type": "get_state",
+                    ]))
+            } catch {
+                return
+            }
+        }
+
+        /// Caller must hold `lock`. Only clears an open prompt when Pi reports it is not streaming.
+        private func reconcilePromptTurnFromPiGetStateLocked(_ data: [String: Any]) {
+            guard promptTurnCommitted,
+                bool(for: "isStreaming", in: data) == false
+            else {
+                return
+            }
+            finishPiAgentTurnLocked(stopReason: "stop")
+            resetTurnWatchdogLocked()
+        }
+
+        private func noteStdoutActivityForTurnWatchdogIfCommitted(type: String, object: [String: Any]) {
+            guard PiRPCTurnWatchdog.countsAsMeaningfulStdoutProgress(type: type, object: object) else {
+                return
+            }
+            lock.lock()
+            guard promptTurnCommitted else {
+                lock.unlock()
+                return
+            }
+            lastStdoutActivityUptimeNanoseconds = DispatchTime.now().uptimeNanoseconds
+            watchdogPollsSinceIdleThreshold = 0
+            lock.unlock()
+        }
+
+        private func resetTurnWatchdogLocked() {
+            providerStallDeclared = false
+            watchdogPollsSinceIdleThreshold = 0
+            lastProviderPollUptimeNanoseconds = nil
+            lastStdoutActivityUptimeNanoseconds = DispatchTime.now().uptimeNanoseconds
+        }
+
+        private func startTurnWatchdogIfNeeded() {
+            turnWatchdogTask?.cancel()
+            turnWatchdogTask = Task { [weak self] in
+                let tick = PiRPCTurnWatchdog.configuredWatchdogTickNanoseconds()
+                while Task.isCancelled == false {
+                    try? await Task.sleep(nanoseconds: tick)
+                    self?.runTurnWatchdogTick()
+                }
+            }
+        }
+
+        private func runTurnWatchdogTick() {
+            let snapshot:
+                (
+                    committed: Bool,
+                    declared: Bool,
+                    lastActivity: UInt64?,
+                    lastPoll: UInt64?,
+                    polls: Int,
+                    sessionID: UUID?,
+                    sessionFile: String?
+                )
+            lock.lock()
+            snapshot = (
+                promptTurnCommitted,
+                providerStallDeclared,
+                lastStdoutActivityUptimeNanoseconds,
+                lastProviderPollUptimeNanoseconds,
+                watchdogPollsSinceIdleThreshold,
+                nexusSessionID,
+                sessionLinkage?.sessionFile
+            )
+            lock.unlock()
+
+            let now = DispatchTime.now().uptimeNanoseconds
+            let action = PiRPCTurnWatchdog.evaluate(
+                promptTurnCommitted: snapshot.committed,
+                providerStallDeclared: snapshot.declared,
+                lastStdoutActivityUptimeNanoseconds: snapshot.lastActivity,
+                lastProviderPollUptimeNanoseconds: snapshot.lastPoll,
+                watchdogPollsSinceIdleThreshold: snapshot.polls,
+                nowUptimeNanoseconds: now,
+                pollIntervalNanoseconds: PiRPCTurnWatchdog.configuredPollIntervalNanoseconds(),
+                stallThresholdNanoseconds: PiRPCTurnWatchdog.configuredStallThresholdNanoseconds()
+            )
+
+            switch action {
+            case .none:
+                return
+            case .pollProviderState:
+                lock.lock()
+                lastProviderPollUptimeNanoseconds = now
+                watchdogPollsSinceIdleThreshold += 1
+                lock.unlock()
+                requestGetStateReconciliation()
+                requestSessionStatsForWatchdog()
+                if let sessionID = snapshot.sessionID {
+                    NexusSessionRuntimeDiagnostics.logPiTurnWatchdogPoll(
+                        sessionID: sessionID,
+                        idleThresholdSeconds: Int(
+                            PiRPCTurnWatchdog.configuredStallThresholdNanoseconds() / 1_000_000_000),
+                        piSessionFile: snapshot.sessionFile
+                    )
+                }
+            case .declareProviderStall(let idleSeconds):
+                declareProviderStall(idleSeconds: idleSeconds, piSessionFile: snapshot.sessionFile)
+            }
+        }
+
+        private func requestSessionStatsForWatchdog() {
+            do {
+                try transport.sendLine(
+                    Self.jsonLine([
+                        "id": "nexus-pi-watchdog-stats-\(UUID().uuidString)",
+                        "type": "get_session_stats",
+                    ]))
+            } catch {
+                return
+            }
+        }
+
+        private func declareProviderStall(idleSeconds: Int, piSessionFile: String?) {
+            lock.lock()
+            guard promptTurnCommitted, providerStallDeclared == false else {
+                lock.unlock()
+                return
+            }
+            providerStallDeclared = true
+            let sessionID = nexusSessionID
+            let message =
+                "Pi stopped responding during this turn (no RPC progress for \(idleSeconds)s). "
+                + "Use Stop or relaunch this Session, then try again."
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: message))
+            finishPiAgentTurnLocked(stopReason: "provider_stall")
+            lock.unlock()
+
+            if let sessionID {
+                NexusSessionRuntimeDiagnostics.logPiTurnWatchdogStallDeclared(
+                    sessionID: sessionID,
+                    idleSeconds: idleSeconds,
+                    piSessionFile: piSessionFile
+                )
+            }
+            notifyChange()
         }
 
         private func isAutomaticSessionStatsRequestID(_ requestID: String?) -> Bool {
@@ -1318,7 +1520,13 @@
                     lock.lock()
                     updateSessionLinkageLocked(from: response)
                     updateCurrentStateLocked(from: response)
-                    if activityItems.isEmpty {
+                    activityItems.removeAll {
+                        $0.kind == .error
+                            && $0.text.contains("Session stream disconnected")
+                    }
+                    if activityItems.contains(where: { $0.kind == .status && $0.text == "Session stream connected" })
+                        == false
+                    {
                         appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Session stream connected"))
                     }
                     if let currentModelStatus = currentModelStatusTextLocked(),
@@ -1339,130 +1547,86 @@
                 return
             }
 
-            if command == "get_state" {
+            switch command {
+            case "get_state":
                 handleGetStateResponse(response, requestID: id)
-                return
-            }
-
-            if command == "get_commands" {
+            case "get_commands":
                 handleGetCommandsResponse(response, requestID: id)
-                return
-            }
-
-            if command == "get_available_models" {
+            case "get_available_models":
                 handleAvailableModelsResponse(response, requestID: id)
-                return
-            }
-
-            if command == "set_model" {
+            case "set_model":
                 handleSetModelResponse(response, requestID: id)
-                return
-            }
-
-            if command == "cycle_model" {
+            case "cycle_model":
                 handleCycleModelResponse(response)
-                return
-            }
-
-            if command == "cycle_thinking_level" {
+            case "cycle_thinking_level":
                 handleCycleThinkingLevelResponse(response)
-                return
-            }
-
-            if command == "set_thinking_level" {
+            case "set_thinking_level":
                 handleSetThinkingLevelResponse(response, requestID: id)
-                return
-            }
-
-            if command == "set_steering_mode" {
+            case "set_steering_mode":
                 handleSetSteeringModeResponse(response, requestID: id)
-                return
-            }
-
-            if command == "set_follow_up_mode" {
+            case "set_follow_up_mode":
                 handleSetFollowUpModeResponse(response, requestID: id)
-                return
-            }
-
-            if command == "compact" {
+            case "compact":
                 handleCompactResponse(response)
-                return
-            }
-
-            if command == "set_auto_compaction" {
+            case "set_auto_compaction":
                 handleSetAutoCompactionResponse(response, requestID: id)
-                return
-            }
-
-            if command == "set_auto_retry" {
+            case "set_auto_retry":
                 handleSetAutoRetryResponse(response, requestID: id)
-                return
-            }
-
-            if command == "abort_retry" {
+            case "abort_retry":
                 handleAbortRetryResponse(response)
-                return
-            }
-
-            if command == "get_fork_messages" {
+            case "get_fork_messages":
                 handleGetForkMessagesResponse(response)
-                return
-            }
-
-            if command == "bash" {
+            case "bash":
                 handleBashResponse(response, requestID: id)
-                return
-            }
-
-            if command == "abort_bash" {
+            case "abort_bash":
                 handleAbortBashResponse(response)
-                return
-            }
-
-            if command == "export_html" {
+            case "export_html":
                 handleExportHTMLResponse(response, requestID: id)
-                return
-            }
-
-            if command == "get_messages" {
+            case "get_messages":
                 handleGetMessagesResponse(response)
-                return
-            }
-
-            if command == "get_session_stats" {
+            case "get_session_stats":
                 handleGetSessionStatsResponse(response, requestID: id)
-                return
-            }
-
-            if command == "get_last_assistant_text" {
+            case "get_last_assistant_text":
                 handleGetLastAssistantTextResponse(response)
-                return
-            }
-
-            if command == "fork" {
+            case "fork":
                 handleForkResponse(response)
-                return
-            }
-
-            if command == "clone" {
+            case "clone":
                 handleCloneResponse(response)
-                return
-            }
-
-            if command == "set_session_name" {
+            case "set_session_name":
                 handleSetSessionNameResponse(response, requestID: id)
-                return
-            }
-
-            if command == "prompt", bool(for: "success", in: response) == true {
-                requestSlashCommands()
+            case "new_session":
+                handleSessionTransitionResponse(
+                    response, successText: "Started a new session", cancelledText: "New session cancelled")
+            case "switch_session":
+                handleSessionTransitionResponse(
+                    response, successText: "Switched session", cancelledText: "Session switch cancelled")
+            case "prompt":
+                if bool(for: "success", in: response) == true {
+                    lock.lock()
+                    awaitingPromptAcceptance = false
+                    let sessionID = nexusSessionID
+                    lock.unlock()
+                    if let sessionID {
+                        NexusSessionRuntimeDiagnostics.logPiPromptAccepted(sessionID: sessionID)
+                    }
+                    requestSlashCommands()
+                } else {
+                    handlePromptSubmissionRejected(response)
+                }
+            default:
+                handleUnhandledResponse(response)
             }
         }
 
         private func handleOutputEvent(_ object: [String: Any], type: String) {
+            noteStdoutActivityForTurnWatchdogIfCommitted(type: type, object: object)
             switch type {
             case "agent_start":
                 notifyChange()
+            case "thinking_level_changed":
+                handleThinkingLevelChanged(object)
+            case "extension_error":
+                handleExtensionError(object)
             case "agent_end":
                 handleAgentEnd(object)
             case "message_update":
@@ -1787,6 +1951,7 @@
         }
 
         private func handleMessageUpdate(_ object: [String: Any]) {
+            noteStdoutActivityForTurnWatchdogIfCommitted(type: "message_update", object: object)
             guard let assistantMessageEvent = object["assistantMessageEvent"] as? [String: Any],
                 let eventType = string(for: "type", in: assistantMessageEvent)
             else {
@@ -1809,7 +1974,7 @@
                     trimTranscriptEntriesLocked()
                 }
                 lock.unlock()
-                notifyChange()
+                notifyChangeThrottledForAssistantTextDelta()
             case "thinking_start":
                 return
             case "thinking_end":
@@ -1824,54 +1989,57 @@
                 lock.unlock()
                 notifyChange()
             case "toolcall_end":
-                return
+                handleToolCallEnd(assistantMessageEvent)
+            case "done":
+                applyAssistantMessageStopReason(
+                    fromAssistantMessageEvent: assistantMessageEvent,
+                    object: object,
+                    defaultStopReason: "stop"
+                )
+            case "error":
+                applyAssistantMessageStopReason(
+                    fromAssistantMessageEvent: assistantMessageEvent,
+                    object: object,
+                    defaultStopReason: "error"
+                )
             default:
                 return
             }
         }
 
-        private func handleMessageEnd(_ object: [String: Any]) {
-            guard let message = object["message"] as? [String: Any],
-                string(for: "role", in: message) == "assistant",
-                let stopReason = string(for: "stopReason", in: message),
-                stopReason == "aborted" || stopReason == "error"
+        private func handleToolCallEnd(_ assistantMessageEvent: [String: Any]) {
+            guard let toolCall = assistantMessageEvent["toolCall"] as? [String: Any],
+                let toolCallID = string(for: "id", in: toolCall),
+                let toolName = string(for: "name", in: toolCall)
             else {
                 return
             }
 
-            let finalText = resolvedPiAssistantFinalText(from: message)
-            let errorText =
-                trimmedString(for: "errorMessage", in: message)
-                ?? (stopReason == "aborted" ? "Operation aborted" : "Error")
-
-            lock.lock()
-            if finalText.isEmpty == false {
-                ensureAssistantTranscriptEntryLocked()
-                if let assistantTranscriptIndex {
-                    transcriptEntries[assistantTranscriptIndex] = finalText
-                    trimTranscriptEntriesLocked()
-                }
-                appendActivityItemLocked(SessionActivityItem(kind: .message, text: "Pi: \(finalText)"))
-            }
-            finishPiAgentTurnLocked(stopReason: stopReason)
-            appendActivityItemLocked(SessionActivityItem(kind: .error, text: errorText))
-            lock.unlock()
-            requestSlashCommands()
-            notifyChange()
-        }
-
-        private func handleToolExecutionStart(_ object: [String: Any]) {
-            guard let toolCallID = string(for: "toolCallId", in: object),
-                let toolName = string(for: "toolName", in: object)
-            else {
-                return
+            let rawArguments = toolCall["arguments"]
+            let args: [String: Any]?
+            if let dictionary = rawArguments as? [String: Any] {
+                args = dictionary
+            } else if let jsonString = rawArguments as? String,
+                let data = jsonString.data(using: .utf8),
+                let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            {
+                args = parsed
+            } else {
+                args = nil
             }
 
-            let args = object["args"] as? [String: Any]
             let callText = toolExecutionCallText(toolName: toolName, args: args)
-            let activityItemID = UUID()
+            guard callText.isEmpty == false else {
+                return
+            }
 
             lock.lock()
+            if toolActivityItemIDByCallID[toolCallID] != nil {
+                lock.unlock()
+                return
+            }
+
+            let activityItemID = UUID()
             toolNamesByCallID[toolCallID] = toolName
             toolOutputByCallID[toolCallID] = ""
             toolActivityItemIDByCallID[toolCallID] = activityItemID
@@ -1883,6 +2051,192 @@
                 toolAgentsByCallID[toolCallID] = agent
             }
             appendActivityItemLocked(SessionActivityItem(id: activityItemID, kind: .command, text: callText))
+            lock.unlock()
+            notifyChange()
+        }
+
+        private func handleMessageEnd(_ object: [String: Any]) {
+            guard let message = object["message"] as? [String: Any],
+                string(for: "role", in: message) == "assistant"
+            else {
+                return
+            }
+
+            let stopReason = string(for: "stopReason", in: message) ?? "stop"
+            applyAssistantMessageStopReason(
+                message: message,
+                stopReason: stopReason,
+                errorMessage: trimmedString(for: "errorMessage", in: message)
+            )
+        }
+
+        /// Pi RPC: `message_end` and `message_update` (`done` / `error`) share the same stop-reason handling.
+        private func applyAssistantMessageStopReason(
+            fromAssistantMessageEvent assistantMessageEvent: [String: Any],
+            object: [String: Any],
+            defaultStopReason: String
+        ) {
+            let message =
+                (assistantMessageEvent["message"] as? [String: Any])
+                ?? (object["message"] as? [String: Any])
+            guard let message,
+                string(for: "role", in: message) == "assistant"
+            else {
+                return
+            }
+
+            let stopReason =
+                string(for: "reason", in: assistantMessageEvent)
+                ?? string(for: "stopReason", in: message)
+                ?? defaultStopReason
+            let errorMessage =
+                trimmedString(for: "error", in: assistantMessageEvent)
+                ?? trimmedString(for: "errorMessage", in: message)
+            applyAssistantMessageStopReason(
+                message: message,
+                stopReason: stopReason,
+                errorMessage: errorMessage
+            )
+        }
+
+        private func applyAssistantMessageStopReason(
+            message: [String: Any],
+            stopReason: String,
+            errorMessage: String?
+        ) {
+            let resolvedText = resolvedPiAssistantFinalText(from: message)
+            let shouldRequestSlashCommands: Bool
+
+            lock.lock()
+            switch stopReason {
+            case "aborted", "error":
+                let errorText =
+                    errorMessage
+                    ?? (stopReason == "aborted" ? "Operation aborted" : "Error")
+                if resolvedText.isEmpty == false {
+                    ensureAssistantTranscriptEntryLocked()
+                    if let assistantTranscriptIndex {
+                        transcriptEntries[assistantTranscriptIndex] = resolvedText
+                        trimTranscriptEntriesLocked()
+                    }
+                    appendActivityItemLocked(SessionActivityItem(kind: .message, text: "Pi: \(resolvedText)"))
+                }
+                finishPiAgentTurnLocked(stopReason: stopReason)
+                appendActivityItemLocked(SessionActivityItem(kind: .error, text: errorText))
+                shouldRequestSlashCommands = true
+            case "stop", "length", "toolUse":
+                // Provisional assistant text; user prompt stays open until `agent_end`.
+                if resolvedText.isEmpty == false {
+                    appendActivityItemLocked(SessionActivityItem(kind: .message, text: "Pi: \(resolvedText)"))
+                }
+                clearAssistantStreamingDraftBuffersLocked()
+                shouldRequestSlashCommands = false
+            default:
+                if resolvedText.isEmpty == false {
+                    appendActivityItemLocked(SessionActivityItem(kind: .message, text: "Pi: \(resolvedText)"))
+                }
+                clearAssistantStreamingDraftBuffersLocked()
+                shouldRequestSlashCommands = false
+            }
+            lock.unlock()
+
+            if shouldRequestSlashCommands {
+                requestSlashCommands()
+            }
+            notifyChange()
+        }
+
+        private func handlePromptSubmissionRejected(_ response: [String: Any]) {
+            let detail = string(for: "error", in: response) ?? "Pi rejected the prompt."
+            lock.lock()
+            if awaitingPromptAcceptance {
+                awaitingPromptAcceptance = false
+                finishPiAgentTurnLocked(stopReason: "error")
+            }
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: detail))
+            lock.unlock()
+            notifyChange()
+        }
+
+        private func handleExtensionError(_ object: [String: Any]) {
+            let path = trimmedString(for: "extensionPath", in: object) ?? "extension"
+            let eventName = trimmedString(for: "event", in: object) ?? "event"
+            let error = trimmedString(for: "error", in: object) ?? "Unknown extension error"
+            lock.lock()
+            appendActivityItemLocked(
+                SessionActivityItem(kind: .error, text: "Extension error (\(path), \(eventName)): \(error)"))
+            lock.unlock()
+            notifyChange()
+        }
+
+        /// Undocumented but emitted by Pi after model changes; keep current status in sync.
+        private func handleThinkingLevelChanged(_ object: [String: Any]) {
+            guard let level = trimmedString(for: "level", in: object) else {
+                return
+            }
+
+            lock.lock()
+            let clampedLevel = clampThinkingLevel(level, for: currentModel)
+            guard currentThinkingLevel != clampedLevel else {
+                lock.unlock()
+                return
+            }
+
+            currentThinkingLevel = clampedLevel
+            if let currentModelStatus = currentModelStatusTextLocked() {
+                appendActivityItemLocked(SessionActivityItem(kind: .status, text: currentModelStatus))
+            }
+            lock.unlock()
+            notifyChange()
+        }
+
+        /// Pi RPC `prompt.streamingBehavior` when the agent is already running (`docs/rpc.md`).
+        private func piStreamingBehavior(for prompt: SessionPrompt) -> String {
+            let trimmed = prompt.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.hasPrefix("/follow-up ") || trimmed.hasPrefix("/follow_up ") {
+                return "followUp"
+            }
+            return "steer"
+        }
+
+        private func handleToolExecutionStart(_ object: [String: Any]) {
+            guard let toolCallID = string(for: "toolCallId", in: object),
+                let toolName = string(for: "toolName", in: object)
+            else {
+                return
+            }
+
+            let args = object["args"] as? [String: Any]
+            let callText = toolExecutionCallText(toolName: toolName, args: args)
+
+            lock.lock()
+            let activityItemID: UUID
+            if let existing = toolActivityItemIDByCallID[toolCallID] {
+                // Planning phase (toolcall_end) already created the .command row for this call.
+                // Reuse its ID so execution updates/end populate detailText on the
+                // originally-recorded tool row (the one the feed segments render).
+                activityItemID = existing
+            } else if let planned = mostRecentUnfilledCommandItemIDLocked(matchingToolName: toolName) {
+                // IDs from toolcall_end (planning) and tool_execution_start may differ.
+                // Link the execution stream to the planned row so output lands in the
+                // accordion the user sees and opens.
+                toolActivityItemIDByCallID[toolCallID] = planned
+                activityItemID = planned
+            } else {
+                activityItemID = UUID()
+                toolActivityItemIDByCallID[toolCallID] = activityItemID
+                appendActivityItemLocked(SessionActivityItem(id: activityItemID, kind: .command, text: callText))
+            }
+
+            toolNamesByCallID[toolCallID] = toolName
+            toolOutputByCallID[toolCallID] = ""
+            if toolName.caseInsensitiveCompare("subagent") == .orderedSame,
+                let agent = args.flatMap({ string(for: "agent", in: $0) })?.trimmingCharacters(
+                    in: .whitespacesAndNewlines),
+                agent.isEmpty == false
+            {
+                toolAgentsByCallID[toolCallID] = agent
+            }
             lock.unlock()
             notifyChange()
         }
@@ -1900,6 +2254,14 @@
 
             let shouldNotify: Bool
             lock.lock()
+            if toolActivityItemIDByCallID[toolCallID] == nil,
+                let planned = mostRecentUnfilledCommandItemIDLocked()
+            {
+                // Bridge execution update to the planned tool row (from toolcall_end) even
+                // if tool_execution_start was not seen or used a different toolCallId.
+                // This ensures partial results land in the accordion the user opens.
+                toolActivityItemIDByCallID[toolCallID] = planned
+            }
             let previousText = toolOutputByCallID[toolCallID] ?? ""
             if previousText != outputText,
                 let activityItemID = toolActivityItemIDByCallID[toolCallID]
@@ -1928,6 +2290,14 @@
 
             let shouldNotify: Bool
             lock.lock()
+            if toolActivityItemIDByCallID[toolCallID] == nil,
+                let planned = mostRecentUnfilledCommandItemIDLocked()
+            {
+                // Bridge final execution result back to the planning tool row created by toolcall_end
+                // (or the most recent unfilled .command). This is the row rendered as the accordion
+                // in the structured feed; without the link, output never appears inside the open tool bubble.
+                toolActivityItemIDByCallID[toolCallID] = planned
+            }
             if let activityItemID = toolActivityItemIDByCallID[toolCallID],
                 outputText.isEmpty == false
             {
@@ -1978,41 +2348,110 @@
                     trigger: .turnEnd,
                     activityItem: finalActivityItem,
                     providerRuntimeLatencyMilliseconds: elapsedMilliseconds(since: startedAt),
-                    expectedThinkingIndicatorVisible: false
+                    expectedThinkingIndicatorVisible: promptTurnCommitted && isStreaming
                 )
             }
-            finishPiAgentTurnLocked(stopReason: "stop")
+            // Pi agent loop emits `turn_end` after every tool cycle; only `agent_end` ends the user prompt.
+            clearAssistantStreamingBuffersLocked()
+            streamingObservationThrottle.reset()
+            lastAssistantStopReason = "stop"
             lock.unlock()
             requestSlashCommands()
             requestSessionStats()
             notifyChange()
         }
 
-        private func clearAssistantStreamingBuffersLocked() {
+        /// Clears in-flight assistant text for the current assistant sub-message (between `message_end` and the next `text_delta`).
+        private func clearAssistantStreamingDraftBuffersLocked() {
             currentAssistantText = ""
             liveStreamedAssistantText = ""
             assistantTranscriptIndex = nil
+        }
+
+        private func clearAssistantStreamingBuffersLocked() {
+            clearAssistantStreamingDraftBuffersLocked()
             toolOutputByCallID.removeAll()
             toolNamesByCallID.removeAll()
             toolActivityItemIDByCallID.removeAll()
             toolAgentsByCallID.removeAll()
         }
 
-        /// Ends the user-visible agent turn (Thinking… + scroll policy) at `turn_end`.
+        /// Ends the user-visible agent turn (Thinking… + scroll policy) at `agent_end` or terminal failure.
         private func finishPiAgentTurnLocked(stopReason: String) {
+            awaitingPromptAcceptance = false
             clearAssistantStreamingBuffersLocked()
+            streamingObservationThrottle.reset()
             isStreaming = false
             promptTurnCommitted = false
             lastAssistantStopReason = stopReason
+            if stopReason != "provider_stall" {
+                providerStallDeclared = false
+            }
+            watchdogPollsSinceIdleThreshold = 0
+            lastProviderPollUptimeNanoseconds = nil
         }
 
         private func handleAgentEnd(_ object: [String: Any]) {
-            guard bool(for: "willRetry", in: object) != true else {
+            let willRetry = bool(for: "willRetry", in: object) == true
+            if let nexusSessionID {
+                NexusSessionRuntimeDiagnostics.logPiAgentEnd(sessionID: nexusSessionID, willRetry: willRetry)
+            }
+            guard willRetry == false else {
                 notifyChange()
                 return
             }
 
+            lock.lock()
+            let shouldFinalizeTurn = promptTurnCommitted
+            let finalText = shouldFinalizeTurn ? resolvedPiAssistantFinalTextFromAgentEndMessages(object) : ""
+            if shouldFinalizeTurn {
+                if finalText.isEmpty == false {
+                    let alreadyHasMatchingPiRow = activityItems.contains {
+                        $0.kind == .message && $0.text == "Pi: \(finalText)"
+                    }
+                    if alreadyHasMatchingPiRow == false {
+                        ensureAssistantTranscriptEntryLocked()
+                        if let assistantTranscriptIndex {
+                            transcriptEntries[assistantTranscriptIndex] = finalText
+                            trimTranscriptEntriesLocked()
+                        }
+                        appendActivityItemLocked(SessionActivityItem(kind: .message, text: "Pi: \(finalText)"))
+                    }
+                }
+                finishPiAgentTurnLocked(stopReason: "stop")
+            }
+            lock.unlock()
+
+            if shouldFinalizeTurn {
+                requestSlashCommands()
+                requestSessionStats()
+            }
             notifyChange()
+        }
+
+        /// Pi RPC clients often treat `agent_end` as run completion; `turn_end` may be absent or carry no assistant body.
+        private func resolvedPiAssistantFinalTextFromAgentEndMessages(_ object: [String: Any]) -> String {
+            guard let messages = object["messages"] as? [[String: Any]] else {
+                return resolvedPiAssistantFinalText(from: nil)
+            }
+            var lastAssistant = ""
+            for message in messages {
+                guard string(for: "role", in: message) == "assistant" else {
+                    continue
+                }
+                let text = assistantText(from: message).trimmingCharacters(in: .whitespacesAndNewlines)
+                if text.isEmpty == false {
+                    lastAssistant = text
+                }
+            }
+            if lastAssistant.isEmpty == false {
+                return resolvedPiAssistantFinalText(
+                    from: [
+                        "role": "assistant",
+                        "content": [["type": "text", "text": lastAssistant]],
+                    ])
+            }
+            return resolvedPiAssistantFinalText(from: nil)
         }
 
         private func handleTermination(status: Int32) {
@@ -2033,6 +2472,10 @@
                 } else {
                     appendActivityItemLocked(SessionActivityItem(kind: .status, text: trimmedStatusMessage))
                 }
+            }
+            let shouldFinalizeTurn = promptTurnCommitted
+            if shouldFinalizeTurn {
+                finishPiAgentTurnLocked(stopReason: "aborted")
             }
             lock.unlock()
 
@@ -2102,14 +2545,15 @@
                 lock.lock()
                 updateSessionLinkageLocked(from: response)
                 updateCurrentStateLocked(from: response)
+                if let data = response["data"] as? [String: Any] {
+                    reconcilePromptTurnFromPiGetStateLocked(data)
+                }
                 shouldQueueTransition =
                     requestID.map { pendingSessionTransitionStateRequestIDs.remove($0) != nil } ?? false
                 if shouldQueueTransition,
                     let metadata = sessionLinkage?.sessionRecordAdapterMetadata
                 {
-                    pendingSessionTransitions.append(
-                        SessionRuntimeSessionTransition(sessionRecordAdapterMetadata: metadata)
-                    )
+                    appendPendingSessionTransitionIfNeededLocked(metadata)
                 }
                 lock.unlock()
             } else {
@@ -2433,6 +2877,72 @@
             notifyChange()
         }
 
+        private func handleSessionTransitionResponse(
+            _ response: [String: Any],
+            successText: String,
+            cancelledText: String
+        ) {
+            guard bool(for: "success", in: response) == true else {
+                handleUnhandledResponse(response)
+                return
+            }
+
+            let data = response["data"] as? [String: Any]
+            if bool(for: "cancelled", in: data ?? [:]) == true {
+                lock.lock()
+                appendActivityItemLocked(SessionActivityItem(kind: .status, text: cancelledText))
+                lock.unlock()
+                notifyChange()
+                return
+            }
+
+            lock.lock()
+            appendActivityItemLocked(SessionActivityItem(kind: .status, text: successText))
+            lock.unlock()
+            notifyChange()
+            requestState(forSessionTransition: true)
+        }
+
+        private func appendPendingSessionTransitionIfNeeded(_ metadata: SessionRecordAdapterMetadata) {
+            lock.lock()
+            defer { lock.unlock() }
+            appendPendingSessionTransitionIfNeededLocked(metadata)
+        }
+
+        private func appendPendingSessionTransitionIfNeededLocked(_ metadata: SessionRecordAdapterMetadata) {
+            if let last = pendingSessionTransitions.last?.sessionRecordAdapterMetadata.piSessionLinkage,
+                let next = metadata.piSessionLinkage,
+                piSessionLinkageMatches(last, next)
+            {
+                return
+            }
+            pendingSessionTransitions.append(SessionRuntimeSessionTransition(sessionRecordAdapterMetadata: metadata))
+        }
+
+        private func piSessionLinkageMatches(_ lhs: PiSessionLinkage, _ rhs: PiSessionLinkage) -> Bool {
+            let lhsFile = lhs.sessionFile?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let rhsFile = rhs.sessionFile?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let lhsFile, let rhsFile, lhsFile.isEmpty == false, lhsFile == rhsFile {
+                return true
+            }
+            let lhsID = lhs.piSessionID?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let rhsID = rhs.piSessionID?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return lhsID != nil && lhsID == rhsID && lhsID?.isEmpty == false
+        }
+
+        private func handleUnhandledResponse(_ response: [String: Any]) {
+            guard bool(for: "success", in: response) != true else {
+                return
+            }
+
+            let command = string(for: "command", in: response) ?? "rpc"
+            let detail = string(for: "error", in: response) ?? "Pi command failed: \(command)"
+            lock.lock()
+            appendActivityItemLocked(SessionActivityItem(kind: .error, text: detail))
+            lock.unlock()
+            notifyChange()
+        }
+
         private func handleBashResponse(_ response: [String: Any], requestID: String?) {
             lock.lock()
             let requestedCommand = requestID.flatMap { pendingBashCommandsByRequestID.removeValue(forKey: $0) }
@@ -2560,9 +3070,17 @@
 
         private func handleForkResponse(_ response: [String: Any]) {
             if bool(for: "success", in: response) == true {
-                if let data = response["data"] as? [String: Any],
-                    let selectedText = trimmedString(for: "text", in: data)
-                {
+                let data = response["data"] as? [String: Any]
+                let cancelled = bool(for: "cancelled", in: data ?? [:]) == true
+                if cancelled {
+                    lock.lock()
+                    appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Fork cancelled"))
+                    lock.unlock()
+                    notifyChange()
+                    return
+                }
+
+                if let selectedText = trimmedString(for: "text", in: data ?? [:]) {
                     lock.lock()
                     appendActivityItemLocked(
                         SessionActivityItem(
@@ -2581,6 +3099,15 @@
 
         private func handleCloneResponse(_ response: [String: Any]) {
             if bool(for: "success", in: response) == true {
+                let data = response["data"] as? [String: Any]
+                if bool(for: "cancelled", in: data ?? [:]) == true {
+                    lock.lock()
+                    appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Clone cancelled"))
+                    lock.unlock()
+                    notifyChange()
+                    return
+                }
+
                 lock.lock()
                 appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Cloned the current session"))
                 lock.unlock()
@@ -2680,13 +3207,40 @@
                     return nil
                 }
 
+                let sourceInfo = command["sourceInfo"] as? [String: Any]
+                let path =
+                    string(for: "path", in: command)
+                    ?? sourceInfo.flatMap { string(for: "path", in: $0) }
+                let location =
+                    string(for: "location", in: command).flatMap(SessionSlashCommandLocation.init(rawValue:))
+                    ?? slashCommandLocation(fromSourceInfo: sourceInfo, fallbackPath: path)
+
                 return SessionSlashCommand(
                     name: name,
                     description: string(for: "description", in: command),
                     source: source,
-                    location: string(for: "location", in: command).flatMap(SessionSlashCommandLocation.init(rawValue:)),
-                    path: string(for: "path", in: command)
+                    location: location,
+                    path: path
                 )
+            }
+        }
+
+        private func slashCommandLocation(fromSourceInfo sourceInfo: [String: Any]?, fallbackPath: String?)
+            -> SessionSlashCommandLocation?
+        {
+            guard let sourceInfo else {
+                return fallbackPath == nil ? nil : .path
+            }
+
+            switch trimmedString(for: "scope", in: sourceInfo) {
+            case "user":
+                return .user
+            case "project":
+                return .project
+            case "temporary":
+                return .path
+            default:
+                return fallbackPath == nil ? nil : .path
             }
         }
 
@@ -3103,10 +3657,8 @@
 
             lock.lock()
             sessionLinkage = linkage
-            pendingSessionTransitions.append(
-                SessionRuntimeSessionTransition(sessionRecordAdapterMetadata: metadata)
-            )
             lock.unlock()
+            appendPendingSessionTransitionIfNeeded(metadata)
             notifyChange()
         }
 
@@ -3307,41 +3859,11 @@
         }
 
         private func toolExecutionResultText(_ object: [String: Any]?) -> String {
-            toolExecutionResultText(from: object)
+            PiToolExecutionResultText.extract(from: object)
         }
 
         private func toolExecutionResultText(from value: Any?) -> String {
-            switch value {
-            case let string as String:
-                return string.trimmingCharacters(in: .whitespacesAndNewlines)
-            case let object as [String: Any]:
-                if let text = string(for: "text", in: object)
-                    ?? string(for: "delta", in: object)
-                    ?? string(for: "message", in: object)
-                    ?? string(for: "output", in: object)
-                    ?? string(for: "summary", in: object)
-                {
-                    return text
-                }
-
-                for key in ["content", "result", "partialResult"] {
-                    let text = toolExecutionResultText(from: object[key])
-                    if text.isEmpty == false {
-                        return text
-                    }
-                }
-
-                return ""
-            case let array as [Any]:
-                let text =
-                    array
-                    .map { toolExecutionResultText(from: $0) }
-                    .filter { $0.isEmpty == false }
-                    .joined()
-                return text.trimmingCharacters(in: .whitespacesAndNewlines)
-            default:
-                return ""
-            }
+            PiToolExecutionResultText.extract(from: value)
         }
 
         private func incrementalToolOutput(from previousText: String, to nextText: String) -> String {
@@ -3427,7 +3949,8 @@
 
         private func upsertExtensionStatusLocked(_ status: SessionExtensionUIStatus) {
             extensionStatuses.removeAll { $0.key == status.key }
-            extensionStatuses.append(status)
+            let plainText = TerminalEscapeSequences.stripForPlainDisplay(status.text)
+            extensionStatuses.append(SessionExtensionUIStatus(key: status.key, text: plainText))
         }
 
         private func upsertExtensionWidgetLocked(_ widget: SessionExtensionUIWidget) {
@@ -3457,12 +3980,15 @@
         }
 
         private func appendActivityItemLocked(_ item: SessionActivityItem) {
-            let trimmedText = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedText = TerminalEscapeSequences.stripForPlainDisplay(
+                item.text.trimmingCharacters(in: .whitespacesAndNewlines))
             guard trimmedText.isEmpty == false else {
                 return
             }
 
-            let trimmedDetailText = item.detailText?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedDetailText = item.detailText.map {
+                TerminalEscapeSequences.stripForPlainDisplay($0.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
             activityItems.append(
                 SessionActivityItem(
                     id: item.id,
@@ -3489,7 +4015,8 @@
                 return
             }
 
-            let trimmedDetailText = detailText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedDetailText = TerminalEscapeSequences.stripForPlainDisplay(
+                detailText.trimmingCharacters(in: .whitespacesAndNewlines))
             let updatedItem = SessionActivityItem(
                 id: activityItems[index].id,
                 kind: activityItems[index].kind,
@@ -3501,6 +4028,21 @@
             if let overflowIndex = persistedActivityItemOverflow.firstIndex(where: { $0.id == id }) {
                 persistedActivityItemOverflow[overflowIndex] = updatedItem
             }
+        }
+
+        /// Returns the ID of the most recent .command activity item that has no (or empty) detailText yet.
+        /// Used to bridge `toolcall_end` (planning phase, which creates the visible tool row in the feed)
+        /// to later `tool_execution_*` events (which may use a different toolCallId or arrive after
+        /// the planning map was not consulted). This ensures tool output appears inside the accordion
+        /// the user actually sees and expands.
+        private func mostRecentUnfilledCommandItemIDLocked(matchingToolName toolName: String? = nil) -> UUID? {
+            for item in activityItems.reversed() {
+                guard item.kind == .command else { continue }
+                let hasDetail = item.detailText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                if hasDetail { continue }
+                return item.id
+            }
+            return nil
         }
 
         private func assistantText(from message: [String: Any]?) -> String {
@@ -3641,6 +4183,41 @@
             handler?()
         }
 
+        private func notifyChangeThrottledForAssistantTextDelta() {
+            let shouldNotifyImmediately: Bool
+            let flushGeneration: UInt64?
+            lock.lock()
+            shouldNotifyImmediately = streamingObservationThrottle.shouldNotifyImmediatelyForStreamingDelta()
+            flushGeneration =
+                shouldNotifyImmediately
+                ? nil
+                : streamingObservationThrottle.beginScheduledFlushIfNeeded()
+            lock.unlock()
+
+            if shouldNotifyImmediately {
+                notifyChange()
+                return
+            }
+
+            guard let flushGeneration else {
+                return
+            }
+
+            let interval = 0.4
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+                guard let self else {
+                    return
+                }
+                let shouldFlush = self.streamingObservationThrottle.consumePendingNotify(
+                    forScheduledFlushGeneration: flushGeneration
+                )
+                if shouldFlush {
+                    self.notifyChange()
+                }
+            }
+        }
+
         static func transportArguments(sessionLinkage: PiSessionLinkage?) -> [String] {
             var arguments = ["--mode", "rpc"]
 
@@ -3695,6 +4272,7 @@
         private let arguments: [String]
         private let workingDirectory: String?
         private let environment: [String: String]?
+        private let nexusSessionID: UUID?
         private let lock = NSLock()
         private var stdoutLineHandler: (@Sendable (String) -> Void)?
         private var terminationHandler: (@Sendable (Int32) -> Void)?
@@ -3704,13 +4282,18 @@
         private var stderrHandle: FileHandle?
         private var stdoutBuffer = Data()
 
-        init(executable: String, arguments: [String], workingDirectory: String?, environment: [String: String]? = nil)
-            throws
-        {
+        init(
+            executable: String,
+            arguments: [String],
+            workingDirectory: String?,
+            environment: [String: String]? = nil,
+            nexusSessionID: UUID? = nil
+        ) throws {
             self.executable = executable
             self.arguments = arguments
             self.workingDirectory = workingDirectory
             self.environment = environment
+            self.nexusSessionID = nexusSessionID
         }
 
         func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
@@ -3750,6 +4333,15 @@
 
             try process.run()
 
+            if let nexusSessionID {
+                NexusSessionRuntimeDiagnostics.logPiProcessStarted(
+                    sessionID: nexusSessionID,
+                    childPID: process.processIdentifier,
+                    executable: invocation.executable,
+                    arguments: invocation.arguments
+                )
+            }
+
             let stdoutHandle = stdoutPipe.fileHandleForReading
             stdoutHandle.readabilityHandler = { [weak self] handle in
                 let data = handle.availableData
@@ -3777,6 +4369,7 @@
         }
 
         func sendLine(_ line: String) throws {
+            Self.appendWireRecord(stream: "stdin", line: line, nexusSessionID: nexusSessionID)
             guard let data = (line + "\n").data(using: .utf8) else {
                 throw PiRPCSessionRuntimeError.startupFailed("Failed to encode Pi RPC input.")
             }
@@ -3888,17 +4481,66 @@
             lock.unlock()
 
             for line in lines where line.isEmpty == false {
+                Self.appendWireRecord(stream: "stdout", line: line, nexusSessionID: nexusSessionID)
                 handler?(line)
             }
         }
 
+        private static func appendWireRecord(stream: String, line: String, nexusSessionID: UUID?) {
+            guard
+                let base = ProcessInfo.processInfo.environment["NEXUS_PI_RPC_RECORD_DIR"]?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                base.isEmpty == false
+            else {
+                return
+            }
+            let sessionToken = nexusSessionID?.uuidString ?? "unknown"
+            let directory = URL(fileURLWithPath: base, isDirectory: true)
+                .appendingPathComponent(sessionToken, isDirectory: true)
+            let fileURL = directory.appendingPathComponent("\(stream).jsonl")
+            let payload: [String: Any] = [
+                "t": ProcessInfo.processInfo.systemUptime,
+                "line": line,
+            ]
+            guard let data = try? JSONSerialization.data(withJSONObject: payload),
+                let record = String(data: data, encoding: .utf8)
+            else {
+                return
+            }
+            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            guard let handle = try? FileHandle(forWritingTo: fileURL) else {
+                if FileManager.default.createFile(atPath: fileURL.path, contents: nil) == false {
+                    return
+                }
+                guard let newHandle = try? FileHandle(forWritingTo: fileURL) else {
+                    return
+                }
+                defer { try? newHandle.close() }
+                newHandle.seekToEndOfFile()
+                newHandle.write(Data((record + "\n").utf8))
+                return
+            }
+            defer { try? handle.close() }
+            handle.seekToEndOfFile()
+            handle.write(Data((record + "\n").utf8))
+        }
+
         private func handleTermination(_ status: Int32) {
             let handler: (@Sendable (Int32) -> Void)?
+            let childPID: Int32?
+            let sessionID: UUID?
             lock.lock()
             stdoutHandle?.readabilityHandler = nil
             stderrHandle?.readabilityHandler = nil
             handler = terminationHandler
+            childPID = process?.processIdentifier
+            sessionID = nexusSessionID
             lock.unlock()
+            NexusSessionRuntimeDiagnostics.logPiProcessTerminated(
+                sessionID: sessionID,
+                childPID: childPID,
+                exitStatus: status
+            )
             handler?(status)
         }
     }

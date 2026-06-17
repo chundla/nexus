@@ -99,10 +99,18 @@
         }
 
         private var visibleSegments: [StructuredSessionFeedSegment] {
-            structuredSessionVisibleFeedSegments(
-                in: feedPresentation,
-                visibleTailItemCount: visibleTailRowCount
-            ) ?? []
+            let all = feedPresentation.feedSegments ?? []
+            let raw =
+                structuredSessionVisibleFeedSegments(
+                    in: feedPresentation,
+                    visibleTailItemCount: visibleTailRowCount
+                ) ?? []
+            return raw.filter { segment in
+                guard case .standalone(let item) = segment else {
+                    return true
+                }
+                return structuredSessionPiShouldRenderStandaloneFeedSegment(item: item, in: all)
+            }
         }
 
         @ViewBuilder

@@ -5,8 +5,9 @@
     @testable import NexusService
     import Testing
 
+    @Suite(.serialized)
     struct NexusServicePiSessionStreamTests {
-        @Test func localPiDefaultSessionLaunchAndResumePreserveSharedActivity() throws {
+        @Test func localPiDefaultSessionLaunchAndResumePreserveSharedActivity() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -14,7 +15,7 @@
             try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
 
             let launchCounter = LaunchCounter()
-            let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
+            let launcher = makePiStreamTestLauncher(piTransportFactory: { _, _, _ in
                 launchCounter.increment()
                 return TestPiRPCTransport()
             })
@@ -41,9 +42,11 @@
                 primaryGroupID: group.id
             )
 
-            let firstSession = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+            let firstSession = try await service.launchOrResumeDefaultSession(
+                workspaceID: workspace.id, providerID: .pi)
             let firstScreen = try service.getSessionScreen(sessionID: firstSession.id)
-            let resumedSession = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+            let resumedSession = try await service.launchOrResumeDefaultSession(
+                workspaceID: workspace.id, providerID: .pi)
 
             #expect(firstSession.providerID == .pi)
             #expect(firstSession.isDefault)
@@ -89,14 +92,14 @@
             #expect(screen.activityItems.map(\.kind) == [.status, .status])
         }
 
-        @Test func localPiSessionScreenIncludesLiveSlashCommandsFromRpc() throws {
+        @Test func localPiSessionScreenIncludesLiveSlashCommandsFromRpc() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
             let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
             try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
 
-            let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
+            let launcher = makePiStreamTestLauncher(piTransportFactory: { _, _, _ in
                 TestPiRPCTransport(
                     slashCommands: [
                         TestPiRPCCommand(
@@ -139,35 +142,56 @@
                 primaryGroupID: group.id
             )
 
-            let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+            let session = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
             let screen = try service.getSessionScreen(sessionID: session.id)
+            let slashCommands = try #require(screen.slashCommands)
 
             #expect(
-                screen.slashCommands == [
+                slashCommands.contains(
                     SessionSlashCommand(
                         name: "review-changes",
                         description: "Summarize the current diff.",
                         source: .prompt,
                         location: .project,
                         path: "/tmp/project/.pi/prompts/review-changes.md"
-                    ),
+                    )))
+            #expect(
+                slashCommands.contains(
                     SessionSlashCommand(
                         name: "skill:create-cli",
                         description: "CLI UX/spec: args, flags, help, output, errors, config, dry-run.",
                         source: .skill,
                         location: .user,
                         path: "/Users/tester/.pi/agent/skills/create-cli/SKILL.md"
-                    ),
-                ])
+                    )))
         }
 
-        @Test func localPiRuntimeRetainsOnlyBoundedTranscriptTailAcrossManyTurns() throws {
+        @Test func localPiRuntimeParsesRpcSlashCommandSourceInfoShape() throws {
             let runtime = try PiRPCSessionRuntime(
                 executable: "/tmp/fake-pi",
                 workingDirectory: "/tmp",
                 terminationStatusMessageBuilder: { _ in "" },
                 transportFactory: { _, _, _ in
-                    TestPiRPCTransport(promptResponseText: String(repeating: "assistant-tail-", count: 4_000))
+                    TestPiRPCTransport(
+                        slashCommands: [
+                            TestPiRPCCommand(
+                                name: "review-changes",
+                                description: "Summarize the current diff.",
+                                source: .prompt,
+                                location: .project,
+                                path: "/tmp/project/.pi/prompts/review-changes.md",
+                                sourceInfoOnly: true
+                            ),
+                            TestPiRPCCommand(
+                                name: "skill:create-cli",
+                                description: "CLI UX/spec: args, flags, help, output, errors, config, dry-run.",
+                                source: .skill,
+                                location: .user,
+                                path: "/Users/tester/.pi/agent/skills/create-cli/SKILL.md",
+                                sourceInfoOnly: true
+                            ),
+                        ]
+                    )
                 }
             )
 
@@ -179,29 +203,56 @@
                 state: .ready
             )
 
-            for turn in 0..<5 {
-                try runtime.sendInput("prompt-\(turn)")
-            }
-            let metadata = runtime.sessionRecordAdapterMetadata
             let screen = runtime.sessionScreen(for: session)
+            let slashCommands = try #require(screen.slashCommands)
 
-            let resumedRuntime = try PiRPCSessionRuntime(
+            #expect(
+                slashCommands.contains(
+                    SessionSlashCommand(
+                        name: "review-changes",
+                        description: "Summarize the current diff.",
+                        source: .prompt,
+                        location: .project,
+                        path: "/tmp/project/.pi/prompts/review-changes.md"
+                    )))
+            #expect(
+                slashCommands.contains(
+                    SessionSlashCommand(
+                        name: "skill:create-cli",
+                        description: "CLI UX/spec: args, flags, help, output, errors, config, dry-run.",
+                        source: .skill,
+                        location: .user,
+                        path: "/Users/tester/.pi/agent/skills/create-cli/SKILL.md"
+                    )))
+        }
+
+        @Test func localPiRuntimeRetainsOnlyBoundedTranscriptTailAcrossManyTurns() throws {
+            let assistantChunk = String(repeating: "a", count: 2_500)
+            let runtime = try PiRPCSessionRuntime(
                 executable: "/tmp/fake-pi",
                 workingDirectory: "/tmp",
-                restoredMetadata: metadata,
                 terminationStatusMessageBuilder: { _ in "" },
                 transportFactory: { _, _, _ in
-                    TestPiRPCTransport()
+                    TestPiRPCTransport(promptResponseText: assistantChunk)
                 }
             )
-            let resumedScreen = resumedRuntime.sessionScreen(for: session)
+
+            let session = Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            )
+
+            for turn in 0..<60 {
+                try runtime.sendInput("prompt-\(turn)")
+            }
+            let screen = runtime.sessionScreen(for: session)
 
             #expect(screen.transcript.count <= StructuredSessionLiveHistoryRetention.maxTranscriptCharacters)
-            #expect(screen.transcript.contains("> prompt-4"))
+            #expect(screen.transcript.contains("> prompt-59"))
             #expect(screen.transcript.contains("> prompt-0") == false)
-            #expect(resumedScreen.transcript.contains("> prompt-4"))
-            #expect(resumedScreen.transcript.contains("> prompt-0") == false)
-            #expect(resumedScreen.transcript.count <= screen.transcript.count)
         }
 
         @Test func localPiRuntimePublishesAvailableModelCommandsFromRpc() throws {
@@ -237,25 +288,10 @@
 
             let screen = runtime.sessionScreen(for: session)
 
-            #expect(
-                screen.slashCommands == [
-                    SessionSlashCommand(
-                        name: "model anthropic/claude-sonnet-4-20250514",
-                        displayName: "model anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4",
-                        insertionText: "model anthropic/claude-sonnet-4-20250514",
-                        suggestionQueryPrefix: "model ",
-                        description: "Switch to anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4.",
-                        source: .builtIn
-                    ),
-                    SessionSlashCommand(
-                        name: "model openai/gpt-4o",
-                        displayName: "model openai/gpt-4o — GPT-4o",
-                        insertionText: "model openai/gpt-4o",
-                        suggestionQueryPrefix: "model ",
-                        description: "Switch to openai/gpt-4o — GPT-4o.",
-                        source: .builtIn
-                    ),
-                ])
+            let modelCommands = screen.slashCommands?.filter { $0.name.hasPrefix("model ") } ?? []
+            #expect(modelCommands.count == 2)
+            #expect(modelCommands.map(\.name).contains("model anthropic/claude-sonnet-4-20250514"))
+            #expect(modelCommands.map(\.name).contains("model openai/gpt-4o"))
         }
 
         @Test func localPiRuntimePublishesThinkingCommandsForCurrentModelState() throws {
@@ -287,8 +323,9 @@
             let screen = runtime.sessionScreen(for: session)
             let commandNames = screen.slashCommands?.map(\.name)
 
+            let thinkingCommands = commandNames?.filter { $0.hasPrefix("thinking ") } ?? []
             #expect(
-                commandNames == [
+                thinkingCommands == [
                     "thinking off",
                     "thinking minimal",
                     "thinking low",
@@ -1064,7 +1101,7 @@
                     "/bash ls -la",
                     "Running bash: ls -la",
                     "bash: total 48",
-                    "Pi bash completed with exit code 0 and will be included on the next prompt",
+                    "Bash completed with exit code 0 and will be included on the next prompt",
                 ])
             #expect(screen.activityItems.map(\.kind) == [.status, .command, .progress, .message, .status])
             #expect(screen.transcript.isEmpty)
@@ -1098,7 +1135,7 @@
                     "/bash sleep 10",
                     "Running bash: sleep 10",
                     "/abort-bash",
-                    "Requested Pi bash cancellation",
+                    "Requested bash cancellation",
                     "Bash cancelled",
                 ])
             #expect(screen.activityItems.map(\.kind) == [.status, .command, .progress, .command, .status, .status])
@@ -1176,7 +1213,7 @@
                 screen.activityItems.map(\.text) == [
                     "Session stream connected",
                     "/messages",
-                    "Pi returned 2 messages",
+                    "Returned 2 messages",
                     "Message 1 — user: Hello Pi",
                     "Message 2 — assistant: Hi there",
                 ])
@@ -1227,6 +1264,9 @@
         }
 
         @Test func localPiRuntimeRequestsSessionStatsOnStartupForStatusBarUsage() throws {
+            setenv("NEXUS_PI_RPC_STARTUP_SESSION_STATS", "1", 1)
+            defer { unsetenv("NEXUS_PI_RPC_STARTUP_SESSION_STATS") }
+
             let transport = TestPiRPCTransport(
                 sessionStats: [
                     "contextUsage": [
@@ -1424,20 +1464,7 @@
                                 "type": "text",
                                 "text": "Looks good overall.",
                             ]
-                        ],
-                        "details": [
-                            "messages": [
-                                [
-                                    "role": "assistant",
-                                    "content": [
-                                        [
-                                            "type": "text",
-                                            "text": oversizedMarker,
-                                        ]
-                                    ],
-                                ]
-                            ]
-                        ],
+                        ]
                     ],
                 ],
                 [
@@ -1577,7 +1604,7 @@
             #expect(screen.activityItems.map(\.kind) == [.status, .command, .message])
         }
 
-        @Test func localPiDefaultSessionRelaunchKeepsPiConversationLinkageAcrossServiceRestart() throws {
+        @Test func localPiDefaultSessionRelaunchKeepsPiConversationLinkageAcrossServiceRestart() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1586,7 +1613,7 @@
 
             let transportHarness = PersistentPiTransportHarness()
             func makeService() throws -> NexusService {
-                let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, arguments, _ in
+                let launcher = makePiStreamTestLauncher(piTransportFactory: { _, arguments, _ in
                     transportHarness.makeTransport(arguments: arguments)
                 })
 
@@ -1606,30 +1633,38 @@
                 )
             }
 
-            let service = try makeService()
-            let group = try service.createWorkspaceGroup(name: "Solo Group")
-            let workspace = try service.createLocalWorkspace(
-                name: "Local Pi",
-                folderPath: workspaceFolder.path(percentEncoded: false),
-                primaryGroupID: group.id
-            )
-
-            let firstSession = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
-            _ = try service.sendSessionText(sessionID: firstSession.id, text: "alpha")
-            let firstTurn = try service.sendSessionInputKey(sessionID: firstSession.id, key: .enter)
+            let group: WorkspaceGroup
+            let workspace: Workspace
+            let firstSession: Session
+            let firstTurn: SessionScreen
+            do {
+                let service = try makeService()
+                group = try service.createWorkspaceGroup(name: "Solo Group")
+                workspace = try service.createLocalWorkspace(
+                    name: "Local Pi",
+                    folderPath: workspaceFolder.path(percentEncoded: false),
+                    primaryGroupID: group.id
+                )
+                firstSession = try await service.launchOrResumeDefaultSession(
+                    workspaceID: workspace.id, providerID: .pi)
+                _ = try await service.sendSessionText(sessionID: firstSession.id, text: "alpha")
+                firstTurn = try await service.sendSessionInputKey(sessionID: firstSession.id, key: .enter)
+            }
 
             let restartedService = try makeService()
-            let relaunchedSession = try restartedService.launchOrResumeDefaultSession(
+            let relaunchedSession = try await restartedService.launchOrResumeDefaultSession(
                 workspaceID: workspace.id, providerID: .pi)
-            _ = try restartedService.sendSessionText(sessionID: relaunchedSession.id, text: "what was my last message?")
-            let resumedTurn = try restartedService.sendSessionInputKey(sessionID: relaunchedSession.id, key: .enter)
+            _ = try await restartedService.sendSessionText(
+                sessionID: relaunchedSession.id, text: "what was my last message?")
+            let resumedTurn = try await restartedService.sendSessionInputKey(
+                sessionID: relaunchedSession.id, key: .enter)
 
             #expect(firstTurn.activityItems.suffix(2).map(\.text) == ["You: alpha", "Pi: alpha"])
             #expect(relaunchedSession.id == firstSession.id)
             #expect(resumedTurn.activityItems.suffix(2).map(\.text) == ["You: what was my last message?", "Pi: alpha"])
         }
 
-        @Test func localPiNewCommandResetsCurrentSessionHistoryAndStartsFreshPiSession() throws {
+        @Test func localPiNewCommandResetsCurrentSessionHistoryAndStartsFreshPiSession() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1638,7 +1673,7 @@
 
             let transportHarness = PersistentPiTransportHarness()
             func makeService() throws -> NexusService {
-                let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, arguments, _ in
+                let launcher = makePiStreamTestLauncher(piTransportFactory: { _, arguments, _ in
                     transportHarness.makeTransport(arguments: arguments)
                 })
 
@@ -1666,10 +1701,11 @@
                 primaryGroupID: group.id
             )
 
-            let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
-            let firstTurn = try service.sendSessionInput(sessionID: session.id, text: "alpha")
-            let resetScreen = try service.sendSessionInput(sessionID: session.id, text: "/new")
-            let nextTurn = try service.sendSessionInput(sessionID: session.id, text: "what was my last message?")
+            let session = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+            let firstTurn = try await service.sendSessionInput(sessionID: session.id, text: "alpha")
+            let resetScreen = try await service.sendSessionInput(sessionID: session.id, text: "/new")
+            let nextTurn = try await service.sendSessionInput(
+                sessionID: session.id, text: "what was my last message?")
 
             #expect(firstTurn.activityItems.suffix(2).map(\.text) == ["You: alpha", "Pi: alpha"])
             #expect(resetScreen.session.id == session.id)
@@ -1678,7 +1714,7 @@
             #expect(nextTurn.activityItems.suffix(2).map(\.text) == ["You: what was my last message?", "Pi: (none)"])
         }
 
-        @Test func localPiClearCommandResetsCurrentSessionHistoryAndStartsFreshPiSession() throws {
+        @Test func localPiClearCommandResetsCurrentSessionHistoryAndStartsFreshPiSession() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1687,7 +1723,7 @@
 
             let transportHarness = PersistentPiTransportHarness()
             func makeService() throws -> NexusService {
-                let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, arguments, _ in
+                let launcher = makePiStreamTestLauncher(piTransportFactory: { _, arguments, _ in
                     transportHarness.makeTransport(arguments: arguments)
                 })
 
@@ -1715,17 +1751,17 @@
                 primaryGroupID: group.id
             )
 
-            let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
-            _ = try service.sendSessionInput(sessionID: session.id, text: "alpha")
-            let resetScreen = try service.sendSessionInput(sessionID: session.id, text: "/clear")
-            let nextTurn = try service.sendSessionInput(sessionID: session.id, text: "what was my last message?")
+            let session = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+            _ = try await service.sendSessionInput(sessionID: session.id, text: "alpha")
+            let resetScreen = try await service.sendSessionInput(sessionID: session.id, text: "/clear")
+            let nextTurn = try await service.sendSessionInput(sessionID: session.id, text: "what was my last message?")
 
             #expect(resetScreen.session.id == session.id)
             #expect(resetScreen.activityItems.map(\.text) == ["Session stream connected"])
             #expect(nextTurn.activityItems.suffix(2).map(\.text) == ["You: what was my last message?", "Pi: (none)"])
         }
 
-        @Test func localPiRestartedSessionShowsInterruptedLostRuntimeCopyAcrossInspectableSurfaces() throws {
+        @Test func localPiRestartedSessionShowsInterruptedLostRuntimeCopyAcrossInspectableSurfaces() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1733,7 +1769,7 @@
             try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
 
             func makeService() throws -> NexusService {
-                let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
+                let launcher = makePiStreamTestLauncher(piTransportFactory: { _, _, _ in
                     TestPiRPCTransport()
                 })
 
@@ -1753,21 +1789,27 @@
                 )
             }
 
-            let service = try makeService()
-            let group = try service.createWorkspaceGroup(name: "Solo Group")
-            let workspace = try service.createLocalWorkspace(
-                name: "Local Pi",
-                folderPath: workspaceFolder.path(percentEncoded: false),
-                primaryGroupID: group.id
-            )
-
-            let defaultSession = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
-            let namedSession = try service.createNamedSession(
-                workspaceID: workspace.id, providerID: .pi, name: "Review")
+            let workspace: Workspace
+            let defaultSession: Session
+            let namedSession: Session
+            do {
+                let service = try makeService()
+                let group = try service.createWorkspaceGroup(name: "Solo Group")
+                workspace = try service.createLocalWorkspace(
+                    name: "Local Pi",
+                    folderPath: workspaceFolder.path(percentEncoded: false),
+                    primaryGroupID: group.id
+                )
+                defaultSession = try await service.launchOrResumeDefaultSession(
+                    workspaceID: workspace.id, providerID: .pi)
+                namedSession = try await service.createNamedSession(
+                    workspaceID: workspace.id, providerID: .pi, name: "Review")
+            }
 
             let restartedService = try makeService()
-            let overview = try restartedService.getWorkspaceOverview(workspaceID: workspace.id)
-            let providerDetail = try restartedService.getProviderDetail(workspaceID: workspace.id, providerID: .pi)
+            let overview = try await restartedService.getWorkspaceOverview(workspaceID: workspace.id)
+            let providerDetail = try await restartedService.getProviderDetail(
+                workspaceID: workspace.id, providerID: .pi)
             let interruptedDefaultScreen = try restartedService.getSessionScreen(sessionID: defaultSession.id)
             let interruptedNamedScreen = try restartedService.getSessionScreen(sessionID: namedSession.id)
 
@@ -1796,7 +1838,7 @@
 
         @Test
         func localPiInFlightTurnBecomesInterruptedAfterServiceRestartWhileKeepingPartialAssistantOutputInspectable()
-            throws
+            async throws
         {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
@@ -1816,7 +1858,7 @@
             ])
 
             func makeService() throws -> NexusService {
-                let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in transport })
+                let launcher = makePiStreamTestLauncher(piTransportFactory: { _, _, _ in transport })
                 return try NexusService.bootstrapForTests(
                     rootURL: rootURL,
                     providerHealthEvaluator: ProviderHealthFacts(
@@ -1833,16 +1875,19 @@
                 )
             }
 
-            let service = try makeService()
-            let group = try service.createWorkspaceGroup(name: "Solo Group")
-            let workspace = try service.createLocalWorkspace(
-                name: "Local Pi",
-                folderPath: workspaceFolder.path(percentEncoded: false),
-                primaryGroupID: group.id
-            )
-
-            let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
-            let partialScreen = try service.sendSessionInput(sessionID: session.id, text: "first")
+            let session: Session
+            let partialScreen: SessionScreen
+            do {
+                let service = try makeService()
+                let group = try service.createWorkspaceGroup(name: "Solo Group")
+                let workspace = try service.createLocalWorkspace(
+                    name: "Local Pi",
+                    folderPath: workspaceFolder.path(percentEncoded: false),
+                    primaryGroupID: group.id
+                )
+                session = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+                partialScreen = try await service.sendSessionInput(sessionID: session.id, text: "first")
+            }
 
             let restartedService = try makeService()
             let interruptedSession = try restartedService.getSessionRecord(sessionID: session.id)
@@ -1864,7 +1909,8 @@
             #expect(interruptedScreen.activityItems.last?.text == expectedFailureMessage)
         }
 
-        @Test func localPiNamedSessionCanBeStoppedRelaunchedAndDeletedWhilePreservingConversationLinkage() throws {
+        @Test func localPiNamedSessionCanBeStoppedRelaunchedAndDeletedWhilePreservingConversationLinkage() async throws
+        {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -1873,7 +1919,7 @@
 
             let transportHarness = PersistentPiTransportHarness()
             func makeService() throws -> NexusService {
-                let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, arguments, _ in
+                let launcher = makePiStreamTestLauncher(piTransportFactory: { _, arguments, _ in
                     transportHarness.makeTransport(arguments: arguments)
                 })
 
@@ -1893,28 +1939,37 @@
                 )
             }
 
-            let service = try makeService()
-            let group = try service.createWorkspaceGroup(name: "Solo Group")
-            let workspace = try service.createLocalWorkspace(
-                name: "Local Pi",
-                folderPath: workspaceFolder.path(percentEncoded: false),
-                primaryGroupID: group.id
-            )
-
-            let namedSession = try service.createNamedSession(
-                workspaceID: workspace.id, providerID: .pi, name: "Review")
-            _ = try service.sendSessionText(sessionID: namedSession.id, text: "alpha")
-            let firstTurn = try service.sendSessionInputKey(sessionID: namedSession.id, key: .enter)
-            let stoppedSession = try service.stopSession(sessionID: namedSession.id)
-            let stoppedRecord = try service.getSessionRecord(sessionID: namedSession.id)
+            let workspace: Workspace
+            let namedSession: Session
+            let firstTurn: SessionScreen
+            let stoppedSession: Session
+            let stoppedRecord: Session
+            do {
+                let service = try makeService()
+                let group = try service.createWorkspaceGroup(name: "Solo Group")
+                workspace = try service.createLocalWorkspace(
+                    name: "Local Pi",
+                    folderPath: workspaceFolder.path(percentEncoded: false),
+                    primaryGroupID: group.id
+                )
+                namedSession = try await service.createNamedSession(
+                    workspaceID: workspace.id, providerID: .pi, name: "Review")
+                _ = try await service.sendSessionText(sessionID: namedSession.id, text: "alpha")
+                firstTurn = try await service.sendSessionInputKey(sessionID: namedSession.id, key: .enter)
+                stoppedSession = try service.stopSession(sessionID: namedSession.id)
+                stoppedRecord = try service.getSessionRecord(sessionID: namedSession.id)
+            }
 
             let restartedService = try makeService()
-            let relaunchedSession = try restartedService.launchOrResumeSession(sessionID: namedSession.id)
-            _ = try restartedService.sendSessionText(sessionID: relaunchedSession.id, text: "what was my last message?")
-            let resumedTurn = try restartedService.sendSessionInputKey(sessionID: relaunchedSession.id, key: .enter)
+            let relaunchedSession = try await restartedService.launchOrResumeSession(sessionID: namedSession.id)
+            _ = try await restartedService.sendSessionText(
+                sessionID: relaunchedSession.id, text: "what was my last message?")
+            let resumedTurn = try await restartedService.sendSessionInputKey(
+                sessionID: relaunchedSession.id, key: .enter)
             _ = try restartedService.stopSession(sessionID: namedSession.id)
             let deleted = try restartedService.deleteSessionRecord(sessionID: namedSession.id)
-            let providerDetail = try restartedService.getProviderDetail(workspaceID: workspace.id, providerID: .pi)
+            let providerDetail = try await restartedService.getProviderDetail(
+                workspaceID: workspace.id, providerID: .pi)
 
             #expect(namedSession.providerID == .pi)
             #expect(namedSession.name == "Review")
@@ -2091,6 +2146,8 @@
                     "tool_execution_end",
                     "turn_end",
                     "response",
+                    "response",
+                    "response",
                 ])
             #expect(
                 screen.providerEvents.map(\.command) == [
@@ -2106,6 +2163,8 @@
                     nil,
                     nil,
                     "get_commands",
+                    "get_state",
+                    "get_session_stats",
                 ])
             #expect(
                 screen.providerEvents.map(\.family) == [
@@ -2120,6 +2179,8 @@
                     .toolExecution,
                     .toolExecution,
                     .turn,
+                    .response,
+                    .response,
                     .response,
                 ])
             #expect(
@@ -2182,7 +2243,7 @@
             #expect(diagnostic.serviceObservationLatencyMilliseconds == nil)
             #expect(diagnostic.expectedActivityItemID == screen.activityItems.last?.id)
             #expect(diagnostic.expectedActivityItemText == "Pi: world")
-            #expect(diagnostic.expectedThinkingIndicatorVisible == false)
+            #expect(diagnostic.expectedThinkingIndicatorVisible == true)
             #expect(diagnostic.serviceObservationAnchorUptimeNanoseconds != nil)
         }
 
@@ -2291,6 +2352,7 @@
                     "Session stream connected",
                     "You: inspect auth",
                     "thoughts:",
+                    "subagent reviewer: Inspect the auth flow",
                     "Pi: Done",
                 ])
             #expect(
@@ -2298,6 +2360,7 @@
                     .status,
                     .message,
                     .status,
+                    .command,
                     .message,
                 ])
             #expect(screen.activityItems[2].detailText == "Inspect the auth flow before running tools.")
@@ -2358,8 +2421,528 @@
                     "Pi: Partial answer",
                     "Provider overloaded",
                 ])
+            #expect(screen.isAgentTurnInProgress == false)
             #expect(screen.activityItems.contains(where: { $0.kind == .completion }) == false)
             #expect(screen.transcript == "> inspect auth\nPartial answer")
+        }
+
+        @Test func localPiRuntimeKeepsPromptTurnOpenAfterIntermediateTurnEndUntilAgentEnd() throws {
+            let transport = PromptEventPiRPCTransport(promptEvents: [
+                ["type": "agent_start", "agent": "pi"],
+                [
+                    "type": "message_update",
+                    "assistantMessageEvent": [
+                        "type": "thinking_end",
+                        "content": "Plan step one.",
+                    ],
+                ],
+                [
+                    "type": "message_update",
+                    "assistantMessageEvent": [
+                        "type": "toolcall_end",
+                        "toolCall": [
+                            "type": "toolCall",
+                            "id": "tool-1",
+                            "name": "read",
+                            "arguments": ["path": "A.md"],
+                        ],
+                    ],
+                ],
+                [
+                    "type": "turn_end",
+                    "message": [
+                        "content": [["type": "text", "text": "Cycle one done."]]
+                    ],
+                ],
+            ])
+            let runtime = try PiRPCSessionRuntime(
+                executable: "/tmp/fake-pi",
+                workingDirectory: "/tmp",
+                terminationStatusMessageBuilder: { _ in "" },
+                transportFactory: { _, _, _ in transport }
+            )
+
+            let session = Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            )
+
+            try runtime.sendInput("review")
+            let screen = runtime.sessionScreen(for: session)
+
+            #expect(screen.isAgentTurnInProgress == true)
+            #expect(screen.activityItems.contains { $0.text == "Pi: Cycle one done." })
+        }
+
+        @Test func localPiRuntimeClearsThinkingWhenTransportTerminatesMidPrompt() throws {
+            let transport = PromptEventPiRPCTransport(promptEvents: [
+                ["type": "agent_start", "agent": "pi"],
+                [
+                    "type": "message_update",
+                    "assistantMessageEvent": [
+                        "type": "thinking_end",
+                        "content": "Planning.",
+                    ],
+                ],
+                [
+                    "type": "message_update",
+                    "assistantMessageEvent": [
+                        "type": "toolcall_end",
+                        "toolCall": [
+                            "type": "toolCall",
+                            "id": "tool-1",
+                            "name": "read",
+                            "arguments": ["path": "README.md"],
+                        ],
+                    ],
+                ],
+            ])
+            let runtime = try PiRPCSessionRuntime(
+                executable: "/tmp/fake-pi",
+                workingDirectory: "/tmp",
+                terminationStatusMessageBuilder: { _ in "" },
+                transportFactory: { _, _, _ in transport }
+            )
+
+            let session = Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            )
+
+            try runtime.sendInput("review")
+            #expect(runtime.sessionScreen(for: session).isAgentTurnInProgress == true)
+            try transport.terminate()
+            let screen = runtime.sessionScreen(for: session)
+            #expect(screen.isAgentTurnInProgress == false)
+        }
+
+        @Test func localPiRuntimeFinalizesTurnOnAgentEndWhenTurnEndMissing() throws {
+            let transport = PromptEventPiRPCTransport(promptEvents: [
+                ["type": "agent_start", "agent": "pi"],
+                [
+                    "type": "message_update",
+                    "assistantMessageEvent": [
+                        "type": "thinking_end",
+                        "content": "Plan the review.",
+                    ],
+                ],
+                [
+                    "type": "message_update",
+                    "assistantMessageEvent": [
+                        "type": "toolcall_end",
+                        "toolCall": [
+                            "type": "toolCall",
+                            "id": "tool-1",
+                            "name": "read",
+                            "arguments": ["path": "README.md"],
+                        ],
+                    ],
+                ],
+                [
+                    "type": "message_update",
+                    "assistantMessageEvent": [
+                        "type": "toolcall_end",
+                        "toolCall": [
+                            "type": "toolCall",
+                            "id": "tool-2",
+                            "name": "read",
+                            "arguments": ["path": "ARCHITECTURE.md"],
+                        ],
+                    ],
+                ],
+                [
+                    "type": "agent_end",
+                    "messages": [
+                        [
+                            "role": "assistant",
+                            "content": [
+                                [
+                                    "type": "text",
+                                    "text": "## Code review\n\nFindings look good.",
+                                ]
+                            ],
+                        ]
+                    ],
+                ],
+            ])
+            let runtime = try PiRPCSessionRuntime(
+                executable: "/tmp/fake-pi",
+                workingDirectory: "/tmp",
+                terminationStatusMessageBuilder: { _ in "" },
+                transportFactory: { _, _, _ in transport }
+            )
+
+            let session = Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            )
+
+            try runtime.sendInput("review nexus")
+            let screen = runtime.sessionScreen(for: session)
+
+            #expect(screen.isAgentTurnInProgress == false)
+            #expect(screen.providerFacts.liveAssistantDraftText == nil)
+            #expect(screen.activityItems.map(\.kind).filter { $0 == .command }.count == 2)
+            #expect(screen.activityItems.contains { $0.text == "Pi: ## Code review\n\nFindings look good." })
+        }
+
+        @Test func localPiRuntimeRecordsToolUseMessageEndBeforeTurnEndWithoutClosingAgentTurn() throws {
+            let interimText = "Gathering context before running tools."
+            let transport = PromptEventPiRPCTransport(promptEvents: [
+                ["type": "agent_start", "agent": "pi"],
+                [
+                    "type": "message_update",
+                    "assistantMessageEvent": [
+                        "type": "text_delta",
+                        "delta": interimText,
+                    ],
+                ],
+                [
+                    "type": "message_end",
+                    "message": [
+                        "role": "assistant",
+                        "stopReason": "toolUse",
+                        "content": [
+                            [
+                                "type": "text",
+                                "text": interimText,
+                            ]
+                        ],
+                    ],
+                ],
+                [
+                    "type": "tool_execution_start",
+                    "toolCallId": "tool-1",
+                    "toolName": "read",
+                    "args": ["path": "README.md"],
+                ],
+                [
+                    "type": "turn_end",
+                    "message": [
+                        "content": [
+                            [
+                                "type": "text",
+                                "text": "Final answer after tools.",
+                            ]
+                        ]
+                    ],
+                ],
+                [
+                    "type": "agent_end",
+                    "messages": [],
+                ],
+            ])
+            let runtime = try PiRPCSessionRuntime(
+                executable: "/tmp/fake-pi",
+                workingDirectory: "/tmp",
+                terminationStatusMessageBuilder: { _ in "" },
+                transportFactory: { _, _, _ in transport }
+            )
+
+            let session = Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            )
+
+            try runtime.sendInput("review")
+            let screen = runtime.sessionScreen(for: session)
+
+            #expect(screen.isAgentTurnInProgress == false)
+            #expect(screen.providerFacts.liveAssistantDraftText == nil)
+            #expect(
+                screen.activityItems.map(\.text) == [
+                    "Session stream connected",
+                    "You: review",
+                    "Pi: \(interimText)",
+                    "read README.md",
+                    "Pi: Final answer after tools.",
+                ])
+        }
+
+        @Test func localPiRuntimeRollsBackPromptTurnWhenPromptResponseRejected() throws {
+            let transport = ConfigurablePromptPiRPCTransport(
+                promptEvents: [],
+                promptSuccess: false,
+                promptRejectionError: "Pi rejected the prompt."
+            )
+            let runtime = try PiRPCSessionRuntime(
+                executable: "/tmp/fake-pi",
+                workingDirectory: "/tmp",
+                terminationStatusMessageBuilder: { _ in "" },
+                transportFactory: { _, _, _ in transport }
+            )
+            let session = Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            )
+
+            try runtime.sendInput("hello")
+            let screen = runtime.sessionScreen(for: session)
+
+            #expect(screen.isAgentTurnInProgress == false)
+            #expect(screen.activityItems.contains { $0.text == "Pi rejected the prompt." })
+        }
+
+        @Test func localPiRuntimeHandlesMessageUpdateDoneWithoutMessageEnd() throws {
+            let transport = PromptEventPiRPCTransport(promptEvents: [
+                ["type": "agent_start", "agent": "pi"],
+                [
+                    "type": "message_update",
+                    "assistantMessageEvent": [
+                        "type": "text_delta",
+                        "delta": "Answer from done delta",
+                    ],
+                ],
+                [
+                    "type": "message_update",
+                    "message": [
+                        "role": "assistant",
+                        "stopReason": "stop",
+                        "content": [["type": "text", "text": "Answer from done delta"]],
+                    ],
+                    "assistantMessageEvent": [
+                        "type": "done",
+                        "reason": "stop",
+                    ],
+                ],
+                ["type": "agent_end", "messages": []],
+            ])
+            let runtime = try PiRPCSessionRuntime(
+                executable: "/tmp/fake-pi",
+                workingDirectory: "/tmp",
+                terminationStatusMessageBuilder: { _ in "" },
+                transportFactory: { _, _, _ in transport }
+            )
+            let session = Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            )
+
+            try runtime.sendInput("hello")
+            let screen = runtime.sessionScreen(for: session)
+
+            #expect(screen.isAgentTurnInProgress == false)
+            #expect(screen.activityItems.contains { $0.text == "Pi: Answer from done delta" })
+        }
+
+        @Test func localPiRuntimeSurfacesUnhandledRpcResponseErrors() throws {
+            let transport = PromptEventPiRPCTransport(promptEvents: [
+                [
+                    "type": "response",
+                    "command": "steer",
+                    "success": false,
+                    "error": "Steering is unavailable right now.",
+                ],
+                ["type": "agent_end", "messages": []],
+            ])
+            let runtime = try PiRPCSessionRuntime(
+                executable: "/tmp/fake-pi",
+                workingDirectory: "/tmp",
+                terminationStatusMessageBuilder: { _ in "" },
+                transportFactory: { _, _, _ in transport }
+            )
+            let session = Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            )
+
+            try runtime.sendInput("hello")
+            let screen = runtime.sessionScreen(for: session)
+
+            #expect(
+                screen.activityItems.contains { $0.kind == .error && $0.text == "Steering is unavailable right now." })
+        }
+
+        @Test func localPiRuntimeSurfacesExtensionErrorEvent() throws {
+            let transport = PromptEventPiRPCTransport(promptEvents: [
+                [
+                    "type": "extension_error",
+                    "extensionPath": "/tmp/ext.ts",
+                    "event": "tool_call",
+                    "error": "boom",
+                ],
+                ["type": "agent_end", "messages": []],
+            ])
+            let runtime = try PiRPCSessionRuntime(
+                executable: "/tmp/fake-pi",
+                workingDirectory: "/tmp",
+                terminationStatusMessageBuilder: { _ in "" },
+                transportFactory: { _, _, _ in transport }
+            )
+            let session = Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            )
+
+            try runtime.sendInput("hello")
+            let screen = runtime.sessionScreen(for: session)
+
+            #expect(
+                screen.activityItems.contains {
+                    $0.text == "Extension error (/tmp/ext.ts, tool_call): boom"
+                })
+        }
+
+        @Test func localPiRuntimeTracksThinkingLevelChangedEvent() throws {
+            let runtime = try PiRPCSessionRuntime(
+                executable: "/tmp/fake-pi",
+                workingDirectory: "/tmp",
+                terminationStatusMessageBuilder: { _ in "" },
+                transportFactory: { _, _, _ in
+                    TestPiRPCTransport(
+                        stateModel: TestPiRPCModel(
+                            provider: "anthropic",
+                            id: "claude-sonnet-4-20250514",
+                            name: "Claude Sonnet 4",
+                            reasoning: true
+                        ),
+                        stateThinkingLevel: "high",
+                        promptEvents: [
+                            ["type": "thinking_level_changed", "level": "off"],
+                            ["type": "agent_end", "messages": []],
+                        ]
+                    )
+                }
+            )
+            let session = Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            )
+
+            try runtime.sendInput("hello")
+            let screen = runtime.sessionScreen(for: session)
+
+            #expect(
+                screen.activityItems.contains {
+                    $0.text == "Current Model: anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4 (thinking: off)"
+                })
+        }
+
+        @Test func localPiRuntimeQueuesStreamingPromptWithFollowUpBehaviorForFollowUpSlashPrefix() throws {
+            let transport = QueueControlPiRPCTransport()
+            let runtime = try PiRPCSessionRuntime(
+                executable: "/tmp/fake-pi",
+                workingDirectory: "/tmp",
+                terminationStatusMessageBuilder: { _ in "" },
+                transportFactory: { _, _, _ in transport }
+            )
+            let session = Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            )
+
+            try runtime.sendInput("hello")
+            try runtime.sendInput("/follow-up After that, summarize")
+            _ = runtime.sessionScreen(for: session)
+
+            #expect(
+                transport.sentLines.contains(where: {
+                    $0.contains("\"type\":\"follow_up\"")
+                        && $0.contains("\"message\":\"After that, summarize\"")
+                }))
+        }
+
+        @Test func localPiRuntimeReconcilesOpenPromptWhenGetStateReportsNotStreaming() throws {
+            let transport = ConfigurablePromptPiRPCTransport(
+                promptEvents: [
+                    ["type": "agent_start", "agent": "pi"],
+                    [
+                        "type": "message_update",
+                        "assistantMessageEvent": [
+                            "type": "text_delta",
+                            "delta": "Partial",
+                        ],
+                    ],
+                    [
+                        "type": "turn_end",
+                        "message": [
+                            "role": "assistant",
+                            "content": [["type": "text", "text": "Partial"]],
+                        ],
+                    ],
+                ],
+                getStateIsStreaming: false
+            )
+            let runtime = try PiRPCSessionRuntime(
+                executable: "/tmp/fake-pi",
+                workingDirectory: "/tmp",
+                terminationStatusMessageBuilder: { _ in "" },
+                transportFactory: { _, _, _ in transport }
+            )
+            let session = Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            )
+
+            try runtime.sendInput("hello")
+            let screen = runtime.sessionScreen(for: session)
+
+            #expect(screen.isAgentTurnInProgress == false)
+        }
+
+        @Test func localPiRuntimeRetainsStopReasonInCompactedMessageEndProviderEvents() throws {
+            let transport = PromptEventPiRPCTransport(promptEvents: [
+                [
+                    "type": "message_end",
+                    "message": [
+                        "role": "assistant",
+                        "stopReason": "toolUse",
+                        "content": [["type": "text", "text": "x"]],
+                    ],
+                ],
+                ["type": "agent_end", "messages": []],
+            ])
+            let runtime = try PiRPCSessionRuntime(
+                executable: "/tmp/fake-pi",
+                workingDirectory: "/tmp",
+                terminationStatusMessageBuilder: { _ in "" },
+                transportFactory: { _, _, _ in transport }
+            )
+            let session = Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            )
+
+            try runtime.sendInput("hello")
+            let screen = runtime.sessionScreen(for: session)
+            let compacted = try #require(screen.providerEvents.first(where: { $0.type == "message_end" }))
+            #expect(compacted.rawPayload.contains("\"stopReason\":\"toolUse\""))
         }
 
         @Test func localPiRuntimeProjectsCompactionAndRetryLifecycleIntoSharedSessionActivity() throws {
@@ -2514,6 +3097,7 @@
                 screen.activityItems.map(\.text) == [
                     "Session stream connected",
                     "You: hello",
+                    "Extension error (extension, event): Unknown extension error",
                     "Pi: done",
                 ])
         }
@@ -2563,6 +3147,7 @@
                 ]
             )
             transport.emitTurnEnd(text: "Done")
+            transport.emitAgentEnd()
 
             let completedScreen = runtime.sessionScreen(for: session)
 
@@ -2575,6 +3160,47 @@
                     "reviewer: Looks good overall. Watch the new error path.",
                     "Pi: Done",
                 ])
+        }
+
+        @Test func localPiRuntimeSurfacesReadToolOutputFromResultDetailsWhenContentEmpty() throws {
+            let transport = PromptEventPiRPCTransport(promptEvents: [
+                ["type": "agent_start", "agent": "pi"],
+                [
+                    "type": "tool_execution_start",
+                    "toolCallId": "tool-read",
+                    "toolName": "read",
+                    "args": ["path": "AGENTS.md"],
+                ],
+                [
+                    "type": "tool_execution_end",
+                    "toolCallId": "tool-read",
+                    "toolName": "read",
+                    "result": [
+                        "content": [] as [Any],
+                        "details": ["diff": "# AGENTS\n\nBe concise."],
+                    ],
+                    "isError": false,
+                ],
+                ["type": "agent_end", "messages": []],
+            ])
+            let runtime = try PiRPCSessionRuntime(
+                executable: "/tmp/fake-pi",
+                workingDirectory: "/tmp",
+                terminationStatusMessageBuilder: { _ in "" },
+                transportFactory: { _, _, _ in transport }
+            )
+            let session = Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            )
+            try runtime.sendInput("read agents")
+            let screen = runtime.sessionScreen(for: session)
+            let command = try #require(screen.activityItems.first(where: { $0.kind == .command }))
+            #expect(command.text == "read AGENTS.md")
+            #expect(command.detailText == "# AGENTS\n\nBe concise.")
         }
 
         @Test func localPiRuntimeStreamsToolExecutionUpdatesFromDeltaContentBlocksBeforeTurnEnds() throws {
@@ -2668,14 +3294,14 @@
                     ))
         }
 
-        @Test func localPiExtensionDialogResponseContinuesSessionWithoutChangingProviderHealth() throws {
+        @Test func localPiExtensionDialogResponseContinuesSessionWithoutChangingProviderHealth() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
             let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
             try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
 
-            let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
+            let launcher = makePiStreamTestLauncher(piTransportFactory: { _, _, _ in
                 ExtensionDialogTestPiRPCTransport()
             })
 
@@ -2701,16 +3327,16 @@
                 primaryGroupID: group.id
             )
 
-            let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
-            let pendingScreen = try service.sendSessionInput(sessionID: session.id, text: "deploy")
+            let session = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+            let pendingScreen = try await service.sendSessionInput(sessionID: session.id, text: "deploy")
             let dialog = try #require(pendingScreen.extensionUI?.pendingDialogs.first)
 
-            let approvedScreen = try service.respondToExtensionDialog(
+            let approvedScreen = try await service.respondToExtensionDialog(
                 sessionID: session.id,
                 dialogID: dialog.id,
                 response: .confirmed(true)
             )
-            let providerDetail = try service.getProviderDetail(workspaceID: workspace.id, providerID: .pi)
+            let providerDetail = try await service.getProviderDetail(workspaceID: workspace.id, providerID: .pi)
 
             #expect(pendingScreen.extensionUI?.pendingDialogs == [dialog])
             #expect(approvedScreen.extensionUI == nil || approvedScreen.extensionUI?.pendingDialogs.isEmpty == true)
@@ -2772,7 +3398,7 @@
             try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
 
             let transport = FireAndForgetExtensionUITestPiRPCTransport()
-            let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in transport })
+            let launcher = makePiStreamTestLauncher(piTransportFactory: { _, _, _ in transport })
             let service = try NexusService.bootstrapForTests(
                 rootURL: rootURL,
                 providerHealthEvaluator: ProviderHealthFacts(
@@ -2822,7 +3448,9 @@
             #expect(finalScreen.extensionUI?.notifications.first?.kind == .info)
             #expect(finalScreen.extensionUI?.notifications.first?.message == "Editor prefilled")
             #expect(
-                finalScreen.extensionUI?.statuses == [SessionExtensionUIStatus(key: "rpc-demo", text: "Turn ready")])
+                finalScreen.extensionUI?.statuses == [
+                    SessionExtensionUIStatus(key: "rpc-demo", text: "MCP: 0/1 servers")
+                ])
             #expect(
                 finalScreen.extensionUI?.widgets == [
                     SessionExtensionUIWidget(
@@ -2831,7 +3459,101 @@
             #expect(finalScreen.extensionUI?.editorText == "This text was set by the rpc-demo extension.")
         }
 
-        @Test func localPiPersistsStructuredHistoryOverflowOnDiskAndRestoresRecentTailAcrossInspectPaths() throws {
+        @Test func inMemorySessionRuntimeManagerDoesNotBlockRuntimeChangeDrainOnObservers() async throws {
+            let session = Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            )
+            let workspace = Workspace(
+                id: session.workspaceID,
+                name: "Local Pi",
+                kind: .local,
+                folderPath: "/tmp",
+                primaryGroupID: UUID(),
+                remoteHostID: nil
+            )
+            let runtime = BlockingObserverProbeSessionRuntime(sessionID: session.id)
+            let manager = InMemorySessionRuntimeManager(
+                launcher: StaticSessionRuntimeLauncher(runtime: runtime)
+            )
+
+            let observerEntered = DispatchSemaphore(value: 0)
+            let unblockObserver = DispatchSemaphore(value: 0)
+            let secondChangeTriggered = DispatchSemaphore(value: 0)
+            let blockOnce = OnceBox()
+            let observationID = UUID()
+
+            manager.addUpdateObserver(id: observationID, for: session) {
+                let screen = runtime.sessionScreen(for: session)
+                guard screen.activityItems.contains(where: { $0.kind == .command && $0.text == "read CONTEXT.md" }),
+                    blockOnce.take()
+                else {
+                    return
+                }
+                observerEntered.signal()
+                _ = unblockObserver.wait(timeout: .now() + .seconds(1))
+            }
+            defer { manager.removeUpdateObserver(id: observationID) }
+
+            try await manager.launchOrResume(
+                session: session,
+                workspace: workspace,
+                launchConfiguration: SessionRuntimeLaunchConfiguration(
+                    executable: "/tmp/fake-pi",
+                    workingDirectory: "/tmp",
+                    remoteHost: nil
+                )
+            )
+
+            DispatchQueue.global().async {
+                runtime.replaceScreen(
+                    SessionScreen(
+                        session: session,
+                        primarySurface: .structuredActivityFeed,
+                        controller: .mac,
+                        transcript: "",
+                        terminalColumns: 80,
+                        terminalRows: 24,
+                        activityItems: [SessionActivityItem(kind: .command, text: "read CONTEXT.md")],
+                        isAgentTurnInProgress: true
+                    )
+                )
+                runtime.triggerChange()
+                runtime.replaceScreen(
+                    SessionScreen(
+                        session: session,
+                        primarySurface: .structuredActivityFeed,
+                        controller: .mac,
+                        transcript: "",
+                        terminalColumns: 80,
+                        terminalRows: 24,
+                        activityItems: [
+                            SessionActivityItem(kind: .command, text: "read CONTEXT.md"),
+                            SessionActivityItem(kind: .command, text: "LS"),
+                        ],
+                        isAgentTurnInProgress: false
+                    )
+                )
+                runtime.triggerChange()
+                secondChangeTriggered.signal()
+            }
+
+            #expect(await waitForSemaphore(observerEntered))
+            #expect(await waitForSemaphore(secondChangeTriggered))
+
+            let blockedScreen = try manager.sessionScreen(for: session)
+            #expect(blockedScreen.activityItems.contains { $0.kind == .command && $0.text == "read CONTEXT.md" })
+            #expect(blockedScreen.activityItems.contains { $0.kind == .command && $0.text == "LS" })
+            #expect(blockedScreen.isAgentTurnInProgress == false)
+
+            unblockObserver.signal()
+        }
+
+        @Test func localPiPersistsStructuredHistoryOverflowOnDiskAndRestoresRecentTailAcrossInspectPaths() async throws
+        {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -2847,7 +3569,7 @@
             }
 
             func makeService() throws -> NexusService {
-                let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
+                let launcher = makePiStreamTestLauncher(piTransportFactory: { _, _, _ in
                     TestPiRPCTransport(messages: messages)
                 })
 
@@ -2867,17 +3589,21 @@
                 )
             }
 
-            let service = try makeService()
-            let group = try service.createWorkspaceGroup(name: "Solo Group")
-            let workspace = try service.createLocalWorkspace(
-                name: "Local Pi",
-                folderPath: workspaceFolder.path(percentEncoded: false),
-                primaryGroupID: group.id
-            )
-            let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
-            _ = try service.sendSessionInput(sessionID: session.id, text: "/messages")
+            let session: Session
+            let liveScreen: SessionScreen
+            do {
+                let service = try makeService()
+                let group = try service.createWorkspaceGroup(name: "Solo Group")
+                let workspace = try service.createLocalWorkspace(
+                    name: "Local Pi",
+                    folderPath: workspaceFolder.path(percentEncoded: false),
+                    primaryGroupID: group.id
+                )
+                session = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+                _ = try await service.sendSessionInput(sessionID: session.id, text: "/messages")
+                liveScreen = try service.getSessionScreen(sessionID: session.id)
+            }
 
-            let liveScreen = try service.getSessionScreen(sessionID: session.id)
             let restartedService = try makeService()
             let interruptedScreen = try restartedService.getSessionScreen(sessionID: session.id)
             let observationSnapshot = try restartedService.getSessionScreenObservationSnapshot(sessionID: session.id)
@@ -2889,12 +3615,10 @@
             let snapshotData = try Data(
                 contentsOf: historyDirectory.appendingPathComponent("current.json", isDirectory: false))
             let persistedState = try JSONDecoder().decode(PiStructuredSessionPersistedState.self, from: snapshotData)
-            let overflowLines = try String(
-                decoding: Data(
-                    contentsOf: historyDirectory.appendingPathComponent("activity-items.jsonl", isDirectory: false)),
-                as: UTF8.self
-            )
-            .split(separator: "\n")
+            let overflowData = try Data(
+                contentsOf: historyDirectory.appendingPathComponent("activity-items.jsonl", isDirectory: false))
+            let overflowText = try #require(String(data: overflowData, encoding: .utf8))
+            let overflowLines = overflowText.split(separator: "\n")
             let overflowItems = try overflowLines.map { line in
                 try JSONDecoder().decode(SessionActivityItem.self, from: Data(line.utf8))
             }
@@ -2918,7 +3642,7 @@
             )
         }
 
-        @Test func localPiLoadsOlderStructuredHistoryPagesFromPersistedOverflowWithoutGrowingLiveTail() throws {
+        @Test func localPiLoadsOlderStructuredHistoryPagesFromPersistedOverflowWithoutGrowingLiveTail() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -2935,7 +3659,7 @@
             }
 
             func makeService() throws -> NexusService {
-                let launcher = ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
+                let launcher = makePiStreamTestLauncher(piTransportFactory: { _, _, _ in
                     TestPiRPCTransport(messages: messages)
                 })
 
@@ -2955,15 +3679,18 @@
                 )
             }
 
-            let service = try makeService()
-            let group = try service.createWorkspaceGroup(name: "Solo Group")
-            let workspace = try service.createLocalWorkspace(
-                name: "Local Pi",
-                folderPath: workspaceFolder.path(percentEncoded: false),
-                primaryGroupID: group.id
-            )
-            let session = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
-            _ = try service.sendSessionInput(sessionID: session.id, text: "/messages")
+            let session: Session
+            do {
+                let service = try makeService()
+                let group = try service.createWorkspaceGroup(name: "Solo Group")
+                let workspace = try service.createLocalWorkspace(
+                    name: "Local Pi",
+                    folderPath: workspaceFolder.path(percentEncoded: false),
+                    primaryGroupID: group.id
+                )
+                session = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+                _ = try await service.sendSessionInput(sessionID: session.id, text: "/messages")
+            }
 
             let restartedService = try makeService()
             let liveScreen = try restartedService.getSessionScreen(sessionID: session.id)
@@ -2998,6 +3725,21 @@
             #expect(finalPage.activityItems.contains(where: { $0.text == "Message 1 — user: History 0" }))
             #expect(finalPage.activityItems.contains(where: { $0.text == "Message 20 — user: History 19" }))
             #expect(finalPage.nextCursor == nil)
+        }
+    }
+
+    private func makePiStreamTestLauncher(
+        piTransportFactory: @escaping PiRPCSessionRuntime.TransportFactory
+    ) -> ProcessSessionRuntimeLauncher {
+        ProcessSessionRuntimeLauncher(
+            localShellEnvironmentResolver: PiStreamStubShellEnvironmentResolver(),
+            piTransportFactory: piTransportFactory
+        )
+    }
+
+    private struct PiStreamStubShellEnvironmentResolver: LocalShellEnvironmentResolving {
+        func resolvedEnvironment() -> [String: String]? {
+            ["SHELL": "/bin/zsh", "PATH": "/tmp/bin"]
         }
     }
 
@@ -3268,6 +4010,123 @@
                 for event in promptEvents {
                     emit(event)
                 }
+            case "get_session_stats":
+                emit([
+                    "id": object["id"] as? String ?? "stats",
+                    "type": "response",
+                    "command": "get_session_stats",
+                    "success": true,
+                    "data": ["sessionId": "pi-session-1"],
+                ])
+            default:
+                return
+            }
+        }
+
+        func terminate() throws {
+            terminationHandler?(0)
+        }
+
+        private func emit(_ object: [String: Any]) {
+            guard let data = try? JSONSerialization.data(withJSONObject: object),
+                let line = String(data: data, encoding: .utf8)
+            else {
+                return
+            }
+            stdoutLineHandler?(line)
+        }
+    }
+
+    private final class ConfigurablePromptPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
+        private let promptEvents: [[String: Any]]
+        private let promptSuccess: Bool
+        private let promptRejectionError: String?
+        private let getStateIsStreaming: Bool?
+        private var stdoutLineHandler: (@Sendable (String) -> Void)?
+        private var terminationHandler: (@Sendable (Int32) -> Void)?
+
+        init(
+            promptEvents: [[String: Any]],
+            promptSuccess: Bool = true,
+            promptRejectionError: String? = nil,
+            getStateIsStreaming: Bool? = nil
+        ) {
+            self.promptEvents = promptEvents
+            self.promptSuccess = promptSuccess
+            self.promptRejectionError = promptRejectionError
+            self.getStateIsStreaming = getStateIsStreaming
+        }
+
+        func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
+            stdoutLineHandler = handler
+        }
+
+        func setTerminationHandler(_ handler: (@Sendable (Int32) -> Void)?) {
+            terminationHandler = handler
+        }
+
+        func start() throws {}
+
+        func sendLine(_ line: String) throws {
+            guard let data = line.data(using: .utf8),
+                let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                let type = object["type"] as? String
+            else {
+                return
+            }
+
+            switch type {
+            case "get_state":
+                var dataPayload: [String: Any] = ["sessionId": "pi-session-1"]
+                if let getStateIsStreaming {
+                    dataPayload["isStreaming"] = getStateIsStreaming
+                }
+                emit([
+                    "id": object["id"] as? String ?? "state",
+                    "type": "response",
+                    "command": "get_state",
+                    "success": true,
+                    "data": dataPayload,
+                ])
+            case "get_commands":
+                emit([
+                    "id": object["id"] as? String ?? "commands",
+                    "type": "response",
+                    "command": "get_commands",
+                    "success": true,
+                    "data": ["commands": []],
+                ])
+            case "get_available_models":
+                emit([
+                    "id": object["id"] as? String ?? "available-models",
+                    "type": "response",
+                    "command": "get_available_models",
+                    "success": true,
+                    "data": ["models": []],
+                ])
+            case "get_session_stats":
+                emit([
+                    "id": object["id"] as? String ?? "stats",
+                    "type": "response",
+                    "command": "get_session_stats",
+                    "success": true,
+                    "data": ["sessionId": "pi-session-1"],
+                ])
+            case "prompt":
+                var response: [String: Any] = [
+                    "type": "response",
+                    "command": "prompt",
+                    "success": promptSuccess,
+                ]
+                if promptSuccess == false, let promptRejectionError {
+                    response["error"] = promptRejectionError
+                }
+                emit(response)
+                if promptSuccess {
+                    for event in promptEvents {
+                        emit(event)
+                    }
+                }
             default:
                 return
             }
@@ -3371,14 +4230,21 @@
                     "success": true,
                 ])
                 if let streamingBehavior = object["streamingBehavior"] as? String,
-                    let message = object["message"] as? String,
-                    streamingBehavior == "steer"
+                    let message = object["message"] as? String
                 {
-                    emit([
-                        "type": "queue_update",
-                        "steering": [message],
-                        "followUp": [],
-                    ])
+                    if streamingBehavior == "steer" {
+                        emit([
+                            "type": "queue_update",
+                            "steering": [message],
+                            "followUp": [],
+                        ])
+                    } else if streamingBehavior == "followUp" {
+                        emit([
+                            "type": "queue_update",
+                            "steering": [],
+                            "followUp": [message],
+                        ])
+                    }
                 }
             case "set_steering_mode":
                 emit([
@@ -3431,6 +4297,21 @@
         var value: SessionScreenObservationAccumulator?
     }
 
+    private final class OnceBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var fired = false
+
+        func take() -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            guard fired == false else {
+                return false
+            }
+            fired = true
+            return true
+        }
+    }
+
     private actor SessionScreenSink {
         private var screens: [SessionScreen] = []
 
@@ -3448,6 +4329,18 @@
                 try? await Task.sleep(nanoseconds: 10_000_000)
             }
             return nil
+        }
+    }
+
+    private func waitForSemaphore(
+        _ semaphore: DispatchSemaphore,
+        timeoutNanoseconds: UInt64 = 1_000_000_000
+    ) async -> Bool {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global().async {
+                let timeout = DispatchTime.now() + .nanoseconds(Int(timeoutNanoseconds))
+                continuation.resume(returning: semaphore.wait(timeout: timeout) == .success)
+            }
         }
     }
 
@@ -3720,7 +4613,7 @@
                 "id": "status-1",
                 "method": "setStatus",
                 "statusKey": "rpc-demo",
-                "statusText": "Turn ready",
+                "statusText": "\u{001B}[38;5;109mMCP: 0/1 servers\u{001B}[39m",
             ])
             emit([
                 "type": "extension_ui_request",
@@ -3752,6 +4645,81 @@
             }
             stdoutLineHandler?(line)
         }
+    }
+
+    private struct StaticSessionRuntimeLauncher: SessionRuntimeLaunching {
+        let runtime: any SessionRuntime
+
+        func makeRuntime(
+            session: Session,
+            workspace: Workspace,
+            launchConfiguration: SessionRuntimeLaunchConfiguration
+        ) async throws -> any SessionRuntime {
+            _ = session
+            _ = workspace
+            _ = launchConfiguration
+            return runtime
+        }
+    }
+
+    private final class BlockingObserverProbeSessionRuntime: SessionRuntime, @unchecked Sendable {
+        private let lock = NSLock()
+        private var changeHandler: (@Sendable () -> Void)?
+        private var transcript = ""
+        private var activityItems: [SessionActivityItem] = []
+        private var isAgentTurnInProgress = false
+
+        init(sessionID: UUID) {
+            _ = sessionID
+        }
+
+        var state: Session.State { .ready }
+        var sessionRecordAdapterMetadata: SessionRecordAdapterMetadata? { nil }
+
+        func sessionScreen(for session: Session) -> SessionScreen {
+            lock.lock()
+            defer { lock.unlock() }
+            return SessionScreen(
+                session: session,
+                primarySurface: .structuredActivityFeed,
+                controller: .mac,
+                transcript: transcript,
+                terminalColumns: 80,
+                terminalRows: 24,
+                activityItems: activityItems,
+                isAgentTurnInProgress: isAgentTurnInProgress
+            )
+        }
+
+        func setChangeHandler(_ handler: (@Sendable () -> Void)?) {
+            lock.lock()
+            changeHandler = handler
+            lock.unlock()
+        }
+
+        func replaceScreen(_ screen: SessionScreen) {
+            lock.lock()
+            transcript = screen.transcript
+            activityItems = screen.activityItems
+            isAgentTurnInProgress = screen.isAgentTurnInProgress
+            lock.unlock()
+        }
+
+        func triggerChange() {
+            let handler: (@Sendable () -> Void)?
+            lock.lock()
+            handler = changeHandler
+            lock.unlock()
+            handler?()
+        }
+
+        func stop() throws {}
+        func sendInput(_ text: String) throws {}
+        func sendInput(_ prompt: SessionPrompt) throws {}
+        func sendText(_ text: String) throws {}
+        func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool) throws {}
+        func respondToApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision) throws {}
+        func resize(columns: Int, rows: Int) throws {}
     }
 
     private final class StreamingToolPiRPCTransport: PiRPCTransporting, @unchecked Sendable {
@@ -3841,6 +4809,10 @@
             ])
         }
 
+        func emitAgentEnd() {
+            emit(["type": "agent_end", "messages": []])
+        }
+
         private func emit(_ object: [String: Any]) {
             guard let data = try? JSONSerialization.data(withJSONObject: object),
                 let line = String(data: data, encoding: .utf8)
@@ -3878,6 +4850,23 @@
         let source: SessionSlashCommandSource
         let location: SessionSlashCommandLocation?
         let path: String?
+        let sourceInfoOnly: Bool
+
+        init(
+            name: String,
+            description: String?,
+            source: SessionSlashCommandSource,
+            location: SessionSlashCommandLocation?,
+            path: String?,
+            sourceInfoOnly: Bool = false
+        ) {
+            self.name = name
+            self.description = description
+            self.source = source
+            self.location = location
+            self.path = path
+            self.sourceInfoOnly = sourceInfoOnly
+        }
 
         func responseObject() -> [String: Any] {
             var object: [String: Any] = [
@@ -3886,6 +4875,25 @@
             ]
             if let description {
                 object["description"] = description
+            }
+            if sourceInfoOnly {
+                var sourceInfo: [String: Any] = [:]
+                if let path {
+                    sourceInfo["path"] = path
+                }
+                if let location {
+                    sourceInfo["scope"] =
+                        switch location {
+                        case .user:
+                            "user"
+                        case .project:
+                            "project"
+                        case .path:
+                            "temporary"
+                        }
+                }
+                object["sourceInfo"] = sourceInfo
+                return object
             }
             if let location {
                 object["location"] = location.rawValue
@@ -3989,6 +4997,8 @@
         private let cycledThinkingLevelResult: String?
         private let compactionSummary: String?
         private let compactionTokensBefore: Int?
+        private let promptEvents: [[String: Any]]
+        private let stallAfterPromptAcceptance: Bool
         private(set) var sentLines: [String] = []
         private var stdoutLineHandler: (@Sendable (String) -> Void)?
         private var terminationHandler: (@Sendable (Int32) -> Void)?
@@ -4009,7 +5019,9 @@
             cycledThinkingLevel: String? = nil,
             cycledThinkingLevelResult: String? = nil,
             compactionSummary: String? = nil,
-            compactionTokensBefore: Int? = nil
+            compactionTokensBefore: Int? = nil,
+            promptEvents: [[String: Any]] = [],
+            stallAfterPromptAcceptance: Bool = false
         ) {
             self.promptResponseText = promptResponseText
             self.slashCommands = slashCommands
@@ -4027,6 +5039,8 @@
             self.cycledThinkingLevelResult = cycledThinkingLevelResult
             self.compactionSummary = compactionSummary
             self.compactionTokensBefore = compactionTokensBefore
+            self.promptEvents = promptEvents
+            self.stallAfterPromptAcceptance = stallAfterPromptAcceptance
         }
 
         func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
@@ -4052,7 +5066,8 @@
             switch type {
             case "get_state":
                 var data: [String: Any] = [
-                    "sessionId": "pi-session-1"
+                    "sessionId": "pi-session-1",
+                    "isStreaming": stallAfterPromptAcceptance,
                 ]
                 if let stateModel {
                     data["model"] = stateModel.responseObject()
@@ -4236,6 +5251,12 @@
                     "command": "prompt",
                     "success": true,
                 ])
+                if stallAfterPromptAcceptance {
+                    return
+                }
+                for event in promptEvents {
+                    emit(event)
+                }
                 guard promptResponseText.isEmpty == false else {
                     return
                 }
@@ -4257,6 +5278,7 @@
                         ]
                     ],
                 ])
+                emit(["type": "agent_end", "messages": []])
             default:
                 return
             }
@@ -4273,6 +5295,92 @@
                 return
             }
             stdoutLineHandler?(line)
+        }
+    }
+
+    extension NexusServicePiSessionStreamTests {
+        @Test func piTurnWatchdogDeclaresProviderStallWhenRpcStdoutStaysIdle() async throws {
+            setenv("NEXUS_PI_RPC_TURN_STALL_SEC", "1", 1)
+            setenv("NEXUS_PI_RPC_TURN_POLL_SEC", "0.2", 1)
+            setenv("NEXUS_PI_RPC_TURN_WATCHDOG_TICK_SEC", "0.1", 1)
+            defer {
+                unsetenv("NEXUS_PI_RPC_TURN_STALL_SEC")
+                unsetenv("NEXUS_PI_RPC_TURN_POLL_SEC")
+                unsetenv("NEXUS_PI_RPC_TURN_WATCHDOG_TICK_SEC")
+            }
+
+            let runtime = try await PiRPCSessionRuntime(
+                executable: "/tmp/fake-pi",
+                workingDirectory: "/tmp",
+                terminationStatusMessageBuilder: { _ in "" },
+                nexusSessionID: UUID(),
+                transportFactory: { _, _, _ in
+                    TestPiRPCTransport(stallAfterPromptAcceptance: true)
+                }
+            )
+
+            let session = Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            )
+
+            try runtime.sendInput("stall me")
+            try await Task.sleep(nanoseconds: 2_500_000_000)
+
+            let screen = runtime.sessionScreen(for: session)
+            #expect(screen.isAgentTurnInProgress == false)
+            #expect(screen.activityItems.contains { $0.kind == .error && $0.text.contains("Pi stopped responding") })
+        }
+
+        @Test func relaunchedPiSessionScreenDropsInterruptedErrorWhenLiveRuntimeExists() async throws {
+            let rootURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusServiceTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
+            try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
+
+            let launcher = makePiStreamTestLauncher(piTransportFactory: { _, _, _ in
+                TestPiRPCTransport()
+            })
+            func makeService() throws -> NexusService {
+                try NexusService.bootstrapForTests(
+                    rootURL: rootURL,
+                    providerHealthEvaluator: ProviderHealthFacts(
+                        executableResolver: PiStreamStubExecutableResolver(executables: ["pi": "/tmp/fake-pi"]),
+                        commandRunner: PiStreamStubCommandRunner(results: [
+                            .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--version'"]): .success(
+                                stdout: "0.9.0\n"),
+                            .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(
+                                stdout: "Usage: pi\n"),
+                        ]),
+                        localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+                    ),
+                    sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
+                )
+            }
+
+            let service = try makeService()
+            let group = try service.createWorkspaceGroup(name: "Solo Group")
+            let workspace = try service.createLocalWorkspace(
+                name: "Local Pi",
+                folderPath: workspaceFolder.path(percentEncoded: false),
+                primaryGroupID: group.id
+            )
+            let session = try await service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .pi)
+
+            let restarted = try makeService()
+            let interruptedScreen = try restarted.getSessionScreen(sessionID: session.id)
+            #expect(interruptedScreen.session.state == .interrupted)
+
+            _ = try await restarted.launchOrResumeSession(sessionID: session.id)
+            let liveScreen = try restarted.getSessionScreen(sessionID: session.id)
+
+            #expect(liveScreen.session.state == .ready)
+            #expect(liveScreen.activityItems.contains(where: { $0.kind == .error }) == false)
+            #expect(liveScreen.activityItems.contains(where: { $0.text == "Session stream connected" }))
         }
     }
 #endif

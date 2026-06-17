@@ -46,6 +46,27 @@ struct CoalescingMainActorValuePumpTests {
 
         try await waitUntil { await recorder.values == ["first"] }
     }
+
+    @Test func mergePendingValueCanPreserveEarlierPreferredQueuedValue() async throws {
+        let gate = AsyncGate()
+        let recorder = DeliveryRecorder<Int>()
+        let pump = CoalescingMainActorValuePump<Int>(mergePendingValue: max)
+        pump.installDeliver { value in
+            await recorder.record(value)
+            if value == 1 {
+                await gate.wait()
+            }
+        }
+
+        pump.submit(1)
+        try await waitUntil { await recorder.values == [1] }
+
+        pump.submit(5)
+        pump.submit(3)
+        await gate.open()
+
+        try await waitUntil { await recorder.values == [1, 5] }
+    }
 }
 
 private actor DeliveryRecorder<Value: Sendable & Equatable> {
@@ -78,7 +99,9 @@ private actor AsyncGate {
         isOpen = true
         let continuations = waiters
         waiters.removeAll(keepingCapacity: false)
-        continuations.forEach { $0.resume() }
+        for continuation in continuations {
+            continuation.resume()
+        }
     }
 }
 

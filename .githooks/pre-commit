@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT=$(git rev-parse --show-toplevel)
+cd "$ROOT"
+
+HOOKS_DIR="$ROOT/.githooks"
+
+# Bob Shell: pending-notes cleanup when .bob is present
+if [ -d "$ROOT/.bob" ] && [ -f "$HOOKS_DIR/bob-pre-commit.sh" ]; then
+    # shellcheck source=/dev/null
+    source "$HOOKS_DIR/bob-pre-commit.sh"
+    run_bob_pre_commit
+fi
+
+# Nexus Swift lint (staged .swift only)
+# shellcheck source=/dev/null
+source "$HOOKS_DIR/lint-staged-swift.sh"

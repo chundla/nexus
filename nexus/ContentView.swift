@@ -29,7 +29,7 @@
         @State private var structuredSessionDraftGrowthScrollThrottle = StructuredSessionDraftGrowthScrollThrottle()
         @State private var structuredSessionPinState = StructuredSessionFeedPinState()
         @State private var structuredSessionFeedScrollSnapshot: StructuredSessionFeedScrollSnapshot?
-        @State private var structuredSessionFeedScrollPosition = ScrollPosition(edge: .bottom)
+        @State private var structuredSessionFeedScrollPosition = ScrollPosition()
         @State private var structuredSessionMacOSFeedVisibleTailRowCount = 0
         @State private var presentedStructuredSessionAssistantFullResponse:
             StructuredSessionAssistantFullResponsePresentation?
@@ -1560,20 +1560,22 @@
                             presentedStructuredSessionAssistantFullResponse = nil
                             structuredSessionMacOSFeedVisibleTailRowCount = 0
                             structuredSessionAgentTurnDisclosureState.reset()
+                            structuredSessionFeedScrollPosition = ScrollPosition()
                             structuredSessionScheduleMacOSFeedActivityRowsIfNeeded()
+                        },
+                        content: {
+                            MacStructuredSessionFeedScrollContent(
+                                structuredPresentation: structuredPresentation,
+                                feedPresentation: feedPresentation,
+                                visibleTailRowCount: structuredSessionMacOSFeedVisibleTailRowCount,
+                                disclosureState: structuredSessionAgentTurnDisclosureState,
+                                historyPaging: { structuredSessionHistoryPagingControls() },
+                                activityRow: { structuredSessionActivityRowView($0) },
+                                onShowFullAssistantResponse: { presentedStructuredSessionAssistantFullResponse = $0 },
+                                thinkingIndicator: { structuredSessionThinkingIndicatorView($0) }
+                            )
                         }
-                    ) {
-                        MacStructuredSessionFeedScrollContent(
-                            structuredPresentation: structuredPresentation,
-                            feedPresentation: feedPresentation,
-                            visibleTailRowCount: structuredSessionMacOSFeedVisibleTailRowCount,
-                            disclosureState: structuredSessionAgentTurnDisclosureState,
-                            historyPaging: { structuredSessionHistoryPagingControls() },
-                            activityRow: { structuredSessionActivityRowView($0) },
-                            onShowFullAssistantResponse: { presentedStructuredSessionAssistantFullResponse = $0 },
-                            thinkingIndicator: { structuredSessionThinkingIndicatorView($0) }
-                        )
-                    }
+                    )
 
                     if isReady, let structuredChrome {
                         MacStructuredSessionComposerSection(

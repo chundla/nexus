@@ -62,6 +62,7 @@
             _ dialogID: String, response: SessionExtensionUIDialogResponse, to session: Session
         ) throws -> SessionScreen
         func resize(session: Session, columns: Int, rows: Int) throws -> SessionScreen
+        func flushPendingRuntimeChangeNotifications()
     }
 
     extension SessionRuntimeManaging {
@@ -123,6 +124,8 @@
         let sessionRecordAdapterMetadata: SessionRecordAdapterMetadata?
         let initialTranscript: String
         let terminationStatusMessageBuilder: (Int32) -> String
+        /// When true, an existing in-memory runtime is removed before starting a new one (persisted relaunch / fresh launch).
+        let replaceExistingRuntime: Bool
 
         init(
             executable: String,
@@ -133,7 +136,8 @@
             remoteRuntimeLaunchMode: RemoteRuntimeLaunchMode = .launchNew,
             sessionRecordAdapterMetadata: SessionRecordAdapterMetadata? = nil,
             initialTranscript: String = "",
-            terminationStatusMessageBuilder: @escaping (Int32) -> String = { _ in "" }
+            terminationStatusMessageBuilder: @escaping (Int32) -> String = { _ in "" },
+            replaceExistingRuntime: Bool = false
         ) {
             self.executable = executable
             self.arguments = arguments
@@ -144,6 +148,7 @@
             self.sessionRecordAdapterMetadata = sessionRecordAdapterMetadata
             self.initialTranscript = initialTranscript
             self.terminationStatusMessageBuilder = terminationStatusMessageBuilder
+            self.replaceExistingRuntime = replaceExistingRuntime
         }
     }
 
@@ -329,12 +334,17 @@
 
     final class InMemorySessionRuntimeManager: SessionRuntimeManaging, @unchecked Sendable {
         private let launcher: any SessionRuntimeLaunching
+        private let runtimeChangeNotificationQueue = DispatchQueue(
+            label: "NexusService.InMemorySessionRuntimeManager.runtime-change")
         private let lock = NSLock()
         private var runtimes: [UUID: any SessionRuntime] = [:]
         private var updateObservers: [UUID: [UUID: @Sendable () -> Void]] = [:]
         private var observedSessionIDs: [UUID: UUID] = [:]
         private var runtimeChangePreObserverHandler: (@Sendable (UUID) -> Void)?
         private var runtimeChangePostObserverHandler: (@Sendable (UUID) -> Void)?
+        private var pendingRuntimeChangeSessionIDs: Set<UUID> = []
+        private var runtimeChangeNotificationOrder: [UUID] = []
+        private var runtimeChangeNotificationsScheduled = false
 
         init(launcher: any SessionRuntimeLaunching = ProcessSessionRuntimeLauncher()) {
             self.launcher = launcher
@@ -355,11 +365,16 @@
         func launchOrResume(
             session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration
         ) async throws {
-            let shouldCreateRuntime = try withLock {
+            let (shouldCreateRuntime, replacedExistingRuntime) = try withLock {
+                let hadRuntime = runtimes[session.id] != nil
                 if let runtime = runtimes[session.id], runtime.state == .ready {
-                    return false
+                    return (false, hadRuntime)
                 }
-                return true
+                if launchConfiguration.replaceExistingRuntime, hadRuntime {
+                    runtimes.removeValue(forKey: session.id)?.setChangeHandler(nil)
+                    return (true, true)
+                }
+                return (true, hadRuntime)
             }
 
             guard shouldCreateRuntime else {
@@ -369,12 +384,17 @@
             let runtime = try await launcher.makeRuntime(
                 session: session, workspace: workspace, launchConfiguration: launchConfiguration)
             runtime.setChangeHandler { [weak self] in
-                self?.notifyRuntimeChange(for: session.id)
+                self?.enqueueRuntimeChangeNotification(for: session.id)
             }
 
             try withLock {
                 runtimes[session.id] = runtime
             }
+            NexusSessionRuntimeDiagnostics.logRuntimeRegistered(
+                sessionID: session.id,
+                providerID: session.providerID,
+                hadExistingRuntime: replacedExistingRuntime
+            )
             notifyRuntimeChange(for: session.id)
         }
 
@@ -396,12 +416,19 @@
 
         func remove(session: Session, preservingObservers: Bool) {
             lock.lock()
+            let hadRuntime = runtimes[session.id] != nil
             runtimes.removeValue(forKey: session.id)?.setChangeHandler(nil)
             if preservingObservers == false {
                 updateObservers.removeValue(forKey: session.id)
                 observedSessionIDs = observedSessionIDs.filter { $0.value != session.id }
             }
             lock.unlock()
+            if hadRuntime {
+                NexusSessionRuntimeDiagnostics.logRuntimeRemoved(
+                    sessionID: session.id,
+                    providerID: session.providerID
+                )
+            }
         }
 
         func hasRuntime(for session: Session) -> Bool {
@@ -454,7 +481,7 @@
 
             replacedRuntime?.setChangeHandler(nil)
             runtime?.setChangeHandler { [weak self] in
-                self?.notifyRuntimeChange(for: targetSessionID)
+                self?.enqueueRuntimeChangeNotification(for: targetSessionID)
             }
             notifyRuntimeChange(for: targetSessionID)
         }
@@ -504,6 +531,7 @@
             }
 
             try runtime.sendInput(prompt)
+            notifyRuntimeChange(for: session.id)
             return runtime.sessionScreen(for: session)
         }
 
@@ -516,6 +544,7 @@
             }
 
             try runtime.sendText(text)
+            notifyRuntimeChange(for: session.id)
             return runtime.sessionScreen(for: session)
         }
 
@@ -530,6 +559,7 @@
             }
 
             try runtime.sendInputKey(key, applicationCursorMode: applicationCursorMode)
+            notifyRuntimeChange(for: session.id)
             return runtime.sessionScreen(for: session)
         }
 
@@ -544,6 +574,7 @@
             }
 
             try runtime.respondToApprovalRequest(approvalRequestID, decision: decision)
+            notifyRuntimeChange(for: session.id)
             return runtime.sessionScreen(for: session)
         }
 
@@ -558,6 +589,7 @@
             }
 
             try runtime.respondToExtensionDialog(dialogID, response: response)
+            notifyRuntimeChange(for: session.id)
             return runtime.sessionScreen(for: session)
         }
 
@@ -588,6 +620,57 @@
                 observer()
             }
             runtimeChangePostObserverHandler?(sessionID)
+        }
+
+        private func enqueueRuntimeChangeNotification(for sessionID: UUID) {
+            let shouldSchedule: Bool
+            lock.lock()
+            if pendingRuntimeChangeSessionIDs.insert(sessionID).inserted {
+                runtimeChangeNotificationOrder.append(sessionID)
+            }
+            shouldSchedule = runtimeChangeNotificationsScheduled == false
+            if shouldSchedule {
+                runtimeChangeNotificationsScheduled = true
+            }
+            lock.unlock()
+
+            guard shouldSchedule else {
+                return
+            }
+
+            runtimeChangeNotificationQueue.async { [weak self] in
+                self?.drainRuntimeChangeNotifications()
+            }
+        }
+
+        private func drainRuntimeChangeNotifications() {
+            while true {
+                let sessionID: UUID
+                lock.lock()
+                guard let nextSessionID = runtimeChangeNotificationOrder.first else {
+                    runtimeChangeNotificationsScheduled = false
+                    lock.unlock()
+                    return
+                }
+                runtimeChangeNotificationOrder.removeFirst()
+                pendingRuntimeChangeSessionIDs.remove(nextSessionID)
+                sessionID = nextSessionID
+                lock.unlock()
+
+                notifyRuntimeChange(for: sessionID)
+            }
+        }
+
+        func flushPendingRuntimeChangeNotifications() {
+            runtimeChangeNotificationQueue.sync {
+                drainRuntimeChangeNotifications()
+            }
+        }
+
+        /// Drains queued runtime-change notifications synchronously. Tests use this after bulk stub
+        /// updates so structured history persistence observes the latest screen before reading disk.
+        func flushPendingRuntimeChangeNotificationsForTests() {
+            flushPendingRuntimeChangeNotifications()
         }
 
         private func withLock<T>(_ operation: () throws -> T) throws -> T {
@@ -723,10 +806,10 @@
                         try makeRemoteTerminalRuntime(launchConfiguration: launchConfiguration)
                     },
                     makeLocalPiRuntime: { [self] in
-                        try await makeLocalPiRuntime(launchConfiguration: launchConfiguration)
+                        try await makeLocalPiRuntime(session: session, launchConfiguration: launchConfiguration)
                     },
                     makeRemotePiRuntime: { [self] in
-                        try await makeRemotePiRuntime(launchConfiguration: launchConfiguration)
+                        try await makeRemotePiRuntime(session: session, launchConfiguration: launchConfiguration)
                     },
                     makeLocalCodexRuntime: { [self] in
                         try await makeLocalCodexRuntime(launchConfiguration: launchConfiguration)
@@ -808,6 +891,7 @@
         }
 
         private func makeLocalPiRuntime(
+            session: Session,
             launchConfiguration: SessionRuntimeLaunchConfiguration
         ) async throws -> any SessionRuntime {
             let processEnvironment = localShellEnvironmentResolver.resolvedEnvironment()
@@ -819,6 +903,7 @@
                     restoredMetadata: launchConfiguration.sessionRecordAdapterMetadata,
                     terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
                     processEnvironment: processEnvironment,
+                    nexusSessionID: session.id,
                     transportFactory: piTransportFactory
                 )
             }
@@ -829,11 +914,13 @@
                 sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.piSessionLinkage,
                 restoredMetadata: launchConfiguration.sessionRecordAdapterMetadata,
                 terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
-                processEnvironment: processEnvironment
+                processEnvironment: processEnvironment,
+                nexusSessionID: session.id
             )
         }
 
         private func makeRemotePiRuntime(
+            session: Session,
             launchConfiguration: SessionRuntimeLaunchConfiguration
         ) async throws -> any SessionRuntime {
             guard let remoteHost = launchConfiguration.remoteHost,
@@ -857,6 +944,7 @@
                 launchMode: launchConfiguration.remoteRuntimeLaunchMode
             )
 
+            let nexusSessionID = session.id
             return try await PiRPCSessionRuntime(
                 executable: "/usr/bin/ssh",
                 workingDirectory: launchConfiguration.workingDirectory,
@@ -867,15 +955,17 @@
                 unexpectedTerminationMessageBuilder: { _ in
                     "Pi Session stream disconnected. Relaunch to reconnect to the tmux-backed remote runtime."
                 },
-                stopHandler: {
-                    try Self.runCommand(
-                        executable: "/usr/bin/ssh",
-                        arguments: self.remoteProtocolSessionCommandBuilder.stopArguments(
-                            runtimeIdentifier: runtimeIdentifier,
-                            host: remoteHost
+                stopHandler: self.piTransportFactory == nil
+                    ? {
+                        try Self.runCommand(
+                            executable: "/usr/bin/ssh",
+                            arguments: self.remoteProtocolSessionCommandBuilder.stopArguments(
+                                runtimeIdentifier: runtimeIdentifier,
+                                host: remoteHost
+                            )
                         )
-                    )
-                },
+                    } : nil,
+                nexusSessionID: nexusSessionID,
                 transportFactory: { _, _, _ in
                     if let piTransportFactory = self.piTransportFactory {
                         return try piTransportFactory("/usr/bin/ssh", bridgeArguments, nil)
@@ -884,7 +974,8 @@
                     return try ProcessPiRPCTransport(
                         executable: "/usr/bin/ssh",
                         arguments: bridgeArguments,
-                        workingDirectory: nil
+                        workingDirectory: nil,
+                        nexusSessionID: nexusSessionID
                     )
                 }
             )
@@ -1090,7 +1181,7 @@
 
         private let pid: pid_t
         private let terminalHandle: FileHandle
-        private let masterFileDescriptor: Int32
+        private let ptyFileDescriptor: Int32
         private let readSource: DispatchSourceRead
         private let terminationSource: DispatchSourceProcess
         private let stopHandler: (() throws -> Void)?
@@ -1124,9 +1215,9 @@
             self.stopHandler = stopHandler
             self.terminationStatusMessageBuilder = terminationStatusMessageBuilder
 
-            var masterFileDescriptor: Int32 = -1
+            var ptyFileDescriptor: Int32 = -1
             var initialWindowSize = winsize(ws_row: 24, ws_col: 80, ws_xpixel: 0, ws_ypixel: 0)
-            let pid = forkpty(&masterFileDescriptor, nil, nil, &initialWindowSize)
+            let pid = forkpty(&ptyFileDescriptor, nil, nil, &initialWindowSize)
             guard pid >= 0 else {
                 throw NSError(
                     domain: NSPOSIXErrorDomain, code: Int(errno),
@@ -1147,9 +1238,9 @@
             }
 
             self.pid = pid
-            self.masterFileDescriptor = masterFileDescriptor
-            self.terminalHandle = FileHandle(fileDescriptor: masterFileDescriptor, closeOnDealloc: true)
-            self.readSource = DispatchSource.makeReadSource(fileDescriptor: masterFileDescriptor, queue: .global())
+            self.ptyFileDescriptor = ptyFileDescriptor
+            self.terminalHandle = FileHandle(fileDescriptor: ptyFileDescriptor, closeOnDealloc: true)
+            self.readSource = DispatchSource.makeReadSource(fileDescriptor: ptyFileDescriptor, queue: .global())
             self.terminationSource = DispatchSource.makeProcessSource(
                 identifier: pid, eventMask: .exit, queue: .global())
 
@@ -1160,7 +1251,7 @@
 
                 let estimatedBytes = max(Int(self.readSource.data), 1)
                 var buffer = [UInt8](repeating: 0, count: estimatedBytes)
-                let bytesRead = Darwin.read(self.masterFileDescriptor, &buffer, buffer.count)
+                let bytesRead = Darwin.read(self.ptyFileDescriptor, &buffer, buffer.count)
                 guard bytesRead > 0 else {
                     return
                 }
@@ -1271,9 +1362,7 @@
 
             append("\n> \(trimmed)\n")
             notifyChange()
-            guard let data = "\(trimmed)\n".data(using: .utf8) else {
-                return
-            }
+            let data = Data("\(trimmed)\n".utf8)
             terminalHandle.write(data)
         }
 
@@ -1331,7 +1420,7 @@
 
             var windowSize = winsize(
                 ws_row: UInt16(clampedRows), ws_col: UInt16(clampedColumns), ws_xpixel: 0, ws_ypixel: 0)
-            guard ioctl(masterFileDescriptor, TIOCSWINSZ, &windowSize) == 0 else {
+            guard ioctl(ptyFileDescriptor, TIOCSWINSZ, &windowSize) == 0 else {
                 throw NSError(
                     domain: NSPOSIXErrorDomain, code: Int(errno),
                     userInfo: [NSLocalizedDescriptionKey: String(cString: strerror(errno))])
@@ -2277,10 +2366,12 @@
         }
 
         func sendSessionInput(sessionID: UUID, prompt: SessionPrompt) async throws -> SessionScreen {
-            sessionScreenAfterPiRedirectIfNeeded(
+            let screen = sessionScreenAfterPiRedirectIfNeeded(
                 sourceSessionID: sessionID,
                 fallback: try await sessionInteraction.sendSessionInput(sessionID: sessionID, prompt: prompt)
             )
+            structuredSessionObservationStore.recordChange(for: screen)
+            return screen
         }
 
         func sendSessionText(sessionID: UUID, text: String) throws -> SessionScreen {
@@ -2368,7 +2459,7 @@
             approvalRequestID: UUID,
             decision: ApprovalRequestDecision
         ) async throws -> SessionScreen {
-            sessionScreenAfterPiRedirectIfNeeded(
+            let screen = sessionScreenAfterPiRedirectIfNeeded(
                 sourceSessionID: sessionID,
                 fallback: try await sessionInteraction.respondToApprovalRequest(
                     sessionID: sessionID,
@@ -2376,6 +2467,8 @@
                     decision: decision
                 )
             )
+            structuredSessionObservationStore.recordChange(for: screen)
+            return screen
         }
 
         func respondToExtensionDialog(
@@ -2500,7 +2593,7 @@
         func sendRemoteSessionInput(sessionID: UUID, pairedDeviceID: UUID, prompt: SessionPrompt) async throws
             -> SessionScreen
         {
-            sessionScreenAfterPiRedirectIfNeeded(
+            let screen = sessionScreenAfterPiRedirectIfNeeded(
                 sourceSessionID: sessionID,
                 fallback: try await sessionInteraction.sendRemoteSessionInput(
                     sessionID: sessionID,
@@ -2508,6 +2601,8 @@
                     prompt: prompt
                 )
             )
+            structuredSessionObservationStore.recordChange(for: screen)
+            return screen
         }
 
         func respondToRemoteApprovalRequest(
@@ -2691,7 +2786,8 @@
                 return resolvedSession
             }
 
-            guard sessionRuntimeManager.hasRuntime(for: resolvedSession) == false,
+            let hadRuntimeBefore = sessionRuntimeManager.hasRuntime(for: resolvedSession)
+            guard hadRuntimeBefore == false,
                 let workspace = try metadataStore.workspace(id: resolvedSession.workspaceID)
             else {
                 return resolvedSession
@@ -2714,9 +2810,20 @@
                 fatalError("Interactive ready bootstrap must produce a bootstrapReadyWithoutRuntime transition plan.")
             }
 
+            let relaunched: Bool
             if case .relaunchPersistedSession = plan {
                 _ = try await sessionLifecycle.launchOrResumeSession(sessionID: resolvedSession.id)
+                relaunched = true
+            } else {
+                relaunched = false
             }
+
+            NexusSessionRuntimeDiagnostics.logInteractiveReadyBootstrap(
+                sessionID: resolvedSession.id,
+                providerID: resolvedSession.providerID,
+                hadRuntimeBefore: hadRuntimeBefore,
+                relaunchedPersistedSession: relaunched
+            )
 
             return resolvedSession
         }
@@ -3007,12 +3114,29 @@
             for session: Session,
             source: SessionRecordAdapterMetadataLaunchSource
         ) throws -> SessionRecordAdapterMetadata? {
+            let base: SessionRecordAdapterMetadata?
             switch source {
             case .stored:
-                try sessionRecordStore.sessionRecordAdapterMetadata(sessionID: session.id)
+                base = try sessionRecordStore.sessionRecordAdapterMetadata(sessionID: session.id)
             case .explicit(let metadata):
-                metadata
+                base = metadata
             }
+
+            guard session.providerID == .pi else {
+                return base
+            }
+            guard let historyState = try piStructuredSessionHistoryStore.persistedState(sessionID: session.id) else {
+                return base
+            }
+
+            let linkage = base?.piSessionLinkage
+            return SessionRecordAdapterMetadata.pi(
+                linkage: linkage,
+                activityItems: historyState.activityItems,
+                approvalRequests: historyState.approvalRequests,
+                extensionUIState: historyState.extensionUIState,
+                providerEvents: historyState.providerEvents
+            ) ?? base
         }
 
         private func persistRuntimeLinkageIfNeeded(for session: Session) throws {
@@ -3205,6 +3329,8 @@
         private func sessionScreenAfterPiRedirectIfNeeded(sourceSessionID: UUID, fallback: SessionScreen)
             -> SessionScreen
         {
+            sessionRuntimeManager.flushPendingRuntimeChangeNotifications()
+            handlePiSessionTransitionAfterRuntimeChange(sessionID: sourceSessionID)
             guard let redirectedSessionID = consumePiSessionRedirect(for: sourceSessionID),
                 let redirectedScreen = try? getSessionScreen(sessionID: redirectedSessionID)
             else {
@@ -3351,7 +3477,8 @@
                 ),
                 terminationStatusMessageBuilder: { status in
                     providerModule.terminationStatusMessage(for: status)
-                }
+                },
+                replaceExistingRuntime: remoteRuntimeLaunchMode == .launchNew
             )
         }
 
@@ -3487,11 +3614,13 @@
             if let persistedActivityItems, persistedActivityItems.isEmpty == false {
                 switch session.state {
                 case .failed, .interrupted:
-                    let errorItem = SessionActivityItem(kind: .error, text: transcript)
-                    if persistedActivityItems.last == errorItem {
+                    let failureText = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if failureText.isEmpty == false,
+                        persistedActivityItems.last(where: { $0.kind == .error })?.text == failureText
+                    {
                         return persistedActivityItems
                     }
-                    return persistedActivityItems + [errorItem]
+                    return persistedActivityItems + [SessionActivityItem(kind: .error, text: transcript)]
                 case .ready, .exited:
                     return persistedActivityItems
                 }

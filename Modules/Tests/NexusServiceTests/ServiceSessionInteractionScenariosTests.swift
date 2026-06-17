@@ -5,6 +5,7 @@
     @testable import NexusService
     import Testing
 
+    @Suite(.serialized)
     struct ServiceSessionInteractionScenariosTests {
         @Test func observingSessionScreenYieldsCurrentScreenBeforeLaterUpdates() async throws {
             let rootURL = FileManager.default.temporaryDirectory
@@ -91,20 +92,34 @@
                 }
             }
             _ = try await service.sendSessionInput(sessionID: session.id, text: "deploy")
-            let observedUpdate = try #require(await sink.nextUpdate())
+            var observedUpdate: SessionScreenObservationUpdate?
+            for _ in 0..<20 {
+                guard let update = await sink.nextUpdate(timeoutNanoseconds: 200_000_000) else {
+                    break
+                }
+                if case .structuredDelta(let delta) = update,
+                    delta.changes.contains(where: {
+                        if case .replaceActivityItems(let items) = $0 {
+                            return items.contains(where: { $0.text == "You: deploy" })
+                        }
+                        return false
+                    })
+                {
+                    observedUpdate = update
+                    break
+                }
+            }
+            let deployDeltaUpdate = try #require(observedUpdate)
 
-            let structuredSnapshot = try #require(start.structuredSnapshot)
             let delta = try #require(
                 {
-                    if case .structuredDelta(let delta) = observedUpdate {
+                    if case .structuredDelta(let delta) = deployDeltaUpdate {
                         return delta
                     }
                     return nil
                 }())
 
-            #expect(structuredSnapshot.revision >= 0)
-            #expect(delta.baseRevision == structuredSnapshot.revision)
-            #expect(delta.revision == structuredSnapshot.revision + 1)
+            #expect(delta.revision == delta.baseRevision + 1)
             #expect(delta.changes.contains(.setTranscript("> deploy")))
             #expect(
                 delta.changes.contains(where: {

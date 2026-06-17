@@ -140,7 +140,7 @@
                 transportFactory: { _, _, _ in
                     SynchronousIBMBobTransport(
                         stdoutLines: [
-                            #"{"type":"message","text":"\#(reply)"}"#,
+                            #"{"type":"message","text":"\#(reply)","session_id":"bob-bounded-history"}"#,
                             #"{"type":"completion","text":"Done"}"#,
                         ],
                         terminationStatus: 0

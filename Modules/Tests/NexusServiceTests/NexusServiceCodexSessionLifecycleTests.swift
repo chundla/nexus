@@ -5,7 +5,7 @@
     import Testing
 
     struct NexusServiceCodexSessionLifecycleTests {
-        @Test func localCodexRestartedSessionsRemainInspectableAndDefaultRelaunchResumesPersistedThread() throws {
+        @Test func localCodexRestartedSessionsRemainInspectableAndDefaultRelaunchResumesPersistedThread() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -25,18 +25,20 @@
                 primaryGroupID: group.id
             )
 
-            let defaultSession = try service.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .codex)
-            let namedSession = try service.createNamedSession(
+            let defaultSession = try await service.launchOrResumeDefaultSession(
+                workspaceID: workspace.id, providerID: .codex)
+            let namedSession = try await service.createNamedSession(
                 workspaceID: workspace.id, providerID: .codex, name: "Review")
             let defaultScreen = try service.getSessionScreen(sessionID: defaultSession.id)
             let namedScreen = try service.getSessionScreen(sessionID: namedSession.id)
 
             let restartedService = try makeService()
-            let overview = try restartedService.getWorkspaceOverview(workspaceID: workspace.id)
-            let providerDetail = try restartedService.getProviderDetail(workspaceID: workspace.id, providerID: .codex)
+            let overview = try await restartedService.getWorkspaceOverview(workspaceID: workspace.id)
+            let providerDetail = try await restartedService.getProviderDetail(
+                workspaceID: workspace.id, providerID: .codex)
             let interruptedDefaultScreen = try restartedService.getSessionScreen(sessionID: defaultSession.id)
             let interruptedNamedScreen = try restartedService.getSessionScreen(sessionID: namedSession.id)
-            let relaunchedDefaultSession = try restartedService.launchOrResumeDefaultSession(
+            let relaunchedDefaultSession = try await restartedService.launchOrResumeDefaultSession(
                 workspaceID: workspace.id, providerID: .codex)
             let relaunchedDefaultScreen = try restartedService.getSessionScreen(sessionID: defaultSession.id)
 
@@ -82,7 +84,7 @@
             #expect(resumedDefaultLaunch.resolvedThreadID == firstDefaultLaunch.resolvedThreadID)
         }
 
-        @Test func localCodexNamedSessionCanBeStoppedRelaunchedAndDeletedWhilePreservingThreadLinkage() throws {
+        @Test func localCodexNamedSessionCanBeStoppedRelaunchedAndDeletedWhilePreservingThreadLinkage() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -102,7 +104,7 @@
                 primaryGroupID: group.id
             )
 
-            let namedSession = try service.createNamedSession(
+            let namedSession = try await service.createNamedSession(
                 workspaceID: workspace.id, providerID: .codex, name: "Review")
             let firstScreen = try service.getSessionScreen(sessionID: namedSession.id)
             let stoppedSession = try service.stopSession(sessionID: namedSession.id)
@@ -110,11 +112,12 @@
             let stoppedScreen = try service.getSessionScreen(sessionID: namedSession.id)
 
             let restartedService = try makeService()
-            let relaunchedSession = try restartedService.launchOrResumeSession(sessionID: namedSession.id)
+            let relaunchedSession = try await restartedService.launchOrResumeSession(sessionID: namedSession.id)
             let relaunchedScreen = try restartedService.getSessionScreen(sessionID: namedSession.id)
             _ = try restartedService.stopSession(sessionID: namedSession.id)
             let deleted = try restartedService.deleteSessionRecord(sessionID: namedSession.id)
-            let providerDetail = try restartedService.getProviderDetail(workspaceID: workspace.id, providerID: .codex)
+            let providerDetail = try await restartedService.getProviderDetail(
+                workspaceID: workspace.id, providerID: .codex)
 
             let launches = transportHarness.launches()
             let firstLaunch = try #require(launches.first)
@@ -154,6 +157,7 @@
         -> NexusService
     {
         let launcher = ProcessSessionRuntimeLauncher(
+            localShellEnvironmentResolver: CodexLifecycleStubShellEnvironmentResolver(),
             codexTransportFactory: { _, _, _ in transportHarness.makeTransport() }
         )
 
@@ -162,8 +166,11 @@
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: CodexLifecycleStubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
                 commandRunner: CodexLifecycleStubCommandRunner(results: [
-                    .init(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n")
+                    .init(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(stdout: "1.2.3\n"),
+                    .init(executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-codex' '--version'"]): .success(
+                        stdout: "1.2.3\n"),
                 ]),
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
                 codexReadinessProbe: NoOpCodexLifecycleReadinessProbe()
             ),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
@@ -211,6 +218,12 @@
 
     private struct NoOpCodexLifecycleReadinessProbe: CodexReadinessProbing {
         func probe(executable: String, workingDirectory: String) async throws {}
+    }
+
+    private struct CodexLifecycleStubShellEnvironmentResolver: LocalShellEnvironmentResolving {
+        func resolvedEnvironment() -> [String: String]? {
+            ["SHELL": "/bin/zsh", "PATH": "/tmp/bin"]
+        }
     }
 
     private final class PersistentCodexTransportHarness: @unchecked Sendable {
@@ -318,6 +331,13 @@
                         "approvalPolicy": "on-request",
                         "approvalsReviewer": "user",
                         "sandbox": ["type": "readOnly", "networkAccess": false],
+                    ],
+                ])
+            case "model/list":
+                emit([
+                    "id": object["id"] ?? 0,
+                    "result": [
+                        "data": []
                     ],
                 ])
             default:

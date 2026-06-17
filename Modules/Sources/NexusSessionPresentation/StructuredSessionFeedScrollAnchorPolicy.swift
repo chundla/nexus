@@ -2,23 +2,32 @@ import Foundation
 import NexusDomain
 
 /// Standalone `Pi:` assistant segment after an open agent-turn card (interim text during the same user prompt).
+/// Continuation tool turns may follow the interim `Pi:` segment, so do not require the `Pi:` segment to be last.
 public func structuredSessionFeedHasInterimPiAssistantAfterOpenTurn(
     in feedSegments: [StructuredSessionFeedSegment]?
 ) -> Bool {
     guard let feedSegments, feedSegments.count >= 2 else {
         return false
     }
-    guard case .agentTurn(let turn) = feedSegments[feedSegments.count - 2],
-        turn.isOpen
-    else {
-        return false
+
+    var hasOpenTurnBeforeStandalonePi = false
+    for segment in feedSegments {
+        switch segment {
+        case .agentTurn(let turn):
+            if turn.isOpen {
+                hasOpenTurnBeforeStandalonePi = true
+            }
+        case .standalone(let item):
+            if hasOpenTurnBeforeStandalonePi,
+                structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage(item)
+            {
+                return true
+            }
+        case .userMessage:
+            hasOpenTurnBeforeStandalonePi = false
+        }
     }
-    guard case .standalone(let item) = feedSegments.last,
-        structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage(item)
-    else {
-        return false
-    }
-    return true
+    return false
 }
 
 /// Open **Agent Turn** on the composite feed (presentation), independent of provider `isStreaming` gaps.
@@ -46,10 +55,7 @@ public func structuredSessionEffectiveAgentTurnInProgress(for screen: SessionScr
         return true
     }
     if screen.session.providerID == .pi,
-        structuredSessionPiProviderTurnAwaitingTurnEnd(
-            activityItems: screen.activityItems,
-            providerEvents: screen.providerEvents
-        )
+        structuredSessionPiFeedSegmentTurnInProgress(for: screen)
     {
         return true
     }

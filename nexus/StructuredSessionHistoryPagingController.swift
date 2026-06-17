@@ -29,6 +29,7 @@ final class StructuredSessionHistoryPagingController {
     private var lastRowStablePresentation: FocusedStructuredSessionPresentation?
     private var lastSourceActivityItems: [SessionActivityItem] = []
     private var lastLiveDraftKey: String?
+    private var lastEffectiveTurnInProgress: Bool?
 
     /// Counts full feed rebuilds; used by tests to verify row-stable caching (#208 / Pi provider churn).
     private(set) var presentationRebuildCount = 0
@@ -165,11 +166,13 @@ final class StructuredSessionHistoryPagingController {
         // FocusedStructuredSessionPresentation (and its feed/autoScrollTrigger) from mutating.
         // Only live draft text affects visible rows; provider-event churn must not bust this cache.
         let draftKey = structuredSessionHistoryPagingRowAffectingDraftKey(for: merged)
+        let effectiveTurnInProgress = structuredSessionEffectiveAgentTurnInProgress(for: merged)
 
         if let last = lastRowStablePresentation,
             last.session.id == screen.session.id,
             merged.activityItems == lastSourceActivityItems,
-            draftKey == lastLiveDraftKey
+            draftKey == lastLiveDraftKey,
+            effectiveTurnInProgress == lastEffectiveTurnInProgress
         {
             // Row-affecting inputs unchanged → reuse prior presentation (stable autoScrollTrigger + chunks).
             // Callers still call applyLiveScreen separately for paging availability state.
@@ -185,6 +188,7 @@ final class StructuredSessionHistoryPagingController {
         lastRowStablePresentation = pres
         lastSourceActivityItems = merged.activityItems
         lastLiveDraftKey = draftKey
+        lastEffectiveTurnInProgress = effectiveTurnInProgress
         return pres
     }
 
@@ -238,6 +242,7 @@ final class StructuredSessionHistoryPagingController {
         lastRowStablePresentation = nil
         lastSourceActivityItems = []
         lastLiveDraftKey = nil
+        lastEffectiveTurnInProgress = nil
         presentationRebuildCount = 0
         refreshAvailability()
     }
