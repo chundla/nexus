@@ -1675,6 +1675,12 @@
                         .deletingLastPathComponent()
                         .appendingPathComponent("PiStructuredSessionHistory", isDirectory: true)
                 )
+            let remoteWorkspaceProbeCollector: any RemoteWorkspaceProbeCollecting =
+                if let healthFacts = providerHealthEvaluator as? ProviderHealthFacts {
+                    RemoteWorkspaceProbeCollector(commandRunner: healthFacts.commandRunner)
+                } else {
+                    RemoteWorkspaceProbeCollector()
+                }
             self.workspaceCatalog = WorkspaceCatalog(
                 dependencies: WorkspaceCatalogDependencies(
                     metadataStore: metadataStore,
@@ -1683,7 +1689,7 @@
                     providerHealthEvaluator: providerHealthEvaluator,
                     hostValidationEvaluator: hostValidationEvaluator,
                     workspaceAvailabilityEvaluator: workspaceAvailabilityEvaluator,
-                    remoteWorkspaceProbeCollector: RemoteWorkspaceProbeCollector(),
+                    remoteWorkspaceProbeCollector: remoteWorkspaceProbeCollector,
                     sessionRuntimeManager: sessionRuntimeManager,
                     providerModuleRegistry: self.providerModuleRegistry,
                     recordPerformanceDiagnostic: { [metadataStore] in
@@ -2994,15 +3000,6 @@
             } catch {
                 let failureContext = try remoteRuntimeRecoveryFailureContext(
                     for: error, session: readySession, workspace: workspace)
-                if failureContext.isMissingRemoteRuntime {
-                    return try await launchSession(
-                        readySession,
-                        workspace: workspace,
-                        launchSnapshot: launchSnapshot,
-                        forceFreshRemoteRuntime: true
-                    )
-                }
-
                 return try persistRemoteRuntimeRecoveryFailure(for: readySession, failureContext: failureContext)
             }
         }

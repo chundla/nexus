@@ -419,7 +419,8 @@ struct RemotePairingNetworkTests {
                         stdout: "1.2.3\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
                         stdout: "Usage: codex\n"),
-                ])
+                ]),
+                codexReadinessProbe: NoOpCodexReadinessProbe()
             )
         )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -524,7 +525,8 @@ struct RemotePairingNetworkTests {
                         stdout: "1.2.3\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
                         stdout: "Usage: codex\n"),
-                ])
+                ]),
+                codexReadinessProbe: NoOpCodexReadinessProbe()
             )
         )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -582,7 +584,8 @@ struct RemotePairingNetworkTests {
                         stdout: "1.2.3\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
                         stdout: "Usage: codex\n"),
-                ])
+                ]),
+                codexReadinessProbe: NoOpCodexReadinessProbe()
             )
         )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -807,7 +810,8 @@ struct RemotePairingNetworkTests {
                         stdout: "1.2.3\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
                         stdout: "Usage: codex\n"),
-                ])
+                ]),
+                codexReadinessProbe: NoOpCodexReadinessProbe()
             ),
             sessionRuntimeManager: StructuredPromptSessionRuntimeManager(
                 providerName: "Codex",
@@ -882,7 +886,8 @@ struct RemotePairingNetworkTests {
                         stdout: "1.2.3\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
                         stdout: "Usage: codex\n"),
-                ])
+                ]),
+                codexReadinessProbe: NoOpCodexReadinessProbe()
             ),
             sessionRuntimeManager: StructuredPromptSessionRuntimeManager(
                 providerName: "Codex",
@@ -945,7 +950,8 @@ struct RemotePairingNetworkTests {
                         stdout: "1.2.3\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
                         stdout: "Usage: codex\n"),
-                ])
+                ]),
+                codexReadinessProbe: NoOpCodexReadinessProbe()
             ),
             sessionRuntimeManager: StructuredPromptSessionRuntimeManager(providerName: "Codex")
         )
@@ -1007,7 +1013,8 @@ struct RemotePairingNetworkTests {
                         stdout: "1.2.3\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
                         stdout: "Usage: codex\n"),
-                ])
+                ]),
+                codexReadinessProbe: NoOpCodexReadinessProbe()
             )
         )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -2855,66 +2862,14 @@ private struct RemotePairingTestCommandRunner: ProviderCommandRunning {
     }
 
     private func matchShellWrappedInvocation(executable: String, arguments: [String]) -> StubbedResult? {
-        guard arguments.isEmpty == false else {
-            return nil
-        }
-        let shellCommand: String?
-        if let last = arguments.last, arguments.dropLast().allSatisfy({ $0.hasPrefix("-") }) {
-            shellCommand = last
-        } else if arguments.count == 1 {
-            shellCommand = arguments[0]
-        } else {
-            shellCommand = nil
-        }
-        guard let shellCommand else {
-            return nil
-        }
-        if shellCommand.contains("--version") {
-            for (invocation, stubbed) in results where invocation.arguments == ["--version"] {
-                if shellCommand.contains(invocation.executable) {
-                    return stubbed
-                }
-            }
-        }
-        if shellCommand.contains("--help") {
-            for (invocation, stubbed) in results where invocation.arguments == ["--help"] {
-                if shellCommand.contains(invocation.executable) {
-                    return stubbed
-                }
-            }
-        }
-        for (invocation, stubbed) in results {
-            let direct = ([invocation.executable] + invocation.arguments).joined(separator: " ")
-            if shellCommand.contains(direct) || shellCommand.contains(invocation.executable) {
-                return stubbed
-            }
-        }
-        if executable.hasSuffix("/ssh") || executable == "/usr/bin/ssh" || executable == "ssh" {
-            for (invocation, stubbed) in results where invocation.executable.contains("ssh") {
-                if let remoteScript = invocation.arguments.last,
-                    shellCommand == remoteScript
-                        || (remoteScript.contains("resolve_codex_path")
-                            && shellCommand.contains("resolve_codex_path"))
-                        || (remoteScript.contains("resolve_claude_path")
-                            && shellCommand.contains("resolve_claude_path"))
-                        || (remoteScript.contains("cd '") && shellCommand.contains("cd '")
-                            && remoteScript.contains("--version") && shellCommand.contains("--version"))
-                {
-                    return stubbed
-                }
-            }
-            if shellCommand.contains("--version"),
-                let versionStub = results.first(where: { $0.key.arguments == ["--version"] })?.value
-            {
-                return versionStub
-            }
-            if shellCommand.contains("--help"),
-                let helpStub = results.first(where: { $0.key.arguments == ["--help"] })?.value
-            {
-                return helpStub
-            }
-        }
-        return nil
+        stubCommandRunnerMatchShellWrappedInvocation(
+            executable: executable,
+            arguments: arguments,
+            results: results,
+            invocationExecutable: { $0.executable },
+            invocationArguments: { $0.arguments },
+            stubbedArguments: { $0.arguments }
+        )
     }
 }
 

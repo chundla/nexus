@@ -901,7 +901,12 @@ struct nexusTests {
                 ]
             ): .success(stdout: "/srv/api\n")
         ])
+        let bulkProbe = remoteWorkspaceV1BulkProbeSSHStub(
+            sshTarget: "build-box",
+            stdout: remoteWorkspaceV1BulkProbeStdout()
+        )
         let providerHealthRunner = StubCommandRunner(results: [
+            bulkProbe.0: bulkProbe.1,
             StubCommandRunner.Invocation(
                 executable: "/usr/bin/ssh",
                 arguments: [
@@ -927,7 +932,8 @@ struct nexusTests {
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
-                commandRunner: providerHealthRunner
+                commandRunner: providerHealthRunner,
+                remoteCodexReadinessProbe: NoOpRemoteCodexReadinessProbe()
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
                 "build-box": HostValidationResult(
@@ -1168,7 +1174,16 @@ struct nexusTests {
                 ]
             ): .success(stdout: "/srv/api\n")
         ])
+        let bulkProbe = remoteWorkspaceV1BulkProbeSSHStub(
+            sshTarget: "build-box",
+            stdout: remoteWorkspaceV1BulkProbeStdout(
+                claudeExecutable: nil,
+                claudeVersion: nil,
+                claudeResolutionDetail: "NEXUS_REMOTE_CLAUDE_NOT_FOUND"
+            )
+        )
         let providerHealthRunner = StubCommandRunner(results: [
+            bulkProbe.0: bulkProbe.1,
             StubCommandRunner.Invocation(
                 executable: "/usr/bin/ssh",
                 arguments: [
@@ -1177,7 +1192,7 @@ struct nexusTests {
                     "build-box",
                     remoteClaudeProbeScript("/srv/api"),
                 ]
-            ): .success(stdout: "", stderr: "NEXUS_REMOTE_CLAUDE_NOT_FOUND\n", exitStatus: 1)
+            ): .success(stdout: "", stderr: "NEXUS_REMOTE_CLAUDE_NOT_FOUND\n", exitStatus: 1),
         ])
         let service = try NexusService.bootstrapForTests(
             rootURL: FileManager.default.temporaryDirectory
@@ -1975,7 +1990,13 @@ struct nexusTests {
                 ]
             ): .success(stdout: "/srv/api\n")
         ])
+        let bulkProbe = remoteWorkspaceV1BulkProbeSSHStub(
+            sshTarget: "build-box",
+            port: 2222,
+            stdout: remoteWorkspaceV1BulkProbeStdout()
+        )
         let providerHealthRunner = StubCommandRunner(results: [
+            bulkProbe.0: bulkProbe.1,
             StubCommandRunner.Invocation(
                 executable: "/usr/bin/ssh",
                 arguments: [
@@ -1985,7 +2006,7 @@ struct nexusTests {
                     "build-box",
                     remoteCodexProbeScript("/srv/api"),
                 ]
-            ): .success(stdout: "/usr/local/bin/codex\n1.2.3\n")
+            ): .success(stdout: "/usr/local/bin/codex\n1.2.3\n"),
         ])
         let runtimeManager = StubSessionRuntimeManager(
             launchTranscriptForConfiguration: { configuration, _, _ in
@@ -1998,7 +2019,8 @@ struct nexusTests {
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
-                commandRunner: providerHealthRunner
+                commandRunner: providerHealthRunner,
+                remoteCodexReadinessProbe: NoOpRemoteCodexReadinessProbe()
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
                 "build-box": HostValidationResult(
@@ -8132,7 +8154,7 @@ struct nexusTests {
         #expect(model.focusedStructuredSessionPresentation?.feed.pendingApprovalRequests == [approvalRequest])
         #expect(
             model.focusedStructuredSessionPresentation?.feed.thinkingIndicator
-                == StructuredSessionThinkingIndicator(text: "Thinking"))
+                == StructuredSessionThinkingIndicator(text: "Thinking…"))
 
         await model.loadOlderFocusedStructuredSessionHistory()
 
@@ -8145,7 +8167,7 @@ struct nexusTests {
         #expect(model.focusedStructuredSessionPresentation?.feed.pendingApprovalRequests == [approvalRequest])
         #expect(
             model.focusedStructuredSessionPresentation?.feed.thinkingIndicator
-                == StructuredSessionThinkingIndicator(text: "Thinking"))
+                == StructuredSessionThinkingIndicator(text: "Thinking…"))
         #expect(client.structuredHistoryPageRequests.map(\.sessionID) == [session.id])
     }
 
@@ -11137,6 +11159,76 @@ func remoteCodexProbeScript(_ workspacePath: String) -> String {
     remoteCLIProbeScript(workspacePath, commandName: "codex")
 }
 
+/// Tab-separated `RemoteWorkspaceProbeCollector` v1 envelope for SSH bulk probe stubs.
+func remoteWorkspaceV1BulkProbeStdout(
+    claudeExecutable: String? = "/usr/local/bin/claude",
+    claudeVersion: String? = "9.9.9 (Claude Code)",
+    claudeResolutionDetail: String? = nil,
+    codexExecutable: String? = "/usr/local/bin/codex",
+    codexVersion: String? = "1.2.3",
+    codexResolutionDetail: String? = nil,
+    piExecutable: String? = nil,
+    piVersion: String? = nil,
+    bobExecutable: String? = nil,
+    bobVersion: String? = nil,
+    tmuxAvailable: Bool = true,
+    workspacePath: RemoteWorkspacePathProbeFact = .available,
+    workspacePathDetail: String? = nil
+) -> String {
+    var lines = ["protocol\tv1", "tmuxAvailable\t\(tmuxAvailable)"]
+    switch workspacePath {
+    case .available:
+        lines.append("workspacePath\tavailable")
+    case .failed:
+        lines.append("workspacePath\tfailed")
+        if let workspacePathDetail {
+            lines.append("workspacePathDetail\t\(workspacePathDetail)")
+        }
+    case .notChecked:
+        break
+    }
+    func appendProvider(
+        _ key: String,
+        executable: String?,
+        version: String?,
+        resolutionDetail: String?
+    ) {
+        if let resolutionDetail {
+            lines.append("provider.\(key).resolutionDetail\t\(resolutionDetail)")
+            return
+        }
+        if let executable {
+            lines.append("provider.\(key).executable\t\(executable)")
+        }
+        if let version {
+            lines.append("provider.\(key).version\t\(version)")
+        }
+    }
+    appendProvider(
+        "claude", executable: claudeExecutable, version: claudeVersion, resolutionDetail: claudeResolutionDetail)
+    appendProvider("codex", executable: codexExecutable, version: codexVersion, resolutionDetail: codexResolutionDetail)
+    appendProvider("pi", executable: piExecutable, version: piVersion, resolutionDetail: nil)
+    appendProvider("ibmBob", executable: bobExecutable, version: bobVersion, resolutionDetail: nil)
+    return lines.joined(separator: "\n") + "\n"
+}
+
+/// Last SSH argument marker paired with `stubCommandRunnerMatchShellWrappedInvocation` bulk-probe fuzzy match.
+let remoteWorkspaceV1BulkProbeSSHScriptMarker = "remote-workspace-v1-bulk-probe"
+
+func remoteWorkspaceV1BulkProbeSSHStub(
+    sshTarget: String,
+    port: Int? = nil,
+    stdout: String
+) -> (StubCommandRunner.Invocation, StubCommandRunner.StubbedResult) {
+    var arguments = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5"]
+    if let port {
+        arguments += ["-p", String(port)]
+    }
+    arguments += [sshTarget, "/bin/sh -lc \(remoteWorkspaceV1BulkProbeSSHScriptMarker)"]
+    let invocation = StubCommandRunner.Invocation(executable: "/usr/bin/ssh", arguments: arguments)
+    return (invocation, .success(stdout: stdout))
+}
+
 private func remoteCLIProbeScript(_ workspacePath: String, commandName: String) -> String {
     let commandPathVariable = "\(commandName.uppercased())_PATH"
     let resolveFunctionName = "resolve_\(commandName)_path"
@@ -11268,6 +11360,111 @@ final class MutableExecutableResolver: ProviderExecutableResolving {
     }
 }
 
+func stubCommandRunnerMatchShellWrappedInvocation<Invocation: Hashable, StubbedResult>(
+    executable: String,
+    arguments: [String],
+    results: [Invocation: StubbedResult],
+    invocationExecutable: (Invocation) -> String,
+    invocationArguments: (Invocation) -> [String],
+    stubbedArguments: (Invocation) -> [String]
+) -> StubbedResult? {
+    guard arguments.isEmpty == false else {
+        return nil
+    }
+
+    let shellCommand: String?
+    if let last = arguments.last, arguments.dropLast().allSatisfy({ $0.hasPrefix("-") }) {
+        shellCommand = last
+    } else if arguments.count == 1 {
+        shellCommand = arguments[0]
+    } else {
+        shellCommand = nil
+    }
+
+    guard let shellCommand else {
+        return nil
+    }
+
+    if shellCommand.contains("--version") {
+        for (invocation, stubbed) in results where stubbedArguments(invocation) == ["--version"] {
+            if shellCommand.contains(invocationExecutable(invocation)) {
+                return stubbed
+            }
+        }
+    }
+    if shellCommand.contains("--help") {
+        for (invocation, stubbed) in results where stubbedArguments(invocation) == ["--help"] {
+            if shellCommand.contains(invocationExecutable(invocation)) {
+                return stubbed
+            }
+        }
+    }
+
+    for (invocation, stubbed) in results {
+        let direct = ([invocationExecutable(invocation)] + stubbedArguments(invocation)).joined(separator: " ")
+        if shellCommand.contains(direct) || shellCommand.contains(invocationExecutable(invocation)) {
+            return stubbed
+        }
+    }
+
+    let isSSH =
+        executable.hasSuffix("/ssh") || executable == "/usr/bin/ssh" || executable == "ssh"
+    if isSSH {
+        if shellCommand.contains("app-server") {
+            for (invocation, stubbed) in results where invocationExecutable(invocation).contains("ssh") {
+                if let remoteScript = invocationArguments(invocation).last,
+                    remoteScript.contains("--version") || remoteScript.contains("resolve_codex_path")
+                {
+                    return stubbed
+                }
+            }
+        }
+        if shellCommand.contains("emit_fact") && shellCommand.contains("protocol") {
+            for (invocation, stubbed) in results where invocationExecutable(invocation).contains("ssh") {
+                if let remoteScript = invocationArguments(invocation).last,
+                    remoteScript.contains(remoteWorkspaceV1BulkProbeSSHScriptMarker)
+                        || remoteScript.contains("resolve_claude_path")
+                        || remoteScript.contains("resolve_codex_path")
+                        || remoteScript.contains("collect_cli_provider")
+                {
+                    return stubbed
+                }
+            }
+        }
+        for (invocation, stubbed) in results where invocationExecutable(invocation).contains("ssh") {
+            if let remoteScript = invocationArguments(invocation).last,
+                shellCommand == remoteScript
+                    || (remoteScript.contains("resolve_codex_path")
+                        && shellCommand.contains("resolve_codex_path"))
+                    || (remoteScript.contains("resolve_claude_path")
+                        && shellCommand.contains("resolve_claude_path"))
+                    || (remoteScript.contains("resolve_pi_path")
+                        && shellCommand.contains("resolve_pi_path"))
+                    || (remoteScript.contains("resolve_bob_path")
+                        && shellCommand.contains("resolve_bob_path"))
+                    || (remoteScript.contains("cd '") && shellCommand.contains("cd '")
+                        && remoteScript.contains("--version") && shellCommand.contains("--version"))
+                    || (remoteScript.contains("cd '") && shellCommand.contains("cd '")
+                        && remoteScript.contains("&& pwd") && shellCommand.contains("&& pwd"))
+            {
+                return stubbed
+            }
+        }
+        if shellCommand.contains("--version"),
+            let versionStub = results.first(where: { stubbedArguments($0.key) == ["--version"] })?.value
+        {
+            return versionStub
+        }
+        if shellCommand.contains("--help"),
+            let helpStub = results.first(where: { stubbedArguments($0.key) == ["--help"] })?.value
+        {
+            return helpStub
+        }
+    }
+
+    return nil
+}
+
 struct StubCommandRunner: ProviderCommandRunning {
     struct Invocation: Hashable {
         let executable: String
@@ -11303,77 +11500,27 @@ struct StubCommandRunner: ProviderCommandRunning {
 
     /// Provider health and terminal launch probes run through login shells (`-lic`, `-lc`, …), not direct argv.
     private func matchShellWrappedInvocation(executable: String, arguments: [String]) -> StubbedResult? {
-        guard arguments.isEmpty == false else {
-            return nil
-        }
-
-        let shellCommand: String?
-        if let last = arguments.last, arguments.dropLast().allSatisfy({ $0.hasPrefix("-") }) {
-            shellCommand = last
-        } else if arguments.count == 1 {
-            shellCommand = arguments[0]
-        } else {
-            shellCommand = nil
-        }
-
-        guard let shellCommand else {
-            return nil
-        }
-
-        if shellCommand.contains("--version") {
-            for (invocation, stubbed) in results where invocation.arguments == ["--version"] {
-                if shellCommand.contains(invocation.executable) {
-                    return stubbed
-                }
-            }
-        }
-        if shellCommand.contains("--help") {
-            for (invocation, stubbed) in results where invocation.arguments == ["--help"] {
-                if shellCommand.contains(invocation.executable) {
-                    return stubbed
-                }
-            }
-        }
-
-        for (invocation, stubbed) in results {
-            let direct = ([invocation.executable] + invocation.arguments).joined(separator: " ")
-            if shellCommand.contains(direct) || shellCommand.contains(invocation.executable) {
-                return stubbed
-            }
-        }
-
-        if executable.hasSuffix("/ssh") || executable == "/usr/bin/ssh" || executable == "ssh" {
-            for (invocation, stubbed) in results where invocation.executable.contains("ssh") {
-                if let remoteScript = invocation.arguments.last,
-                    shellCommand == remoteScript
-                        || (remoteScript.contains("resolve_codex_path")
-                            && shellCommand.contains("resolve_codex_path"))
-                        || (remoteScript.contains("resolve_claude_path")
-                            && shellCommand.contains("resolve_claude_path"))
-                        || (remoteScript.contains("cd '") && shellCommand.contains("cd '")
-                            && remoteScript.contains("--version") && shellCommand.contains("--version"))
-                {
-                    return stubbed
-                }
-            }
-            if shellCommand.contains("--version"),
-                let versionStub = results.first(where: { $0.key.arguments == ["--version"] })?.value
-            {
-                return versionStub
-            }
-            if shellCommand.contains("--help"),
-                let helpStub = results.first(where: { $0.key.arguments == ["--help"] })?.value
-            {
-                return helpStub
-            }
-        }
-
-        return nil
+        stubCommandRunnerMatchShellWrappedInvocation(
+            executable: executable,
+            arguments: arguments,
+            results: results,
+            invocationExecutable: \.executable,
+            invocationArguments: \.arguments,
+            stubbedArguments: \.arguments
+        )
     }
 }
 
-private struct NoOpCodexReadinessProbe: CodexReadinessProbing {
+struct NoOpCodexReadinessProbe: CodexReadinessProbing {
     func probe(executable: String, workingDirectory: String) throws {}
+}
+
+struct NoOpRemoteCodexReadinessProbe: RemoteCodexReadinessProbing {
+    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) async throws
+        -> RemoteCodexReadinessOutcome
+    {
+        .ready
+    }
 }
 
 private class NexusTestsBasePiRPCTransport: PiRPCTransporting, @unchecked Sendable {
