@@ -245,7 +245,7 @@ struct StructuredSessionMarkdownRendererTests {
 
         #expect(parseCallCount == 0)
 
-        await Task.yield()
+        await StructuredSessionMarkdownRowHydrationScheduler.waitUntilHydrationJobsScheduledForTesting(1)
         await StructuredSessionMarkdownRowHydrationScheduler.drainForTesting()
 
         #expect(parseCallCount == 1)
@@ -272,7 +272,7 @@ struct StructuredSessionMarkdownRendererTests {
             }
         }
 
-        await Task.yield()
+        await StructuredSessionMarkdownRowHydrationScheduler.waitUntilHydrationJobsScheduledForTesting(4)
         await StructuredSessionMarkdownRowHydrationScheduler.drainForTesting()
 
         #expect(parseCallCount == 4)
@@ -308,7 +308,7 @@ struct StructuredSessionMarkdownRendererTests {
             }
         }
 
-        await Task.yield()
+        await StructuredSessionMarkdownRowHydrationScheduler.waitUntilHydrationJobsScheduledForTesting(jobCount)
         await StructuredSessionMarkdownRowHydrationScheduler.drainForTesting()
 
         #expect(parseCallCount == jobCount)

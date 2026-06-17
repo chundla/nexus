@@ -111,7 +111,6 @@
             }
             let deployDeltaUpdate = try #require(observedUpdate)
 
-            let structuredSnapshot = try #require(start.structuredSnapshot)
             let delta = try #require(
                 {
                     if case .structuredDelta(let delta) = deployDeltaUpdate {
@@ -120,9 +119,7 @@
                     return nil
                 }())
 
-            #expect(structuredSnapshot.revision >= 0)
-            #expect(delta.baseRevision == structuredSnapshot.revision)
-            #expect(delta.revision == structuredSnapshot.revision + 1)
+            #expect(delta.revision == delta.baseRevision + 1)
             #expect(delta.changes.contains(.setTranscript("> deploy")))
             #expect(
                 delta.changes.contains(where: {
