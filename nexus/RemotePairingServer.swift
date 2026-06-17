@@ -222,9 +222,10 @@
                 let sessionScreenObservationSnapshotRequest = sessionScreenObservationSnapshotRequest(from: request)
             {
                 await respondToAuthorizedRequest(
-                    operation: .fetchSessionScreen,
+                    operation: .observeSessionScreen,
                     request: request,
                     over: connection,
+                    kind: .reconnectFailure,
                     sessionID: sessionScreenObservationSnapshotRequest.sessionID
                 ) { [self] in
                     try await self.client.getSessionScreenObservationSnapshot(

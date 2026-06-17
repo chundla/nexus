@@ -1524,10 +1524,11 @@
                         $0.kind == .error
                             && $0.text.contains("Session stream disconnected")
                     }
-                    if activityItems.contains(where: { $0.kind == .status && $0.text == "Session stream connected" })
+                    let connectedStatus = "Pi shared Session stream connected"
+                    if activityItems.contains(where: { $0.kind == .status && $0.text == connectedStatus })
                         == false
                     {
-                        appendActivityItemLocked(SessionActivityItem(kind: .status, text: "Session stream connected"))
+                        appendActivityItemLocked(SessionActivityItem(kind: .status, text: connectedStatus))
                     }
                     if let currentModelStatus = currentModelStatusTextLocked(),
                         activityItems.contains(where: { $0.kind == .status && $0.text == currentModelStatus }) == false
