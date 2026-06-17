@@ -34,6 +34,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Install Swift lint tools
+        run: brew install swift-format swiftlint
+
       - name: Swift lint
         run: ./scripts/lint-swift.sh
 
