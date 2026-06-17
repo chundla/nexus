@@ -44,6 +44,56 @@
             #expect(decoded["permissionDecisionReason"] as? String == "Controller denied this tool call.")
         }
 
+        @Test func acceptsASecondPreToolUseRequestWhileTheFirstIsStillAwaitingADecision() throws {
+            let bridge = ClaudeApprovalHookBridge()
+            try bridge.start()
+            defer { bridge.stop() }
+
+            let pendingRequests = PendingRequestsBox()
+            bridge.setRequestHandler { request in
+                pendingRequests.append(request)
+            }
+
+            let firstOutputBox = SingleValueBox<Data>()
+            let secondOutputBox = SingleValueBox<Data>()
+            let firstThread = Thread {
+                firstOutputBox.value = try? self.runHookCommand(
+                    bridge: bridge,
+                    stdin: #"{"tool_name":"Write","tool_input":{"file_path":"/tmp/workspace/a.txt"}}"#)
+            }
+            let secondThread = Thread {
+                secondOutputBox.value = try? self.runHookCommand(
+                    bridge: bridge,
+                    stdin: #"{"tool_name":"Bash","tool_input":{"command":"ls"}}"#)
+            }
+            firstThread.start()
+            secondThread.start()
+
+            let deadline = Date().addingTimeInterval(5)
+            while pendingRequests.count() < 2, Date() < deadline {
+                Thread.sleep(forTimeInterval: 0.02)
+            }
+
+            let requests = pendingRequests.snapshot()
+            #expect(requests.count == 2)
+            let writeRequest = try #require(requests.first(where: { $0.toolName == "Write" }))
+            let bashRequest = try #require(requests.first(where: { $0.toolName == "Bash" }))
+
+            try bridge.resolve(requestID: writeRequest.id, decision: .allow, reason: "looks safe")
+            try bridge.resolve(requestID: bashRequest.id, decision: .deny, reason: "not allowed")
+
+            firstThread.cancel()
+            secondThread.cancel()
+            while firstOutputBox.value == nil || secondOutputBox.value == nil {
+                Thread.sleep(forTimeInterval: 0.02)
+            }
+
+            let firstDecoded = try decodeHookOutput(try #require(firstOutputBox.value))
+            let secondDecoded = try decodeHookOutput(try #require(secondOutputBox.value))
+            #expect(firstDecoded["permissionDecision"] as? String == "allow")
+            #expect(secondDecoded["permissionDecision"] as? String == "deny")
+        }
+
         @Test func settingsJSONConfiguresAPreToolUseHookPointingAtTheSocket() throws {
             let bridge = ClaudeApprovalHookBridge()
             try bridge.start()
@@ -91,5 +141,28 @@
 
     private final class SingleValueBox<Value>: @unchecked Sendable {
         var value: Value?
+    }
+
+    private final class PendingRequestsBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var requests: [ClaudeApprovalHookRequest] = []
+
+        func append(_ request: ClaudeApprovalHookRequest) {
+            lock.lock()
+            requests.append(request)
+            lock.unlock()
+        }
+
+        func count() -> Int {
+            lock.lock()
+            defer { lock.unlock() }
+            return requests.count
+        }
+
+        func snapshot() -> [ClaudeApprovalHookRequest] {
+            lock.lock()
+            defer { lock.unlock() }
+            return requests
+        }
     }
 #endif

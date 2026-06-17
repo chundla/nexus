@@ -23,7 +23,7 @@
             #expect(persistedSession.state == .interrupted)
             #expect(
                 persistedSession.failureMessage
-                    == "Session interrupted because the background service restarted. Relaunch to create a new live runtime."
+                    == "Claude Session Record survived, but its live runtime was lost when the background service restarted. Relaunch to create a new live runtime."
             )
         }
 

@@ -67,6 +67,20 @@
             shouldReuseRemoteCLIHealthSnapshot(snapshot, remoteContext: remoteContext)
         }
 
+        func interruptedSessionFailureMessage(
+            for session: Session,
+            workspace: Workspace?,
+            persistedPrimarySurface: SessionSurface
+        ) -> String {
+            guard workspace?.kind == .local,
+                persistedPrimarySurface == .structuredActivityFeed
+            else {
+                return providerModuleDefaultInterruptedSessionFailureMessage()
+            }
+
+            return structuredInterruptedSessionFailureMessage(for: provider.id)
+        }
+
         func constructRuntime(
             for session: Session,
             workspace: Workspace,

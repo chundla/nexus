@@ -72,7 +72,7 @@
         ) throws {
             let resolvedTransportFactory =
                 transportFactory ?? { executable, arguments, workingDirectory in
-                    try ProcessClaudeStreamJSONTransport(
+                    ProcessClaudeStreamJSONTransport(
                         executable: executable,
                         arguments: arguments,
                         workingDirectory: workingDirectory,
@@ -175,8 +175,12 @@
         }
 
         func stop() throws {
+            lock.lock()
+            runtimeState = .exited
+            lock.unlock()
             approvalHookBridge.stop()
             try transport.terminate()
+            notifyChange()
         }
 
         func sendInput(_ text: String) throws {
