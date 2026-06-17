@@ -56,6 +56,7 @@ jobs:
             -project nexus.xcodeproj \
             -destination 'platform=macOS' \
             -parallel-testing-enabled NO \
-            -resultBundlePath "$RUNNER_TEMP/nexus-test.xcresult"
+            -resultBundlePath "$RUNNER_TEMP/nexus-test.xcresult" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="-"
         env:
           NSUnbufferedIO: YES
