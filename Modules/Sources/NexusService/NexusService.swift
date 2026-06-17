@@ -62,6 +62,7 @@
             _ dialogID: String, response: SessionExtensionUIDialogResponse, to session: Session
         ) throws -> SessionScreen
         func resize(session: Session, columns: Int, rows: Int) throws -> SessionScreen
+        func flushPendingRuntimeChangeNotifications()
     }
 
     extension SessionRuntimeManaging {
@@ -660,12 +661,16 @@
             }
         }
 
-        /// Drains queued runtime-change notifications synchronously. Tests use this after bulk stub
-        /// updates so structured history persistence observes the latest screen before reading disk.
-        func flushPendingRuntimeChangeNotificationsForTests() {
+        func flushPendingRuntimeChangeNotifications() {
             runtimeChangeNotificationQueue.sync {
                 drainRuntimeChangeNotifications()
             }
+        }
+
+        /// Drains queued runtime-change notifications synchronously. Tests use this after bulk stub
+        /// updates so structured history persistence observes the latest screen before reading disk.
+        func flushPendingRuntimeChangeNotificationsForTests() {
+            flushPendingRuntimeChangeNotifications()
         }
 
         private func withLock<T>(_ operation: () throws -> T) throws -> T {
@@ -3324,6 +3329,7 @@
         private func sessionScreenAfterPiRedirectIfNeeded(sourceSessionID: UUID, fallback: SessionScreen)
             -> SessionScreen
         {
+            sessionRuntimeManager.flushPendingRuntimeChangeNotifications()
             handlePiSessionTransitionAfterRuntimeChange(sessionID: sourceSessionID)
             guard let redirectedSessionID = consumePiSessionRedirect(for: sourceSessionID),
                 let redirectedScreen = try? getSessionScreen(sessionID: redirectedSessionID)

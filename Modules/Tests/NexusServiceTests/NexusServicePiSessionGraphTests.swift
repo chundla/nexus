@@ -294,6 +294,7 @@
                 text: "branch-observed"
             )
             while await sink.nextScreen(timeoutNanoseconds: 20_000_000) != nil {}
+            _ = await sink.nextScreen(timeoutNanoseconds: 50_000_000)
 
             let namedSession = try #require(
                 (try await fixture.service.getProviderDetail(workspaceID: fixture.workspace.id, providerID: .pi))
