@@ -31,8 +31,9 @@
 
         private let lock = NSLock()
         private let transport: any ClaudeStreamJSONTransporting
-        private let terminationStatusMessageBuilder: (Int32) -> String
+        private let unexpectedTerminationMessageBuilder: (Int32) -> String
         private let unexpectedTerminationState: Session.State
+        private let stopHandler: (() throws -> Void)?
         private var runtimeState: Session.State = .ready
         private var terminalColumns = 80
         private var terminalRows = 24
@@ -46,6 +47,7 @@
         private let approvalHookBridge: any ClaudeApprovalHookBridging
         private var approvalRequests: [SessionApprovalRequest] = []
         private var pendingApprovalHookRequestIDs: [UUID: String] = [:]
+        private var didRequestStop = false
 
         var state: Session.State {
             lock.lock()
@@ -65,7 +67,9 @@
             sessionLinkage: ClaudeSessionLinkage? = nil,
             terminationStatusMessageBuilder: @escaping (Int32) -> String,
             unexpectedTerminationState: Session.State = .exited,
+            unexpectedTerminationMessageBuilder: ((Int32) -> String)? = nil,
             processEnvironment: [String: String]? = nil,
+            stopHandler: (() throws -> Void)? = nil,
             sessionIDGenerator: @escaping () -> String = { UUID().uuidString },
             approvalHookBridge: (any ClaudeApprovalHookBridging)? = nil,
             transportFactory: TransportFactory? = nil
@@ -86,6 +90,9 @@
                 sessionLinkage: sessionLinkage,
                 terminationStatusMessageBuilder: terminationStatusMessageBuilder,
                 unexpectedTerminationState: unexpectedTerminationState,
+                unexpectedTerminationMessageBuilder: unexpectedTerminationMessageBuilder
+                    ?? terminationStatusMessageBuilder,
+                stopHandler: stopHandler,
                 sessionIDGenerator: sessionIDGenerator,
                 approvalHookBridge: approvalHookBridge ?? ClaudeApprovalHookBridge(),
                 transportFactory: resolvedTransportFactory
@@ -98,12 +105,15 @@
             sessionLinkage: ClaudeSessionLinkage?,
             terminationStatusMessageBuilder: @escaping (Int32) -> String,
             unexpectedTerminationState: Session.State,
+            unexpectedTerminationMessageBuilder: @escaping (Int32) -> String,
+            stopHandler: (() throws -> Void)?,
             sessionIDGenerator: @escaping () -> String,
             approvalHookBridge: any ClaudeApprovalHookBridging,
             transportFactory: TransportFactory
         ) throws {
-            self.terminationStatusMessageBuilder = terminationStatusMessageBuilder
+            self.unexpectedTerminationMessageBuilder = unexpectedTerminationMessageBuilder
             self.unexpectedTerminationState = unexpectedTerminationState
+            self.stopHandler = stopHandler
             self.activityItems = Self.defaultActivityItems
             self.approvalHookBridge = approvalHookBridge
             let isResuming = sessionLinkage?.isEmpty == false
@@ -176,9 +186,11 @@
 
         func stop() throws {
             lock.lock()
+            didRequestStop = true
             runtimeState = .exited
             lock.unlock()
             approvalHookBridge.stop()
+            try stopHandler?()
             try transport.terminate()
             notifyChange()
         }
@@ -417,20 +429,36 @@
         }
 
         private func handleTermination(status: Int32) {
+            let shouldNotify: Bool
+
             lock.lock()
             let wasTurnInProgress = isTurnInProgress
             isTurnInProgress = false
-            if status != 0 {
+            if didRequestStop {
+                shouldNotify = runtimeState != .exited
+                runtimeState = .exited
+            } else if status != 0 {
                 runtimeState = unexpectedTerminationState
                 let stderr = stderrLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-                let message = stderr.isEmpty == false ? stderr : terminationStatusMessageBuilder(status)
-                appendActivityItemLocked(SessionActivityItem(kind: .error, text: message))
-            } else if wasTurnInProgress {
-                runtimeState = .ready
+                let message = stderr.isEmpty == false ? stderr : unexpectedTerminationMessageBuilder(status)
+                appendActivityItemLocked(
+                    SessionActivityItem(
+                        kind: .error,
+                        text: message
+                    ))
+                shouldNotify = true
+            } else {
+                if wasTurnInProgress {
+                    runtimeState = .ready
+                }
+                shouldNotify = wasTurnInProgress
             }
             stderrLines = []
             lock.unlock()
-            notifyChange()
+
+            if shouldNotify {
+                notifyChange()
+            }
         }
 
         private func appendActivityItemLocked(_ item: SessionActivityItem) {

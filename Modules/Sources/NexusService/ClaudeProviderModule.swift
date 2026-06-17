@@ -88,7 +88,7 @@
             actions: ProviderModuleRuntimeConstructionActions
         ) async throws -> (any SessionRuntime)? {
             if workspace.kind == .remote {
-                return try actions.makeRemoteTerminalRuntime()
+                return try actions.makeRemoteClaudeRuntime()
             }
 
             return try actions.makeLocalClaudeRuntime()

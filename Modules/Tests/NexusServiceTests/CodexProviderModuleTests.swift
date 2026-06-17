@@ -608,6 +608,7 @@
                         return StaticCodexRuntime()
                     },
                     makeLocalClaudeRuntime: { StaticCodexRuntime() },
+                    makeRemoteClaudeRuntime: { StaticCodexRuntime() },
                     makeLocalPiRuntime: { StaticCodexRuntime() },
                     makeRemotePiRuntime: { StaticCodexRuntime() },
                     makeLocalCodexRuntime: {
@@ -668,6 +669,7 @@
                         return StaticCodexRuntime()
                     },
                     makeLocalClaudeRuntime: { StaticCodexRuntime() },
+                    makeRemoteClaudeRuntime: { StaticCodexRuntime() },
                     makeLocalPiRuntime: { StaticCodexRuntime() },
                     makeRemotePiRuntime: { StaticCodexRuntime() },
                     makeLocalCodexRuntime: {

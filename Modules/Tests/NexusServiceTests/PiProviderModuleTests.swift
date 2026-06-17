@@ -840,6 +840,7 @@
                         return StaticPiRuntime()
                     },
                     makeLocalClaudeRuntime: { StaticPiRuntime() },
+                    makeRemoteClaudeRuntime: { StaticPiRuntime() },
                     makeLocalPiRuntime: {
                         tracker.requests.append(.localProtocolNative)
                         return StaticPiRuntime()
@@ -900,6 +901,7 @@
                         return StaticPiRuntime()
                     },
                     makeLocalClaudeRuntime: { StaticPiRuntime() },
+                    makeRemoteClaudeRuntime: { StaticPiRuntime() },
                     makeLocalPiRuntime: {
                         Issue.record("Pi should not choose a local runtime for remote structured Sessions")
                         return StaticPiRuntime()

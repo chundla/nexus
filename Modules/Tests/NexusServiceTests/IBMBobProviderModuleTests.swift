@@ -120,6 +120,7 @@
                         return StaticIBMBobRuntime()
                     },
                     makeLocalClaudeRuntime: { StaticIBMBobRuntime() },
+                    makeRemoteClaudeRuntime: { StaticIBMBobRuntime() },
                     makeLocalPiRuntime: { StaticIBMBobRuntime() },
                     makeRemotePiRuntime: { StaticIBMBobRuntime() },
                     makeLocalCodexRuntime: { StaticIBMBobRuntime() },
@@ -180,6 +181,7 @@
                         return StaticIBMBobRuntime()
                     },
                     makeLocalClaudeRuntime: { StaticIBMBobRuntime() },
+                    makeRemoteClaudeRuntime: { StaticIBMBobRuntime() },
                     makeLocalPiRuntime: { StaticIBMBobRuntime() },
                     makeRemotePiRuntime: { StaticIBMBobRuntime() },
                     makeLocalCodexRuntime: { StaticIBMBobRuntime() },

@@ -811,6 +811,9 @@
                     makeLocalClaudeRuntime: { [self] in
                         try makeLocalClaudeRuntime(launchConfiguration: launchConfiguration)
                     },
+                    makeRemoteClaudeRuntime: { [self] in
+                        try makeRemoteClaudeRuntime(launchConfiguration: launchConfiguration)
+                    },
                     makeLocalPiRuntime: { [self] in
                         try await makeLocalPiRuntime(session: session, launchConfiguration: launchConfiguration)
                     },
@@ -1086,6 +1089,62 @@
                 sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.claudeSessionLinkage,
                 terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
                 processEnvironment: processEnvironment
+            )
+        }
+
+        private func makeRemoteClaudeRuntime(
+            launchConfiguration: SessionRuntimeLaunchConfiguration
+        ) throws -> any SessionRuntime {
+            guard let remoteHost = launchConfiguration.remoteHost,
+                let runtimeIdentifier = launchConfiguration.remoteRuntimeIdentifier
+            else {
+                throw NSError(
+                    domain: "ProcessSessionRuntimeLauncher",
+                    code: 1,
+                    userInfo: [
+                        NSLocalizedDescriptionKey: "Remote Claude launch requires a Host and runtime identifier."
+                    ]
+                )
+            }
+
+            return try ClaudeStreamJSONRuntime(
+                executable: launchConfiguration.executable,
+                workingDirectory: launchConfiguration.workingDirectory,
+                sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.claudeSessionLinkage,
+                terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
+                unexpectedTerminationState: .interrupted,
+                unexpectedTerminationMessageBuilder: { _ in
+                    "Claude Session stream disconnected. Relaunch to reconnect to the tmux-backed remote runtime."
+                },
+                stopHandler: {
+                    try Self.runCommand(
+                        executable: "/usr/bin/ssh",
+                        arguments: self.remoteProtocolSessionCommandBuilder.stopArguments(
+                            runtimeIdentifier: runtimeIdentifier,
+                            host: remoteHost
+                        )
+                    )
+                },
+                transportFactory: { executable, arguments, workingDirectory in
+                    let bridgeArguments = self.remoteProtocolSessionCommandBuilder.bridgeArguments(
+                        host: remoteHost,
+                        runtimeIdentifier: runtimeIdentifier,
+                        workingDirectory: workingDirectory ?? launchConfiguration.workingDirectory,
+                        executable: executable,
+                        providerArguments: arguments,
+                        launchMode: launchConfiguration.remoteRuntimeLaunchMode
+                    )
+
+                    if let claudeTransportFactory = self.claudeTransportFactory {
+                        return try claudeTransportFactory("/usr/bin/ssh", bridgeArguments, nil)
+                    }
+
+                    return ProcessClaudeStreamJSONTransport(
+                        executable: "/usr/bin/ssh",
+                        arguments: bridgeArguments,
+                        workingDirectory: nil
+                    )
+                }
             )
         }
 

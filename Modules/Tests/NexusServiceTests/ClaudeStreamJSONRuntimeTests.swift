@@ -305,6 +305,38 @@
                 id: UUID(), workspaceID: UUID(), providerID: .claude, isDefault: true, state: .ready)
             #expect(runtime.sessionScreen(for: session).activityItems.last?.text == "claude: fatal: out of memory")
         }
+
+        @Test func stopInvokesStopHandlerWithoutSurfacingTransportTerminationAsAnError() throws {
+            let transport = ScriptedClaudeTransport()
+            transport.terminationStatusOnTerminate = 15
+            var stopCalls = 0
+            let runtime = try ClaudeStreamJSONRuntime(
+                executable: "/tmp/fake-claude",
+                workingDirectory: "/tmp/workspace",
+                sessionLinkage: nil,
+                terminationStatusMessageBuilder: { "Claude exited with status \($0)." },
+                unexpectedTerminationState: .interrupted,
+                unexpectedTerminationMessageBuilder: { _ in "should stay hidden" },
+                stopHandler: { stopCalls += 1 },
+                sessionIDGenerator: { "generated-session-id" },
+                transportFactory: { executable, arguments, workingDirectory in
+                    transport.configure(
+                        executable: executable, arguments: arguments, workingDirectory: workingDirectory)
+                    return transport
+                }
+            )
+
+            try runtime.stop()
+
+            #expect(stopCalls == 1)
+            #expect(runtime.state == .exited)
+            let session = Session(
+                id: UUID(), workspaceID: UUID(), providerID: .claude, isDefault: true, state: .ready)
+            #expect(
+                runtime.sessionScreen(for: session).activityItems.map(\.text) == [
+                    "Claude Session ready. Send a prompt to start Claude."
+                ])
+        }
     }
 
     private final class ScriptedClaudeTransport: ClaudeStreamJSONTransporting, @unchecked Sendable {
@@ -312,6 +344,7 @@
         private(set) var launchedArguments: [String] = []
         private(set) var launchedWorkingDirectory: String?
         private(set) var sentLines: [String] = []
+        var terminationStatusOnTerminate: Int32 = 0
         private var stdoutLineHandler: (@Sendable (String) -> Void)?
         private var stderrLineHandler: (@Sendable (String) -> Void)?
         private var terminationHandler: (@Sendable (Int32) -> Void)?
@@ -341,7 +374,7 @@
         }
 
         func terminate() throws {
-            terminate(status: 0)
+            terminate(status: terminationStatusOnTerminate)
         }
 
         func terminate(status: Int32) {

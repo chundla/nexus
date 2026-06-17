@@ -741,6 +741,67 @@
                 ))
         }
 
+        @Test func claudeProviderModuleChoosesRemoteProtocolNativeRuntimeConstructionThroughProviderModuleSeam()
+            async throws
+        {
+            let module = ClaudeProviderModule()
+            let host = NexusDomain.Host(id: UUID(), name: "Build Server", sshTarget: "build-box")
+            let workspace = Workspace(
+                id: UUID(),
+                name: "Remote Claude",
+                kind: .remote,
+                folderPath: "/srv/api",
+                primaryGroupID: UUID(),
+                remoteHostID: host.id
+            )
+            let session = Session(
+                id: UUID(),
+                workspaceID: workspace.id,
+                providerID: .claude,
+                isDefault: true,
+                state: .ready
+            )
+            var requests: [String] = []
+
+            let runtime = try await module.constructRuntime(
+                for: session,
+                workspace: workspace,
+                launchConfiguration: SessionRuntimeLaunchConfiguration(
+                    executable: "/home/tester/.local/bin/claude",
+                    workingDirectory: workspace.folderPath,
+                    remoteHost: host,
+                    remoteRuntimeIdentifier: "nexus-runtime-1"
+                ),
+                actions: ProviderModuleRuntimeConstructionActions(
+                    makeLocalTerminalRuntime: {
+                        Issue.record("Claude should not choose a terminal runtime for remote structured Sessions")
+                        return StaticClaudeSessionRuntime()
+                    },
+                    makeRemoteTerminalRuntime: {
+                        Issue.record("Claude should not choose a terminal runtime for remote structured Sessions")
+                        return StaticClaudeSessionRuntime()
+                    },
+                    makeLocalClaudeRuntime: {
+                        Issue.record("Claude should not choose a local runtime for remote structured Sessions")
+                        return StaticStructuredClaudeSessionRuntime()
+                    },
+                    makeRemoteClaudeRuntime: {
+                        requests.append("remoteClaude")
+                        return StaticStructuredClaudeSessionRuntime()
+                    },
+                    makeLocalPiRuntime: { StaticStructuredClaudeSessionRuntime() },
+                    makeRemotePiRuntime: { StaticStructuredClaudeSessionRuntime() },
+                    makeLocalCodexRuntime: { StaticStructuredClaudeSessionRuntime() },
+                    makeRemoteCodexRuntime: { StaticStructuredClaudeSessionRuntime() },
+                    makeLocalIBMBobRuntime: { StaticStructuredClaudeSessionRuntime() },
+                    makeRemoteIBMBobRuntime: { StaticStructuredClaudeSessionRuntime() }
+                )
+            )
+
+            #expect(requests == ["remoteClaude"])
+            #expect(runtime?.sessionScreen(for: session).primarySurface == .structuredActivityFeed)
+        }
+
         @Test func claudeProviderModuleKeepsSharedPersistedRelaunchPlan() {
             let module = ClaudeProviderModule()
             let workspace = Workspace(
@@ -970,6 +1031,23 @@
 
         func sessionScreen(for session: Session) -> SessionScreen {
             SessionScreen(session: session, primarySurface: .terminal, transcript: "Claude ready")
+        }
+
+        func setChangeHandler(_ handler: (@Sendable () -> Void)?) {}
+        func stop() throws { state = .exited }
+        func sendInput(_ text: String) throws {}
+        func sendText(_ text: String) throws {}
+        func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool) throws {}
+        func respondToApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision) throws {}
+        func resize(columns: Int, rows: Int) throws {}
+    }
+
+    private final class StaticStructuredClaudeSessionRuntime: SessionRuntime, @unchecked Sendable {
+        var state: Session.State = .ready
+        var sessionRecordAdapterMetadata: SessionRecordAdapterMetadata? { nil }
+
+        func sessionScreen(for session: Session) -> SessionScreen {
+            SessionScreen(session: session, primarySurface: .structuredActivityFeed, transcript: "Claude ready")
         }
 
         func setChangeHandler(_ handler: (@Sendable () -> Void)?) {}
