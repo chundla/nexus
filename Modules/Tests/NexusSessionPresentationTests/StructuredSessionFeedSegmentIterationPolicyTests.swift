@@ -116,4 +116,37 @@ struct StructuredSessionFeedSegmentIterationPolicyTests {
         #expect(defaults.tools == false)
         #expect(defaults.toolRows == [false])
     }
+
+    @Test func agentTurnDisclosureDefaultsKeepActivityCollapsedWhenTurnHasNotices() {
+        let turn = StructuredSessionFeedAgentTurnSegment(
+            id: UUID(),
+            isOpen: true,
+            stackItems: [
+                .reasoning(
+                    StructuredSessionFeedAgentTurnReasoningSegment(
+                        activityItemID: UUID(), markdownBody: "Plan."))
+            ],
+            turnNotices: [.progress("Auto-compacting the session context")],
+            finalAnswer: nil
+        )
+        let defaults = structuredSessionAgentTurnDisclosureExpansionDefaults(for: turn)
+        #expect(defaults.activity == false)
+    }
+
+    @Test func agentTurnDisclosureStateKeepsStickyActivityExpansionPerTurn() {
+        let turnID = UUID()
+        let turn = StructuredSessionFeedAgentTurnSegment(
+            id: turnID,
+            isOpen: true,
+            stackItems: [],
+            turnNotices: [.progress("Running bash: ls")],
+            finalAnswer: nil
+        )
+        let state = StructuredSessionAgentTurnDisclosureState()
+        #expect(state.activityIsExpanded(for: turn) == false)
+        state.setActivityExpanded(turnID: turnID, isExpanded: true)
+        #expect(state.activityIsExpanded(for: turn) == true)
+        state.reset()
+        #expect(state.activityIsExpanded(for: turn) == false)
+    }
 }

@@ -6,6 +6,7 @@ import Foundation
 public final class StructuredSessionAgentTurnDisclosureState: ObservableObject, @unchecked Sendable {
     private struct TurnOverrides: Equatable {
         var tools: Bool?
+        var activity: Bool?
         var reasoningRows: [UUID: Bool] = [:]
         var toolRows: [UUID: Bool] = [:]
     }
@@ -24,6 +25,13 @@ public final class StructuredSessionAgentTurnDisclosureState: ObservableObject, 
             return override
         }
         return structuredSessionAgentTurnDisclosureExpansionDefaults(for: turn).tools
+    }
+
+    public func activityIsExpanded(for turn: StructuredSessionFeedAgentTurnSegment) -> Bool {
+        if let override = overridesByTurnID[turn.id]?.activity {
+            return override
+        }
+        return structuredSessionAgentTurnDisclosureExpansionDefaults(for: turn).activity
     }
 
     public func reasoningRowIsExpanded(turnID: UUID, reasoningID: UUID, defaultExpanded: Bool) -> Bool {
@@ -51,6 +59,13 @@ public final class StructuredSessionAgentTurnDisclosureState: ObservableObject, 
         objectWillChange.send()
         var entry = overridesByTurnID[turnID] ?? TurnOverrides()
         entry.tools = isExpanded
+        overridesByTurnID[turnID] = entry
+    }
+
+    public func setActivityExpanded(turnID: UUID, isExpanded: Bool) {
+        objectWillChange.send()
+        var entry = overridesByTurnID[turnID] ?? TurnOverrides()
+        entry.activity = isExpanded
         overridesByTurnID[turnID] = entry
     }
 

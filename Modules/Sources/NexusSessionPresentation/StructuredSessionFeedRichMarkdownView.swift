@@ -32,6 +32,13 @@ public struct StructuredSessionFeedRichMarkdownView: View {
                 color: color,
                 codeBlockPolicy: codeBlockPolicy
             )
+        } else if structuredSessionAssistantFullResponseProseContainsExtractedInlineMath(in: markdown) {
+            structuredSessionFeedLaTeXProseView(
+                markdown: markdown,
+                font: font,
+                color: color,
+                codeBlockPolicy: codeBlockPolicy
+            )
         } else {
             Markdown(markdown)
                 .markdownBlockStyle(\.codeBlock) { configuration in
@@ -67,7 +74,7 @@ public struct StructuredSessionFeedRichMarkdownView: View {
                 id: \.offset
             ) { _, segment in
                 if let chunk = segment.markdownChunk {
-                    StructuredSessionFeedRichMarkdownView(
+                    structuredSessionFeedLaTeXProseView(
                         markdown: chunk,
                         font: font,
                         color: color,

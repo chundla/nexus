@@ -260,6 +260,8 @@ final class RemoteClientPairingModel {
     private let focusedSessionScreenUpdatePump = CoalescingMainActorValuePump<SessionScreen>(
         mergePendingValue: preferredSessionScreenMergePendingValue
     )
+    @ObservationIgnored
+    private let agentTurnCompletionHapticFeedback: any AgentTurnCompletionHapticFeedback
     private var focusedSessionObservation: (any SessionScreenObservation)?
     private var focusedSessionObservationStartupTask: Task<Void, Never>?
     private var focusedSessionReconnectTask: Task<Void, Never>?
@@ -293,11 +295,19 @@ final class RemoteClientPairingModel {
     init(
         client: any RemotePairingClient,
         store: any PairedMacStore,
-        focusedSessionObservationStartupTimeoutNanoseconds: UInt64 = 5_000_000_000
+        focusedSessionObservationStartupTimeoutNanoseconds: UInt64 = 5_000_000_000,
+        agentTurnCompletionHapticFeedback: (any AgentTurnCompletionHapticFeedback)? = nil
     ) {
         self.client = client
         self.store = store
         self.focusedSessionObservationStartupTimeoutNanoseconds = focusedSessionObservationStartupTimeoutNanoseconds
+        #if os(iOS)
+            self.agentTurnCompletionHapticFeedback =
+                agentTurnCompletionHapticFeedback ?? UINotificationAgentTurnCompletionHapticFeedback()
+        #else
+            self.agentTurnCompletionHapticFeedback =
+                agentTurnCompletionHapticFeedback ?? NoOpAgentTurnCompletionHapticFeedback()
+        #endif
         self.structuredSessionHistoryPagingController = StructuredSessionHistoryPagingController {
             sessionID, pageSize, cursor in
             let pairedMac = try await MainActor.run {
@@ -1347,6 +1357,17 @@ final class RemoteClientPairingModel {
         syncFocusedSessionSurfacePresentation(for: screen)
         syncFocusedSessionControllerStatus()
         setFocusedSessionWorkspaceID(screen.session.workspaceID)
+
+        #if os(iOS)
+            if shouldPlayAgentTurnCompletionHaptic(
+                previousScreen: previousScreen,
+                newScreen: screen,
+                isController: focusedSessionIsController,
+                isLoadingOlderStructuredSessionHistory: isLoadingOlderFocusedStructuredSessionHistory
+            ) {
+                agentTurnCompletionHapticFeedback.playSuccess()
+            }
+        #endif
 
         guard let previousScreen else {
             return

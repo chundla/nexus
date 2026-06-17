@@ -245,6 +245,93 @@ public struct StructuredSessionAgentTurnToolBubble: View {
 }
 
 @available(macOS 12.0, iOS 15.0, *)
+public struct StructuredSessionAgentTurnActivityBubble: View {
+    public let turn: StructuredSessionFeedAgentTurnSegment
+    public let style: StructuredSessionPiFeedSegmentStyle
+    @ObservedObject public var disclosureState: StructuredSessionAgentTurnDisclosureState
+
+    public init(
+        turn: StructuredSessionFeedAgentTurnSegment,
+        style: StructuredSessionPiFeedSegmentStyle,
+        disclosureState: StructuredSessionAgentTurnDisclosureState
+    ) {
+        self.turn = turn
+        self.style = style
+        self.disclosureState = disclosureState
+    }
+
+    private var isExpanded: Bool {
+        disclosureState.activityIsExpanded(for: turn)
+    }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    disclosureState.setActivityExpanded(turnID: turn.id, isExpanded: !isExpanded)
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(style.mutedForeground)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    Text("Activity")
+                        .font(style.bodyFont(13, .subheadline, .semibold))
+                        .foregroundStyle(style.mutedForeground)
+                    if isExpanded == false {
+                        Text(structuredSessionAgentTurnActivityCollapsedSummary(for: turn.turnNotices))
+                            .font(style.bodyFont(13, nil, nil))
+                            .foregroundStyle(style.assistantBodyForeground.opacity(0.72))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel("Activity")
+
+            if isExpanded {
+                Divider()
+                    .opacity(0.35)
+                    .padding(.horizontal, 12)
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(turn.turnNotices.enumerated()), id: \.offset) { _, notice in
+                        switch notice {
+                        case .progress(let text):
+                            Text(text)
+                                .font(style.bodyFont(13, nil, nil))
+                                .foregroundStyle(style.mutedForeground)
+                                .structuredSessionFeedTextSelection()
+                                .fixedSize(horizontal: false, vertical: true)
+                        case .error(let text):
+                            Text(text)
+                                .font(style.bodyFont(13, nil, nil))
+                                .foregroundStyle(Color.red.opacity(0.92))
+                                .structuredSessionFeedTextSelection()
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 12)
+            }
+        }
+        .frame(maxWidth: 620, alignment: .leading)
+        .background(
+            style.assistantBubbleBackground.opacity(0.55),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+        .structuredSessionFeedRowCompositing()
+    }
+}
+
+@available(macOS 12.0, iOS 15.0, *)
 public struct StructuredSessionAgentTurnStackView: View {
     public let turn: StructuredSessionFeedAgentTurnSegment
     public let providerDisplayName: String
@@ -288,26 +375,11 @@ public struct StructuredSessionAgentTurnStackView: View {
             }
 
             if turn.turnNotices.isEmpty == false {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(Array(turn.turnNotices.enumerated()), id: \.offset) { _, notice in
-                        switch notice {
-                        case .progress(let text):
-                            Text(text)
-                                .font(style.bodyFont(13, nil, nil))
-                                .foregroundStyle(style.mutedForeground)
-                                .structuredSessionFeedTextSelection()
-                                .fixedSize(horizontal: false, vertical: true)
-                                .padding(.horizontal, 4)
-                        case .error(let text):
-                            Text(text)
-                                .font(style.bodyFont(13, nil, nil))
-                                .foregroundStyle(Color.red.opacity(0.92))
-                                .structuredSessionFeedTextSelection()
-                                .fixedSize(horizontal: false, vertical: true)
-                                .padding(.horizontal, 4)
-                        }
-                    }
-                }
+                StructuredSessionAgentTurnActivityBubble(
+                    turn: turn,
+                    style: style,
+                    disclosureState: disclosureState
+                )
             }
 
             if turn.isOpen == false, let finalAnswer = turn.finalAnswer {

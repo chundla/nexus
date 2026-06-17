@@ -104,7 +104,7 @@ public final class StructuredSessionMarkdownRenderer: @unchecked Sendable {
     }
 
     public func renderContent(_ text: String) -> StructuredSessionRenderedText {
-        if structuredSessionFeedDisplayMathUsesPlainFallback(for: text) {
+        if structuredSessionFeedLaTeXMathUsesPlainAttributedFallback(for: text) {
             lock.lock()
             metrics.plainTextBypassCount += 1
             lock.unlock()
