@@ -11619,6 +11619,8 @@ private final class StubSessionRuntimeManager: SessionRuntimeManaging {
 
     func setRuntimeChangePostObserverHandler(_ handler: (@Sendable (UUID) -> Void)?) {}
 
+    func flushPendingRuntimeChangeNotifications() {}
+
     func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration)
         async throws
     {

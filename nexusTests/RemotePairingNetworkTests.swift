@@ -2952,6 +2952,8 @@ private final class DelayedEchoSessionRuntimeManager: SessionRuntimeManaging, @u
 
     func setRuntimeChangePostObserverHandler(_ handler: (@Sendable (UUID) -> Void)?) {}
 
+    func flushPendingRuntimeChangeNotifications() {}
+
     func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration)
         async throws
     {
@@ -3140,6 +3142,8 @@ private final class StructuredPromptSessionRuntimeManager: SessionRuntimeManagin
     func setRuntimeChangePreObserverHandler(_ handler: (@Sendable (UUID) -> Void)?) {}
 
     func setRuntimeChangePostObserverHandler(_ handler: (@Sendable (UUID) -> Void)?) {}
+
+    func flushPendingRuntimeChangeNotifications() {}
 
     func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration)
         async throws
