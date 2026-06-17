@@ -2588,7 +2588,7 @@
         func sendRemoteSessionInput(sessionID: UUID, pairedDeviceID: UUID, prompt: SessionPrompt) async throws
             -> SessionScreen
         {
-            sessionScreenAfterPiRedirectIfNeeded(
+            let screen = sessionScreenAfterPiRedirectIfNeeded(
                 sourceSessionID: sessionID,
                 fallback: try await sessionInteraction.sendRemoteSessionInput(
                     sessionID: sessionID,
@@ -2596,6 +2596,8 @@
                     prompt: prompt
                 )
             )
+            structuredSessionObservationStore.recordChange(for: screen)
+            return screen
         }
 
         func respondToRemoteApprovalRequest(

@@ -108,7 +108,7 @@
                     }
                 return StructuredSessionHistoryPage(
                     sessionID: sessionID,
-                    activityItems: activityPage.values,
+                    activityItems: deduplicatedContiguousOverflowBlocks(activityPage.values),
                     providerEvents: providerEventPage.values,
                     nextCursor: nextCursor
                 )
@@ -234,6 +234,9 @@
             guard overlapIndex > 0 else {
                 return []
             }
+            if previous.count == current.count, previous.first?.id == current.first?.id {
+                return []
+            }
             return Array(previous.prefix(overlapIndex))
         }
 
@@ -266,6 +269,29 @@
                 return []
             }
             return Array(previous.prefix(overlapIndex))
+        }
+
+        /// Collapses accidental double-writes where an overflow prefix was appended twice in one jsonl.
+        private func deduplicatedContiguousOverflowBlocks(_ items: [SessionActivityItem]) -> [SessionActivityItem] {
+            var result = items
+            while result.count >= 2 {
+                var merged = false
+                let maxBlock = result.count / 2
+                for blockSize in stride(from: maxBlock, through: 1, by: -1) {
+                    let first = Array(result.prefix(blockSize))
+                    let second = Array(result.dropFirst(blockSize).prefix(blockSize))
+                    guard first == second else {
+                        continue
+                    }
+                    result = first + Array(result.dropFirst(blockSize * 2))
+                    merged = true
+                    break
+                }
+                if merged == false {
+                    break
+                }
+            }
+            return result
         }
 
         private func deduplicatedActivityItems(_ items: [SessionActivityItem]) -> [SessionActivityItem] {

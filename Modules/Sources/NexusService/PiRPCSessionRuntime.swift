@@ -2553,9 +2553,7 @@
                 if shouldQueueTransition,
                     let metadata = sessionLinkage?.sessionRecordAdapterMetadata
                 {
-                    pendingSessionTransitions.append(
-                        SessionRuntimeSessionTransition(sessionRecordAdapterMetadata: metadata)
-                    )
+                    appendPendingSessionTransitionIfNeededLocked(metadata)
                 }
                 lock.unlock()
             } else {
@@ -2903,6 +2901,33 @@
             lock.unlock()
             notifyChange()
             requestState(forSessionTransition: true)
+        }
+
+        private func appendPendingSessionTransitionIfNeeded(_ metadata: SessionRecordAdapterMetadata) {
+            lock.lock()
+            defer { lock.unlock() }
+            appendPendingSessionTransitionIfNeededLocked(metadata)
+        }
+
+        private func appendPendingSessionTransitionIfNeededLocked(_ metadata: SessionRecordAdapterMetadata) {
+            if let last = pendingSessionTransitions.last?.sessionRecordAdapterMetadata.piSessionLinkage,
+                let next = metadata.piSessionLinkage,
+                piSessionLinkageMatches(last, next)
+            {
+                return
+            }
+            pendingSessionTransitions.append(SessionRuntimeSessionTransition(sessionRecordAdapterMetadata: metadata))
+        }
+
+        private func piSessionLinkageMatches(_ lhs: PiSessionLinkage, _ rhs: PiSessionLinkage) -> Bool {
+            let lhsFile = lhs.sessionFile?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let rhsFile = rhs.sessionFile?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let lhsFile, let rhsFile, lhsFile.isEmpty == false, lhsFile == rhsFile {
+                return true
+            }
+            let lhsID = lhs.piSessionID?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let rhsID = rhs.piSessionID?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return lhsID != nil && lhsID == rhsID && lhsID?.isEmpty == false
         }
 
         private func handleUnhandledResponse(_ response: [String: Any]) {
@@ -3632,10 +3657,8 @@
 
             lock.lock()
             sessionLinkage = linkage
-            pendingSessionTransitions.append(
-                SessionRuntimeSessionTransition(sessionRecordAdapterMetadata: metadata)
-            )
             lock.unlock()
+            appendPendingSessionTransitionIfNeeded(metadata)
             notifyChange()
         }
 

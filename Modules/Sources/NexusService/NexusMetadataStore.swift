@@ -28,6 +28,7 @@
             self.database = database
             try execute(
                 """
+                PRAGMA busy_timeout = 30000;
                 PRAGMA foreign_keys = ON;
 
                 CREATE TABLE IF NOT EXISTS workspace_groups (

@@ -5,6 +5,7 @@
     @testable import NexusService
     import Testing
 
+    @Suite(.serialized)
     struct ServiceSessionInteractionScenariosTests {
         @Test func observingSessionScreenYieldsCurrentScreenBeforeLaterUpdates() async throws {
             let rootURL = FileManager.default.temporaryDirectory

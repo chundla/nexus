@@ -634,7 +634,9 @@
                     "command": "clone",
                     "success": true,
                     "data": [
-                        "cancelled": false
+                        "cancelled": false,
+                        "sessionId": transition.sessionID,
+                        "sessionFile": transition.sessionFile,
                     ],
                 ])
             case "prompt":
