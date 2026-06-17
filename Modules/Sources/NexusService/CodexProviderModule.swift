@@ -67,6 +67,28 @@
             shouldReuseRemoteCLIHealthSnapshot(snapshot, remoteContext: remoteContext)
         }
 
+        func planPersistedSessionRelaunch(
+            _ request: ProviderModulePersistedSessionRelaunchRequest
+        ) -> ProviderModulePersistedSessionRelaunchPlan {
+            guard request.execution.workspace.kind == .remote else {
+                return .sharedLaunch
+            }
+
+            let freshRemoteRelaunch = ProviderModuleFreshRemotePersistedSessionRelaunch(
+                sessionRecordAdapterMetadataSource: request.execution.sessionRecordAdapterMetadataSource,
+                retriesWithoutContinuity: true
+            )
+
+            switch request.execution.mode {
+            case .recoverRemoteRuntime:
+                return .recoverRemoteRuntime(freshRemoteRelaunch)
+            case .launch(let forceFreshRemoteRuntime):
+                return forceFreshRemoteRuntime
+                    ? .launchFreshRemoteRuntime(freshRemoteRelaunch)
+                    : .sharedLaunch
+            }
+        }
+
         func interruptedSessionFailureMessage(
             for session: Session,
             workspace: Workspace?,
@@ -79,6 +101,19 @@
             }
 
             return structuredInterruptedSessionFailureMessage(for: provider.id)
+        }
+
+        func shouldRetryFreshRemotePersistedSessionRelaunchWithoutContinuity(
+            _ error: Error,
+            metadata: SessionRecordAdapterMetadata?
+        ) throws -> Bool {
+            guard metadata?.codexSessionLinkage != nil else {
+                return false
+            }
+
+            let normalized = error.localizedDescription.lowercased()
+            return normalized.contains("invalid thread id")
+                || normalized.contains("no rollout found for thread id")
         }
 
         func constructRuntime(
