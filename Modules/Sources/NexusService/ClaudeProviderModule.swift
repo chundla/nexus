@@ -51,7 +51,7 @@
         }
 
         func prelaunchPrimarySurface(in workspace: Workspace) -> SessionSurface {
-            .terminal
+            .structuredActivityFeed
         }
 
         func supportsSharedRemoteProbeFacts(
@@ -77,7 +77,7 @@
                 return try actions.makeRemoteTerminalRuntime()
             }
 
-            return try actions.makeLocalTerminalRuntime()
+            return try actions.makeLocalClaudeRuntime()
         }
     }
 

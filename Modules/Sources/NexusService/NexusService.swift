@@ -765,6 +765,7 @@
         private let piTransportFactory: PiRPCSessionRuntime.TransportFactory?
         private let codexTransportFactory: CodexAppServerRuntime.TransportFactory?
         private let ibmBobTransportFactory: IBMBobSessionRuntime.TransportFactory?
+        private let claudeTransportFactory: ClaudeStreamJSONRuntime.TransportFactory?
         private let remoteProtocolSessionCommandBuilder: RemoteProtocolSessionCommandBuilder
         private let remoteIBMBobCommandBuilder: RemoteIBMBobCommandBuilder
 
@@ -775,6 +776,7 @@
             piTransportFactory: PiRPCSessionRuntime.TransportFactory? = nil,
             codexTransportFactory: CodexAppServerRuntime.TransportFactory? = nil,
             ibmBobTransportFactory: IBMBobSessionRuntime.TransportFactory? = nil,
+            claudeTransportFactory: ClaudeStreamJSONRuntime.TransportFactory? = nil,
             remoteProtocolSessionCommandBuilder: RemoteProtocolSessionCommandBuilder =
                 RemoteProtocolSessionCommandBuilder(),
             remoteIBMBobCommandBuilder: RemoteIBMBobCommandBuilder = RemoteIBMBobCommandBuilder()
@@ -787,6 +789,7 @@
             self.piTransportFactory = piTransportFactory
             self.codexTransportFactory = codexTransportFactory
             self.ibmBobTransportFactory = ibmBobTransportFactory
+            self.claudeTransportFactory = claudeTransportFactory
             self.remoteProtocolSessionCommandBuilder = remoteProtocolSessionCommandBuilder
             self.remoteIBMBobCommandBuilder = remoteIBMBobCommandBuilder
         }
@@ -804,6 +807,9 @@
                     },
                     makeRemoteTerminalRuntime: { [self] in
                         try makeRemoteTerminalRuntime(launchConfiguration: launchConfiguration)
+                    },
+                    makeLocalClaudeRuntime: { [self] in
+                        try makeLocalClaudeRuntime(launchConfiguration: launchConfiguration)
                     },
                     makeLocalPiRuntime: { [self] in
                         try await makeLocalPiRuntime(session: session, launchConfiguration: launchConfiguration)
@@ -1056,6 +1062,30 @@
                         workingDirectory: nil
                     )
                 }
+            )
+        }
+
+        private func makeLocalClaudeRuntime(
+            launchConfiguration: SessionRuntimeLaunchConfiguration
+        ) throws -> any SessionRuntime {
+            let processEnvironment = localShellEnvironmentResolver.resolvedEnvironment()
+            if let claudeTransportFactory {
+                return try ClaudeStreamJSONRuntime(
+                    executable: launchConfiguration.executable,
+                    workingDirectory: launchConfiguration.workingDirectory,
+                    sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.claudeSessionLinkage,
+                    terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
+                    processEnvironment: processEnvironment,
+                    transportFactory: claudeTransportFactory
+                )
+            }
+
+            return try ClaudeStreamJSONRuntime(
+                executable: launchConfiguration.executable,
+                workingDirectory: launchConfiguration.workingDirectory,
+                sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.claudeSessionLinkage,
+                terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
+                processEnvironment: processEnvironment
             )
         }
 

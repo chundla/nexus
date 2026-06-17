@@ -607,6 +607,7 @@
                         Issue.record("Codex should not choose a terminal runtime for local structured Sessions")
                         return StaticCodexRuntime()
                     },
+                    makeLocalClaudeRuntime: { StaticCodexRuntime() },
                     makeLocalPiRuntime: { StaticCodexRuntime() },
                     makeRemotePiRuntime: { StaticCodexRuntime() },
                     makeLocalCodexRuntime: {
@@ -666,6 +667,7 @@
                         Issue.record("Codex should not choose a terminal runtime for remote structured Sessions")
                         return StaticCodexRuntime()
                     },
+                    makeLocalClaudeRuntime: { StaticCodexRuntime() },
                     makeLocalPiRuntime: { StaticCodexRuntime() },
                     makeRemotePiRuntime: { StaticCodexRuntime() },
                     makeLocalCodexRuntime: {

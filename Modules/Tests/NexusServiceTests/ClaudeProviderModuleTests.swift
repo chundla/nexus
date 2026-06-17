@@ -37,7 +37,7 @@
 
             #expect(module.supportsDefaultSessionLaunch(in: workspace))
             #expect(module.supportsNamedSessions(in: workspace))
-            #expect(module.prelaunchPrimarySurface(in: workspace) == .terminal)
+            #expect(module.prelaunchPrimarySurface(in: workspace) == .structuredActivityFeed)
             #expect(
                 module.reusesRemoteHealthSnapshot(
                     ProviderHealthSummary(state: .available, summary: "reuse me", checkedAt: Date()),
@@ -124,7 +124,7 @@
                 localDefaultOpen
                     == .launch(
                         ProviderModuleFreshSessionLaunch(
-                            primarySurface: .terminal,
+                            primarySurface: .structuredActivityFeed,
                             executable: "/tmp/local-claude"
                         )
                     ))
@@ -132,7 +132,7 @@
                 localNamedOpen
                     == .launch(
                         ProviderModuleFreshSessionLaunch(
-                            primarySurface: .terminal,
+                            primarySurface: .structuredActivityFeed,
                             executable: "/tmp/local-claude"
                         )
                     ))
@@ -140,7 +140,7 @@
                 remoteDefaultOpen
                     == .launch(
                         ProviderModuleFreshSessionLaunch(
-                            primarySurface: .terminal,
+                            primarySurface: .structuredActivityFeed,
                             executable: "/tmp/remote-claude"
                         )
                     ))
@@ -212,7 +212,7 @@
             #expect(providerHealthEvaluator.legacyRequests.isEmpty)
             #expect(catalogRead.capabilities.launchDefaultSession.isEnabled)
             #expect(catalogRead.capabilities.createNamedSession.isEnabled)
-            #expect(catalogRead.prelaunchPrimarySurface == .terminal)
+            #expect(catalogRead.prelaunchPrimarySurface == .structuredActivityFeed)
         }
 
         @Test func claudeProviderModuleDerivesRemoteBlockedCatalogReadFromPrerequisiteFacts() async throws {
@@ -283,7 +283,7 @@
             #expect(
                 catalogRead.capabilities.launchDefaultSession.disabledReason
                     == "Provider Health is blocked by Host Validation")
-            #expect(catalogRead.prelaunchPrimarySurface == .terminal)
+            #expect(catalogRead.prelaunchPrimarySurface == .structuredActivityFeed)
         }
 
         @Test func claudeProviderModuleDerivesRemoteProbeBackedCatalogReadFromSharedCLIProbeFacts() async throws {
@@ -365,7 +365,7 @@
             #expect(providerHealthEvaluator.legacyRequests.isEmpty)
             #expect(catalogRead.capabilities.launchDefaultSession.isEnabled)
             #expect(catalogRead.capabilities.createNamedSession.isEnabled)
-            #expect(catalogRead.prelaunchPrimarySurface == .terminal)
+            #expect(catalogRead.prelaunchPrimarySurface == .structuredActivityFeed)
         }
 
         @Test func claudeProviderModuleDerivesRemoteCatalogReadFromRawClaudeProbeFacts() async throws {
@@ -449,7 +449,7 @@
             #expect(providerHealthEvaluator.legacyRequests.isEmpty)
             #expect(catalogRead.capabilities.launchDefaultSession.isEnabled)
             #expect(catalogRead.capabilities.createNamedSession.isEnabled)
-            #expect(catalogRead.prelaunchPrimarySurface == .terminal)
+            #expect(catalogRead.prelaunchPrimarySurface == .structuredActivityFeed)
         }
 
         @Test func claudeProviderModuleClassifiesRemoteRawProbeFactsWithoutSharedRemoteHealthAdapter() async {
@@ -581,7 +581,7 @@
                 ])
             #expect(catalogRead.capabilities.launchDefaultSession.isEnabled)
             #expect(catalogRead.capabilities.createNamedSession.isEnabled)
-            #expect(catalogRead.prelaunchPrimarySurface == .terminal)
+            #expect(catalogRead.prelaunchPrimarySurface == .structuredActivityFeed)
             #expect(
                 module.reusesRemoteHealthSnapshot(
                     ProviderHealthSummary(state: .available, summary: "reuse me", checkedAt: Date()),

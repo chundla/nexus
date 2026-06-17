@@ -113,6 +113,7 @@
 
         @Test func terminalBackedProvidersStillUseProcessRuntimePath() async throws {
             let launcher = ProcessSessionRuntimeLauncher(
+                providerModuleRegistry: ProviderModuleRegistry(),
                 localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/sh"])
             )
             let workspace = Workspace(

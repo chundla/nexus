@@ -303,7 +303,7 @@
             let claudeModule = registry.module(for: .claude)
 
             #expect(piModule.prelaunchPrimarySurface(in: workspace) == .structuredActivityFeed)
-            #expect(claudeModule.prelaunchPrimarySurface(in: workspace) == .terminal)
+            #expect(claudeModule.prelaunchPrimarySurface(in: workspace) == .structuredActivityFeed)
             #expect(piModule.reusesRemoteHealthSnapshot(checkedSnapshot, remoteContext: remoteContext))
             #expect(claudeModule.reusesRemoteHealthSnapshot(checkedSnapshot, remoteContext: remoteContext))
         }
@@ -839,6 +839,7 @@
                         Issue.record("Pi should not choose a terminal runtime for local structured Sessions")
                         return StaticPiRuntime()
                     },
+                    makeLocalClaudeRuntime: { StaticPiRuntime() },
                     makeLocalPiRuntime: {
                         tracker.requests.append(.localProtocolNative)
                         return StaticPiRuntime()
@@ -898,6 +899,7 @@
                         Issue.record("Pi should not choose a terminal runtime for remote structured Sessions")
                         return StaticPiRuntime()
                     },
+                    makeLocalClaudeRuntime: { StaticPiRuntime() },
                     makeLocalPiRuntime: {
                         Issue.record("Pi should not choose a local runtime for remote structured Sessions")
                         return StaticPiRuntime()
