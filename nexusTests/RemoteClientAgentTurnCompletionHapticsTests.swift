@@ -15,6 +15,7 @@ struct RemoteClientAgentTurnCompletionHapticsTests {
                 state: .ready
             ),
             primarySurface: .structuredActivityFeed,
+            transcript: "",
             isAgentTurnInProgress: isAgentTurnInProgress
         )
     }
@@ -24,11 +25,13 @@ struct RemoteClientAgentTurnCompletionHapticsTests {
         let inProgress = SessionScreen(
             session: Session(id: id, workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready),
             primarySurface: .structuredActivityFeed,
+            transcript: "",
             isAgentTurnInProgress: true
         )
         let completed = SessionScreen(
             session: Session(id: id, workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready),
             primarySurface: .structuredActivityFeed,
+            transcript: "",
             isAgentTurnInProgress: false
         )
 
@@ -46,11 +49,13 @@ struct RemoteClientAgentTurnCompletionHapticsTests {
         let inProgress = SessionScreen(
             session: Session(id: id, workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready),
             primarySurface: .structuredActivityFeed,
+            transcript: "",
             isAgentTurnInProgress: true
         )
         let completed = SessionScreen(
             session: Session(id: id, workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready),
             primarySurface: .structuredActivityFeed,
+            transcript: "",
             isAgentTurnInProgress: false
         )
 
@@ -80,11 +85,13 @@ struct RemoteClientAgentTurnCompletionHapticsTests {
         let inProgress = SessionScreen(
             session: Session(id: id, workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready),
             primarySurface: .structuredActivityFeed,
+            transcript: "",
             isAgentTurnInProgress: true
         )
         let completed = SessionScreen(
             session: Session(id: id, workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready),
             primarySurface: .structuredActivityFeed,
+            transcript: "",
             isAgentTurnInProgress: false
         )
 
@@ -102,11 +109,13 @@ struct RemoteClientAgentTurnCompletionHapticsTests {
         let idle = SessionScreen(
             session: Session(id: id, workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready),
             primarySurface: .structuredActivityFeed,
+            transcript: "",
             isAgentTurnInProgress: false
         )
         let stillIdle = SessionScreen(
             session: Session(id: id, workspaceID: UUID(), providerID: .pi, isDefault: true, state: .ready),
             primarySurface: .structuredActivityFeed,
+            transcript: "",
             activityItems: [SessionActivityItem(kind: .message, text: "delta")],
             isAgentTurnInProgress: false
         )
@@ -148,12 +157,14 @@ struct RemoteClientAgentTurnCompletionHapticsTests {
                 session: session,
                 primarySurface: .structuredActivityFeed,
                 controller: .pairedDevice(pairedDeviceID),
+                transcript: "",
                 isAgentTurnInProgress: true
             )
             let completed = SessionScreen(
                 session: session,
                 primarySurface: .structuredActivityFeed,
                 controller: .pairedDevice(pairedDeviceID),
+                transcript: "",
                 activityItems: [SessionActivityItem(kind: .message, text: "Pi: Done")],
                 isAgentTurnInProgress: false
             )
@@ -209,12 +220,14 @@ struct RemoteClientAgentTurnCompletionHapticsTests {
                 session: session,
                 primarySurface: .structuredActivityFeed,
                 controller: .mac,
+                transcript: "",
                 isAgentTurnInProgress: true
             )
             let completed = SessionScreen(
                 session: session,
                 primarySurface: .structuredActivityFeed,
                 controller: .mac,
+                transcript: "",
                 isAgentTurnInProgress: false
             )
 

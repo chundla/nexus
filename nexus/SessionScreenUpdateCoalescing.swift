@@ -22,6 +22,13 @@ nonisolated func sessionScreenAppearsToAdvance(_ candidate: SessionScreen, beyon
     }
 
     if current.isAgentTurnInProgress == false, candidate.isAgentTurnInProgress {
+        // After turn_end, a new user prompt / drafting tick must win over a coalesced finalized screen.
+        if candidate.activityItems.count > current.activityItems.count {
+            return true
+        }
+        if candidate.providerFacts.liveAssistantDraftText?.isEmpty == false {
+            return true
+        }
         return false
     }
 

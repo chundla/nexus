@@ -30,7 +30,7 @@
 
             #expect(session.state == .ready)
             #expect(screen.primarySurface == .structuredActivityFeed)
-            #expect(screen.activityItems.map(\.text) == ["Session stream connected"])
+            #expect(screen.activityItems.map(\.text) == ["Pi shared Session stream connected"])
             #expect(launch.executable == "/usr/bin/ssh")
             #expect(launch.arguments.prefix(5) == ["-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5"])
             #expect(launch.arguments.contains("-tt") == false)
@@ -65,7 +65,7 @@
             #expect(screen.primarySurface == .structuredActivityFeed)
             #expect(
                 screen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "You: hello",
                     "Pi: Remote hello",
                 ])
@@ -109,7 +109,7 @@
             #expect(promptedScreen.controller == .pairedDevice(pairedDeviceID))
             #expect(
                 promptedScreen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "You: hello",
                     "Pi: Remote hello",
                 ])
@@ -153,7 +153,7 @@
             #expect(controllerScreen.controller == .pairedDevice(pairedDeviceID))
             #expect(
                 controllerScreen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "/cycle-thinking-level",
                     "Thinking level cycled to high",
                 ])
@@ -197,7 +197,7 @@
             #expect(queuedScreen.controller == .pairedDevice(pairedDeviceID))
             #expect(
                 queuedScreen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "Queued follow-up: After that, summarize the result",
                     "Queue updated — follow-up: After that, summarize the result",
                 ])
@@ -338,10 +338,10 @@
             #expect(detail.alternateSessions.map(\.id) == [namedSession.id])
             #expect(detail.failedSessions.isEmpty)
             #expect(namedScreen.primarySurface == .structuredActivityFeed)
-            #expect(namedScreen.activityItems.map(\.text) == ["Session stream connected"])
+            #expect(namedScreen.activityItems.map(\.text) == ["Pi shared Session stream connected"])
             #expect(resumedNamedSession.id == namedSession.id)
             #expect(resumedNamedScreen.primarySurface == .structuredActivityFeed)
-            #expect(resumedNamedScreen.activityItems.map(\.text) == ["Session stream connected"])
+            #expect(resumedNamedScreen.activityItems.map(\.text) == ["Pi shared Session stream connected"])
             #expect(launches.count == 3)
             #expect(defaultLaunch.sessionFile != namedLaunch.sessionFile)
             #expect(namedLaunch.sessionFile == resumedNamedLaunch.sessionFile)
@@ -462,7 +462,7 @@
             #expect(resumedScreen.primarySurface == .structuredActivityFeed)
             #expect(
                 resumedScreen.activityItems.map(\.text) == [
-                    "Session stream connected",
+                    "Pi shared Session stream connected",
                     "You: again",
                     "Pi: Remote again",
                 ])

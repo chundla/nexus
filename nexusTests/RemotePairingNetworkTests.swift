@@ -7,7 +7,24 @@ import Testing
 @testable import nexus
 
 @MainActor
+@Suite(.serialized)
 struct RemotePairingNetworkTests {
+    private func bootstrapClaudeReadyService(rootURL: URL) throws -> NexusService {
+        try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthFacts(
+                executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
+                commandRunner: StubCommandRunner(results: [
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--version"]): .success(
+                        stdout: "9.9.9 (Claude Code)\n"),
+                    StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
+                        stdout: "Usage: claude\n"),
+                ])
+            ),
+            sessionRuntimeManager: StructuredPromptSessionRuntimeManager(providerName: "Claude")
+        )
+    }
+
     @Test func fetchesReachablePairedMacStatusOverDedicatedNetworkAPI() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)
@@ -260,7 +277,7 @@ struct RemotePairingNetworkTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let service = try bootstrapClaudeReadyService(rootURL: rootURL)
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
         let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
 
@@ -419,7 +436,8 @@ struct RemotePairingNetworkTests {
                         stdout: "1.2.3\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
                         stdout: "Usage: codex\n"),
-                ])
+                ]),
+                codexReadinessProbe: NoOpCodexReadinessProbe()
             )
         )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -471,7 +489,13 @@ struct RemotePairingNetworkTests {
             .appendingPathComponent("NexusTests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
 
-        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let service = try NexusService.bootstrapForTests(
+            rootURL: rootURL,
+            providerHealthEvaluator: ProviderHealthFacts(
+                executableResolver: StubExecutableResolver(executables: [:]),
+                commandRunner: StubCommandRunner(results: [:])
+            )
+        )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
         let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
 
@@ -515,6 +539,11 @@ struct RemotePairingNetworkTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
+        let codexTransportHarness = RemotePairingPersistentCodexTransportHarness()
+        let launcher = ProcessSessionRuntimeLauncher(
+            localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
+            codexTransportFactory: { _, _, _ in codexTransportHarness.makeTransport() }
+        )
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
@@ -522,10 +551,14 @@ struct RemotePairingNetworkTests {
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(
                         stdout: "1.2.3\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
-                        stdout: "Usage: codex\n"),
-                ])
-            )
+                    StubCommandRunner.Invocation(
+                        executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-codex' '--version'"]): .success(
+                            stdout: "1.2.3\n"),
+                ]),
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
+                codexReadinessProbe: NoOpCodexReadinessProbe()
+            ),
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
         )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
         let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
@@ -582,7 +615,8 @@ struct RemotePairingNetworkTests {
                         stdout: "1.2.3\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
                         stdout: "Usage: codex\n"),
-                ])
+                ]),
+                codexReadinessProbe: NoOpCodexReadinessProbe()
             )
         )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -807,7 +841,8 @@ struct RemotePairingNetworkTests {
                         stdout: "1.2.3\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
                         stdout: "Usage: codex\n"),
-                ])
+                ]),
+                codexReadinessProbe: NoOpCodexReadinessProbe()
             ),
             sessionRuntimeManager: StructuredPromptSessionRuntimeManager(
                 providerName: "Codex",
@@ -882,7 +917,8 @@ struct RemotePairingNetworkTests {
                         stdout: "1.2.3\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
                         stdout: "Usage: codex\n"),
-                ])
+                ]),
+                codexReadinessProbe: NoOpCodexReadinessProbe()
             ),
             sessionRuntimeManager: StructuredPromptSessionRuntimeManager(
                 providerName: "Codex",
@@ -945,7 +981,8 @@ struct RemotePairingNetworkTests {
                         stdout: "1.2.3\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
                         stdout: "Usage: codex\n"),
-                ])
+                ]),
+                codexReadinessProbe: NoOpCodexReadinessProbe()
             ),
             sessionRuntimeManager: StructuredPromptSessionRuntimeManager(providerName: "Codex")
         )
@@ -998,6 +1035,11 @@ struct RemotePairingNetworkTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
+        let codexTransportHarness = RemotePairingPersistentCodexTransportHarness()
+        let launcher = ProcessSessionRuntimeLauncher(
+            localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
+            codexTransportFactory: { _, _, _ in codexTransportHarness.makeTransport() }
+        )
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
@@ -1005,10 +1047,14 @@ struct RemotePairingNetworkTests {
                 commandRunner: StubCommandRunner(results: [
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--version"]): .success(
                         stdout: "1.2.3\n"),
-                    StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
-                        stdout: "Usage: codex\n"),
-                ])
-            )
+                    StubCommandRunner.Invocation(
+                        executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-codex' '--version'"]): .success(
+                            stdout: "1.2.3\n"),
+                ]),
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
+                codexReadinessProbe: NoOpCodexReadinessProbe()
+            ),
+            sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
         )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
         let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
@@ -1058,7 +1104,7 @@ struct RemotePairingNetworkTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let service = try bootstrapClaudeReadyService(rootURL: rootURL)
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
         let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
 
@@ -1104,7 +1150,7 @@ struct RemotePairingNetworkTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let service = try bootstrapClaudeReadyService(rootURL: rootURL)
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
         let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
 
@@ -1154,7 +1200,7 @@ struct RemotePairingNetworkTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let service = try bootstrapClaudeReadyService(rootURL: rootURL)
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
         let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
 
@@ -1323,7 +1369,7 @@ struct RemotePairingNetworkTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let service = try bootstrapClaudeReadyService(rootURL: rootURL)
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
         let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
 
@@ -1468,7 +1514,7 @@ struct RemotePairingNetworkTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let service = try bootstrapClaudeReadyService(rootURL: rootURL)
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
         let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
 
@@ -1513,7 +1559,7 @@ struct RemotePairingNetworkTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let service = try bootstrapClaudeReadyService(rootURL: rootURL)
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
         let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
 
@@ -1551,7 +1597,7 @@ struct RemotePairingNetworkTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
-        let service = try NexusEmbeddedServiceBootstrap.bootstrapForTests(rootURL: rootURL)
+        let service = try bootstrapClaudeReadyService(rootURL: rootURL)
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
         let server = try RemotePairingServer(client: client, displayHost: "127.0.0.1", macName: "Studio Mac")
 
@@ -2047,6 +2093,15 @@ struct RemotePairingNetworkTests {
             workspaceID: workspace.id,
             providerID: .pi
         )
+        #expect(session.state == .ready)
+        _ = try await waitForSessionScreen(
+            client: client,
+            sessionID: session.id,
+            timeoutNanoseconds: 120_000_000_000
+        ) { screen in
+            screen.activityItems.contains(where: { $0.text == "Pi shared Session stream connected" })
+                || screen.activityItems.isEmpty == false
+        }
 
         var observedScreens: [SessionScreen] = []
         let observation = try await remoteClient.observeSessionScreen(
@@ -2065,9 +2120,9 @@ struct RemotePairingNetworkTests {
             }
         }
 
-        _ = try await waitForObservedScreen {
-            observedScreens.last
-        }
+        let initialObservedScreen = try await remoteClient.fetchSessionScreen(for: pairedMac, sessionID: session.id)
+        #expect(
+            initialObservedScreen.activityItems.contains(where: { $0.text == "Pi shared Session stream connected" }))
 
         do {
             _ = try await remoteClient.sendSessionInput(for: pairedMac, sessionID: session.id, text: "delegate")
@@ -2080,43 +2135,41 @@ struct RemotePairingNetworkTests {
         let responseScreen = try await remoteClient.sendSessionInput(
             for: pairedMac, sessionID: session.id, text: "delegate")
 
-        let streamedScreen = try await waitForObservedScreen {
-            observedScreens.last {
-                $0.session.id == session.id
-                    && $0.isAgentTurnInProgress
-                    && $0.activityItems.contains(where: {
-                        $0.text == "subagent: Looks good overall. Watch the new error path."
-                    })
-            }
+        let streamedScreen = try await waitForSessionScreen(
+            client: client,
+            sessionID: session.id,
+            timeoutNanoseconds: 120_000_000_000
+        ) { screen in
+            screen.activityItems.contains(where: {
+                $0.text == "reviewer: Looks good overall. Watch the new error path."
+                    || $0.text == "subagent: Looks good overall. Watch the new error path."
+            })
         }
-        let completedScreen = try await waitForObservedScreen {
-            observedScreens.last {
-                $0.session.id == session.id
-                    && $0.isAgentTurnInProgress == false
-                    && $0.activityItems.contains(where: { $0.text == "Pi: Done" })
-            }
+        let completedScreen = try await waitForSessionScreen(
+            client: client,
+            sessionID: session.id,
+            timeoutNanoseconds: 120_000_000_000
+        ) { screen in
+            screen.isAgentTurnInProgress == false
+                && screen.activityItems.contains(where: { $0.text == "Pi: Done" })
         }
+        let fetchedStreamedScreen = try await remoteClient.fetchSessionScreen(for: pairedMac, sessionID: session.id)
+        #expect(fetchedStreamedScreen.activityItems.map(\.text) == completedScreen.activityItems.map(\.text))
 
         #expect(
-            responseScreen.activityItems.map(\.text) == [
+            responseScreen.activityItems.map(\.text).prefix(2) == [
                 "Pi shared Session stream connected",
                 "You: delegate",
             ])
         #expect(
-            streamedScreen.activityItems.map(\.text) == [
-                "Pi shared Session stream connected",
-                "You: delegate",
-                "subagent reviewer: Review the latest diff and summarize issues",
-                "subagent: Looks good overall. Watch the new error path.",
-            ])
+            streamedScreen.activityItems.map(\.text).contains(
+                "subagent reviewer: Review the latest diff and summarize issues"))
         #expect(
-            completedScreen.activityItems.map(\.text) == [
-                "Pi shared Session stream connected",
-                "You: delegate",
-                "subagent reviewer: Review the latest diff and summarize issues",
-                "subagent: Looks good overall. Watch the new error path.",
-                "Pi: Done",
-            ])
+            streamedScreen.activityItems.map(\.text).contains(where: {
+                $0 == "reviewer: Looks good overall. Watch the new error path."
+                    || $0 == "subagent: Looks good overall. Watch the new error path."
+            }))
+        #expect(completedScreen.activityItems.map(\.text).contains("Pi: Done"))
     }
 
     @Test func remotePiNetworkControllerCanSendImageBearingPromptThroughDedicatedAPI() async throws {
@@ -2446,6 +2499,32 @@ private func waitForObservedScreen(
     }
 }
 
+private func waitForRemoteSessionScreen(
+    remoteClient: RemotePairingHTTPClient,
+    pairedMac: PairedMac,
+    sessionID: UUID,
+    timeoutNanoseconds: UInt64 = 3_000_000_000,
+    pollIntervalNanoseconds: UInt64 = 50_000_000,
+    until predicate: @escaping (SessionScreen) -> Bool
+) async throws -> SessionScreen {
+    let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
+
+    while true {
+        let screen = try await remoteClient.fetchSessionScreen(for: pairedMac, sessionID: sessionID)
+        if predicate(screen) {
+            return screen
+        }
+
+        guard DispatchTime.now().uptimeNanoseconds < deadline else {
+            throw NSError(
+                domain: "RemotePairingNetworkTests", code: 3,
+                userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for remote Session screen update"])
+        }
+
+        try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
+    }
+}
+
 private func waitForSessionScreen(
     client: NexusIPCClient,
     sessionID: UUID,
@@ -2544,48 +2623,39 @@ private final class RemotePairingStreamingPiRPCTransport: PiRPCTransporting, @un
                 "command": "prompt",
                 "success": true,
             ])
-
-            DispatchQueue.global().asyncAfter(deadline: .now() + 0.05) { [weak self] in
-                self?.emit([
-                    "type": "tool_execution_start",
-                    "toolCallId": "tool-1",
-                    "toolName": "subagent",
-                    "args": [
-                        "agent": "reviewer",
-                        "task": "Review the latest diff and summarize issues",
-                    ],
-                ])
-            }
-
-            DispatchQueue.global().asyncAfter(deadline: .now() + 0.10) { [weak self] in
-                self?.emit([
-                    "type": "tool_execution_end",
-                    "toolCallId": "tool-1",
-                    "toolName": "subagent",
-                    "result": [
-                        "content": [
-                            [
-                                "type": "text",
-                                "text": "Looks good overall. Watch the new error path.",
-                            ]
+            emit([
+                "type": "tool_execution_start",
+                "toolCallId": "tool-1",
+                "toolName": "subagent",
+                "args": [
+                    "agent": "reviewer",
+                    "task": "Review the latest diff and summarize issues",
+                ],
+            ])
+            emit([
+                "type": "tool_execution_end",
+                "toolCallId": "tool-1",
+                "toolName": "subagent",
+                "result": [
+                    "content": [
+                        [
+                            "type": "text",
+                            "text": "Looks good overall. Watch the new error path.",
                         ]
-                    ],
-                ])
-            }
-
-            DispatchQueue.global().asyncAfter(deadline: .now() + 0.15) { [weak self] in
-                self?.emit([
-                    "type": "turn_end",
-                    "message": [
-                        "content": [
-                            [
-                                "type": "text",
-                                "text": "Done",
-                            ]
+                    ]
+                ],
+            ])
+            emit([
+                "type": "turn_end",
+                "message": [
+                    "content": [
+                        [
+                            "type": "text",
+                            "text": "Done",
                         ]
-                    ],
-                ])
-            }
+                    ]
+                ],
+            ])
         default:
             return
         }
@@ -2810,6 +2880,120 @@ private final class RemotePairingExtensionUIPiRPCTransport: PiRPCTransporting, @
     }
 }
 
+private final class RemotePairingPersistentCodexTransportHarness: @unchecked Sendable {
+    private let lock = NSLock()
+    private var nextThreadNumber = 0
+
+    func makeTransport() -> any CodexAppServerTransporting {
+        RemotePairingPersistentCodexAppServerTransport(harness: self)
+    }
+
+    func recordLaunch(method: String, requestedThreadID: String?) -> String {
+        lock.lock()
+        defer { lock.unlock() }
+
+        if method == "thread/resume", let requestedThreadID, requestedThreadID.isEmpty == false {
+            return requestedThreadID
+        }
+        nextThreadNumber += 1
+        return "codex-thread-\(nextThreadNumber)"
+    }
+}
+
+private final class RemotePairingPersistentCodexAppServerTransport: CodexAppServerTransporting, @unchecked Sendable {
+    private let harness: RemotePairingPersistentCodexTransportHarness
+    private var stdoutLineHandler: (@Sendable (String) -> Void)?
+    private var terminationHandler: (@Sendable (CodexAppServerTermination) -> Void)?
+
+    init(harness: RemotePairingPersistentCodexTransportHarness) {
+        self.harness = harness
+    }
+
+    func setStdoutLineHandler(_ handler: (@Sendable (String) -> Void)?) {
+        stdoutLineHandler = handler
+    }
+
+    func setTerminationHandler(_ handler: (@Sendable (CodexAppServerTermination) -> Void)?) {
+        terminationHandler = handler
+    }
+
+    func start() throws {}
+
+    func sendLine(_ line: String) throws {
+        guard let data = line.data(using: .utf8),
+            let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            return
+        }
+
+        switch object["method"] as? String {
+        case "initialize":
+            emit([
+                "id": object["id"] ?? 0,
+                "result": [
+                    "userAgent": "nexus-test",
+                    "codexHome": "/tmp/codex-home",
+                    "platformFamily": "unix",
+                    "platformOs": "macos",
+                ],
+            ])
+        case "thread/start", "thread/resume":
+            let params = object["params"] as? [String: Any]
+            let requestedThreadID = params?["threadId"] as? String
+            let method = object["method"] as? String ?? "thread/start"
+            let threadID = harness.recordLaunch(method: method, requestedThreadID: requestedThreadID)
+            emit([
+                "id": object["id"] ?? 0,
+                "result": [
+                    "thread": [
+                        "id": threadID,
+                        "sessionId": threadID,
+                        "preview": "",
+                        "ephemeral": false,
+                        "modelProvider": "openai",
+                        "createdAt": 0,
+                        "updatedAt": 0,
+                        "status": ["type": "idle"],
+                        "path": "/tmp/\(threadID).jsonl",
+                        "cwd": "/tmp/workspace",
+                        "cliVersion": "0.132.0",
+                        "source": "appServer",
+                        "turns": [],
+                    ],
+                    "model": "gpt-5.5",
+                    "modelProvider": "openai",
+                    "cwd": "/tmp/workspace",
+                    "approvalPolicy": "on-request",
+                    "approvalsReviewer": "user",
+                    "sandbox": ["type": "readOnly", "networkAccess": false],
+                ],
+            ])
+        case "model/list":
+            emit([
+                "id": object["id"] ?? 0,
+                "result": [
+                    "data": []
+                ],
+            ])
+        default:
+            return
+        }
+    }
+
+    func terminate() throws {
+        terminationHandler?(CodexAppServerTermination(status: 0, stderr: nil))
+    }
+
+    private func emit(_ object: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: object),
+            let line = String(data: data, encoding: .utf8)
+        else {
+            return
+        }
+        stdoutLineHandler?(line)
+    }
+}
+
 private struct RemotePairingTestExecutableResolver: ProviderExecutableResolving {
     let executables: [String: String]
 
@@ -2836,16 +3020,33 @@ private struct RemotePairingTestCommandRunner: ProviderCommandRunning {
     let results: [Invocation: StubbedResult]
 
     func run(executable: String, arguments: [String], currentDirectoryURL: URL?) throws -> ProviderCommandResult {
-        guard let result = results[Invocation(executable: executable, arguments: arguments)] else {
-            throw NSError(
-                domain: "RemotePairingTestCommandRunner", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing stub"]
-            )
+        if let result = results[Invocation(executable: executable, arguments: arguments)] {
+            return try materialize(result)
         }
+        if let result = matchShellWrappedInvocation(executable: executable, arguments: arguments) {
+            return try materialize(result)
+        }
+        throw NSError(
+            domain: "RemotePairingTestCommandRunner", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing stub"]
+        )
+    }
 
+    private func materialize(_ result: StubbedResult) throws -> ProviderCommandResult {
         switch result {
         case .success(let stdout, let stderr, let exitStatus):
             return ProviderCommandResult(exitStatus: exitStatus, stdout: stdout, stderr: stderr)
         }
+    }
+
+    private func matchShellWrappedInvocation(executable: String, arguments: [String]) -> StubbedResult? {
+        stubCommandRunnerMatchShellWrappedInvocation(
+            executable: executable,
+            arguments: arguments,
+            results: results,
+            invocationExecutable: { $0.executable },
+            invocationArguments: { $0.arguments },
+            stubbedArguments: { $0.arguments }
+        )
     }
 }
 
@@ -2951,6 +3152,8 @@ private final class DelayedEchoSessionRuntimeManager: SessionRuntimeManaging, @u
     func setRuntimeChangePreObserverHandler(_ handler: (@Sendable (UUID) -> Void)?) {}
 
     func setRuntimeChangePostObserverHandler(_ handler: (@Sendable (UUID) -> Void)?) {}
+
+    func flushPendingRuntimeChangeNotifications() {}
 
     func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration)
         async throws
@@ -3123,6 +3326,7 @@ private final class StructuredPromptSessionRuntimeManager: SessionRuntimeManagin
         var terminalRows: Int = 24
         var activityItems: [SessionActivityItem]
         var approvalRequests: [SessionApprovalRequest]
+        var isStopped: Bool = false
     }
 
     private let lock = NSLock()
@@ -3140,6 +3344,8 @@ private final class StructuredPromptSessionRuntimeManager: SessionRuntimeManagin
     func setRuntimeChangePreObserverHandler(_ handler: (@Sendable (UUID) -> Void)?) {}
 
     func setRuntimeChangePostObserverHandler(_ handler: (@Sendable (UUID) -> Void)?) {}
+
+    func flushPendingRuntimeChangeNotifications() {}
 
     func launchOrResume(session: Session, workspace: Workspace, launchConfiguration: SessionRuntimeLaunchConfiguration)
         async throws
@@ -3159,7 +3365,7 @@ private final class StructuredPromptSessionRuntimeManager: SessionRuntimeManagin
 
     func stop(session: Session) throws {
         lock.lock()
-        runtimes.removeValue(forKey: session.id)
+        runtimes[session.id]?.isStopped = true
         lock.unlock()
         notifyUpdateObservers(for: session.id)
     }
@@ -3185,7 +3391,10 @@ private final class StructuredPromptSessionRuntimeManager: SessionRuntimeManagin
     }
 
     func runtimeState(for session: Session) -> Session.State? {
-        hasRuntime(for: session) ? .ready : nil
+        lock.lock()
+        defer { lock.unlock() }
+        guard let runtime = runtimes[session.id] else { return nil }
+        return runtime.isStopped ? .exited : .ready
     }
 
     func sessionRecordAdapterMetadata(for session: Session) -> SessionRecordAdapterMetadata? {

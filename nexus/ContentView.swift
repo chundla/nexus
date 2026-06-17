@@ -3289,57 +3289,6 @@
         }
     }
 
-    @MainActor
-    final class QuickSwitchSearchCoordinator<Result> {
-        private let debounceDuration: Duration
-        private let sleep: (Duration) async throws -> Void
-        private var searchTask: Task<Void, Never>?
-
-        init(
-            debounceDuration: Duration = .milliseconds(250),
-            sleep: @escaping (Duration) async throws -> Void = { duration in
-                try await Task.sleep(for: duration)
-            }
-        ) {
-            self.debounceDuration = debounceDuration
-            self.sleep = sleep
-        }
-
-        func updateQuery(
-            _ rawQuery: String,
-            search: @escaping (String) async throws -> Result,
-            applyResults: @escaping (Result) -> Void,
-            clearResults: @escaping () -> Void,
-            handleError: @escaping (Error) -> Void
-        ) {
-            let query = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-            cancel()
-
-            guard query.isEmpty == false else {
-                clearResults()
-                return
-            }
-
-            searchTask = Task { @MainActor in
-                do {
-                    try await sleep(debounceDuration)
-                    let results = try await search(query)
-                    applyResults(results)
-                } catch is CancellationError {
-                } catch {
-                    handleError(error)
-                }
-
-                searchTask = nil
-            }
-        }
-
-        func cancel() {
-            searchTask?.cancel()
-            searchTask = nil
-        }
-    }
-
     #Preview {
         if let appModel = try? NexusAppModel.live() {
             ContentView(appModel: appModel)

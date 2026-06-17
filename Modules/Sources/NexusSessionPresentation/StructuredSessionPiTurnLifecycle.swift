@@ -9,6 +9,11 @@ func structuredSessionPiFeedSegmentTurnInProgress(for screen: SessionScreen) -> 
     guard screen.session.providerID == .pi else {
         return false
     }
+    // Service cleared the flag and Pi emitted turn_end; do not keep Thinking… via activity-tail heuristics
+    // (e.g. long finalized assistant after command in profiling fixtures and live RPC).
+    if screen.providerFacts.lastProviderEventType == "turn_end" {
+        return false
+    }
     if structuredSessionPiProviderTurnAwaitingTurnEnd(
         activityItems: screen.activityItems,
         providerEvents: screen.providerEvents

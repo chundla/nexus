@@ -7,7 +7,8 @@ on:
 
 jobs:
   modules:
-    runs-on: macos-15
+    runs-on: macos-26
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
 
@@ -27,10 +28,29 @@ jobs:
         env:
           SWIFT_TEST_TIMEOUT: 300
 
-  # Future: app + IPC integration + UI tests
-  # app:
-  #   runs-on: macos-15
-  #   steps:
-  #     - uses: actions/checkout@v5
-  #     - name: xcodebuild test (nexus scheme)
-  #       run: xcodebuild test -scheme nexus -project nexus.xcodeproj -destination 'platform=macOS'
+  app:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Cache Xcode DerivedData
+        uses: actions/cache@v5
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData
+          key: xcode-${{ runner.os }}-${{ hashFiles('nexus.xcodeproj/project.pbxproj', 'Modules/Package.swift', 'Modules/Package.resolved') }}
+          restore-keys: |
+            xcode-${{ runner.os }}-
+
+      - name: xcodebuild test (nexus scheme)
+        run: |
+          set -euo pipefail
+          xcodebuild test \
+            -scheme nexus \
+            -project nexus.xcodeproj \
+            -destination 'platform=macOS' \
+            -parallel-testing-enabled NO \
+            -resultBundlePath "$RUNNER_TEMP/nexus-test.xcresult" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="-"
+        env:
+          NSUnbufferedIO: YES

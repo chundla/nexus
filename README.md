@@ -39,9 +39,11 @@ xcodebuild -scheme nexus -project nexus.xcodeproj build
 ## Test
 
 ```bash
-xcodebuild test -scheme nexus -project nexus.xcodeproj -destination 'platform=macOS'
-swift test --package-path Modules
+xcodebuild test -scheme nexus -project nexus.xcodeproj -destination 'platform=macOS' -parallel-testing-enabled NO
+swift test --package-path Modules --no-parallel
 ```
+
+**CI** (PRs and `main`): `swift-test.yml` runs Modules SwiftPM tests and full `xcodebuild test` (serial) on `macos-26`; `swift-lint.yml` runs `./scripts/lint-swift.sh` on `macos-15`.
 
 ## Swift lint (CI)
 

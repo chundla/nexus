@@ -559,7 +559,15 @@
                 sessionRecordAdapterMetadataSource: .stored
             )
 
-            #expect(module.planPersistedSessionRelaunch(.init(execution: execution)) == .sharedLaunch)
+            #expect(
+                module.planPersistedSessionRelaunch(.init(execution: execution))
+                    == .recoverRemoteRuntime(
+                        ProviderModuleFreshRemotePersistedSessionRelaunch(
+                            sessionRecordAdapterMetadataSource: .stored,
+                            retriesWithoutContinuity: true
+                        )
+                    )
+            )
         }
 
         @Test func codexProviderModuleChoosesLocalProtocolNativeRuntimeConstructionThroughProviderModuleSeam()

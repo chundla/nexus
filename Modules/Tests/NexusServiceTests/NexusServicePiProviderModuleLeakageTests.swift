@@ -185,7 +185,7 @@
                 session: session,
                 primarySurface: .structuredActivityFeed,
                 transcript: "",
-                activityItems: [SessionActivityItem(kind: .status, text: "Session stream connected")]
+                activityItems: [SessionActivityItem(kind: .status, text: "Pi shared Session stream connected")]
             )
         }
 
