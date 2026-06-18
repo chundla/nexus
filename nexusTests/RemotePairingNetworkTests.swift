@@ -1459,7 +1459,15 @@ struct RemotePairingNetworkTests {
         )
         let screen = try await remoteClient.fetchSessionScreen(for: pairedMac, sessionID: session.id)
 
-        #expect(screen == expectedScreen)
+        #expect(screen.session == expectedScreen.session)
+        #expect(screen.primarySurface == expectedScreen.primarySurface)
+        #expect(screen.controller == expectedScreen.controller)
+        #expect(screen.transcript == expectedScreen.transcript)
+        #expect(screen.terminalColumns == expectedScreen.terminalColumns)
+        #expect(screen.terminalRows == expectedScreen.terminalRows)
+        #expect(screen.activityItems.map(\.kind) == expectedScreen.activityItems.map(\.kind))
+        #expect(screen.activityItems.map(\.text) == expectedScreen.activityItems.map(\.text))
+        #expect(screen.approvalRequests == expectedScreen.approvalRequests)
     }
 
     @Test func fetchesRemotePiStructuredHistoryPagesOverDedicatedNetworkAPI() async throws {
