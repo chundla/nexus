@@ -765,6 +765,9 @@
         private let piTransportFactory: PiRPCSessionRuntime.TransportFactory?
         private let codexTransportFactory: CodexAppServerRuntime.TransportFactory?
         private let ibmBobTransportFactory: IBMBobSessionRuntime.TransportFactory?
+        private let claudeTransportFactory: ClaudeStreamJSONRuntime.TransportFactory?
+        private let remoteClaudeApprovalHookBridgeFactory:
+            ((_ host: NexusDomain.Host, _ runtimeIdentifier: String) -> any ClaudeApprovalHookBridging)?
         private let remoteProtocolSessionCommandBuilder: RemoteProtocolSessionCommandBuilder
         private let remoteIBMBobCommandBuilder: RemoteIBMBobCommandBuilder
 
@@ -775,6 +778,9 @@
             piTransportFactory: PiRPCSessionRuntime.TransportFactory? = nil,
             codexTransportFactory: CodexAppServerRuntime.TransportFactory? = nil,
             ibmBobTransportFactory: IBMBobSessionRuntime.TransportFactory? = nil,
+            claudeTransportFactory: ClaudeStreamJSONRuntime.TransportFactory? = nil,
+            remoteClaudeApprovalHookBridgeFactory:
+                ((_ host: NexusDomain.Host, _ runtimeIdentifier: String) -> any ClaudeApprovalHookBridging)? = nil,
             remoteProtocolSessionCommandBuilder: RemoteProtocolSessionCommandBuilder =
                 RemoteProtocolSessionCommandBuilder(),
             remoteIBMBobCommandBuilder: RemoteIBMBobCommandBuilder = RemoteIBMBobCommandBuilder()
@@ -787,6 +793,8 @@
             self.piTransportFactory = piTransportFactory
             self.codexTransportFactory = codexTransportFactory
             self.ibmBobTransportFactory = ibmBobTransportFactory
+            self.claudeTransportFactory = claudeTransportFactory
+            self.remoteClaudeApprovalHookBridgeFactory = remoteClaudeApprovalHookBridgeFactory
             self.remoteProtocolSessionCommandBuilder = remoteProtocolSessionCommandBuilder
             self.remoteIBMBobCommandBuilder = remoteIBMBobCommandBuilder
         }
@@ -804,6 +812,12 @@
                     },
                     makeRemoteTerminalRuntime: { [self] in
                         try makeRemoteTerminalRuntime(launchConfiguration: launchConfiguration)
+                    },
+                    makeLocalClaudeRuntime: { [self] in
+                        try makeLocalClaudeRuntime(launchConfiguration: launchConfiguration)
+                    },
+                    makeRemoteClaudeRuntime: { [self] in
+                        try makeRemoteClaudeRuntime(launchConfiguration: launchConfiguration)
                     },
                     makeLocalPiRuntime: { [self] in
                         try await makeLocalPiRuntime(session: session, launchConfiguration: launchConfiguration)
@@ -1051,6 +1065,91 @@
                     }
 
                     return try ProcessCodexAppServerTransport(
+                        executable: "/usr/bin/ssh",
+                        arguments: bridgeArguments,
+                        workingDirectory: nil
+                    )
+                }
+            )
+        }
+
+        private func makeLocalClaudeRuntime(
+            launchConfiguration: SessionRuntimeLaunchConfiguration
+        ) throws -> any SessionRuntime {
+            let processEnvironment = localShellEnvironmentResolver.resolvedEnvironment()
+            if let claudeTransportFactory {
+                return try ClaudeStreamJSONRuntime(
+                    executable: launchConfiguration.executable,
+                    workingDirectory: launchConfiguration.workingDirectory,
+                    sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.claudeSessionLinkage,
+                    terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
+                    processEnvironment: processEnvironment,
+                    transportFactory: claudeTransportFactory
+                )
+            }
+
+            return try ClaudeStreamJSONRuntime(
+                executable: launchConfiguration.executable,
+                workingDirectory: launchConfiguration.workingDirectory,
+                sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.claudeSessionLinkage,
+                terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
+                processEnvironment: processEnvironment
+            )
+        }
+
+        private func makeRemoteClaudeRuntime(
+            launchConfiguration: SessionRuntimeLaunchConfiguration
+        ) throws -> any SessionRuntime {
+            guard let remoteHost = launchConfiguration.remoteHost,
+                let runtimeIdentifier = launchConfiguration.remoteRuntimeIdentifier
+            else {
+                throw NSError(
+                    domain: "ProcessSessionRuntimeLauncher",
+                    code: 1,
+                    userInfo: [
+                        NSLocalizedDescriptionKey: "Remote Claude launch requires a Host and runtime identifier."
+                    ]
+                )
+            }
+
+            let approvalHookBridge =
+                self.remoteClaudeApprovalHookBridgeFactory?(remoteHost, runtimeIdentifier)
+                ?? RemoteClaudeApprovalHookBridge(host: remoteHost, runtimeIdentifier: runtimeIdentifier)
+
+            return try ClaudeStreamJSONRuntime(
+                executable: launchConfiguration.executable,
+                workingDirectory: launchConfiguration.workingDirectory,
+                sessionLinkage: launchConfiguration.sessionRecordAdapterMetadata?.claudeSessionLinkage,
+                terminationStatusMessageBuilder: launchConfiguration.terminationStatusMessageBuilder,
+                unexpectedTerminationState: .interrupted,
+                unexpectedTerminationMessageBuilder: { _ in
+                    "Claude Session stream disconnected. Relaunch to reconnect to the tmux-backed remote runtime."
+                },
+                stopHandler: {
+                    try Self.runCommand(
+                        executable: "/usr/bin/ssh",
+                        arguments: self.remoteProtocolSessionCommandBuilder.stopArguments(
+                            runtimeIdentifier: runtimeIdentifier,
+                            host: remoteHost
+                        )
+                    )
+                },
+                approvalHookBridge: approvalHookBridge,
+                transportFactory: { executable, arguments, workingDirectory in
+                    let bridgeArguments = self.remoteProtocolSessionCommandBuilder.bridgeArguments(
+                        host: remoteHost,
+                        runtimeIdentifier: runtimeIdentifier,
+                        workingDirectory: workingDirectory ?? launchConfiguration.workingDirectory,
+                        executable: executable,
+                        providerArguments: arguments,
+                        launchMode: launchConfiguration.remoteRuntimeLaunchMode
+                    )
+
+                    if let claudeTransportFactory = self.claudeTransportFactory {
+                        return try claudeTransportFactory("/usr/bin/ssh", bridgeArguments, nil)
+                    }
+
+                    return ProcessClaudeStreamJSONTransport(
                         executable: "/usr/bin/ssh",
                         arguments: bridgeArguments,
                         workingDirectory: nil

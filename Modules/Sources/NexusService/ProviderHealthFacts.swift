@@ -38,6 +38,24 @@
             -> RemotePiReadinessOutcome
     }
 
+    protocol ClaudeStreamJSONReadinessProbing: Sendable {
+        func probe(executable: String, workingDirectory: String) async throws
+    }
+
+    protocol RemoteClaudeStreamJSONReadinessProbing: Sendable {
+        func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) async throws
+    }
+
+    enum LocalClaudeStreamJSONReadinessProbeResult: Sendable, Equatable {
+        case ready
+        case failed(String)
+    }
+
+    enum RemoteClaudeStreamJSONReadinessProbeResult: Sendable, Equatable {
+        case ready
+        case failed(String)
+    }
+
     enum RemoteCodexReadinessOutcome: Sendable, Equatable {
         case ready
         case authenticationRequired(String)
@@ -168,6 +186,14 @@
             -> RemotePiReadinessProbeResult
     }
 
+    protocol ClaudeProviderHealthFactProviding: CLIProviderHealthFactProviding {
+        func probeLocalClaudeStreamJSONReadiness(workspace: Workspace, executable: String) async
+            -> LocalClaudeStreamJSONReadinessProbeResult
+        func probeRemoteClaudeStreamJSONReadiness(
+            workspace: Workspace, host: NexusDomain.Host, executable: String
+        ) async -> RemoteClaudeStreamJSONReadinessProbeResult
+    }
+
     protocol IBMBobProviderHealthFactProviding: Sendable {
         func localIBMBobPassiveProbe(workspace: Workspace) async -> LocalIBMBobPassiveProbeResult
         func remoteIBMBobPassiveProbe(workspace: Workspace, host: NexusDomain.Host) async
@@ -230,8 +256,8 @@
     }
 
     struct ProviderHealthFacts: ProviderHealthEvaluating, CLIProviderHealthFactProviding,
-        CodexProviderHealthFactProviding, PiProviderHealthFactProviding, IBMBobProviderHealthFactProviding,
-        SharedRemoteIBMBobProviderHealthFactProviding, @unchecked Sendable
+        CodexProviderHealthFactProviding, PiProviderHealthFactProviding, ClaudeProviderHealthFactProviding,
+        IBMBobProviderHealthFactProviding, SharedRemoteIBMBobProviderHealthFactProviding, @unchecked Sendable
     {
         let executableResolver: any ProviderExecutableResolving
         let commandRunner: any ProviderCommandRunning
@@ -239,6 +265,8 @@
         let codexReadinessProbe: any CodexReadinessProbing
         let remoteCodexReadinessProbe: any RemoteCodexReadinessProbing
         let remotePiReadinessProbe: any RemotePiReadinessProbing
+        let claudeStreamJSONReadinessProbe: any ClaudeStreamJSONReadinessProbing
+        let remoteClaudeStreamJSONReadinessProbe: any RemoteClaudeStreamJSONReadinessProbing
         let providerModuleRegistry: ProviderModuleRegistry
 
         init(
@@ -248,6 +276,9 @@
             codexReadinessProbe: any CodexReadinessProbing = CodexAppServerReadinessProbe(),
             remoteCodexReadinessProbe: any RemoteCodexReadinessProbing = SSHRemoteCodexAppServerReadinessProbe(),
             remotePiReadinessProbe: any RemotePiReadinessProbing = SSHRemotePiRPCReadinessProbe(),
+            claudeStreamJSONReadinessProbe: any ClaudeStreamJSONReadinessProbing = ClaudeStreamJSONReadinessProbe(),
+            remoteClaudeStreamJSONReadinessProbe: any RemoteClaudeStreamJSONReadinessProbing =
+                SSHRemoteClaudeStreamJSONReadinessProbe(),
             providerModuleRegistry: ProviderModuleRegistry = ServiceSessionProviderRegistry.providerModules()
         ) {
             self.executableResolver = executableResolver
@@ -256,6 +287,8 @@
             self.codexReadinessProbe = codexReadinessProbe
             self.remoteCodexReadinessProbe = remoteCodexReadinessProbe
             self.remotePiReadinessProbe = remotePiReadinessProbe
+            self.claudeStreamJSONReadinessProbe = claudeStreamJSONReadinessProbe
+            self.remoteClaudeStreamJSONReadinessProbe = remoteClaudeStreamJSONReadinessProbe
             self.providerModuleRegistry = providerModuleRegistry
         }
 
@@ -431,6 +464,38 @@
                 case .authenticationUncertain(let message):
                     return .authenticationUncertain(message)
                 }
+            } catch {
+                return .failed(error.localizedDescription)
+            }
+        }
+
+        func probeLocalClaudeStreamJSONReadiness(
+            workspace: Workspace,
+            executable: String
+        ) async -> LocalClaudeStreamJSONReadinessProbeResult {
+            do {
+                try await claudeStreamJSONReadinessProbe.probe(
+                    executable: executable,
+                    workingDirectory: workspace.folderPath
+                )
+                return .ready
+            } catch {
+                return .failed(error.localizedDescription)
+            }
+        }
+
+        func probeRemoteClaudeStreamJSONReadiness(
+            workspace: Workspace,
+            host: NexusDomain.Host,
+            executable: String
+        ) async -> RemoteClaudeStreamJSONReadinessProbeResult {
+            do {
+                try await remoteClaudeStreamJSONReadinessProbe.probe(
+                    host: host,
+                    executable: executable,
+                    workingDirectory: workspace.folderPath
+                )
+                return .ready
             } catch {
                 return .failed(error.localizedDescription)
             }

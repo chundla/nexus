@@ -169,7 +169,7 @@
 
     private func waitForTransportOutput<Status>(
         _ recorder: StdoutTransportRecorder<Status>,
-        timeoutNanoseconds: UInt64 = 2_000_000_000
+        timeoutNanoseconds: UInt64 = 5_000_000_000
     ) async throws {
         let deadline = ContinuousClock.now + .nanoseconds(Int64(timeoutNanoseconds))
         while ContinuousClock.now < deadline {

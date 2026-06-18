@@ -533,6 +533,26 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func remoteProviderActionStateEnablesClaudeStructuredNamedSessionCreationOnIPhone() {
+        let createState = RemoteProviderActionState(
+            capability: ProviderCapability(
+                action: .createNamedSession,
+                isSupported: true,
+                isEnabled: true
+            ),
+            provider: Provider(id: .claude),
+            prelaunchPrimarySurface: .structuredActivityFeed
+        )
+
+        #expect(
+            createState
+                == RemoteProviderActionState(
+                    isEnabled: true,
+                    disabledReason: nil
+                ))
+    }
+
+    @MainActor
     @Test func remoteProviderActionStateEnablesRemotePiStructuredDefaultLaunchOnIPhone() {
         let launchState = RemoteProviderActionState(
             capability: ProviderCapability(
@@ -549,6 +569,37 @@ struct nexusTests {
                 == RemoteProviderActionState(
                     isEnabled: true,
                     disabledReason: nil
+                ))
+    }
+
+    @MainActor
+    @Test func remoteSessionSurfacePresentationSupportsClaudeStructuredSessionsOnIPhone() {
+        let screen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .claude,
+                isDefault: true,
+                state: .ready
+            ),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .status, text: "Claude Session ready. Send a prompt to start Claude.")
+            ]
+        )
+
+        #expect(
+            remoteSessionSurfacePresentation(for: screen, isReady: true)
+                == RemoteSessionSurfacePresentation(
+                    surfaceSupport: .supported,
+                    showsTerminal: false,
+                    showsStructuredActivity: true,
+                    showsAttachment: true,
+                    showsInput: false,
+                    relaunchIsEnabled: true,
+                    relaunchDisabledReason: nil,
+                    unsupportedCopy: nil
                 ))
     }
 
@@ -933,7 +984,9 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
                 commandRunner: providerHealthRunner,
-                remoteCodexReadinessProbe: NoOpRemoteCodexReadinessProbe()
+                remoteCodexReadinessProbe: NoOpRemoteCodexReadinessProbe(),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
                 "build-box": HostValidationResult(
@@ -1009,7 +1062,9 @@ struct nexusTests {
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
                         stdout: "Usage: codex\n"),
                 ]),
-                codexReadinessProbe: NoOpCodexReadinessProbe()
+                codexReadinessProbe: NoOpCodexReadinessProbe(),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             )
         )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -1061,7 +1116,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
         )
@@ -1121,7 +1178,9 @@ struct nexusTests {
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
-                commandRunner: providerHealthRunner
+                commandRunner: providerHealthRunner,
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
                 "build-box": HostValidationResult(
@@ -1151,7 +1210,9 @@ struct nexusTests {
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
-                commandRunner: StubCommandRunner(results: [:])
+                commandRunner: StubCommandRunner(results: [:]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             workspaceAvailabilityEvaluator: WorkspaceAvailabilityEvaluator(commandRunner: availabilityRunner)
         )
@@ -1200,7 +1261,9 @@ struct nexusTests {
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
-                commandRunner: providerHealthRunner
+                commandRunner: providerHealthRunner,
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
                 "build-box": HostValidationResult(
@@ -1271,7 +1334,9 @@ struct nexusTests {
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
-                commandRunner: failedHealthRunner
+                commandRunner: failedHealthRunner,
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
                 "build-box": HostValidationResult(
@@ -1323,7 +1388,9 @@ struct nexusTests {
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
-                commandRunner: recoveredHealthRunner
+                commandRunner: recoveredHealthRunner,
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
                 "build-box": HostValidationResult(
@@ -1362,7 +1429,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             )
         )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -1418,7 +1487,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
                 "build-box": HostValidationResult(
@@ -1482,7 +1553,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
                 "build-box": HostValidationResult(
@@ -1522,7 +1595,9 @@ struct nexusTests {
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: [:]),
-                commandRunner: StubCommandRunner(results: [:])
+                commandRunner: StubCommandRunner(results: [:]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             )
         )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -1558,7 +1633,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: StubSessionRuntimeManager()
         )
@@ -1598,7 +1675,9 @@ struct nexusTests {
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
                         stdout: "Usage: codex\n"),
                 ]),
-                codexReadinessProbe: NoOpCodexReadinessProbe()
+                codexReadinessProbe: NoOpCodexReadinessProbe(),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: StubSessionRuntimeManager()
         )
@@ -1632,7 +1711,9 @@ struct nexusTests {
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: [:]),
-                commandRunner: StubCommandRunner(results: [:])
+                commandRunner: StubCommandRunner(results: [:]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             )
         )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -1691,7 +1772,9 @@ struct nexusTests {
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
                         stdout: "Usage: codex\n"),
                 ]),
-                codexReadinessProbe: NoOpCodexReadinessProbe()
+                codexReadinessProbe: NoOpCodexReadinessProbe(),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Codex ready")
         )
@@ -1734,7 +1817,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: StubSessionRuntimeManager()
         )
@@ -1779,7 +1864,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: resolvedExecutable, arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(launchTranscriptForExecutable: { $0 })
         )
@@ -1818,7 +1905,9 @@ struct nexusTests {
                         .success(stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/provider-module-claude", arguments: ["--help"]):
                         .success(stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(
                 launchTranscriptForConfiguration: { configuration, _, _ in
@@ -1879,7 +1968,9 @@ struct nexusTests {
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
-                commandRunner: providerHealthRunner
+                commandRunner: providerHealthRunner,
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
                 "build-box": HostValidationResult(
@@ -1958,7 +2049,9 @@ struct nexusTests {
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
-                commandRunner: providerHealthRunner
+                commandRunner: providerHealthRunner,
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
                 "build-box": HostValidationResult(
@@ -2042,7 +2135,9 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
                 commandRunner: providerHealthRunner,
-                remoteCodexReadinessProbe: NoOpRemoteCodexReadinessProbe()
+                remoteCodexReadinessProbe: NoOpRemoteCodexReadinessProbe(),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
                 "build-box": HostValidationResult(
@@ -2123,7 +2218,9 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
                 commandRunner: providerHealthRunner,
-                remoteCodexReadinessProbe: NoOpRemoteCodexReadinessProbe()
+                remoteCodexReadinessProbe: NoOpRemoteCodexReadinessProbe(),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
                 "build-box": HostValidationResult(
@@ -2199,7 +2296,9 @@ struct nexusTests {
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
-                commandRunner: failedHealthRunner
+                commandRunner: failedHealthRunner,
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
                 "build-box": HostValidationResult(
@@ -2254,7 +2353,9 @@ struct nexusTests {
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["codex": "/tmp/fake-codex"]),
                 commandRunner: recoveredHealthRunner,
-                remoteCodexReadinessProbe: NoOpRemoteCodexReadinessProbe()
+                remoteCodexReadinessProbe: NoOpRemoteCodexReadinessProbe(),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
                 "build-box": HostValidationResult(
@@ -2326,7 +2427,9 @@ struct nexusTests {
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
-                commandRunner: providerHealthRunner
+                commandRunner: providerHealthRunner,
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
                 "build-box": HostValidationResult(
@@ -2450,7 +2553,9 @@ struct nexusTests {
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
-                commandRunner: providerHealthRunner
+                commandRunner: providerHealthRunner,
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
                 "build-box": HostValidationResult(
@@ -2517,7 +2622,9 @@ struct nexusTests {
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
-                commandRunner: providerHealthRunner
+                commandRunner: providerHealthRunner,
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
                 "build-box": HostValidationResult(
@@ -2551,7 +2658,9 @@ struct nexusTests {
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
-                commandRunner: providerHealthRunner
+                commandRunner: providerHealthRunner,
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
                 "build-box": HostValidationResult(
@@ -2611,7 +2720,9 @@ struct nexusTests {
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
-                commandRunner: providerHealthRunner
+                commandRunner: providerHealthRunner,
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
                 "build-box": HostValidationResult(
@@ -2645,7 +2756,9 @@ struct nexusTests {
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
-                commandRunner: providerHealthRunner
+                commandRunner: providerHealthRunner,
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
                 "build-box": HostValidationResult(
@@ -2701,7 +2814,9 @@ struct nexusTests {
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
-                commandRunner: providerHealthRunner
+                commandRunner: providerHealthRunner,
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
                 "build-box": HostValidationResult(
@@ -2735,7 +2850,9 @@ struct nexusTests {
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
-                commandRunner: providerHealthRunner
+                commandRunner: providerHealthRunner,
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
                 "build-box": HostValidationResult(
@@ -2809,7 +2926,9 @@ struct nexusTests {
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
-                commandRunner: providerHealthRunner
+                commandRunner: providerHealthRunner,
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
                 "build-box": HostValidationResult(
@@ -2843,7 +2962,9 @@ struct nexusTests {
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
-                commandRunner: providerHealthRunner
+                commandRunner: providerHealthRunner,
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
                 "build-box": HostValidationResult(
@@ -2906,7 +3027,9 @@ struct nexusTests {
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
-                commandRunner: failedHealthRunner
+                commandRunner: failedHealthRunner,
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
                 "build-box": HostValidationResult(
@@ -2956,7 +3079,9 @@ struct nexusTests {
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
-                commandRunner: recoveredHealthRunner
+                commandRunner: recoveredHealthRunner,
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
                 "build-box": HostValidationResult(
@@ -3000,7 +3125,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
         )
@@ -3235,7 +3362,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
         )
@@ -3306,7 +3435,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
         )
@@ -3353,7 +3484,9 @@ struct nexusTests {
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
                         stdout: "Usage: codex\n"),
                 ]),
-                codexReadinessProbe: NoOpCodexReadinessProbe()
+                codexReadinessProbe: NoOpCodexReadinessProbe(),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Codex ready")
         )
@@ -3408,7 +3541,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
         )
@@ -3451,7 +3586,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
         )
@@ -3492,7 +3629,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
         )
@@ -3529,7 +3668,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -3571,7 +3712,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -3610,7 +3753,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -3648,7 +3793,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -3686,7 +3833,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -3721,7 +3870,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -3758,7 +3909,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -3796,7 +3949,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -3834,7 +3989,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -3872,7 +4029,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -3910,7 +4069,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -3948,7 +4109,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -3986,7 +4149,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -4024,7 +4189,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -4062,7 +4229,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -4100,7 +4269,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -4141,7 +4312,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -4180,7 +4353,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -4216,7 +4391,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -4254,7 +4431,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -4292,7 +4471,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -4330,7 +4511,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -4368,7 +4551,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -4406,7 +4591,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -4444,7 +4631,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -4482,7 +4671,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -4520,7 +4711,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -4558,7 +4751,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -4598,7 +4793,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -4637,7 +4834,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -4675,7 +4874,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -4714,7 +4915,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -4752,7 +4955,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -4790,7 +4995,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -4828,7 +5035,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -4866,7 +5075,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -4904,7 +5115,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -4942,7 +5155,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -4981,7 +5196,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -5020,7 +5237,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -5059,7 +5278,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -5098,7 +5319,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -5137,7 +5360,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -5176,7 +5401,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -5214,7 +5441,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -5252,7 +5481,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -5290,7 +5521,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -5328,7 +5561,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -5366,7 +5601,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -5404,7 +5641,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -5442,7 +5681,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: runtimeManager
         )
@@ -5463,933 +5704,6 @@ struct nexusTests {
         #expect(screen.cursorColumn == 4)
     }
 
-    @Test func liveClaudeRuntimeStartsOnPseudoTerminalOverIPC() async throws {
-        let workspaceFolderURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
-
-        let executableURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: false)
-        try """
-        #!/usr/bin/env python3
-        import fcntl
-        import struct
-        import sys
-        import termios
-
-        try:
-            rows, cols, _, _ = struct.unpack(
-                "HHHH",
-                fcntl.ioctl(sys.stdin.fileno(), termios.TIOCGWINSZ, struct.pack("HHHH", 0, 0, 0, 0))
-            )
-            print(f"TTY {rows} {cols}", flush=True)
-        except OSError:
-            print("TTY no-tty", flush=True)
-
-        while True:
-            line = sys.stdin.readline()
-            if not line:
-                break
-        """.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
-
-        let service = try NexusService.bootstrapForTests(
-            rootURL: FileManager.default.temporaryDirectory
-                .appendingPathComponent("NexusTests", isDirectory: true)
-                .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: StubExecutableResolver(executables: [
-                    "claude": executableURL.path(percentEncoded: false)
-                ]),
-                commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(
-                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
-                            stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(
-                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
-                            stdout: "Usage: claude\n"),
-                ])
-            )
-        )
-        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
-        _ = try await client.createWorkspaceGroup(name: "Solo Group")
-        let workspace = try await client.createLocalWorkspace(
-            name: nil,
-            folderPath: workspaceFolderURL.path(percentEncoded: false),
-            primaryGroupID: nil
-        )
-
-        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
-        let screen = try await waitForSessionScreen(client: client, sessionID: session.id) { currentScreen in
-            currentScreen.transcript.contains("TTY 24 80") || currentScreen.transcript.contains("TTY no-tty")
-        }
-
-        #expect(screen.terminalColumns == 80)
-        #expect(screen.terminalRows == 24)
-        #expect(screen.transcript.contains("TTY 24 80"))
-    }
-
-    @Test func liveClaudeRuntimeNormalizesTerminalControlOutputOverIPC() async throws {
-        let workspaceFolderURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
-
-        let executableURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: false)
-        try """
-        #!/usr/bin/env python3
-        import sys
-        import time
-
-        sys.stdout.write("progress 0%")
-        sys.stdout.flush()
-        time.sleep(0.05)
-        sys.stdout.write("\\rprogress 100%\\n")
-        sys.stdout.write("\\x1b[32mClaude ready\\x1b[0m\\n")
-        sys.stdout.flush()
-        time.sleep(2)
-        """.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
-
-        let service = try NexusService.bootstrapForTests(
-            rootURL: FileManager.default.temporaryDirectory
-                .appendingPathComponent("NexusTests", isDirectory: true)
-                .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: StubExecutableResolver(executables: [
-                    "claude": executableURL.path(percentEncoded: false)
-                ]),
-                commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(
-                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
-                            stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(
-                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
-                            stdout: "Usage: claude\n"),
-                ])
-            )
-        )
-        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
-        _ = try await client.createWorkspaceGroup(name: "Solo Group")
-        let workspace = try await client.createLocalWorkspace(
-            name: nil,
-            folderPath: workspaceFolderURL.path(percentEncoded: false),
-            primaryGroupID: nil
-        )
-
-        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
-        let screen = try await waitForSessionScreen(client: client, sessionID: session.id) { currentScreen in
-            currentScreen.transcript.contains("progress 100%") && currentScreen.transcript.contains("Claude ready")
-        }
-
-        #expect(screen.transcript.contains("progress 100%"))
-        #expect(screen.transcript.contains("Claude ready"))
-        #expect(screen.transcript.contains("progress 0%") == false)
-        #expect(screen.transcript.contains("\u{001B}") == false)
-    }
-
-    @Test func liveClaudeRuntimeStreamsSessionScreenUpdatesOverXPC() async throws {
-        let workspaceFolderURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
-
-        let executableURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: false)
-        try """
-        #!/usr/bin/env python3
-        import time
-
-        print("Claude ready", flush=True)
-        time.sleep(0.2)
-        print("Claude streamed update", flush=True)
-        """.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
-
-        let service = try NexusService.bootstrapForTests(
-            rootURL: FileManager.default.temporaryDirectory
-                .appendingPathComponent("NexusTests", isDirectory: true)
-                .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: StubExecutableResolver(executables: [
-                    "claude": executableURL.path(percentEncoded: false)
-                ]),
-                commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(
-                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
-                            stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(
-                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
-                            stdout: "Usage: claude\n"),
-                ])
-            )
-        )
-        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
-        _ = try await client.createWorkspaceGroup(name: "Solo Group")
-        let workspace = try await client.createLocalWorkspace(
-            name: nil,
-            folderPath: workspaceFolderURL.path(percentEncoded: false),
-            primaryGroupID: nil
-        )
-
-        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
-        let collector = SessionScreenCollector()
-        let observation = try await client.observeSessionScreen(sessionID: session.id) { screen in
-            Task {
-                await collector.record(screen)
-            }
-        }
-
-        let streamedScreen = try await collector.waitForScreen { screen in
-            screen.transcript.contains("Claude streamed update") && screen.session.state == .exited
-        }
-
-        #expect(streamedScreen.transcript.contains("Claude ready"))
-        #expect(streamedScreen.transcript.contains("Claude streamed update"))
-        #expect(streamedScreen.session.state == .exited)
-        await observation.cancel()
-    }
-
-    @Test func liveClaudeRuntimeAcceptsEmptyInputAsEnterOverIPC() async throws {
-        let workspaceFolderURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
-
-        let executableURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: false)
-        try """
-        #!/usr/bin/env python3
-        import sys
-
-        print("Press enter to continue", flush=True)
-        line = sys.stdin.readline()
-        if line == "\\n":
-            print("Enter received", flush=True)
-        else:
-            print(f"Unexpected input: {line!r}", flush=True)
-        """.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
-
-        let service = try NexusService.bootstrapForTests(
-            rootURL: FileManager.default.temporaryDirectory
-                .appendingPathComponent("NexusTests", isDirectory: true)
-                .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: StubExecutableResolver(executables: [
-                    "claude": executableURL.path(percentEncoded: false)
-                ]),
-                commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(
-                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
-                            stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(
-                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
-                            stdout: "Usage: claude\n"),
-                ])
-            )
-        )
-        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
-        _ = try await client.createWorkspaceGroup(name: "Solo Group")
-        let workspace = try await client.createLocalWorkspace(
-            name: nil,
-            folderPath: workspaceFolderURL.path(percentEncoded: false),
-            primaryGroupID: nil
-        )
-
-        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
-        _ = try await waitForSessionScreen(client: client, sessionID: session.id) { currentScreen in
-            currentScreen.transcript.contains("Press enter to continue")
-        }
-
-        _ = try await client.sendSessionInput(sessionID: session.id, text: "")
-        let screen = try await waitForSessionScreen(client: client, sessionID: session.id) { currentScreen in
-            currentScreen.transcript.contains("Enter received")
-        }
-
-        #expect(screen.transcript.contains("Enter received"))
-    }
-
-    @Test func liveClaudeRuntimeSendsCarriageReturnForEnterKeyOverIPC() async throws {
-        let workspaceFolderURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
-
-        let executableURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: false)
-        try #"""
-        #!/usr/bin/env python3
-        import os
-        import sys
-        import tty
-
-        tty.setraw(sys.stdin.fileno())
-        print("READY", flush=True)
-        data = os.read(sys.stdin.fileno(), 1)
-        if data == b'\r':
-            print("CR", flush=True)
-        elif data == b'\n':
-            print("LF", flush=True)
-        else:
-            print(repr(data), flush=True)
-        """#.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
-
-        let service = try NexusService.bootstrapForTests(
-            rootURL: FileManager.default.temporaryDirectory
-                .appendingPathComponent("NexusTests", isDirectory: true)
-                .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: StubExecutableResolver(executables: [
-                    "claude": executableURL.path(percentEncoded: false)
-                ]),
-                commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(
-                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
-                            stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(
-                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
-                            stdout: "Usage: claude\n"),
-                ])
-            )
-        )
-        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
-        _ = try await client.createWorkspaceGroup(name: "Solo Group")
-        let workspace = try await client.createLocalWorkspace(
-            name: nil,
-            folderPath: workspaceFolderURL.path(percentEncoded: false),
-            primaryGroupID: nil
-        )
-
-        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
-        _ = try await waitForSessionScreen(client: client, sessionID: session.id) { currentScreen in
-            currentScreen.transcript.contains("READY")
-        }
-
-        _ = try await client.sendSessionInputKey(sessionID: session.id, key: .enter)
-        let screen = try await waitForSessionScreen(client: client, sessionID: session.id) { currentScreen in
-            currentScreen.transcript.contains("CR") || currentScreen.transcript.contains("LF")
-        }
-
-        #expect(screen.transcript.contains("CR"))
-        #expect(screen.transcript.contains("LF") == false)
-    }
-
-    @Test func liveClaudeRuntimeAcceptsSpecialArrowKeyInputOverIPC() async throws {
-        let workspaceFolderURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
-
-        let executableURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: false)
-        try #"""
-        #!/usr/bin/env python3
-        import os
-        import sys
-        import tty
-
-        tty.setraw(sys.stdin.fileno())
-        print("READY", flush=True)
-        data = os.read(sys.stdin.fileno(), 3)
-        if data == b'\x1b[A':
-            print("UP", flush=True)
-        else:
-            print(repr(data), flush=True)
-        """#.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
-
-        let service = try NexusService.bootstrapForTests(
-            rootURL: FileManager.default.temporaryDirectory
-                .appendingPathComponent("NexusTests", isDirectory: true)
-                .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: StubExecutableResolver(executables: [
-                    "claude": executableURL.path(percentEncoded: false)
-                ]),
-                commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(
-                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
-                            stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(
-                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
-                            stdout: "Usage: claude\n"),
-                ])
-            )
-        )
-        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
-        _ = try await client.createWorkspaceGroup(name: "Solo Group")
-        let workspace = try await client.createLocalWorkspace(
-            name: nil,
-            folderPath: workspaceFolderURL.path(percentEncoded: false),
-            primaryGroupID: nil
-        )
-
-        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
-        _ = try await waitForSessionScreen(client: client, sessionID: session.id) { currentScreen in
-            currentScreen.transcript.contains("READY")
-        }
-        _ = try await client.sendSessionInputKey(sessionID: session.id, key: .upArrow)
-        let screen = try await waitForSessionScreen(client: client, sessionID: session.id) { currentScreen in
-            currentScreen.transcript.contains("UP")
-        }
-
-        #expect(screen.transcript.contains("UP"))
-    }
-
-    @Test func liveClaudeRuntimeAcceptsEndOfTransmissionKeyInputOverIPC() async throws {
-        let workspaceFolderURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
-
-        let executableURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: false)
-        try #"""
-        #!/usr/bin/env python3
-        import os
-        import sys
-        import tty
-
-        tty.setraw(sys.stdin.fileno())
-        print("READY", flush=True)
-        data = os.read(sys.stdin.fileno(), 1)
-        if data == b'\x04':
-            print("EOT", flush=True)
-        else:
-            print(repr(data), flush=True)
-        """#.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
-
-        let service = try NexusService.bootstrapForTests(
-            rootURL: FileManager.default.temporaryDirectory
-                .appendingPathComponent("NexusTests", isDirectory: true)
-                .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: StubExecutableResolver(executables: [
-                    "claude": executableURL.path(percentEncoded: false)
-                ]),
-                commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(
-                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
-                            stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(
-                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
-                            stdout: "Usage: claude\n"),
-                ])
-            )
-        )
-        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
-        _ = try await client.createWorkspaceGroup(name: "Solo Group")
-        let workspace = try await client.createLocalWorkspace(
-            name: nil,
-            folderPath: workspaceFolderURL.path(percentEncoded: false),
-            primaryGroupID: nil
-        )
-
-        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
-        _ = try await waitForSessionScreen(client: client, sessionID: session.id) { currentScreen in
-            currentScreen.transcript.contains("READY")
-        }
-        _ = try await client.sendSessionInputKey(sessionID: session.id, key: .endOfTransmission)
-        let screen = try await waitForSessionScreen(client: client, sessionID: session.id) { currentScreen in
-            currentScreen.transcript.contains("EOT")
-        }
-
-        #expect(screen.transcript.contains("EOT"))
-    }
-
-    @Test func liveClaudeRuntimeAcceptsInterruptKeyInputOverIPC() async throws {
-        let workspaceFolderURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
-
-        let executableURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: false)
-        try #"""
-        #!/usr/bin/env python3
-        import os
-        import sys
-        import tty
-
-        tty.setraw(sys.stdin.fileno())
-        print("READY", flush=True)
-        data = os.read(sys.stdin.fileno(), 1)
-        if data == b'\x03':
-            print("INTERRUPT", flush=True)
-        else:
-            print(repr(data), flush=True)
-        """#.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
-
-        let service = try NexusService.bootstrapForTests(
-            rootURL: FileManager.default.temporaryDirectory
-                .appendingPathComponent("NexusTests", isDirectory: true)
-                .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: StubExecutableResolver(executables: [
-                    "claude": executableURL.path(percentEncoded: false)
-                ]),
-                commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(
-                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
-                            stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(
-                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
-                            stdout: "Usage: claude\n"),
-                ])
-            )
-        )
-        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
-        _ = try await client.createWorkspaceGroup(name: "Solo Group")
-        let workspace = try await client.createLocalWorkspace(
-            name: nil,
-            folderPath: workspaceFolderURL.path(percentEncoded: false),
-            primaryGroupID: nil
-        )
-
-        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
-        _ = try await waitForSessionScreen(client: client, sessionID: session.id) { currentScreen in
-            currentScreen.transcript.contains("READY")
-        }
-        _ = try await client.sendSessionInputKey(sessionID: session.id, key: .interrupt)
-        let screen = try await waitForSessionScreen(client: client, sessionID: session.id) { currentScreen in
-            currentScreen.transcript.contains("INTERRUPT")
-        }
-
-        #expect(screen.transcript.contains("INTERRUPT"))
-    }
-
-    @Test func liveClaudeRuntimeUsesApplicationCursorKeysWhenTerminalRequestsThemOverIPC() async throws {
-        let workspaceFolderURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
-
-        let executableURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: false)
-        try #"""
-        #!/usr/bin/env python3
-        import os
-        import sys
-        import tty
-
-        tty.setraw(sys.stdin.fileno())
-        sys.stdout.write("\x1b[?1h")
-        print("READY", flush=True)
-        data = os.read(sys.stdin.fileno(), 3)
-        if data == b'\x1bOA':
-            print("APPLICATION-UP", flush=True)
-        else:
-            print(repr(data), flush=True)
-        """#.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
-
-        let service = try NexusService.bootstrapForTests(
-            rootURL: FileManager.default.temporaryDirectory
-                .appendingPathComponent("NexusTests", isDirectory: true)
-                .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: StubExecutableResolver(executables: [
-                    "claude": executableURL.path(percentEncoded: false)
-                ]),
-                commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(
-                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
-                            stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(
-                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
-                            stdout: "Usage: claude\n"),
-                ])
-            )
-        )
-        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
-        _ = try await client.createWorkspaceGroup(name: "Solo Group")
-        let workspace = try await client.createLocalWorkspace(
-            name: nil,
-            folderPath: workspaceFolderURL.path(percentEncoded: false),
-            primaryGroupID: nil
-        )
-
-        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
-        _ = try await waitForSessionScreen(client: client, sessionID: session.id) { currentScreen in
-            currentScreen.transcript.contains("READY")
-        }
-        _ = try await client.sendSessionInputKey(sessionID: session.id, key: .upArrow)
-        let screen = try await waitForSessionScreen(client: client, sessionID: session.id) { currentScreen in
-            currentScreen.transcript.contains("APPLICATION-UP") || currentScreen.transcript.contains("\\x1b[A")
-        }
-
-        #expect(screen.transcript.contains("APPLICATION-UP"))
-    }
-
-    @Test func liveClaudeRuntimeRespondsToCursorPositionReportQueryOverIPC() async throws {
-        let workspaceFolderURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
-
-        let executableURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: false)
-        try #"""
-        #!/usr/bin/env python3
-        import os
-        import sys
-        import tty
-
-        tty.setraw(sys.stdin.fileno())
-        sys.stdout.write('abc\r\x1b[2B\x1b[5C\x1b[6n')
-        sys.stdout.flush()
-
-        data = b''
-        while not data.endswith(b'R'):
-            data += os.read(sys.stdin.fileno(), 1)
-
-        if data == b'\x1b[3;6R':
-            print('CPR', flush=True)
-        else:
-            print(repr(data), flush=True)
-        """#.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
-
-        let service = try NexusService.bootstrapForTests(
-            rootURL: FileManager.default.temporaryDirectory
-                .appendingPathComponent("NexusTests", isDirectory: true)
-                .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: StubExecutableResolver(executables: [
-                    "claude": executableURL.path(percentEncoded: false)
-                ]),
-                commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(
-                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
-                            stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(
-                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
-                            stdout: "Usage: claude\n"),
-                ])
-            )
-        )
-        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
-        _ = try await client.createWorkspaceGroup(name: "Solo Group")
-        let workspace = try await client.createLocalWorkspace(
-            name: nil,
-            folderPath: workspaceFolderURL.path(percentEncoded: false),
-            primaryGroupID: nil
-        )
-
-        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
-        let screen = try await waitForSessionScreen(client: client, sessionID: session.id) { currentScreen in
-            currentScreen.transcript.contains("CPR") || currentScreen.transcript.contains("\\x1b[3;6R")
-        }
-
-        #expect(screen.transcript.contains("CPR"))
-        #expect(screen.transcript.contains("\\x1b[3;6R") == false)
-    }
-
-    @Test func liveClaudeRuntimeReceivesTypedTextAndBackspaceOverIPC() async throws {
-        let workspaceFolderURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
-
-        let executableURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: false)
-        try #"""
-        #!/usr/bin/env python3
-        import os
-        import sys
-        import tty
-
-        tty.setraw(sys.stdin.fileno())
-        print("READY", flush=True)
-        data = b''
-        while len(data) < 3:
-            data += os.read(sys.stdin.fileno(), 3 - len(data))
-        if data == b'ab\x7f':
-            print("BACKSPACE", flush=True)
-        else:
-            print(repr(data), flush=True)
-        """#.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
-
-        let service = try NexusService.bootstrapForTests(
-            rootURL: FileManager.default.temporaryDirectory
-                .appendingPathComponent("NexusTests", isDirectory: true)
-                .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: StubExecutableResolver(executables: [
-                    "claude": executableURL.path(percentEncoded: false)
-                ]),
-                commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(
-                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
-                            stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(
-                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
-                            stdout: "Usage: claude\n"),
-                ])
-            )
-        )
-        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
-        _ = try await client.createWorkspaceGroup(name: "Solo Group")
-        let workspace = try await client.createLocalWorkspace(
-            name: nil,
-            folderPath: workspaceFolderURL.path(percentEncoded: false),
-            primaryGroupID: nil
-        )
-
-        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
-        _ = try await waitForSessionScreen(client: client, sessionID: session.id) { currentScreen in
-            currentScreen.transcript.contains("READY")
-        }
-        _ = try await client.sendSessionText(sessionID: session.id, text: "ab")
-        _ = try await client.sendSessionInputKey(sessionID: session.id, key: .backspace)
-        let screen = try await waitForSessionScreen(client: client, sessionID: session.id) { currentScreen in
-            currentScreen.transcript.contains("BACKSPACE")
-        }
-
-        #expect(screen.transcript.contains("BACKSPACE"))
-    }
-
-    @Test func liveClaudeRuntimeAcceptsForwardDeleteKeyInputOverIPC() async throws {
-        let workspaceFolderURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
-
-        let executableURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: false)
-        try #"""
-        #!/usr/bin/env python3
-        import os
-        import sys
-        import tty
-
-        tty.setraw(sys.stdin.fileno())
-        print("READY", flush=True)
-        data = b''
-        while len(data) < 4:
-            data += os.read(sys.stdin.fileno(), 4 - len(data))
-        if data == b'\x1b[3~':
-            print("DELETE", flush=True)
-        else:
-            print(repr(data), flush=True)
-        """#.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
-
-        let service = try NexusService.bootstrapForTests(
-            rootURL: FileManager.default.temporaryDirectory
-                .appendingPathComponent("NexusTests", isDirectory: true)
-                .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: StubExecutableResolver(executables: [
-                    "claude": executableURL.path(percentEncoded: false)
-                ]),
-                commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(
-                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
-                            stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(
-                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
-                            stdout: "Usage: claude\n"),
-                ])
-            )
-        )
-        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
-        _ = try await client.createWorkspaceGroup(name: "Solo Group")
-        let workspace = try await client.createLocalWorkspace(
-            name: nil,
-            folderPath: workspaceFolderURL.path(percentEncoded: false),
-            primaryGroupID: nil
-        )
-
-        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
-        _ = try await waitForSessionScreen(client: client, sessionID: session.id) { currentScreen in
-            currentScreen.transcript.contains("READY")
-        }
-        _ = try await client.sendSessionInputKey(sessionID: session.id, key: .deleteForward)
-        let screen = try await waitForSessionScreen(client: client, sessionID: session.id) { currentScreen in
-            currentScreen.transcript.contains("DELETE")
-        }
-
-        #expect(screen.transcript.contains("DELETE"))
-    }
-
-    @Test func liveClaudeRuntimeAcceptsHomeAndEndKeyInputOverIPC() async throws {
-        let workspaceFolderURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
-
-        let executableURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: false)
-        try #"""
-        #!/usr/bin/env python3
-        import os
-        import sys
-        import tty
-
-        tty.setraw(sys.stdin.fileno())
-        print("READY", flush=True)
-        first = os.read(sys.stdin.fileno(), 3)
-        second = os.read(sys.stdin.fileno(), 3)
-        if first == b'\x1b[H' and second == b'\x1b[F':
-            print("HOME-END", flush=True)
-        else:
-            print(repr((first, second)), flush=True)
-        """#.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
-
-        let service = try NexusService.bootstrapForTests(
-            rootURL: FileManager.default.temporaryDirectory
-                .appendingPathComponent("NexusTests", isDirectory: true)
-                .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: StubExecutableResolver(executables: [
-                    "claude": executableURL.path(percentEncoded: false)
-                ]),
-                commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(
-                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
-                            stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(
-                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
-                            stdout: "Usage: claude\n"),
-                ])
-            )
-        )
-        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
-        _ = try await client.createWorkspaceGroup(name: "Solo Group")
-        let workspace = try await client.createLocalWorkspace(
-            name: nil,
-            folderPath: workspaceFolderURL.path(percentEncoded: false),
-            primaryGroupID: nil
-        )
-
-        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
-        _ = try await waitForSessionScreen(client: client, sessionID: session.id) { currentScreen in
-            currentScreen.transcript.contains("READY")
-        }
-        _ = try await client.sendSessionInputKey(sessionID: session.id, key: .home)
-        _ = try await client.sendSessionInputKey(sessionID: session.id, key: .end)
-        let screen = try await waitForSessionScreen(client: client, sessionID: session.id) { currentScreen in
-            currentScreen.transcript.contains("HOME-END")
-        }
-
-        #expect(screen.transcript.contains("HOME-END"))
-    }
-
-    @Test func exitedClaudeRuntimeUsesProviderModuleExitCopyOverIPC() async throws {
-        let workspaceFolderURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
-
-        let executableURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: false)
-        try """
-        #!/usr/bin/env python3
-        print("Claude finished work", flush=True)
-        """.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
-
-        let service = try NexusService.bootstrapForTests(
-            rootURL: FileManager.default.temporaryDirectory
-                .appendingPathComponent("NexusTests", isDirectory: true)
-                .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: StubExecutableResolver(executables: [
-                    "claude": executableURL.path(percentEncoded: false)
-                ]),
-                commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(
-                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
-                            stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(
-                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
-                            stdout: "Usage: claude\n"),
-                ])
-            )
-        )
-        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
-        _ = try await client.createWorkspaceGroup(name: "Solo Group")
-        let workspace = try await client.createLocalWorkspace(
-            name: nil,
-            folderPath: workspaceFolderURL.path(percentEncoded: false),
-            primaryGroupID: nil
-        )
-
-        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
-        let exitedScreen = try await waitForSessionScreen(client: client, sessionID: session.id) { screen in
-            screen.session.state == .exited
-        }
-
-        #expect(exitedScreen.transcript.contains("Claude finished work"))
-        #expect(exitedScreen.transcript.contains("[Claude exited with status 0]"))
-        #expect(exitedScreen.transcript.contains("[Adapter exit status 0]") == false)
-    }
-
-    @Test func exitedClaudeRuntimeBecomesInspectableAndRelaunchableOverIPC() async throws {
-        let workspaceFolderURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
-
-        let executableURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: false)
-        try """
-        #!/usr/bin/env python3
-        print("Claude finished work", flush=True)
-        """.write(to: executableURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
-
-        let service = try NexusService.bootstrapForTests(
-            rootURL: FileManager.default.temporaryDirectory
-                .appendingPathComponent("NexusTests", isDirectory: true)
-                .appendingPathComponent(UUID().uuidString, isDirectory: true),
-            providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: StubExecutableResolver(executables: [
-                    "claude": executableURL.path(percentEncoded: false)
-                ]),
-                commandRunner: StubCommandRunner(results: [
-                    StubCommandRunner.Invocation(
-                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]): .success(
-                            stdout: "9.9.9 (Claude Code)\n"),
-                    StubCommandRunner.Invocation(
-                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
-                            stdout: "Usage: claude\n"),
-                ])
-            )
-        )
-        let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
-        _ = try await client.createWorkspaceGroup(name: "Solo Group")
-        let workspace = try await client.createLocalWorkspace(
-            name: nil,
-            folderPath: workspaceFolderURL.path(percentEncoded: false),
-            primaryGroupID: nil
-        )
-
-        let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
-        let exitedScreen = try await waitForSessionScreen(client: client, sessionID: session.id) { screen in
-            screen.session.state == .exited
-        }
-        let overview = try await client.getWorkspaceOverview(workspaceID: workspace.id)
-        let claudeCard = try #require(overview.providerCards.first(where: { $0.provider.id == .claude }))
-
-        #expect(exitedScreen.session.id == session.id)
-        #expect(exitedScreen.session.state == .exited)
-        #expect(exitedScreen.transcript.contains("Claude finished work"))
-        #expect(exitedScreen.transcript.contains("Claude exited"))
-        #expect(claudeCard.defaultSession.state == .exited)
-        #expect(claudeCard.defaultSession.actionTitle == "Relaunch")
-        #expect(claudeCard.defaultSession.sessionID == session.id)
-    }
-
     @Test func persistedReadySessionBecomesRelaunchableAfterServiceRestart() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("NexusTests", isDirectory: true)
@@ -6405,7 +5719,9 @@ struct nexusTests {
                     stdout: "9.9.9 (Claude Code)\n"),
                 StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                     stdout: "Usage: claude\n"),
-            ])
+            ]),
+            claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+            remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
         )
 
         let firstService = try NexusService.bootstrapForTests(
@@ -6456,7 +5772,9 @@ struct nexusTests {
                     stdout: "9.9.9 (Claude Code)\n"),
                 StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                     stdout: "Usage: claude\n"),
-            ])
+            ]),
+            claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+            remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
         )
 
         let firstService = try NexusService.bootstrapForTests(
@@ -6505,7 +5823,9 @@ struct nexusTests {
                     stdout: "9.9.9 (Claude Code)\n"),
                 StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                     stdout: "Usage: claude\n"),
-            ])
+            ]),
+            claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+            remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
         )
 
         let firstService = try NexusService.bootstrapForTests(
@@ -6563,7 +5883,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/claude-a", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: firstRuntimeManager
         )
@@ -6581,7 +5903,9 @@ struct nexusTests {
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: [:]),
-                commandRunner: StubCommandRunner(results: [:])
+                commandRunner: StubCommandRunner(results: [:]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(launchTranscriptForExecutable: { executable in
                 "launched with \(executable)"
@@ -6618,7 +5942,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/claude-a", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(launchTranscriptForExecutable: { executable in
                 "launched with \(executable)"
@@ -6643,7 +5969,9 @@ struct nexusTests {
                         stdout: "9.9.10 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/claude-b", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(launchTranscriptForExecutable: { executable in
                 "launched with \(executable)"
@@ -6674,7 +6002,9 @@ struct nexusTests {
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: [:]),
-                commandRunner: StubCommandRunner(results: [:])
+                commandRunner: StubCommandRunner(results: [:]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             )
         )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -7374,7 +6704,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
                 "build-box": HostValidationResult(
@@ -8735,7 +8067,9 @@ struct nexusTests {
                         executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(
                             stdout: "Usage: pi\n"),
                 ]),
-                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
         )
@@ -8786,7 +8120,9 @@ struct nexusTests {
                         executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(
                             stdout: "Usage: pi\n"),
                 ]),
-                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
         )
@@ -8843,7 +8179,9 @@ struct nexusTests {
                         executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(
                             stdout: "Usage: pi\n"),
                 ]),
-                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
         )
@@ -8917,7 +8255,9 @@ struct nexusTests {
                         executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(
                             stdout: "Usage: pi\n"),
                 ]),
-                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
         )
@@ -8963,7 +8303,9 @@ struct nexusTests {
                         executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(
                             stdout: "Usage: pi\n"),
                 ]),
-                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
         )
@@ -9045,7 +8387,9 @@ struct nexusTests {
                         executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(
                             stdout: "Usage: pi\n"),
                 ]),
-                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
         )
@@ -9093,7 +8437,9 @@ struct nexusTests {
                         executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(
                             stdout: "Usage: pi\n"),
                 ]),
-                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
         )
@@ -9239,7 +8585,9 @@ struct nexusTests {
                             stdout: "Usage: pi\n"),
                 ]),
                 localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
-                codexReadinessProbe: NoOpCodexReadinessProbe()
+                codexReadinessProbe: NoOpCodexReadinessProbe(),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: CompatibilitySessionRuntimeLauncher())
         )
@@ -9341,7 +8689,9 @@ struct nexusTests {
                             executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(
                                 stdout: "Usage: pi\n"),
                     ]),
-                    localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+                    localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
+                    claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                    remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
                 ),
                 sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
             )
@@ -9404,7 +8754,9 @@ struct nexusTests {
                         executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(
                             stdout: "Usage: pi\n"),
                 ]),
-                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
         )
@@ -9482,7 +8834,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
         )
@@ -9714,7 +9068,9 @@ struct nexusTests {
                 .appendingPathComponent(UUID().uuidString, isDirectory: true),
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: [:]),
-                commandRunner: StubCommandRunner(results: [:])
+                commandRunner: StubCommandRunner(results: [:]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             )
         )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -9752,7 +9108,8 @@ struct nexusTests {
         #!/usr/bin/env python3
         import time
         time.sleep(0.2)
-        print("Claude finished work", flush=True)
+        print('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Claude finished work"}]}}', flush=True)
+        print('{"type":"result","subtype":"success","result":"Claude finished work"}', flush=True)
         """.write(to: executableURL, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
@@ -9772,7 +9129,9 @@ struct nexusTests {
                     StubCommandRunner.Invocation(
                         executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
                             stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             )
         )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -9821,11 +9180,14 @@ struct nexusTests {
 
         state_path = pathlib.Path(os.environ["NEXUS_RELAUNCH_STATE_FILE"])
         if state_path.exists():
-            print("Claude relaunched", flush=True)
+            print('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Claude relaunched"}]}}', flush=True)
+            print('{"type":"result","subtype":"success","result":"Claude relaunched"}', flush=True)
             time.sleep(2)
         else:
             state_path.write_text("relaunched")
-            print("Claude finished work", flush=True)
+            time.sleep(0.2)
+            print('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Claude finished work"}]}}', flush=True)
+            print('{"type":"result","subtype":"success","result":"Claude finished work"}', flush=True)
         """.write(to: executableURL, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
@@ -9848,7 +9210,9 @@ struct nexusTests {
                     StubCommandRunner.Invocation(
                         executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
                             stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             )
         )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -9912,7 +9276,9 @@ struct nexusTests {
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
-                commandRunner: providerHealthRunner
+                commandRunner: providerHealthRunner,
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
                 "build-box": HostValidationResult(
@@ -9982,7 +9348,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
         )
@@ -10020,7 +9388,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
         )
@@ -10057,7 +9427,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
         )
@@ -10595,7 +9967,9 @@ struct nexusTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: StubSessionRuntimeManager(initialTranscript: "Claude ready")
         )
@@ -10804,32 +10178,6 @@ private func quickSwitchNavigationItem(title: String) -> NavigationItem {
         title: title,
         subtitle: "/tmp/\(title.lowercased())"
     )
-}
-
-private func waitForSessionScreen(
-    client: any NexusServiceClient,
-    sessionID: UUID,
-    timeoutNanoseconds: UInt64 = 5_000_000_000,
-    pollIntervalNanoseconds: UInt64 = 50_000_000,
-    until predicate: @escaping (SessionScreen) -> Bool
-) async throws -> SessionScreen {
-    let deadline = ContinuousClock.now.advanced(by: .nanoseconds(Int64(timeoutNanoseconds)))
-    var latestScreen = try await client.getSessionScreen(sessionID: sessionID)
-
-    while predicate(latestScreen) == false {
-        guard ContinuousClock.now < deadline else {
-            throw NSError(
-                domain: "nexusTests", code: 1,
-                userInfo: [
-                    NSLocalizedDescriptionKey: "Timed out waiting for session screen update: \(latestScreen.transcript)"
-                ])
-        }
-
-        try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
-        latestScreen = try await client.getSessionScreen(sessionID: sessionID)
-    }
-
-    return latestScreen
 }
 
 struct WorkspaceOverviewRefreshStagingTests {
@@ -11613,6 +10961,14 @@ struct NoOpRemoteCodexReadinessProbe: RemoteCodexReadinessProbing {
     {
         .ready
     }
+}
+
+struct NoOpClaudeStreamJSONReadinessProbe: ClaudeStreamJSONReadinessProbing {
+    func probe(executable: String, workingDirectory: String) async throws {}
+}
+
+struct NoOpRemoteClaudeStreamJSONReadinessProbe: RemoteClaudeStreamJSONReadinessProbing {
+    func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) async throws {}
 }
 
 private class NexusTestsBasePiRPCTransport: PiRPCTransporting, @unchecked Sendable {

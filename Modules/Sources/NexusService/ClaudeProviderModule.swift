@@ -20,7 +20,7 @@
             remoteContext: RemoteWorkspaceHealthContext?,
             providerHealthEvaluator: any ProviderHealthEvaluating
         ) async -> ProviderHealthSummary {
-            guard let healthFacts = providerHealthEvaluator as? any CLIProviderHealthFactProviding else {
+            guard let healthFacts = providerHealthEvaluator as? any ClaudeProviderHealthFactProviding else {
                 return await providerHealthEvaluator.healthSummary(
                     for: .claude, workspace: workspace, remoteContext: remoteContext)
             }
@@ -51,13 +51,13 @@
         }
 
         func prelaunchPrimarySurface(in workspace: Workspace) -> SessionSurface {
-            .terminal
+            .structuredActivityFeed
         }
 
         func supportsSharedRemoteProbeFacts(
             with providerHealthEvaluator: any ProviderHealthEvaluating
         ) -> Bool {
-            providerHealthEvaluator is any CLIProviderHealthFactProviding
+            providerHealthEvaluator is any ClaudeProviderHealthFactProviding
         }
 
         func reusesRemoteHealthSnapshot(
@@ -67,6 +67,20 @@
             shouldReuseRemoteCLIHealthSnapshot(snapshot, remoteContext: remoteContext)
         }
 
+        func interruptedSessionFailureMessage(
+            for session: Session,
+            workspace: Workspace?,
+            persistedPrimarySurface: SessionSurface
+        ) -> String {
+            guard workspace?.kind == .local,
+                persistedPrimarySurface == .structuredActivityFeed
+            else {
+                return providerModuleDefaultInterruptedSessionFailureMessage()
+            }
+
+            return structuredInterruptedSessionFailureMessage(for: provider.id)
+        }
+
         func constructRuntime(
             for session: Session,
             workspace: Workspace,
@@ -74,17 +88,17 @@
             actions: ProviderModuleRuntimeConstructionActions
         ) async throws -> (any SessionRuntime)? {
             if workspace.kind == .remote {
-                return try actions.makeRemoteTerminalRuntime()
+                return try actions.makeRemoteClaudeRuntime()
             }
 
-            return try actions.makeLocalTerminalRuntime()
+            return try actions.makeLocalClaudeRuntime()
         }
     }
 
     extension ClaudeProviderModule {
         fileprivate func localProviderHealthSummary(
             for workspace: Workspace,
-            healthFacts: any CLIProviderHealthFactProviding
+            healthFacts: any ClaudeProviderHealthFactProviding
         ) async -> ProviderHealthSummary {
             switch await healthFacts.localCLIHealthProbe(
                 commandName: "claude",
@@ -135,21 +149,42 @@
                     ]
                 )
             case .ready(let executable, let version, let diagnostics):
-                return ProviderHealthSummary(
-                    state: .available,
-                    summary: version.map { "Claude \($0) is available" } ?? "Claude is available",
-                    resolvedExecutable: executable,
-                    version: version,
-                    launchability: .launchable,
-                    diagnostics: diagnostics
-                )
+                switch await healthFacts.probeLocalClaudeStreamJSONReadiness(
+                    workspace: workspace,
+                    executable: executable
+                ) {
+                case .failed(let detail):
+                    return ProviderHealthSummary(
+                        state: .misconfigured,
+                        summary: "Claude is installed but failed the stream-json readiness probe",
+                        resolvedExecutable: executable,
+                        version: version,
+                        launchability: .notLaunchable,
+                        diagnostics: diagnostics + [
+                            ProviderHealthDiagnostic(
+                                severity: .error,
+                                code: "streamJSONReadinessProbeFailed",
+                                message: detail
+                            )
+                        ]
+                    )
+                case .ready:
+                    return ProviderHealthSummary(
+                        state: .available,
+                        summary: version.map { "Claude \($0) is available" } ?? "Claude is available",
+                        resolvedExecutable: executable,
+                        version: version,
+                        launchability: .launchable,
+                        diagnostics: diagnostics
+                    )
+                }
             }
         }
 
         fileprivate func remoteProviderHealthSummary(
             for workspace: Workspace,
             remoteContext: RemoteWorkspaceHealthContext?,
-            healthFacts: any CLIProviderHealthFactProviding
+            healthFacts: any ClaudeProviderHealthFactProviding
         ) async -> ProviderHealthSummary {
             if let hostValidation = remoteContext?.hostValidation {
                 if hostValidation.state != .available {
@@ -256,21 +291,43 @@
                     )
                 }
 
-                return ProviderHealthSummary(
-                    state: .available,
-                    summary: probeFact.version.map { "Claude \($0) is available" } ?? "Claude is available",
-                    resolvedExecutable: executable,
-                    version: probeFact.version,
-                    launchability: .launchable,
-                    diagnostics: [
-                        ProviderHealthDiagnostic(
-                            severity: .info,
-                            code: "remoteProbe",
-                            message:
-                                "Validated remote Claude launch prerequisites on \(host.name) for \(workspace.folderPath)."
-                        )
-                    ]
-                )
+                switch await healthFacts.probeRemoteClaudeStreamJSONReadiness(
+                    workspace: workspace,
+                    host: host,
+                    executable: executable
+                ) {
+                case .failed(let detail):
+                    return ProviderHealthSummary(
+                        state: .misconfigured,
+                        summary: "Claude is installed but failed the remote stream-json readiness probe",
+                        resolvedExecutable: executable,
+                        version: probeFact.version,
+                        launchability: .notLaunchable,
+                        diagnostics: [
+                            ProviderHealthDiagnostic(
+                                severity: .error,
+                                code: "remoteStreamJSONReadinessProbeFailed",
+                                message: detail
+                            )
+                        ]
+                    )
+                case .ready:
+                    return ProviderHealthSummary(
+                        state: .available,
+                        summary: probeFact.version.map { "Claude \($0) is available" } ?? "Claude is available",
+                        resolvedExecutable: executable,
+                        version: probeFact.version,
+                        launchability: .launchable,
+                        diagnostics: [
+                            ProviderHealthDiagnostic(
+                                severity: .info,
+                                code: "remoteProbe",
+                                message:
+                                    "Validated remote Claude launch prerequisites on \(host.name) for \(workspace.folderPath)."
+                            )
+                        ]
+                    )
+                }
             }
 
             switch await healthFacts.remoteCLIHealthProbe(
@@ -307,14 +364,52 @@
                     ]
                 )
             case .ready(let executable, let version, let diagnostics):
-                return ProviderHealthSummary(
-                    state: .available,
-                    summary: version.map { "Claude \($0) is available" } ?? "Claude is available",
-                    resolvedExecutable: executable,
-                    version: version,
-                    launchability: .launchable,
-                    diagnostics: diagnostics
-                )
+                guard let executable else {
+                    return ProviderHealthSummary(
+                        state: .misconfigured,
+                        summary: "Claude executable resolution returned no executable path",
+                        launchability: .notLaunchable,
+                        diagnostics: [
+                            ProviderHealthDiagnostic(
+                                severity: .error,
+                                code: "remoteExecutableResolutionFailed",
+                                message:
+                                    "The remote Claude executable resolution probe did not return an executable path."
+                            )
+                        ]
+                    )
+                }
+
+                switch await healthFacts.probeRemoteClaudeStreamJSONReadiness(
+                    workspace: workspace,
+                    host: host,
+                    executable: executable
+                ) {
+                case .failed(let detail):
+                    return ProviderHealthSummary(
+                        state: .misconfigured,
+                        summary: "Claude is installed but failed the remote stream-json readiness probe",
+                        resolvedExecutable: executable,
+                        version: version,
+                        launchability: .notLaunchable,
+                        diagnostics: [
+                            ProviderHealthDiagnostic(
+                                severity: .error,
+                                code: "remoteStreamJSONReadinessProbeFailed",
+                                message: detail
+                            )
+                        ]
+                    )
+                case .ready:
+                    return ProviderHealthSummary(
+                        state: .available,
+                        summary: version.map { "Claude \($0) is available" } ?? "Claude is available",
+                        resolvedExecutable: executable,
+                        version: version,
+                        launchability: .launchable,
+                        diagnostics: diagnostics
+                    )
+                }
             }
         }
 

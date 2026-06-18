@@ -14,12 +14,12 @@ Nexus is a workspace-first control center for coding agent CLIs across local and
 
 | **Provider** | Primary **Session Surface** | Local **Workspace** | **Remote Workspace** | iPhone structured **Remote Client** |
 |--------------|----------------------------|---------------------|----------------------|-------------------------------------|
-| Claude | Terminal | Launchable | Launchable | Terminal when launchable |
+| Claude | Structured | Launchable | Launchable | Supported when launchable |
 | Codex | Structured | Launchable | Launchable | Supported when launchable |
 | Pi | Structured | Launchable | Launchable | Supported when launchable |
 | IBM Bob | Structured (on-demand turns) | Launchable | Launchable | Supported when launchable |
 
-Shared app-native **Approval Requests**: Codex and Pi. IBM Bob does not use them. Claude is terminal-backed on all targets.
+Shared app-native **Approval Requests**: Codex, Pi, and Claude. IBM Bob does not use them.
 
 ## Start here
 

@@ -300,8 +300,18 @@
         }
 
         func sendRemoteSessionText(sessionID: UUID, pairedDeviceID: UUID, text: String) async throws -> SessionScreen {
-            let resolvedSession = try await readyRemoteControlledSession(
-                sessionID: sessionID, pairedDeviceID: pairedDeviceID)
+            guard let session = try dependencies.sessionRecord(sessionID) else {
+                throw NexusMetadataStoreError.sessionNotFound
+            }
+
+            let resolvedSession = try dependencies.reconcileSessionRuntimeState(session)
+            guard dependencies.isRemoteController(resolvedSession.id, pairedDeviceID) else {
+                throw NexusSessionControlError.remoteControllerRequired
+            }
+            guard dependencies.hasRuntime(resolvedSession) else {
+                throw NexusMetadataStoreError.sessionNotReady
+            }
+
             if isPiSessionResetCommand(SessionPrompt(text: text), session: resolvedSession) {
                 return dependencies.normalizedSessionScreen(try dependencies.resetPiSession(resolvedSession))
             }

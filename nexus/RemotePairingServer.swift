@@ -1042,7 +1042,7 @@
                                 disabledReason: health.summary
                             )
                         ),
-                        prelaunchPrimarySurface: providerID == .claude ? .terminal : .structuredActivityFeed,
+                        prelaunchPrimarySurface: .structuredActivityFeed,
                         defaultSession: ProviderDefaultSessionSummary(
                             state: .notCreated,
                             summary: "No default session yet",

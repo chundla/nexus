@@ -19,7 +19,9 @@ struct RemotePairingNetworkTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: StructuredPromptSessionRuntimeManager(providerName: "Claude")
         )
@@ -188,6 +190,7 @@ struct RemotePairingNetworkTests {
         let elapsed = start.duration(to: clock.now)
         let overview = try #require(catalog.workspaceOverviews.first(where: { $0.workspace.id == workspace.id }))
         let piCard = try #require(overview.providerCards.first(where: { $0.provider.id == .pi }))
+        let claudeCard = try #require(overview.providerCards.first(where: { $0.provider.id == .claude }))
 
         #expect(catalog.workspaceGroups == [group])
         #expect(elapsed < .seconds(10))
@@ -196,6 +199,7 @@ struct RemotePairingNetworkTests {
         #expect(piCard.capabilities.launchDefaultSession.isSupported)
         #expect(piCard.capabilities.launchDefaultSession.isEnabled == false)
         #expect(piCard.capabilities.launchDefaultSession.disabledReason == piCard.health.summary)
+        #expect(claudeCard.prelaunchPrimarySurface == .structuredActivityFeed)
     }
 
     @Test func revokedPairingReturnsProductShapedRecoveryErrorOverDedicatedNetworkAPI() async throws {
@@ -437,7 +441,9 @@ struct RemotePairingNetworkTests {
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
                         stdout: "Usage: codex\n"),
                 ]),
-                codexReadinessProbe: NoOpCodexReadinessProbe()
+                codexReadinessProbe: NoOpCodexReadinessProbe(),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             )
         )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -493,7 +499,9 @@ struct RemotePairingNetworkTests {
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: [:]),
-                commandRunner: StubCommandRunner(results: [:])
+                commandRunner: StubCommandRunner(results: [:]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             )
         )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -556,7 +564,9 @@ struct RemotePairingNetworkTests {
                             stdout: "1.2.3\n"),
                 ]),
                 localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
-                codexReadinessProbe: NoOpCodexReadinessProbe()
+                codexReadinessProbe: NoOpCodexReadinessProbe(),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
         )
@@ -616,7 +626,9 @@ struct RemotePairingNetworkTests {
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
                         stdout: "Usage: codex\n"),
                 ]),
-                codexReadinessProbe: NoOpCodexReadinessProbe()
+                codexReadinessProbe: NoOpCodexReadinessProbe(),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             )
         )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -683,7 +695,9 @@ struct RemotePairingNetworkTests {
                         executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--list-sessions'"]): .success(
                             stdout: "[]\n"),
                 ]),
-                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
         )
@@ -729,12 +743,6 @@ struct RemotePairingNetworkTests {
             },
             onDisconnect: { _ in }
         )
-        defer {
-            Task {
-                await observation.cancel()
-            }
-        }
-
         _ = try await waitForObservedScreen {
             observedScreens.last
         }
@@ -767,6 +775,8 @@ struct RemotePairingNetworkTests {
         #expect(observedScreen.session.id == session.id)
         #expect(observedScreen.activityItems.map(\.text) == responseScreen.activityItems.map(\.text))
         #expect(fetchedScreen == responseScreen)
+
+        await observation.cancel()
     }
 
     @Test func failedStructuredCodexSessionScreenStaysInspectableOverDedicatedNetworkAPI() async throws {
@@ -781,7 +791,9 @@ struct RemotePairingNetworkTests {
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: [:]),
-                commandRunner: StubCommandRunner(results: [:])
+                commandRunner: StubCommandRunner(results: [:]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             )
         )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -842,7 +854,9 @@ struct RemotePairingNetworkTests {
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
                         stdout: "Usage: codex\n"),
                 ]),
-                codexReadinessProbe: NoOpCodexReadinessProbe()
+                codexReadinessProbe: NoOpCodexReadinessProbe(),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: StructuredPromptSessionRuntimeManager(
                 providerName: "Codex",
@@ -918,7 +932,9 @@ struct RemotePairingNetworkTests {
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
                         stdout: "Usage: codex\n"),
                 ]),
-                codexReadinessProbe: NoOpCodexReadinessProbe()
+                codexReadinessProbe: NoOpCodexReadinessProbe(),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: StructuredPromptSessionRuntimeManager(
                 providerName: "Codex",
@@ -982,7 +998,9 @@ struct RemotePairingNetworkTests {
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
                         stdout: "Usage: codex\n"),
                 ]),
-                codexReadinessProbe: NoOpCodexReadinessProbe()
+                codexReadinessProbe: NoOpCodexReadinessProbe(),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: StructuredPromptSessionRuntimeManager(providerName: "Codex")
         )
@@ -1052,7 +1070,9 @@ struct RemotePairingNetworkTests {
                             stdout: "1.2.3\n"),
                 ]),
                 localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
-                codexReadinessProbe: NoOpCodexReadinessProbe()
+                codexReadinessProbe: NoOpCodexReadinessProbe(),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
         )
@@ -1315,7 +1335,9 @@ struct RemotePairingNetworkTests {
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
-                commandRunner: failedHealthRunner
+                commandRunner: failedHealthRunner,
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
                 "build-box": HostValidationResult(
@@ -1433,7 +1455,15 @@ struct RemotePairingNetworkTests {
         )
         let screen = try await remoteClient.fetchSessionScreen(for: pairedMac, sessionID: session.id)
 
-        #expect(screen == expectedScreen)
+        #expect(screen.session == expectedScreen.session)
+        #expect(screen.primarySurface == expectedScreen.primarySurface)
+        #expect(screen.controller == expectedScreen.controller)
+        #expect(screen.transcript == expectedScreen.transcript)
+        #expect(screen.terminalColumns == expectedScreen.terminalColumns)
+        #expect(screen.terminalRows == expectedScreen.terminalRows)
+        #expect(screen.activityItems.map(\.kind) == expectedScreen.activityItems.map(\.kind))
+        #expect(screen.activityItems.map(\.text) == expectedScreen.activityItems.map(\.text))
+        #expect(screen.approvalRequests == expectedScreen.approvalRequests)
     }
 
     @Test func fetchesRemotePiStructuredHistoryPagesOverDedicatedNetworkAPI() async throws {
@@ -1462,7 +1492,9 @@ struct RemotePairingNetworkTests {
                         executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(
                             stdout: "Usage: pi\n"),
                 ]),
-                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: InMemorySessionRuntimeManager(
                 launcher: ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
@@ -1645,13 +1677,20 @@ struct RemotePairingNetworkTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: false)
         try #"""
         #!/usr/bin/env python3
+        import json
         import sys
 
-        print("READY", flush=True)
-        first = sys.stdin.readline().rstrip("\r\n")
-        print(f"LOCAL:{first}", flush=True)
-        second = sys.stdin.readline().rstrip("\r\n")
-        print(f"REMOTE:{second}", flush=True)
+        def prompt_text(line):
+            return json.loads(line)["message"]["content"][0]["text"]
+
+        print('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"READY"}]}}', flush=True)
+        print('{"type":"result","subtype":"success","result":"READY"}', flush=True)
+        first = prompt_text(sys.stdin.readline().rstrip("\r\n"))
+        print('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"LOCAL:' + first + '"}]}}', flush=True)
+        print('{"type":"result","subtype":"success","result":"LOCAL"}', flush=True)
+        second = prompt_text(sys.stdin.readline().rstrip("\r\n"))
+        print('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"REMOTE:' + second + '"}]}}', flush=True)
+        print('{"type":"result","subtype":"success","result":"REMOTE"}', flush=True)
         """#.write(to: executableURL, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
@@ -1669,7 +1708,9 @@ struct RemotePairingNetworkTests {
                     RemotePairingTestCommandRunner.Invocation(
                         executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
                             stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             )
         )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -1728,11 +1769,17 @@ struct RemotePairingNetworkTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: false)
         try #"""
         #!/usr/bin/env python3
+        import json
         import sys
 
-        print("AUTH?", flush=True)
-        line = sys.stdin.readline().rstrip("\r\n")
-        print(f"AUTH:{line}", flush=True)
+        def prompt_text(line):
+            return json.loads(line)["message"]["content"][0]["text"]
+
+        print('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"AUTH?"}]}}', flush=True)
+        print('{"type":"result","subtype":"success","result":"AUTH?"}', flush=True)
+        line = prompt_text(sys.stdin.readline().rstrip("\r\n"))
+        print('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"AUTH:' + line + '"}]}}', flush=True)
+        print('{"type":"result","subtype":"success","result":"AUTH"}', flush=True)
         """#.write(to: executableURL, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
@@ -1750,7 +1797,9 @@ struct RemotePairingNetworkTests {
                     RemotePairingTestCommandRunner.Invocation(
                         executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
                             stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             )
         )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -1824,11 +1873,17 @@ struct RemotePairingNetworkTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: false)
         try #"""
         #!/usr/bin/env python3
+        import json
         import sys
 
-        print("AUTH?", flush=True)
-        line = sys.stdin.readline().rstrip("\r\n")
-        print(f"AUTH:{line}", flush=True)
+        def prompt_text(line):
+            return json.loads(line)["message"]["content"][0]["text"]
+
+        print('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"AUTH?"}]}}', flush=True)
+        print('{"type":"result","subtype":"success","result":"AUTH?"}', flush=True)
+        line = prompt_text(sys.stdin.readline().rstrip("\r\n"))
+        print('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"AUTH:' + line + '"}]}}', flush=True)
+        print('{"type":"result","subtype":"success","result":"AUTH"}', flush=True)
         """#.write(to: executableURL, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
@@ -1846,7 +1901,9 @@ struct RemotePairingNetworkTests {
                     RemotePairingTestCommandRunner.Invocation(
                         executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
                             stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             )
         )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -1891,16 +1948,41 @@ struct RemotePairingNetworkTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
+        let executableURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: false)
+        try #"""
+        #!/usr/bin/env python3
+        import json
+        import sys
+
+        def prompt_text(line):
+            return json.loads(line)["message"]["content"][0]["text"]
+
+        print('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"READY"}]}}', flush=True)
+        print('{"type":"result","subtype":"success","result":"READY"}', flush=True)
+        line = prompt_text(sys.stdin.readline().rstrip("\r\n"))
+        print('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"You: ' + line + '"}]}}', flush=True)
+        print('{"type":"result","subtype":"success","result":"DONE"}', flush=True)
+        """#.write(to: executableURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
+
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: RemotePairingTestExecutableResolver(executables: ["claude": "/bin/cat"]),
+                executableResolver: RemotePairingTestExecutableResolver(executables: [
+                    "claude": executableURL.path(percentEncoded: false)
+                ]),
                 commandRunner: RemotePairingTestCommandRunner(results: [
-                    RemotePairingTestCommandRunner.Invocation(executable: "/bin/cat", arguments: ["--version"]):
+                    RemotePairingTestCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]):
                         .success(stdout: "cat (test)\n"),
-                    RemotePairingTestCommandRunner.Invocation(executable: "/bin/cat", arguments: ["--help"]): .success(
-                        stdout: "Usage: cat\n"),
-                ])
+                    RemotePairingTestCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
+                            stdout: "Usage: cat\n"),
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             )
         )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -1950,17 +2032,18 @@ struct RemotePairingNetworkTests {
 
         _ = try await remoteClient.takeSessionControl(for: pairedMac, sessionID: session.id, columns: 40, rows: 17)
         let responseScreen = try await remoteClient.sendSessionText(for: pairedMac, sessionID: session.id, text: "yooo")
+        _ = try await remoteClient.sendSessionInputKey(for: pairedMac, sessionID: session.id, key: .enter)
 
         let fetchedScreen = try await waitForSessionScreen(client: client, sessionID: session.id) { screen in
-            screen.transcript.contains("yooo")
+            screen.transcript.contains("You: yooo")
         }
         let observedScreen = try await waitForObservedScreen {
-            observedScreens.last { $0.transcript.contains("yooo") }
+            observedScreens.last { $0.transcript.contains("You: yooo") }
         }
 
         #expect(responseScreen.controller == .pairedDevice(pairedMac.pairedDeviceID!))
-        #expect(fetchedScreen.transcript.contains("yooo"))
-        #expect(observedScreen.transcript.contains("yooo"))
+        #expect(fetchedScreen.transcript.contains("You: yooo"))
+        #expect(observedScreen.transcript.contains("You: yooo"))
     }
 
     @Test func remoteControllerSendTextResponseWaitsForDelayedEchoOverDedicatedNetworkAPI() async throws {
@@ -1981,7 +2064,9 @@ struct RemotePairingNetworkTests {
                         .success(stdout: "cat (test)\n"),
                     RemotePairingTestCommandRunner.Invocation(executable: "/bin/cat", arguments: ["--help"]): .success(
                         stdout: "Usage: cat\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: delayedRuntimeManager
         )
@@ -2065,7 +2150,9 @@ struct RemotePairingNetworkTests {
                         executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(
                             stdout: "Usage: pi\n"),
                 ]),
-                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
         )
@@ -2196,7 +2283,9 @@ struct RemotePairingNetworkTests {
                         executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(
                             stdout: "Usage: pi\n"),
                 ]),
-                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
         )
@@ -2300,7 +2389,9 @@ struct RemotePairingNetworkTests {
                         executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(
                             stdout: "Usage: pi\n"),
                 ]),
-                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
         )

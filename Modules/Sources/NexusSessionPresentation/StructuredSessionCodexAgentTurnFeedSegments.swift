@@ -324,5 +324,8 @@ public func structuredSessionAgentTurnFeedSegments(for screen: SessionScreen) ->
     if let segments = structuredSessionCodexFeedSegments(for: screen) {
         return segments
     }
+    if let segments = structuredSessionClaudeFeedSegments(for: screen) {
+        return segments
+    }
     return structuredSessionIBMBobFeedSegments(for: screen)
 }

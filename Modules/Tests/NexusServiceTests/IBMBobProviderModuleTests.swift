@@ -119,6 +119,8 @@
                         Issue.record("IBM Bob should not choose a terminal runtime for local structured Sessions")
                         return StaticIBMBobRuntime()
                     },
+                    makeLocalClaudeRuntime: { StaticIBMBobRuntime() },
+                    makeRemoteClaudeRuntime: { StaticIBMBobRuntime() },
                     makeLocalPiRuntime: { StaticIBMBobRuntime() },
                     makeRemotePiRuntime: { StaticIBMBobRuntime() },
                     makeLocalCodexRuntime: { StaticIBMBobRuntime() },
@@ -178,6 +180,8 @@
                         Issue.record("IBM Bob should not choose a terminal runtime for remote structured Sessions")
                         return StaticIBMBobRuntime()
                     },
+                    makeLocalClaudeRuntime: { StaticIBMBobRuntime() },
+                    makeRemoteClaudeRuntime: { StaticIBMBobRuntime() },
                     makeLocalPiRuntime: { StaticIBMBobRuntime() },
                     makeRemotePiRuntime: { StaticIBMBobRuntime() },
                     makeLocalCodexRuntime: { StaticIBMBobRuntime() },

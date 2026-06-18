@@ -23,7 +23,7 @@
             #expect(persistedSession.state == .interrupted)
             #expect(
                 persistedSession.failureMessage
-                    == "Session interrupted because the background service restarted. Relaunch to create a new live runtime."
+                    == "Claude Session Record survived, but its live runtime was lost when the background service restarted. Relaunch to create a new live runtime."
             )
         }
 
@@ -628,10 +628,12 @@
             let commandRunner = FailingWorkspaceCatalogCommandRunner()
             let codexReadinessProbe = RecordingWorkspaceCatalogRemoteCodexReadinessProbe()
             let piReadinessProbe = RecordingWorkspaceCatalogRemotePiReadinessProbe()
+            let claudeReadinessProbe = RecordingWorkspaceCatalogRemoteClaudeReadinessProbe()
             let providerHealthEvaluator = ProviderHealthFacts(
                 commandRunner: commandRunner,
                 remoteCodexReadinessProbe: codexReadinessProbe,
-                remotePiReadinessProbe: piReadinessProbe
+                remotePiReadinessProbe: piReadinessProbe,
+                remoteClaudeStreamJSONReadinessProbe: claudeReadinessProbe
             )
             let collector = RecordingRemoteWorkspaceProbeCollector(
                 result: .collected(
@@ -712,6 +714,11 @@
                 await piReadinessProbe.invocations == [
                     WorkspaceCatalogReadinessInvocation(
                         hostID: host.id, executable: "/opt/tools/pi", workingDirectory: "/srv/api")
+                ])
+            #expect(
+                await claudeReadinessProbe.invocations == [
+                    WorkspaceCatalogReadinessInvocation(
+                        hostID: host.id, executable: "/opt/tools/claude", workingDirectory: "/srv/api")
                 ])
         }
 
@@ -1117,6 +1124,16 @@
                 WorkspaceCatalogReadinessInvocation(
                     hostID: host.id, executable: executable, workingDirectory: workingDirectory))
             return .ready
+        }
+    }
+
+    private actor RecordingWorkspaceCatalogRemoteClaudeReadinessProbe: RemoteClaudeStreamJSONReadinessProbing {
+        private(set) var invocations: [WorkspaceCatalogReadinessInvocation] = []
+
+        func probe(host: NexusDomain.Host, executable: String, workingDirectory: String) async throws {
+            invocations.append(
+                WorkspaceCatalogReadinessInvocation(
+                    hostID: host.id, executable: executable, workingDirectory: workingDirectory))
         }
     }
 

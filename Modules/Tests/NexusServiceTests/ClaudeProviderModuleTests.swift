@@ -37,7 +37,7 @@
 
             #expect(module.supportsDefaultSessionLaunch(in: workspace))
             #expect(module.supportsNamedSessions(in: workspace))
-            #expect(module.prelaunchPrimarySurface(in: workspace) == .terminal)
+            #expect(module.prelaunchPrimarySurface(in: workspace) == .structuredActivityFeed)
             #expect(
                 module.reusesRemoteHealthSnapshot(
                     ProviderHealthSummary(state: .available, summary: "reuse me", checkedAt: Date()),
@@ -124,7 +124,7 @@
                 localDefaultOpen
                     == .launch(
                         ProviderModuleFreshSessionLaunch(
-                            primarySurface: .terminal,
+                            primarySurface: .structuredActivityFeed,
                             executable: "/tmp/local-claude"
                         )
                     ))
@@ -132,7 +132,7 @@
                 localNamedOpen
                     == .launch(
                         ProviderModuleFreshSessionLaunch(
-                            primarySurface: .terminal,
+                            primarySurface: .structuredActivityFeed,
                             executable: "/tmp/local-claude"
                         )
                     ))
@@ -140,7 +140,7 @@
                 remoteDefaultOpen
                     == .launch(
                         ProviderModuleFreshSessionLaunch(
-                            primarySurface: .terminal,
+                            primarySurface: .structuredActivityFeed,
                             executable: "/tmp/remote-claude"
                         )
                     ))
@@ -209,10 +209,89 @@
                         ]
                     ))
             #expect(providerHealthEvaluator.localProbeRequests == [workspace.id])
+            #expect(providerHealthEvaluator.localReadinessRequests == [workspace.id])
             #expect(providerHealthEvaluator.legacyRequests.isEmpty)
             #expect(catalogRead.capabilities.launchDefaultSession.isEnabled)
             #expect(catalogRead.capabilities.createNamedSession.isEnabled)
-            #expect(catalogRead.prelaunchPrimarySurface == .terminal)
+            #expect(catalogRead.prelaunchPrimarySurface == .structuredActivityFeed)
+        }
+
+        @Test func claudeProviderModuleFailsLaunchabilityWhenLocalStreamJSONReadinessProbeFails() async {
+            let module = ClaudeProviderModule()
+            let workspace = Workspace(
+                id: UUID(),
+                name: "Local Claude",
+                kind: .local,
+                folderPath: "/tmp/local-claude",
+                primaryGroupID: UUID()
+            )
+            let providerHealthEvaluator = RecordingClaudeCLIHealthFactProvider(
+                localProbeResult: .ready(
+                    executable: "/tmp/fake-claude",
+                    version: "1.2.3",
+                    diagnostics: []
+                ),
+                localReadinessResult: .failed(
+                    "Claude stream-json readiness probe timed out before system/init arrived.")
+            )
+
+            let health = await module.providerHealthSummary(
+                for: workspace,
+                remoteContext: nil,
+                providerHealthEvaluator: providerHealthEvaluator
+            )
+
+            #expect(
+                health
+                    == ProviderHealthSummary(
+                        state: .misconfigured,
+                        summary: "Claude is installed but failed the stream-json readiness probe",
+                        resolvedExecutable: "/tmp/fake-claude",
+                        version: "1.2.3",
+                        launchability: .notLaunchable,
+                        diagnostics: [
+                            ProviderHealthDiagnostic(
+                                severity: .error,
+                                code: "streamJSONReadinessProbeFailed",
+                                message: "Claude stream-json readiness probe timed out before system/init arrived."
+                            )
+                        ]
+                    ))
+            #expect(providerHealthEvaluator.localProbeRequests == [workspace.id])
+            #expect(providerHealthEvaluator.localReadinessRequests == [workspace.id])
+            #expect(providerHealthEvaluator.legacyRequests.isEmpty)
+        }
+
+        @Test func claudeProviderModuleReportsMissingLocalClaudeExecutable() async {
+            let module = ClaudeProviderModule()
+            let workspace = Workspace(
+                id: UUID(),
+                name: "Local Claude",
+                kind: .local,
+                folderPath: "/tmp/local-claude",
+                primaryGroupID: UUID()
+            )
+            let providerHealthEvaluator = RecordingClaudeCLIHealthFactProvider(
+                localProbeResult: .executableNotFound(
+                    ProviderExecutableResolution(
+                        resolvedExecutable: nil,
+                        searchedDirectories: ["/usr/local/bin", "/opt/homebrew/bin"],
+                        homeDirectories: ["/Users/tester"],
+                        pathEnvironment: "/usr/local/bin:/opt/homebrew/bin"
+                    ))
+            )
+
+            let health = await module.providerHealthSummary(
+                for: workspace,
+                remoteContext: nil,
+                providerHealthEvaluator: providerHealthEvaluator
+            )
+
+            #expect(health.state == .unavailable)
+            #expect(health.summary == "Claude executable was not found")
+            #expect(health.launchability == .notLaunchable)
+            #expect(providerHealthEvaluator.localReadinessRequests.isEmpty)
+            #expect(providerHealthEvaluator.legacyRequests.isEmpty)
         }
 
         @Test func claudeProviderModuleDerivesRemoteBlockedCatalogReadFromPrerequisiteFacts() async throws {
@@ -283,7 +362,78 @@
             #expect(
                 catalogRead.capabilities.launchDefaultSession.disabledReason
                     == "Provider Health is blocked by Host Validation")
-            #expect(catalogRead.prelaunchPrimarySurface == .terminal)
+            #expect(catalogRead.prelaunchPrimarySurface == .structuredActivityFeed)
+        }
+
+        @Test func claudeProviderModuleFailsLaunchabilityWhenRemoteStreamJSONReadinessProbeFails() async {
+            let module = ClaudeProviderModule()
+            let workspaceID = UUID()
+            let hostID = UUID()
+            let workspace = Workspace(
+                id: workspaceID,
+                name: "Remote Claude",
+                kind: .remote,
+                folderPath: "/srv/api",
+                primaryGroupID: UUID(),
+                remoteHostID: hostID
+            )
+            let providerHealthEvaluator = RecordingClaudeCLIHealthFactProvider(
+                localProbeResult: .ready(executable: "/tmp/unused", version: nil, diagnostics: []),
+                remoteProbeResult: .ready(
+                    executable: "/home/tester/.local/bin/claude",
+                    version: "1.2.3",
+                    diagnostics: [
+                        ProviderHealthDiagnostic(
+                            severity: .info,
+                            code: "remoteProbe",
+                            message: "Validated remote Claude launch prerequisites on Build Server for /srv/api."
+                        )
+                    ]
+                ),
+                remoteReadinessResult: .failed(
+                    "Claude stream-json readiness probe returned system/init without a session_id.")
+            )
+            let remoteContext = RemoteWorkspaceHealthContext(
+                host: NexusDomain.Host(id: hostID, name: "Build Server", sshTarget: "build-box"),
+                hostValidation: HostValidationSnapshot(
+                    hostID: hostID,
+                    state: .available,
+                    summary: "Host is available",
+                    checkedAt: Date()
+                ),
+                workspaceAvailability: WorkspaceAvailabilitySnapshot(
+                    workspaceID: workspaceID,
+                    state: .available,
+                    summary: "Workspace is available",
+                    checkedAt: Date()
+                )
+            )
+
+            let health = await module.providerHealthSummary(
+                for: workspace,
+                remoteContext: remoteContext,
+                providerHealthEvaluator: providerHealthEvaluator
+            )
+
+            #expect(
+                health
+                    == ProviderHealthSummary(
+                        state: .misconfigured,
+                        summary: "Claude is installed but failed the remote stream-json readiness probe",
+                        resolvedExecutable: "/home/tester/.local/bin/claude",
+                        version: "1.2.3",
+                        launchability: .notLaunchable,
+                        diagnostics: [
+                            ProviderHealthDiagnostic(
+                                severity: .error,
+                                code: "remoteStreamJSONReadinessProbeFailed",
+                                message: "Claude stream-json readiness probe returned system/init without a session_id."
+                            )
+                        ]
+                    ))
+            #expect(providerHealthEvaluator.remoteProbeRequests == [workspace.id])
+            #expect(providerHealthEvaluator.remoteReadinessRequests == [workspace.id])
+            #expect(providerHealthEvaluator.legacyRequests.isEmpty)
         }
 
         @Test func claudeProviderModuleDerivesRemoteProbeBackedCatalogReadFromSharedCLIProbeFacts() async throws {
@@ -362,10 +512,11 @@
                         ]
                     ))
             #expect(providerHealthEvaluator.remoteProbeRequests == [workspace.id])
+            #expect(providerHealthEvaluator.remoteReadinessRequests == [workspace.id])
             #expect(providerHealthEvaluator.legacyRequests.isEmpty)
             #expect(catalogRead.capabilities.launchDefaultSession.isEnabled)
             #expect(catalogRead.capabilities.createNamedSession.isEnabled)
-            #expect(catalogRead.prelaunchPrimarySurface == .terminal)
+            #expect(catalogRead.prelaunchPrimarySurface == .structuredActivityFeed)
         }
 
         @Test func claudeProviderModuleDerivesRemoteCatalogReadFromRawClaudeProbeFacts() async throws {
@@ -446,10 +597,11 @@
                         ]
                     ))
             #expect(providerHealthEvaluator.remoteProbeRequests.isEmpty)
+            #expect(providerHealthEvaluator.remoteReadinessRequests == [workspace.id])
             #expect(providerHealthEvaluator.legacyRequests.isEmpty)
             #expect(catalogRead.capabilities.launchDefaultSession.isEnabled)
             #expect(catalogRead.capabilities.createNamedSession.isEnabled)
-            #expect(catalogRead.prelaunchPrimarySurface == .terminal)
+            #expect(catalogRead.prelaunchPrimarySurface == .structuredActivityFeed)
         }
 
         @Test func claudeProviderModuleClassifiesRemoteRawProbeFactsWithoutSharedRemoteHealthAdapter() async {
@@ -581,12 +733,73 @@
                 ])
             #expect(catalogRead.capabilities.launchDefaultSession.isEnabled)
             #expect(catalogRead.capabilities.createNamedSession.isEnabled)
-            #expect(catalogRead.prelaunchPrimarySurface == .terminal)
+            #expect(catalogRead.prelaunchPrimarySurface == .structuredActivityFeed)
             #expect(
                 module.reusesRemoteHealthSnapshot(
                     ProviderHealthSummary(state: .available, summary: "reuse me", checkedAt: Date()),
                     remoteContext: remoteContext
                 ))
+        }
+
+        @Test func claudeProviderModuleChoosesRemoteProtocolNativeRuntimeConstructionThroughProviderModuleSeam()
+            async throws
+        {
+            let module = ClaudeProviderModule()
+            let host = NexusDomain.Host(id: UUID(), name: "Build Server", sshTarget: "build-box")
+            let workspace = Workspace(
+                id: UUID(),
+                name: "Remote Claude",
+                kind: .remote,
+                folderPath: "/srv/api",
+                primaryGroupID: UUID(),
+                remoteHostID: host.id
+            )
+            let session = Session(
+                id: UUID(),
+                workspaceID: workspace.id,
+                providerID: .claude,
+                isDefault: true,
+                state: .ready
+            )
+            var requests: [String] = []
+
+            let runtime = try await module.constructRuntime(
+                for: session,
+                workspace: workspace,
+                launchConfiguration: SessionRuntimeLaunchConfiguration(
+                    executable: "/home/tester/.local/bin/claude",
+                    workingDirectory: workspace.folderPath,
+                    remoteHost: host,
+                    remoteRuntimeIdentifier: "nexus-runtime-1"
+                ),
+                actions: ProviderModuleRuntimeConstructionActions(
+                    makeLocalTerminalRuntime: {
+                        Issue.record("Claude should not choose a terminal runtime for remote structured Sessions")
+                        return StaticClaudeSessionRuntime()
+                    },
+                    makeRemoteTerminalRuntime: {
+                        Issue.record("Claude should not choose a terminal runtime for remote structured Sessions")
+                        return StaticClaudeSessionRuntime()
+                    },
+                    makeLocalClaudeRuntime: {
+                        Issue.record("Claude should not choose a local runtime for remote structured Sessions")
+                        return StaticStructuredClaudeSessionRuntime()
+                    },
+                    makeRemoteClaudeRuntime: {
+                        requests.append("remoteClaude")
+                        return StaticStructuredClaudeSessionRuntime()
+                    },
+                    makeLocalPiRuntime: { StaticStructuredClaudeSessionRuntime() },
+                    makeRemotePiRuntime: { StaticStructuredClaudeSessionRuntime() },
+                    makeLocalCodexRuntime: { StaticStructuredClaudeSessionRuntime() },
+                    makeRemoteCodexRuntime: { StaticStructuredClaudeSessionRuntime() },
+                    makeLocalIBMBobRuntime: { StaticStructuredClaudeSessionRuntime() },
+                    makeRemoteIBMBobRuntime: { StaticStructuredClaudeSessionRuntime() }
+                )
+            )
+
+            #expect(requests == ["remoteClaude"])
+            #expect(runtime?.sessionScreen(for: session).primarySurface == .structuredActivityFeed)
         }
 
         @Test func claudeProviderModuleKeepsSharedPersistedRelaunchPlan() {
@@ -829,6 +1042,23 @@
         func resize(columns: Int, rows: Int) throws {}
     }
 
+    private final class StaticStructuredClaudeSessionRuntime: SessionRuntime, @unchecked Sendable {
+        var state: Session.State = .ready
+        var sessionRecordAdapterMetadata: SessionRecordAdapterMetadata? { nil }
+
+        func sessionScreen(for session: Session) -> SessionScreen {
+            SessionScreen(session: session, primarySurface: .structuredActivityFeed, transcript: "Claude ready")
+        }
+
+        func setChangeHandler(_ handler: (@Sendable () -> Void)?) {}
+        func stop() throws { state = .exited }
+        func sendInput(_ text: String) throws {}
+        func sendText(_ text: String) throws {}
+        func sendInputKey(_ key: SessionInputKey, applicationCursorMode: Bool) throws {}
+        func respondToApprovalRequest(_ approvalRequestID: UUID, decision: ApprovalRequestDecision) throws {}
+        func resize(columns: Int, rows: Int) throws {}
+    }
+
     private enum ClaudeRuntimeConstructionRequest: Equatable {
         case localTerminal
     }
@@ -951,20 +1181,28 @@
     }
 
     private final class RecordingClaudeCLIHealthFactProvider: @unchecked Sendable, ProviderHealthEvaluating,
-        CLIProviderHealthFactProviding
+        ClaudeProviderHealthFactProviding
     {
         let localProbeResult: LocalCLIHealthProbeResult
         let remoteProbeResult: RemoteCLIHealthProbeResult
+        let localReadinessResult: LocalClaudeStreamJSONReadinessProbeResult
+        let remoteReadinessResult: RemoteClaudeStreamJSONReadinessProbeResult
         private(set) var localProbeRequests: [UUID] = []
         private(set) var remoteProbeRequests: [UUID] = []
+        private(set) var localReadinessRequests: [UUID] = []
+        private(set) var remoteReadinessRequests: [UUID] = []
         private(set) var legacyRequests: [UUID] = []
 
         init(
             localProbeResult: LocalCLIHealthProbeResult,
-            remoteProbeResult: RemoteCLIHealthProbeResult = .sshLaunchFailed("unexpected")
+            remoteProbeResult: RemoteCLIHealthProbeResult = .sshLaunchFailed("unexpected"),
+            localReadinessResult: LocalClaudeStreamJSONReadinessProbeResult = .ready,
+            remoteReadinessResult: RemoteClaudeStreamJSONReadinessProbeResult = .ready
         ) {
             self.localProbeResult = localProbeResult
             self.remoteProbeResult = remoteProbeResult
+            self.localReadinessResult = localReadinessResult
+            self.remoteReadinessResult = remoteReadinessResult
         }
 
         func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async
@@ -996,6 +1234,22 @@
         ) async -> RemoteCLIHealthProbeResult {
             remoteProbeRequests.append(workspace.id)
             return remoteProbeResult
+        }
+
+        func probeLocalClaudeStreamJSONReadiness(workspace: Workspace, executable: String) async
+            -> LocalClaudeStreamJSONReadinessProbeResult
+        {
+            localReadinessRequests.append(workspace.id)
+            return localReadinessResult
+        }
+
+        func probeRemoteClaudeStreamJSONReadiness(
+            workspace: Workspace,
+            host: NexusDomain.Host,
+            executable: String
+        ) async -> RemoteClaudeStreamJSONReadinessProbeResult {
+            remoteReadinessRequests.append(workspace.id)
+            return remoteReadinessResult
         }
     }
 #endif

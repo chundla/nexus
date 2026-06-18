@@ -88,6 +88,8 @@
     struct ProviderModuleRuntimeConstructionActions {
         let makeLocalTerminalRuntime: () throws -> any SessionRuntime
         let makeRemoteTerminalRuntime: () throws -> any SessionRuntime
+        let makeLocalClaudeRuntime: () throws -> any SessionRuntime
+        let makeRemoteClaudeRuntime: () throws -> any SessionRuntime
         let makeLocalPiRuntime: () async throws -> any SessionRuntime
         let makeRemotePiRuntime: () async throws -> any SessionRuntime
         let makeLocalCodexRuntime: () async throws -> any SessionRuntime

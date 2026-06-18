@@ -33,7 +33,8 @@
                             stdout: "Usage: pi\n"),
                     ]),
                     localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
-                    codexReadinessProbe: CompatibilityCodexReadinessProbe()
+                    codexReadinessProbe: CompatibilityCodexReadinessProbe(),
+                    claudeStreamJSONReadinessProbe: CompatibilityClaudeReadinessProbe()
                 ),
                 sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: CompatibilitySessionRuntimeLauncher())
             )
@@ -78,7 +79,7 @@
             #expect(piDetail.capabilities.createNamedSession.isEnabled)
             #expect(piDetail.defaultSession?.id == piSession.id)
 
-            #expect(claudeScreen.primarySurface == .terminal)
+            #expect(claudeScreen.primarySurface == .structuredActivityFeed)
             #expect(claudeScreen.transcript == "Claude ready")
             #expect(claudeScreen.activityItems.isEmpty)
             #expect(codexScreen.primarySurface == .structuredActivityFeed)
@@ -134,6 +135,10 @@
         func probe(executable: String, workingDirectory: String) async throws {}
     }
 
+    private struct CompatibilityClaudeReadinessProbe: ClaudeStreamJSONReadinessProbing {
+        func probe(executable: String, workingDirectory: String) async throws {}
+    }
+
     private struct CompatibilitySessionRuntimeLauncher: SessionRuntimeLaunching {
         func makeRuntime(
             session: Session,
@@ -142,7 +147,7 @@
         ) async throws -> any SessionRuntime {
             switch session.providerID {
             case .claude:
-                CompatibilityStaticSessionRuntime(transcript: "Claude ready")
+                CompatibilityStaticSessionRuntime(primarySurface: .structuredActivityFeed, transcript: "Claude ready")
             case .codex:
                 CompatibilityStaticSessionRuntime(primarySurface: .structuredActivityFeed, transcript: "Codex ready")
             case .pi:
