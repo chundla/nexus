@@ -257,7 +257,7 @@
                 return
             }
 
-            guard cwd == expectedWorkingDirectory else {
+            guard Self.normalized(cwd) == Self.normalized(expectedWorkingDirectory) else {
                 let error = NSError(
                     domain: "ClaudeStreamJSONReadinessProbe",
                     code: 1,
@@ -311,6 +311,13 @@
                 resolvedError = error
             }
             lock.unlock()
+        }
+
+        fileprivate static func normalized(_ path: String) -> String {
+            guard path.count > 1, path.hasSuffix("/") else {
+                return path
+            }
+            return String(path.dropLast())
         }
 
         private func shouldFailForTermination() -> Bool {

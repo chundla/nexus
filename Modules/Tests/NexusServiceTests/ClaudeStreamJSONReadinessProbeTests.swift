@@ -42,6 +42,42 @@
             #expect(transport.didTerminate)
         }
 
+        @Test func localProbeSucceedsWhenWorkingDirectoryHasTrailingSlashButReportedCWDDoesNot() async throws {
+            let transport = ScriptedClaudeProbeTransport()
+            let probe = ClaudeStreamJSONReadinessProbe(
+                transportFactory: { _, _, _ in transport }
+            )
+
+            let task = Task {
+                try await probe.probe(executable: "/tmp/fake-claude", workingDirectory: "/tmp/workspace/")
+            }
+
+            try await transport.waitForSentLine()
+            transport.emitStdout(
+                #"{"type":"system","subtype":"init","session_id":"probe-session-1","cwd":"/tmp/workspace"}"#)
+
+            try await task.value
+        }
+
+        @Test func localProbeFailsWhenCWDDoesNotMatchBeyondTrailingSlash() async throws {
+            let transport = ScriptedClaudeProbeTransport()
+            let probe = ClaudeStreamJSONReadinessProbe(
+                transportFactory: { _, _, _ in transport }
+            )
+
+            let task = Task {
+                try await probe.probe(executable: "/tmp/fake-claude", workingDirectory: "/tmp/workspace/")
+            }
+
+            try await transport.waitForSentLine()
+            transport.emitStdout(
+                #"{"type":"system","subtype":"init","session_id":"probe-session-1","cwd":"/tmp/other"}"#)
+
+            await #expect(throws: Error.self) {
+                try await task.value
+            }
+        }
+
         @Test func localProbeFailsWhenProcessExitsBeforeInit() async throws {
             let transport = ScriptedClaudeProbeTransport()
             let probe = ClaudeStreamJSONReadinessProbe(
