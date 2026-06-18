@@ -22,7 +22,7 @@ Nexus is the workspace-first control center for coding agent CLIs across local a
 - Milestone Twelve added remote Pi as a launchable structured **Provider** with iPhone parity.
 - Milestone Thirteen added local IBM Bob as a launchable structured **Provider** (on-demand ready-without-runtime lifecycle).
 - Milestone Fourteen is the latest documented plan and adds remote IBM Bob on **Remote Workspaces** with the same on-demand structured lifecycle and iPhone parity.
-- Claude remains terminal-backed on all targets; IBM Bob does not use shared app-native **Approval Requests**.
+- ADR 0038 cut Claude over to a structured (stream-json) primary **Session Surface** on local, remote, and iPhone **Remote Client** targets; no Claude code path constructs a terminal runtime. Legacy terminal-backed Claude **Session Records** relaunch into the structured runtime without tmux transcript import. IBM Bob does not use shared app-native **Approval Requests**.
 
 ## Product shape
 
