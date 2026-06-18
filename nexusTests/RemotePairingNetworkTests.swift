@@ -1683,11 +1683,14 @@ struct RemotePairingNetworkTests {
         #!/usr/bin/env python3
         import sys
 
-        print("READY", flush=True)
+        print('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"READY"}]}}', flush=True)
+        print('{"type":"result","subtype":"success","result":"READY"}', flush=True)
         first = sys.stdin.readline().rstrip("\r\n")
-        print(f"LOCAL:{first}", flush=True)
+        print('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"LOCAL:' + first + '"}]}}', flush=True)
+        print('{"type":"result","subtype":"success","result":"LOCAL"}', flush=True)
         second = sys.stdin.readline().rstrip("\r\n")
-        print(f"REMOTE:{second}", flush=True)
+        print('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"REMOTE:' + second + '"}]}}', flush=True)
+        print('{"type":"result","subtype":"success","result":"REMOTE"}', flush=True)
         """#.write(to: executableURL, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
@@ -1768,9 +1771,11 @@ struct RemotePairingNetworkTests {
         #!/usr/bin/env python3
         import sys
 
-        print("AUTH?", flush=True)
+        print('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"AUTH?"}]}}', flush=True)
+        print('{"type":"result","subtype":"success","result":"AUTH?"}', flush=True)
         line = sys.stdin.readline().rstrip("\r\n")
-        print(f"AUTH:{line}", flush=True)
+        print('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"AUTH:' + line + '"}]}}', flush=True)
+        print('{"type":"result","subtype":"success","result":"AUTH"}', flush=True)
         """#.write(to: executableURL, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
@@ -1866,9 +1871,11 @@ struct RemotePairingNetworkTests {
         #!/usr/bin/env python3
         import sys
 
-        print("AUTH?", flush=True)
+        print('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"AUTH?"}]}}', flush=True)
+        print('{"type":"result","subtype":"success","result":"AUTH?"}', flush=True)
         line = sys.stdin.readline().rstrip("\r\n")
-        print(f"AUTH:{line}", flush=True)
+        print('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"AUTH:' + line + '"}]}}', flush=True)
+        print('{"type":"result","subtype":"success","result":"AUTH"}', flush=True)
         """#.write(to: executableURL, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
@@ -1933,15 +1940,34 @@ struct RemotePairingNetworkTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workspaceFolderURL, withIntermediateDirectories: true)
 
+        let executableURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: false)
+        try #"""
+        #!/usr/bin/env python3
+        import sys
+
+        print('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"READY"}]}}', flush=True)
+        print('{"type":"result","subtype":"success","result":"READY"}', flush=True)
+        line = sys.stdin.readline().rstrip("\r\n")
+        print('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"You: ' + line + '"}]}}', flush=True)
+        print('{"type":"result","subtype":"success","result":"DONE"}', flush=True)
+        """#.write(to: executableURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
+
         let service = try NexusService.bootstrapForTests(
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
-                executableResolver: RemotePairingTestExecutableResolver(executables: ["claude": "/bin/cat"]),
+                executableResolver: RemotePairingTestExecutableResolver(executables: [
+                    "claude": executableURL.path(percentEncoded: false)
+                ]),
                 commandRunner: RemotePairingTestCommandRunner(results: [
-                    RemotePairingTestCommandRunner.Invocation(executable: "/bin/cat", arguments: ["--version"]):
+                    RemotePairingTestCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--version"]):
                         .success(stdout: "cat (test)\n"),
-                    RemotePairingTestCommandRunner.Invocation(executable: "/bin/cat", arguments: ["--help"]): .success(
-                        stdout: "Usage: cat\n"),
+                    RemotePairingTestCommandRunner.Invocation(
+                        executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
+                            stdout: "Usage: cat\n"),
                 ]),
                 claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
                 remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()

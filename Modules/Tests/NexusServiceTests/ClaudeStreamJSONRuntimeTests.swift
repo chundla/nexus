@@ -306,6 +306,34 @@
             #expect(runtime.sessionScreen(for: session).activityItems.last?.text == "claude: fatal: out of memory")
         }
 
+        @Test func processTerminationMarksClaudeRuntimeExitedAndAppendsStatusMessage() throws {
+            let transport = ScriptedClaudeTransport()
+            let runtime = try ClaudeStreamJSONRuntime(
+                executable: "/tmp/fake-claude",
+                workingDirectory: "/tmp/workspace",
+                sessionLinkage: nil,
+                terminationStatusMessageBuilder: { "Claude exited with status \($0)." },
+                unexpectedTerminationState: .exited,
+                sessionIDGenerator: { "generated-session-id" },
+                transportFactory: { executable, arguments, workingDirectory in
+                    transport.configure(
+                        executable: executable, arguments: arguments, workingDirectory: workingDirectory)
+                    return transport
+                }
+            )
+
+            transport.terminate(status: 0)
+
+            #expect(runtime.state == .exited)
+            let session = Session(
+                id: UUID(), workspaceID: UUID(), providerID: .claude, isDefault: true, state: .ready)
+            #expect(
+                runtime.sessionScreen(for: session).activityItems.map(\.text) == [
+                    "Claude Session ready. Send a prompt to start Claude.",
+                    "Claude exited with status 0.",
+                ])
+        }
+
         @Test func stopInvokesStopHandlerWithoutSurfacingTransportTerminationAsAnError() throws {
             let transport = ScriptedClaudeTransport()
             transport.terminationStatusOnTerminate = 15

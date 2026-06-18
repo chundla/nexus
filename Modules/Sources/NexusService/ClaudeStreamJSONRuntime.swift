@@ -432,26 +432,19 @@
             let shouldNotify: Bool
 
             lock.lock()
-            let wasTurnInProgress = isTurnInProgress
+            runtimeState = didRequestStop ? .exited : unexpectedTerminationState
+            shouldNotify = runtimeState != .exited || didRequestStop == false
             isTurnInProgress = false
-            if didRequestStop {
-                shouldNotify = runtimeState != .exited
-                runtimeState = .exited
-            } else if status != 0 {
-                runtimeState = unexpectedTerminationState
-                let stderr = stderrLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            let stderr = stderrLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            if didRequestStop == false {
                 let message = stderr.isEmpty == false ? stderr : unexpectedTerminationMessageBuilder(status)
-                appendActivityItemLocked(
-                    SessionActivityItem(
-                        kind: .error,
-                        text: message
-                    ))
-                shouldNotify = true
-            } else {
-                if wasTurnInProgress {
-                    runtimeState = .ready
+                if message.isEmpty == false {
+                    appendActivityItemLocked(
+                        SessionActivityItem(
+                            kind: runtimeState == .interrupted ? .error : .status,
+                            text: message
+                        ))
                 }
-                shouldNotify = wasTurnInProgress
             }
             stderrLines = []
             lock.unlock()
@@ -727,11 +720,22 @@
 
         private func handleTermination(_ status: Int32) {
             let handler: (@Sendable (Int32) -> Void)?
+            let stderrHandle: FileHandle?
+            let shouldDrainStderr: Bool
             lock.lock()
-            stdoutHandle?.readabilityHandler = nil
+            stderrHandle = self.stderrHandle
             stderrHandle?.readabilityHandler = nil
+            shouldDrainStderr = status != 0 && stderrBuffer.isEmpty
             handler = terminationHandler
             lock.unlock()
+
+            if shouldDrainStderr, let stderrHandle {
+                let remainingStderr = stderrHandle.readDataToEndOfFile()
+                if remainingStderr.isEmpty == false {
+                    consumeStderr(remainingStderr)
+                }
+            }
+
             handler?(status)
         }
     }

@@ -9108,7 +9108,8 @@ struct nexusTests {
         #!/usr/bin/env python3
         import time
         time.sleep(0.2)
-        print("Claude finished work", flush=True)
+        print('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Claude finished work"}]}}', flush=True)
+        print('{"type":"result","subtype":"success","result":"Claude finished work"}', flush=True)
         """.write(to: executableURL, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
@@ -9179,11 +9180,14 @@ struct nexusTests {
 
         state_path = pathlib.Path(os.environ["NEXUS_RELAUNCH_STATE_FILE"])
         if state_path.exists():
-            print("Claude relaunched", flush=True)
+            print('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Claude relaunched"}]}}', flush=True)
+            print('{"type":"result","subtype":"success","result":"Claude relaunched"}', flush=True)
             time.sleep(2)
         else:
             state_path.write_text("relaunched")
-            print("Claude finished work", flush=True)
+            time.sleep(0.2)
+            print('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Claude finished work"}]}}', flush=True)
+            print('{"type":"result","subtype":"success","result":"Claude finished work"}', flush=True)
         """.write(to: executableURL, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o755], ofItemAtPath: executableURL.path(percentEncoded: false))
