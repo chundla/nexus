@@ -121,6 +121,16 @@ private func structuredSessionIBMBobAgentTurnActivitySlice(
         }
 
         if item.kind == .command {
+            // Bob's `attempt_completion` tool call carries a truncated preview of the
+            // turn's answer; the full text always arrives as the following plain
+            // message, which becomes the final answer rather than nested tool output.
+            if structuredSessionIBMBobCommandIsAttemptCompletion(item.text) {
+                openToolIndex = nil
+                consumedAny = true
+                cursor += 1
+                continue
+            }
+
             let tool = StructuredSessionFeedAgentTurnToolSegment(
                 activityItemID: item.id,
                 callPreview: item.text,
@@ -238,6 +248,13 @@ private func structuredSessionIBMBobUserMessageBody(from item: SessionActivityIt
 }
 
 private let structuredSessionIBMBobThoughtsStatusLabel = "thoughts:"
+
+private func structuredSessionIBMBobCommandIsAttemptCompletion(_ text: String) -> Bool {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    let head = trimmed.range(of: ":").map { String(trimmed[..<$0.lowerBound]) } ?? trimmed
+    return head.trimmingCharacters(in: .whitespacesAndNewlines)
+        .caseInsensitiveCompare("attempt_completion") == .orderedSame
+}
 
 private func structuredSessionIBMBobFeedSegmentIsThoughtsStatus(_ item: SessionActivityItem) -> Bool {
     guard item.kind == .status else {
