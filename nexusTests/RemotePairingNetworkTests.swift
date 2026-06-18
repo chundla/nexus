@@ -188,6 +188,7 @@ struct RemotePairingNetworkTests {
         let elapsed = start.duration(to: clock.now)
         let overview = try #require(catalog.workspaceOverviews.first(where: { $0.workspace.id == workspace.id }))
         let piCard = try #require(overview.providerCards.first(where: { $0.provider.id == .pi }))
+        let claudeCard = try #require(overview.providerCards.first(where: { $0.provider.id == .claude }))
 
         #expect(catalog.workspaceGroups == [group])
         #expect(elapsed < .seconds(10))
@@ -196,6 +197,7 @@ struct RemotePairingNetworkTests {
         #expect(piCard.capabilities.launchDefaultSession.isSupported)
         #expect(piCard.capabilities.launchDefaultSession.isEnabled == false)
         #expect(piCard.capabilities.launchDefaultSession.disabledReason == piCard.health.summary)
+        #expect(claudeCard.prelaunchPrimarySurface == .structuredActivityFeed)
     }
 
     @Test func revokedPairingReturnsProductShapedRecoveryErrorOverDedicatedNetworkAPI() async throws {

@@ -533,6 +533,26 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func remoteProviderActionStateEnablesClaudeStructuredNamedSessionCreationOnIPhone() {
+        let createState = RemoteProviderActionState(
+            capability: ProviderCapability(
+                action: .createNamedSession,
+                isSupported: true,
+                isEnabled: true
+            ),
+            provider: Provider(id: .claude),
+            prelaunchPrimarySurface: .structuredActivityFeed
+        )
+
+        #expect(
+            createState
+                == RemoteProviderActionState(
+                    isEnabled: true,
+                    disabledReason: nil
+                ))
+    }
+
+    @MainActor
     @Test func remoteProviderActionStateEnablesRemotePiStructuredDefaultLaunchOnIPhone() {
         let launchState = RemoteProviderActionState(
             capability: ProviderCapability(
@@ -549,6 +569,37 @@ struct nexusTests {
                 == RemoteProviderActionState(
                     isEnabled: true,
                     disabledReason: nil
+                ))
+    }
+
+    @MainActor
+    @Test func remoteSessionSurfacePresentationSupportsClaudeStructuredSessionsOnIPhone() {
+        let screen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .claude,
+                isDefault: true,
+                state: .ready
+            ),
+            primarySurface: .structuredActivityFeed,
+            transcript: "",
+            activityItems: [
+                SessionActivityItem(kind: .status, text: "Claude Session ready. Send a prompt to start Claude.")
+            ]
+        )
+
+        #expect(
+            remoteSessionSurfacePresentation(for: screen, isReady: true)
+                == RemoteSessionSurfacePresentation(
+                    surfaceSupport: .supported,
+                    showsTerminal: false,
+                    showsStructuredActivity: true,
+                    showsAttachment: true,
+                    showsInput: false,
+                    relaunchIsEnabled: true,
+                    relaunchDisabledReason: nil,
+                    unsupportedCopy: nil
                 ))
     }
 
