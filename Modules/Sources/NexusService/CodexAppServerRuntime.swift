@@ -1517,6 +1517,12 @@
             lock.lock()
             stdoutHandle?.readabilityHandler = nil
             stderrHandle?.readabilityHandler = nil
+            if let stderrHandle, status != 0, stderrBuffer.isEmpty {
+                let remainingStderr = stderrHandle.readDataToEndOfFile()
+                if remainingStderr.isEmpty == false {
+                    stderrBuffer.append(remainingStderr)
+                }
+            }
             handler = terminationHandler
             let stderrText = String(data: stderrBuffer, encoding: .utf8)?
                 .replacingOccurrences(of: "\r", with: "")
