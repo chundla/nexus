@@ -743,12 +743,6 @@ struct RemotePairingNetworkTests {
             },
             onDisconnect: { _ in }
         )
-        defer {
-            Task {
-                await observation.cancel()
-            }
-        }
-
         _ = try await waitForObservedScreen {
             observedScreens.last
         }
@@ -781,6 +775,8 @@ struct RemotePairingNetworkTests {
         #expect(observedScreen.session.id == session.id)
         #expect(observedScreen.activityItems.map(\.text) == responseScreen.activityItems.map(\.text))
         #expect(fetchedScreen == responseScreen)
+
+        await observation.cancel()
     }
 
     @Test func failedStructuredCodexSessionScreenStaysInspectableOverDedicatedNetworkAPI() async throws {
@@ -1681,14 +1677,18 @@ struct RemotePairingNetworkTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: false)
         try #"""
         #!/usr/bin/env python3
+        import json
         import sys
+
+        def prompt_text(line):
+            return json.loads(line)["message"]["content"][0]["text"]
 
         print('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"READY"}]}}', flush=True)
         print('{"type":"result","subtype":"success","result":"READY"}', flush=True)
-        first = sys.stdin.readline().rstrip("\r\n")
+        first = prompt_text(sys.stdin.readline().rstrip("\r\n"))
         print('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"LOCAL:' + first + '"}]}}', flush=True)
         print('{"type":"result","subtype":"success","result":"LOCAL"}', flush=True)
-        second = sys.stdin.readline().rstrip("\r\n")
+        second = prompt_text(sys.stdin.readline().rstrip("\r\n"))
         print('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"REMOTE:' + second + '"}]}}', flush=True)
         print('{"type":"result","subtype":"success","result":"REMOTE"}', flush=True)
         """#.write(to: executableURL, atomically: true, encoding: .utf8)
@@ -1769,11 +1769,15 @@ struct RemotePairingNetworkTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: false)
         try #"""
         #!/usr/bin/env python3
+        import json
         import sys
+
+        def prompt_text(line):
+            return json.loads(line)["message"]["content"][0]["text"]
 
         print('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"AUTH?"}]}}', flush=True)
         print('{"type":"result","subtype":"success","result":"AUTH?"}', flush=True)
-        line = sys.stdin.readline().rstrip("\r\n")
+        line = prompt_text(sys.stdin.readline().rstrip("\r\n"))
         print('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"AUTH:' + line + '"}]}}', flush=True)
         print('{"type":"result","subtype":"success","result":"AUTH"}', flush=True)
         """#.write(to: executableURL, atomically: true, encoding: .utf8)
@@ -1869,11 +1873,15 @@ struct RemotePairingNetworkTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: false)
         try #"""
         #!/usr/bin/env python3
+        import json
         import sys
+
+        def prompt_text(line):
+            return json.loads(line)["message"]["content"][0]["text"]
 
         print('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"AUTH?"}]}}', flush=True)
         print('{"type":"result","subtype":"success","result":"AUTH?"}', flush=True)
-        line = sys.stdin.readline().rstrip("\r\n")
+        line = prompt_text(sys.stdin.readline().rstrip("\r\n"))
         print('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"AUTH:' + line + '"}]}}', flush=True)
         print('{"type":"result","subtype":"success","result":"AUTH"}', flush=True)
         """#.write(to: executableURL, atomically: true, encoding: .utf8)
@@ -1944,11 +1952,15 @@ struct RemotePairingNetworkTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: false)
         try #"""
         #!/usr/bin/env python3
+        import json
         import sys
+
+        def prompt_text(line):
+            return json.loads(line)["message"]["content"][0]["text"]
 
         print('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"READY"}]}}', flush=True)
         print('{"type":"result","subtype":"success","result":"READY"}', flush=True)
-        line = sys.stdin.readline().rstrip("\r\n")
+        line = prompt_text(sys.stdin.readline().rstrip("\r\n"))
         print('{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"You: ' + line + '"}]}}', flush=True)
         print('{"type":"result","subtype":"success","result":"DONE"}', flush=True)
         """#.write(to: executableURL, atomically: true, encoding: .utf8)
@@ -2020,17 +2032,18 @@ struct RemotePairingNetworkTests {
 
         _ = try await remoteClient.takeSessionControl(for: pairedMac, sessionID: session.id, columns: 40, rows: 17)
         let responseScreen = try await remoteClient.sendSessionText(for: pairedMac, sessionID: session.id, text: "yooo")
+        _ = try await remoteClient.sendSessionInputKey(for: pairedMac, sessionID: session.id, key: .enter)
 
         let fetchedScreen = try await waitForSessionScreen(client: client, sessionID: session.id) { screen in
-            screen.transcript.contains("yooo")
+            screen.transcript.contains("You: yooo")
         }
         let observedScreen = try await waitForObservedScreen {
-            observedScreens.last { $0.transcript.contains("yooo") }
+            observedScreens.last { $0.transcript.contains("You: yooo") }
         }
 
         #expect(responseScreen.controller == .pairedDevice(pairedMac.pairedDeviceID!))
-        #expect(fetchedScreen.transcript.contains("yooo"))
-        #expect(observedScreen.transcript.contains("yooo"))
+        #expect(fetchedScreen.transcript.contains("You: yooo"))
+        #expect(observedScreen.transcript.contains("You: yooo"))
     }
 
     @Test func remoteControllerSendTextResponseWaitsForDelayedEchoOverDedicatedNetworkAPI() async throws {
