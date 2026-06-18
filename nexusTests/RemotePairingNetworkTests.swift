@@ -19,7 +19,9 @@ struct RemotePairingNetworkTests {
                         stdout: "9.9.9 (Claude Code)\n"),
                     StubCommandRunner.Invocation(executable: "/tmp/fake-claude", arguments: ["--help"]): .success(
                         stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: StructuredPromptSessionRuntimeManager(providerName: "Claude")
         )
@@ -439,7 +441,9 @@ struct RemotePairingNetworkTests {
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
                         stdout: "Usage: codex\n"),
                 ]),
-                codexReadinessProbe: NoOpCodexReadinessProbe()
+                codexReadinessProbe: NoOpCodexReadinessProbe(),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             )
         )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -495,7 +499,9 @@ struct RemotePairingNetworkTests {
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: [:]),
-                commandRunner: StubCommandRunner(results: [:])
+                commandRunner: StubCommandRunner(results: [:]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             )
         )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -558,7 +564,9 @@ struct RemotePairingNetworkTests {
                             stdout: "1.2.3\n"),
                 ]),
                 localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
-                codexReadinessProbe: NoOpCodexReadinessProbe()
+                codexReadinessProbe: NoOpCodexReadinessProbe(),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
         )
@@ -618,7 +626,9 @@ struct RemotePairingNetworkTests {
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
                         stdout: "Usage: codex\n"),
                 ]),
-                codexReadinessProbe: NoOpCodexReadinessProbe()
+                codexReadinessProbe: NoOpCodexReadinessProbe(),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             )
         )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -685,7 +695,9 @@ struct RemotePairingNetworkTests {
                         executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-bob' '--list-sessions'"]): .success(
                             stdout: "[]\n"),
                 ]),
-                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
         )
@@ -783,7 +795,9 @@ struct RemotePairingNetworkTests {
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: [:]),
-                commandRunner: StubCommandRunner(results: [:])
+                commandRunner: StubCommandRunner(results: [:]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             )
         )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -844,7 +858,9 @@ struct RemotePairingNetworkTests {
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
                         stdout: "Usage: codex\n"),
                 ]),
-                codexReadinessProbe: NoOpCodexReadinessProbe()
+                codexReadinessProbe: NoOpCodexReadinessProbe(),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: StructuredPromptSessionRuntimeManager(
                 providerName: "Codex",
@@ -920,7 +936,9 @@ struct RemotePairingNetworkTests {
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
                         stdout: "Usage: codex\n"),
                 ]),
-                codexReadinessProbe: NoOpCodexReadinessProbe()
+                codexReadinessProbe: NoOpCodexReadinessProbe(),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: StructuredPromptSessionRuntimeManager(
                 providerName: "Codex",
@@ -984,7 +1002,9 @@ struct RemotePairingNetworkTests {
                     StubCommandRunner.Invocation(executable: "/tmp/fake-codex", arguments: ["--help"]): .success(
                         stdout: "Usage: codex\n"),
                 ]),
-                codexReadinessProbe: NoOpCodexReadinessProbe()
+                codexReadinessProbe: NoOpCodexReadinessProbe(),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: StructuredPromptSessionRuntimeManager(providerName: "Codex")
         )
@@ -1054,7 +1074,9 @@ struct RemotePairingNetworkTests {
                             stdout: "1.2.3\n"),
                 ]),
                 localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
-                codexReadinessProbe: NoOpCodexReadinessProbe()
+                codexReadinessProbe: NoOpCodexReadinessProbe(),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
         )
@@ -1317,7 +1339,9 @@ struct RemotePairingNetworkTests {
             rootURL: rootURL,
             providerHealthEvaluator: ProviderHealthFacts(
                 executableResolver: StubExecutableResolver(executables: ["claude": "/tmp/fake-claude"]),
-                commandRunner: failedHealthRunner
+                commandRunner: failedHealthRunner,
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             hostValidationEvaluator: StubHostValidationEvaluator(resultsByTarget: [
                 "build-box": HostValidationResult(
@@ -1464,7 +1488,9 @@ struct RemotePairingNetworkTests {
                         executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(
                             stdout: "Usage: pi\n"),
                 ]),
-                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: InMemorySessionRuntimeManager(
                 launcher: ProcessSessionRuntimeLauncher(piTransportFactory: { _, _, _ in
@@ -1671,7 +1697,9 @@ struct RemotePairingNetworkTests {
                     RemotePairingTestCommandRunner.Invocation(
                         executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
                             stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             )
         )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -1752,7 +1780,9 @@ struct RemotePairingNetworkTests {
                     RemotePairingTestCommandRunner.Invocation(
                         executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
                             stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             )
         )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -1848,7 +1878,9 @@ struct RemotePairingNetworkTests {
                     RemotePairingTestCommandRunner.Invocation(
                         executable: executableURL.path(percentEncoded: false), arguments: ["--help"]): .success(
                             stdout: "Usage: claude\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             )
         )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -1902,7 +1934,9 @@ struct RemotePairingNetworkTests {
                         .success(stdout: "cat (test)\n"),
                     RemotePairingTestCommandRunner.Invocation(executable: "/bin/cat", arguments: ["--help"]): .success(
                         stdout: "Usage: cat\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             )
         )
         let client = try NexusIPCClient.connect(to: service.listenerEndpoint)
@@ -1983,7 +2017,9 @@ struct RemotePairingNetworkTests {
                         .success(stdout: "cat (test)\n"),
                     RemotePairingTestCommandRunner.Invocation(executable: "/bin/cat", arguments: ["--help"]): .success(
                         stdout: "Usage: cat\n"),
-                ])
+                ]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: delayedRuntimeManager
         )
@@ -2067,7 +2103,9 @@ struct RemotePairingNetworkTests {
                         executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(
                             stdout: "Usage: pi\n"),
                 ]),
-                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
         )
@@ -2198,7 +2236,9 @@ struct RemotePairingNetworkTests {
                         executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(
                             stdout: "Usage: pi\n"),
                 ]),
-                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
         )
@@ -2302,7 +2342,9 @@ struct RemotePairingNetworkTests {
                         executable: "/bin/zsh", arguments: ["-lic", "'/tmp/fake-pi' '--help'"]): .success(
                             stdout: "Usage: pi\n"),
                 ]),
-                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
+                claudeStreamJSONReadinessProbe: NoOpClaudeStreamJSONReadinessProbe(),
+                remoteClaudeStreamJSONReadinessProbe: NoOpRemoteClaudeStreamJSONReadinessProbe()
             ),
             sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: launcher)
         )
