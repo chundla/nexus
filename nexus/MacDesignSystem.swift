@@ -34,19 +34,6 @@
             endPoint: .bottomTrailing
         )
 
-        static func statusColor(_ state: String) -> Color {
-            switch state.lowercased() {
-            case "available", "ready", "enabled", "launchable":
-                teal
-            case "unavailable", "interrupted", "disabled", "blocked":
-                gold
-            case "broken", "failed", "misconfigured", "exited":
-                coral
-            default:
-                mutedText
-            }
-        }
-
         static func overlay(_ opacity: Double) -> Color {
             dynamicColor(
                 light: .rgb(0.059, 0.075, 0.102, alpha: min(opacity * 0.95, 1.0)),

@@ -571,10 +571,8 @@
                                     title: "Workspace",
                                     stateTitle: workspaceAvailabilityStateTitle(
                                         remoteTarget.workspaceAvailability.state),
-                                    stateSymbol: workspaceAvailabilityStateSymbol(
-                                        remoteTarget.workspaceAvailability.state),
-                                    stateColor: workspaceAvailabilityStateColor(
-                                        remoteTarget.workspaceAvailability.state),
+                                    stateSymbol: remoteTarget.workspaceAvailability.state.tone.symbolName,
+                                    stateColor: remoteTarget.workspaceAvailability.state.tone.color,
                                     summary: remoteTarget.workspaceAvailability.summary,
                                     checkedAt: remoteTarget.workspaceAvailability.checkedAt,
                                     diagnostics: remoteTarget.workspaceAvailability.diagnostics.map {
@@ -585,8 +583,8 @@
                                 remoteStatusPanel(
                                     title: "Host",
                                     stateTitle: hostValidationStateTitle(remoteTarget.hostValidation?.state),
-                                    stateSymbol: hostValidationStateSymbol(remoteTarget.hostValidation?.state),
-                                    stateColor: hostValidationStateColor(remoteTarget.hostValidation?.state),
+                                    stateSymbol: (remoteTarget.hostValidation?.state).tone.symbolName,
+                                    stateColor: (remoteTarget.hostValidation?.state).tone.color,
                                     summary: remoteTarget.hostValidation?.summary
                                         ?? "Validate this Host to unblock deeper remote checks.",
                                     checkedAt: remoteTarget.hostValidation?.checkedAt,
@@ -644,7 +642,7 @@
                                 Spacer()
                                 NexusStatusPill(
                                     text: detail.health.state.rawValue,
-                                    color: providerHealthColor(detail.health.state)
+                                    color: detail.health.state.tone.color
                                 )
                             }
 
@@ -661,7 +659,7 @@
                             }
                         }
                         .padding(26)
-                        .nexusPanel(tint: providerHealthColor(detail.health.state))
+                        .nexusPanel(tint: detail.health.state.tone.color)
 
                         if detail.health.diagnostics.isEmpty == false {
                             VStack(alignment: .leading, spacing: 10) {
@@ -674,7 +672,7 @@
                                         .foregroundStyle(NexusMacTheme.mutedText)
                                         .padding(14)
                                         .frame(maxWidth: .infinity, alignment: .leading)
-                                        .nexusPanel(tint: providerHealthColor(detail.health.state), radius: 16)
+                                        .nexusPanel(tint: detail.health.state.tone.color, radius: 16)
                                 }
                             }
                         }
@@ -821,7 +819,7 @@
             let isReady = summary.session.state == .ready
             let isRemote = context?.isRemote == true
             let surface = summary.primarySurface
-            let stateColor = sessionStateColor(summary.session.state)
+            let stateColor = summary.session.state.tone.color
 
             return VStack(alignment: .leading, spacing: 14) {
                 HStack(spacing: 10) {
@@ -906,7 +904,7 @@
         }
 
         private func providerCard(workspaceID: UUID, card: WorkspaceProviderCard) -> some View {
-            let accent = providerHealthColor(card.health.state)
+            let accent = card.health.state.tone.color
 
             return HStack(alignment: .top, spacing: 14) {
                 Image(systemName: card.prelaunchPrimarySurface == .terminal ? "terminal.fill" : "message.fill")
@@ -1057,30 +1055,6 @@
             .background(NexusMacTheme.overlay(0.04), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
 
-        private func providerHealthColor(_ state: ProviderHealthSummary.State) -> Color {
-            switch state {
-            case .available:
-                NexusMacTheme.teal
-            case .unavailable, .blocked:
-                NexusMacTheme.gold
-            case .misconfigured:
-                NexusMacTheme.coral
-            case .notChecked:
-                NexusMacTheme.mutedText
-            }
-        }
-
-        private func sessionStateColor(_ state: Session.State) -> Color {
-            switch state {
-            case .ready:
-                NexusMacTheme.teal
-            case .interrupted:
-                NexusMacTheme.gold
-            case .exited, .failed:
-                NexusMacTheme.coral
-            }
-        }
-
         private func hostValidationStateTitle(_ state: HostValidationSnapshot.State?) -> String {
             switch state {
             case .available:
@@ -1091,32 +1065,6 @@
                 "Broken"
             case .notChecked, .none:
                 "Not checked"
-            }
-        }
-
-        private func hostValidationStateSymbol(_ state: HostValidationSnapshot.State?) -> String {
-            switch state {
-            case .available:
-                "checkmark.circle"
-            case .unavailable:
-                "wifi.exclamationmark"
-            case .broken:
-                "exclamationmark.triangle"
-            case .notChecked, .none:
-                "clock"
-            }
-        }
-
-        private func hostValidationStateColor(_ state: HostValidationSnapshot.State?) -> Color {
-            switch state {
-            case .available:
-                .green
-            case .unavailable:
-                .orange
-            case .broken:
-                .red
-            case .notChecked, .none:
-                .secondary
             }
         }
 
@@ -1133,32 +1081,6 @@
             }
         }
 
-        private func workspaceAvailabilityStateSymbol(_ state: WorkspaceAvailabilitySnapshot.State) -> String {
-            switch state {
-            case .available:
-                "checkmark.circle"
-            case .unavailable:
-                "wifi.exclamationmark"
-            case .broken:
-                "exclamationmark.triangle"
-            case .blocked:
-                "pause.circle"
-            }
-        }
-
-        private func workspaceAvailabilityStateColor(_ state: WorkspaceAvailabilitySnapshot.State) -> Color {
-            switch state {
-            case .available:
-                .green
-            case .unavailable:
-                .orange
-            case .broken:
-                .red
-            case .blocked:
-                .secondary
-            }
-        }
-
         private func providerSessionRow(
             _ session: Session,
             primaryActionTitle: String,
@@ -1166,7 +1088,7 @@
             secondaryActionTitle: String? = nil,
             secondaryAction: (() -> Void)? = nil
         ) -> some View {
-            let accent = sessionStateColor(session.state)
+            let accent = session.state.tone.color
 
             return HStack(alignment: .top, spacing: 16) {
                 VStack(alignment: .leading, spacing: 8) {
