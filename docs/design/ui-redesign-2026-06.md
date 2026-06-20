@@ -88,16 +88,15 @@ the full IA proposal; this log tracks what actually landed against that proposal
 including where reality (existing `ContentView.swift` architecture) diverged from the
 original pitch.
 
-### Reality check against the original pitch
+### Reality check against the original pitch (revisited — see Slice 11)
 
-- The macOS shell is a **2-column** `NavigationSplitView` (sidebar + one detail pane),
-  not a 3-column workspace/provider/session layout. Workspace Overview, Provider
-  Detail, and Focused Session all already render inside the single detail pane via
-  `SidebarSelection`. There is no middle column to "collapse" when a Session is
-  focused — that part of the original pitch doesn't apply as stated. The Focused
-  Session header (`sessionDetailContent`) is already a compact breadcrumb-style panel,
-  not a full overview, so the core goal (don't bury the session under workspace chrome)
-  is already substantially met.
+- The macOS shell **was** a **2-column** `NavigationSplitView` (sidebar + one detail
+  pane), not a 3-column workspace/provider/session layout, with Workspace Overview,
+  Provider Detail, and Focused Session all rendering inside the single detail pane via
+  `SidebarSelection`. The first pass through this doc treated "there's no middle
+  column today" as a reason the 3-pane pitch didn't apply. That was the wrong call —
+  the absence of the structure was the actual work item, not a reason to skip it. See
+  Slice 11 below, which builds it for real.
 - A Quick Switch sheet already exists (`QuickSwitchSearchCoordinator` +
   `quickSwitchSheet` in `ContentView.swift`), workspace-first with debounced search.
   This is the right foundation for the proposed Command Palette — extend it, don't
@@ -207,10 +206,51 @@ original pitch.
 - [x] Verified live: CPU stays at 0% through window activation and Settings tab
       switching after the fix.
 
+### Slice 11 — 3-pane navigation, collapsing to 2 ✅
+
+- [x] Replaced the single-detail-pane `NavigationSplitView` with a structural switch in
+      `ContentView.body`: when no Session is focused, a 3-column
+      `NavigationSplitView` (sidebar | middle = Workspace Overview/Provider/Group
+      Detail | detail = a quiet "No Session focused" placeholder); when a Session
+      *is* focused, a 2-column `NavigationSplitView` (sidebar | Focused Session,
+      full-bleed). Three panes is correct for browsing; two panes is correct for
+      working — the middle column gets out of the way entirely rather than lingering
+      next to a session the developer already opened.
+- [x] `detailView`/`detailPadding` split into `middleColumnView` (every
+      non-`.session` `SidebarSelection` case, unchanged rendering logic from the old
+      single-pane switch), `focusedSessionColumnView` (the old `.session` case, now
+      full-bleed in its own column), and `sessionPlaceholderColumnView` (new, shown
+      only in the 3-pane branch). `isSessionFocused` is the single source of truth
+      driving which `NavigationSplitView` arity renders.
+- [x] Gave the middle column its own `navigationSplitViewColumnWidth(min: 340, ideal:
+      420, max: 560)` so Workspace Overview/Provider Detail have real room next to the
+      sidebar's existing `min: 280, ideal: 310`.
+- [x] Verified live in the running macOS app against real local data: Home renders as
+      sidebar + Workspace Overview + "No Session focused" placeholder; opening an
+      already-ready Session (IBM Bob's default session) collapses immediately to
+      sidebar + full-bleed session transcript; navigating back to the Workspace via
+      the Command Palette correctly re-expands to the 3-pane layout. Both directions
+      of the transition confirmed with screenshots.
+- Note: `List(selection:)` sidebar row clicks were unreliable under AppleScript/AX
+  synthetic clicks during verification (a known automation quirk with this app, not a
+  product regression — Buttons and the Command Palette's button-backed navigation
+  rows clicked reliably throughout). Verified the reverse (session → workspace)
+  transition via the Command Palette instead.
+- Not done: an animated/width-collapsing transition between the two layouts. This is a
+  structural view swap (SwiftUI tears down and rebuilds the column tree), which is
+  visually a snap, not a slide. Worth a follow-up with `matchedGeometryEffect` or a
+  custom transition if the snap reads as jarring in practice.
+
 ### Explicitly deferred (not in this pass)
 
 - Providers and Advanced/General Settings tabs — no real content exists for them yet
   (see Slice 9 note). Worth adding once there's an actual provider-configuration or
   app-preference model to back them.
-- Any 3-pane / collapsing-pane navigation change — not applicable; see reality check
-  above.
+- Navigation-model items from the original pitch beyond the 3-pane layout itself:
+  session selection restoration on relaunch, non-modal approval banners scoped to
+  session/provider/host chrome, and Session UI state (scroll position, composer
+  draft) surviving a provider switch. None of these are disproven by reality — they
+  just haven't been tackled yet.
+- Component renames into the proposed named system (`WorkspaceRow`, `SessionLaneRow`,
+  `ControllerBadge`, `HostValidationPill`, `AgentTurnStack`, etc.) — the views exist
+  and work, just not extracted into discrete named types yet.

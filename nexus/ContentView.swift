@@ -42,16 +42,41 @@
             ZStack {
                 NexusBackdrop()
 
-                NavigationSplitView {
-                    sidebarContent
-                } detail: {
-                    detailView
-                        .padding(detailPadding)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                Group {
+                    if isSessionFocused {
+                        // A focused Session is the main event: collapse the browsing
+                        // (workspace/provider) column entirely rather than showing it
+                        // alongside a session the developer already opened.
+                        NavigationSplitView {
+                            sidebarContent
+                        } detail: {
+                            focusedSessionColumnView
+                                .padding(16)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        }
+                        #if os(macOS)
+                            .navigationSplitViewStyle(.balanced)
+                        #endif
+                    } else {
+                        NavigationSplitView {
+                            sidebarContent
+                        } content: {
+                            middleColumnView
+                                .padding(20)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                                #if os(macOS)
+                                    .navigationSplitViewColumnWidth(min: 340, ideal: 420, max: 560)
+                                #endif
+                        } detail: {
+                            sessionPlaceholderColumnView
+                                .padding(20)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        }
+                        #if os(macOS)
+                            .navigationSplitViewStyle(.balanced)
+                        #endif
+                    }
                 }
-                #if os(macOS)
-                    .navigationSplitViewStyle(.balanced)
-                #endif
             }
             .tint(NexusMacTheme.gold)
             .task {
@@ -282,48 +307,64 @@
             }
         }
 
-        private var detailPadding: CGFloat {
+        // The middle (browsing) column collapses entirely once a Session is
+        // focused — see the 3-column / 2-column switch in `body`. Three panes is
+        // correct for browsing Workspaces and Providers; two panes (sidebar +
+        // Session, full-bleed) is correct for working.
+        private var isSessionFocused: Bool {
             if case .session = selection {
-                return 16
+                return true
             }
-            return 20
+            return false
         }
 
         @ViewBuilder
-        private var detailView: some View {
-            if let selection {
-                switch selection {
-                case .workspaceGroup(let groupID):
-                    WorkspaceGroupDetailBoundary(appModel: appModel, groupID: groupID) { presentation in
-                        workspaceGroupDetail(presentation: presentation)
-                    }
-                case .workspace(let workspaceID):
-                    WorkspaceDetailBoundary(appModel: appModel, workspaceID: workspaceID) { presentation in
-                        workspaceDetail(presentation: presentation)
-                    }
-                case .provider(let workspaceID, let providerID):
-                    ProviderDetailBoundary(appModel: appModel, workspaceID: workspaceID, providerID: providerID) {
-                        detail in
-                        providerDetail(workspaceID: workspaceID, providerID: providerID, detail: detail)
-                    }
-                case .session(let sessionID):
-                    FocusedSessionDetailBoundary(sessionID: sessionID, appModel: appModel) { summary, screen, context in
-                        sessionDetailContent(summary: summary, screen: screen, context: context)
-                    } unavailable: {
-                        ContentUnavailableView(
-                            "Session unavailable",
-                            systemImage: "message",
-                            description: Text("Open the session again from its workspace to continue the conversation.")
-                        )
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .nexusPanel(tint: NexusMacTheme.coral)
-                    }
+        private var middleColumnView: some View {
+            switch selection {
+            case .workspaceGroup(let groupID):
+                WorkspaceGroupDetailBoundary(appModel: appModel, groupID: groupID) { presentation in
+                    workspaceGroupDetail(presentation: presentation)
                 }
-            } else {
+            case .workspace(let workspaceID):
+                WorkspaceDetailBoundary(appModel: appModel, workspaceID: workspaceID) { presentation in
+                    workspaceDetail(presentation: presentation)
+                }
+            case .provider(let workspaceID, let providerID):
+                ProviderDetailBoundary(appModel: appModel, workspaceID: workspaceID, providerID: providerID) {
+                    detail in
+                    providerDetail(workspaceID: workspaceID, providerID: providerID, detail: detail)
+                }
+            case .session, .none:
                 WorkspaceHomeBoundary(appModel: appModel) { presentation in
                     overviewDetail(presentation: presentation)
                 }
             }
+        }
+
+        @ViewBuilder
+        private var focusedSessionColumnView: some View {
+            if case .session(let sessionID) = selection {
+                FocusedSessionDetailBoundary(sessionID: sessionID, appModel: appModel) { summary, screen, context in
+                    sessionDetailContent(summary: summary, screen: screen, context: context)
+                } unavailable: {
+                    ContentUnavailableView(
+                        "Session unavailable",
+                        systemImage: "message",
+                        description: Text("Open the session again from its workspace to continue the conversation.")
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .nexusPanel(tint: NexusMacTheme.coral)
+                }
+            }
+        }
+
+        private var sessionPlaceholderColumnView: some View {
+            ContentUnavailableView(
+                "No Session focused",
+                systemImage: "bubble.left.and.bubble.right",
+                description: Text("Open a Session from a Provider to start working.")
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
 
         private func overviewDetail(presentation: WorkspaceHomePresentation) -> some View {
