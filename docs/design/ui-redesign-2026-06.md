@@ -166,15 +166,51 @@ original pitch.
       `ContentView`'s local sheet/selection state.
 - [x] Verified in the running macOS app: Go and Remote menus appear with the expected
       items and shortcuts; Go > Command Palette… opens the palette.
-- Deferred: Session-specific menu items (e.g. "Take Controller") were not added in this
-  pass — they need live focused-session context that the App-scene notification pattern
-  doesn't carry cleanly yet. Worth a follow-up once there's a concrete need.
+
+### Slice 9 — Settings scene (⌘,) ✅
+
+- [x] Replaced the Hosts/Remote Access sheets with a real macOS `Settings` scene
+      (`nexus/NexusSettingsScene.swift`): a native `TabView` with Hosts and Remote
+      Access tabs, opened via ⌘, or the existing Remote menu / toolbar "…" menu /
+      Command Palette entries, all routed through `@Environment(\.openSettings)`.
+- [x] `HostManagementView`/`RemoteAccessManagementView` dropped their `isPresented`
+      binding and "Done" button — they're persistent Settings content now, not sheets.
+- [x] Scoped down from the original Providers/Advanced/General pitch: there's no real
+      provider configuration or app-level preference to show in those tabs yet (no
+      `@AppStorage` or provider-config model exists anywhere in the app today), so
+      adding empty placeholder tabs would be exactly the kind of premature scaffolding
+      worth avoiding. Hosts and Remote Access are the only two real surfaces today.
+- [x] Verified live in the running macOS app: ⌘, opens Settings, both tabs render
+      against real local data (a saved Host with validation diagnostics; Remote Access
+      enabled state and Paired Devices), CPU stays at 0% through activation and tab
+      switching.
+
+### Slice 10 — Session > Take Controller menu command ✅
+
+- [x] Added a `Session` menu with "Take Controller", enabled only when a Paired Device
+      currently holds Controller for the focused Session. `ContentView` publishes
+      availability via `.focusedValue(\.nexusSessionControllerIsTakeable, Bool)`; the
+      App reads it with `@FocusedValue` to enable/disable the menu item.
+- [x] `NexusAppModel.reclaimFocusedSessionController()` resizes the focused Session to
+      its current size, which is the same mechanism that already implicitly reclaims
+      Mac Controller on input/resize (`SessionControllerRegistry.claimMacControl`) —
+      no new Service/IPC surface needed, and nothing visibly reflows.
+- [x] **Caught and fixed a real bug during manual verification**, not a regression from
+      repeated test relaunches: the first `FocusedValue` carried a closure-bearing,
+      non-`Equatable` struct. SwiftUI can't diff non-Equatable focused values, so every
+      `ContentView` render republished a "changed" value, re-triggering the App's Scene
+      body and `ContentView`'s body in an infinite loop — invisible while the app was
+      backgrounded (no visible symptom, 0% CPU), ~100% CPU the instant the window
+      became active. Fixed by carrying a plain `Bool` through `FocusedValue` and
+      keeping the actual action on the existing `NotificationCenter` path. Lesson:
+      `@FocusedValue` payloads must stay plain Equatable values, never closures.
+- [x] Verified live: CPU stays at 0% through window activation and Settings tab
+      switching after the fix.
 
 ### Explicitly deferred (not in this pass)
 
-- Settings scene (⌘,) consolidating Hosts/Remote Access/Providers/Advanced — Hosts and
-  Remote Access currently live as sheets, which is a real change in surface area, not a
-  style pass. Tracked here so it isn't lost, not attempted in Phase 2.
+- Providers and Advanced/General Settings tabs — no real content exists for them yet
+  (see Slice 9 note). Worth adding once there's an actual provider-configuration or
+  app-preference model to back them.
 - Any 3-pane / collapsing-pane navigation change — not applicable; see reality check
   above.
-- Session-specific menu commands (see Slice 8 note above).
