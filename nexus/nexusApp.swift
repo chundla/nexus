@@ -25,9 +25,14 @@ struct nexusApp: App {
         WindowGroup {
             #if os(macOS)
                 ContentView(appModel: appModel)
+                    .frame(minWidth: 1100, minHeight: 760)
             #else
                 RemoteClientHomeView(model: pairingModel)
             #endif
         }
+        #if os(macOS)
+            .defaultSize(width: 1460, height: 920)
+            .windowToolbarStyle(.unifiedCompact(showsTitle: false))
+        #endif
     }
 }

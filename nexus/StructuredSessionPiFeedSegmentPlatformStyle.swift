@@ -8,12 +8,12 @@ import SwiftUI
         StructuredSessionPiFeedSegmentStyle(
             userBubbleBackground: NexusMacTheme.gold,
             userBubbleForeground: .white,
-            assistantBubbleBackground: Color.white.opacity(0.1),
+            assistantBubbleBackground: NexusMacTheme.overlay(0.10),
             assistantLabelForeground: NexusMacTheme.mutedText,
-            assistantBodyForeground: .white.opacity(0.94),
+            assistantBodyForeground: NexusMacTheme.textPrimary.opacity(0.94),
             toolAccent: NexusMacTheme.teal,
             mutedForeground: NexusMacTheme.mutedText,
-            systemCapsuleBackground: Color.white.opacity(0.05),
+            systemCapsuleBackground: NexusMacTheme.overlay(0.05),
             bodyFont: { size, style, weight in
                 let base = NexusMacTheme.bodyFont(size, relativeTo: style ?? .body)
                 if let weight, weight != .regular {
@@ -34,12 +34,12 @@ import SwiftUI
         StructuredSessionPiFeedSegmentStyle(
             userBubbleBackground: NexusIOSTheme.gold,
             userBubbleForeground: .white,
-            assistantBubbleBackground: Color.white.opacity(0.1),
+            assistantBubbleBackground: NexusIOSTheme.overlay(0.10),
             assistantLabelForeground: NexusIOSTheme.mutedText,
-            assistantBodyForeground: .white.opacity(0.94),
+            assistantBodyForeground: NexusIOSTheme.textPrimary.opacity(0.94),
             toolAccent: NexusIOSTheme.gold,
             mutedForeground: NexusIOSTheme.mutedText,
-            systemCapsuleBackground: Color.white.opacity(0.05),
+            systemCapsuleBackground: NexusIOSTheme.overlay(0.05),
             bodyFont: { size, style, weight in
                 NexusIOSTheme.bodyFont(size, relativeTo: style ?? .body, weight: weight ?? .regular)
             },

@@ -120,7 +120,7 @@
                 .animation(.snappy(duration: 0.28), value: selectedWorkspaceGroupID)
                 .animation(.snappy(duration: 0.28), value: isShowingPairedMacs)
             }
-            .preferredColorScheme(.dark)
+
             .tint(NexusIOSTheme.gold)
             .onAppear {
                 if model.pairedMacs.isEmpty {
@@ -211,7 +211,7 @@
                                 NexusIOSTheme.displayFont(
                                     horizontalSizeClass == .regular ? 34 : 30, relativeTo: .largeTitle)
                             )
-                            .foregroundStyle(.white)
+                            .foregroundStyle(NexusIOSTheme.textPrimary)
 
                         Text("Simple remote chats for your workspaces.")
                             .font(NexusIOSTheme.bodyFont(15))
@@ -283,7 +283,7 @@
                         VStack(alignment: .leading, spacing: 4) {
                             Text(pairedMac.name)
                                 .font(NexusIOSTheme.bodyFont(17, weight: .semibold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(NexusIOSTheme.textPrimary)
                             Text(availability.summary)
                                 .font(NexusIOSTheme.bodyFont(13))
                                 .foregroundStyle(NexusIOSTheme.mutedText)
@@ -298,7 +298,7 @@
                                 .foregroundStyle(NexusIOSTheme.mutedText)
                             Image(systemName: isShowingPairedMacs ? "chevron.up" : "chevron.down")
                                 .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.55))
+                                .foregroundStyle(NexusIOSTheme.textPrimary.opacity(0.55))
                         }
                     }
                     .padding(18)
@@ -322,7 +322,7 @@
                     HStack {
                         Text("Paired Macs")
                             .font(NexusIOSTheme.bodyFont(16, weight: .semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(NexusIOSTheme.textPrimary)
                         Spacer()
                         Text("\(model.pairedMacs.count)")
                             .font(NexusIOSTheme.bodyFont(12, relativeTo: .caption, weight: .medium))
@@ -334,7 +334,9 @@
                         let isActive = model.activePairedMac?.id == pairedMac.id
                         let availability = model.availability(for: pairedMac)
                         let accent =
-                            isActive ? remotePairedMacAvailabilityColor(availability) : Color.white.opacity(0.72)
+                            isActive
+                            ? remotePairedMacAvailabilityColor(availability)
+                            : NexusIOSTheme.textPrimary.opacity(0.72)
 
                         VStack(alignment: .leading, spacing: 12) {
                             HStack(alignment: .top, spacing: 12) {
@@ -342,7 +344,7 @@
                                     HStack(spacing: 8) {
                                         Text(pairedMac.name)
                                             .font(NexusIOSTheme.bodyFont(16, weight: .semibold))
-                                            .foregroundStyle(.white)
+                                            .foregroundStyle(NexusIOSTheme.textPrimary)
                                         if isActive {
                                             NexusIOSStatusPill(
                                                 text: "Current", color: remotePairedMacAvailabilityColor(availability))
@@ -419,7 +421,7 @@
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text("Workspaces")
                                             .font(NexusIOSTheme.bodyFont(22, relativeTo: .title3, weight: .semibold))
-                                            .foregroundStyle(.white)
+                                            .foregroundStyle(NexusIOSTheme.textPrimary)
                                         Text("Your most recently used workspaces rise to the top.")
                                             .font(NexusIOSTheme.bodyFont(13))
                                             .foregroundStyle(NexusIOSTheme.mutedText)
@@ -566,7 +568,7 @@
                     .foregroundStyle(isSelected ? .white : NexusIOSTheme.mutedText)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 9)
-                    .background((isSelected ? NexusIOSTheme.gold : Color.white.opacity(0.06)), in: Capsule())
+                    .background((isSelected ? NexusIOSTheme.gold : NexusIOSTheme.overlay(0.06)), in: Capsule())
                     .overlay {
                         Capsule()
                             .stroke(isSelected ? NexusIOSTheme.gold.opacity(0.3) : NexusIOSTheme.softLine, lineWidth: 1)
@@ -676,7 +678,7 @@
                         HStack(spacing: 8) {
                             Text(overview.workspace.name)
                                 .font(NexusIOSTheme.bodyFont(17, weight: .semibold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(NexusIOSTheme.textPrimary)
                                 .lineLimit(1)
                             if let groupName, showsGroupName {
                                 Text(groupName)
@@ -684,7 +686,7 @@
                                     .foregroundStyle(NexusIOSTheme.mutedText)
                                     .padding(.horizontal, 8)
                                     .padding(.vertical, 4)
-                                    .background(Color.white.opacity(0.06), in: Capsule())
+                                    .background(NexusIOSTheme.overlay(0.06), in: Capsule())
                             }
                         }
 
@@ -708,10 +710,10 @@
                     VStack(alignment: .trailing, spacing: 8) {
                         Text("\(overview.providerCards.count)")
                             .font(NexusIOSTheme.bodyFont(18, weight: .semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(NexusIOSTheme.textPrimary)
                         Image(systemName: "chevron.right")
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.42))
+                            .foregroundStyle(NexusIOSTheme.textPrimary.opacity(0.42))
                     }
                 }
             }
@@ -754,7 +756,7 @@
                 VStack(alignment: .leading, spacing: 5) {
                     Text(item.title)
                         .font(NexusIOSTheme.bodyFont(16, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(NexusIOSTheme.textPrimary)
                     Text(item.subtitle)
                         .font(NexusIOSTheme.bodyFont(12, relativeTo: .caption))
                         .foregroundStyle(NexusIOSTheme.mutedText)
@@ -765,7 +767,7 @@
 
                 Image(systemName: "arrow.up.right")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.44))
+                    .foregroundStyle(NexusIOSTheme.textPrimary.opacity(0.44))
             }
             .padding(18)
             .nexusIOSPanel(tint: accent, radius: 22)
@@ -824,7 +826,7 @@
                                 NexusIOSTheme.displayFont(
                                     horizontalSizeClass == .regular ? 32 : 28, relativeTo: .largeTitle)
                             )
-                            .foregroundStyle(.white)
+                            .foregroundStyle(NexusIOSTheme.textPrimary)
                         Text("Pick an agent and continue the conversation.")
                             .font(NexusIOSTheme.bodyFont(14))
                             .foregroundStyle(NexusIOSTheme.mutedText)
@@ -874,7 +876,7 @@
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Agents")
                             .font(NexusIOSTheme.bodyFont(20, relativeTo: .title3, weight: .semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(NexusIOSTheme.textPrimary)
                         Text(
                             overview.providerCards.isEmpty
                                 ? "Nothing is available yet." : "Choose who you want to talk to."
@@ -996,7 +998,7 @@
                 VStack(alignment: .leading, spacing: 5) {
                     Text(providerCard.provider.displayName)
                         .font(NexusIOSTheme.bodyFont(17, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(NexusIOSTheme.textPrimary)
                     Text(subtitle)
                         .font(NexusIOSTheme.bodyFont(13))
                         .foregroundStyle(NexusIOSTheme.mutedText)
@@ -1015,7 +1017,7 @@
 
                 Image(systemName: "chevron.right")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.42))
+                    .foregroundStyle(NexusIOSTheme.textPrimary.opacity(0.42))
             }
             .padding(16)
             .nexusIOSPanel(tint: accent, radius: 20)
@@ -1217,7 +1219,7 @@
                                 NexusIOSTheme.displayFont(
                                     horizontalSizeClass == .regular ? 32 : 28, relativeTo: .largeTitle)
                             )
-                            .foregroundStyle(.white)
+                            .foregroundStyle(NexusIOSTheme.textPrimary)
                         Text(overview.workspace.name)
                             .font(NexusIOSTheme.bodyFont(14, weight: .medium))
                             .foregroundStyle(NexusIOSTheme.mutedText)
@@ -1285,7 +1287,7 @@
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Other chats")
                             .font(NexusIOSTheme.bodyFont(18, relativeTo: .title3, weight: .semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(NexusIOSTheme.textPrimary)
                         Text("Keep side conversations tucked away until you need them.")
                             .font(NexusIOSTheme.bodyFont(13))
                             .foregroundStyle(NexusIOSTheme.mutedText)
@@ -1771,7 +1773,7 @@
                 VStack(spacing: 1) {
                     Text(sessionTitle)
                         .font(NexusIOSTheme.bodyFont(15, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(NexusIOSTheme.textPrimary)
                     Text(sessionSubtitle)
                         .font(NexusIOSTheme.bodyFont(11, relativeTo: .caption))
                         .foregroundStyle(NexusIOSTheme.mutedText)
@@ -1800,7 +1802,7 @@
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle")
-                        .foregroundStyle(.white)
+                        .foregroundStyle(NexusIOSTheme.textPrimary)
                 }
             }
         }
@@ -1860,7 +1862,7 @@
                         }
                         .overlay {
                             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                                .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                                .stroke(NexusIOSTheme.overlay(0.06), lineWidth: 1)
                         }
                         .background {
                             GeometryReader { proxy in
@@ -1928,7 +1930,7 @@
                                 } label: {
                                     Image(systemName: "arrow.up")
                                         .font(.system(size: 14, weight: .semibold))
-                                        .foregroundStyle(.white)
+                                        .foregroundStyle(NexusIOSTheme.textPrimary)
                                         .frame(width: 34, height: 34)
                                         .background(
                                             sendAffordance.isEnabled
@@ -1971,7 +1973,7 @@
                 .background(.ultraThinMaterial)
                 .overlay(alignment: .top) {
                     Rectangle()
-                        .fill(Color.white.opacity(0.08))
+                        .fill(NexusIOSTheme.overlay(0.08))
                         .frame(height: 1)
                 }
             }
@@ -1991,7 +1993,7 @@
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(command.displayText)
                                     .font(NexusIOSTheme.monoFont(13, relativeTo: .callout))
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(NexusIOSTheme.textPrimary)
                                 Text(command.summary)
                                     .font(NexusIOSTheme.bodyFont(12, relativeTo: .caption))
                                     .foregroundStyle(NexusIOSTheme.mutedText)
@@ -2005,11 +2007,11 @@
                         .buttonStyle(.plain)
                         .background(
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .fill(Color.white.opacity(0.04))
+                                .fill(NexusIOSTheme.overlay(0.04))
                         )
                         .overlay {
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                                .stroke(NexusIOSTheme.overlay(0.08), lineWidth: 1)
                         }
                     }
                 }
@@ -2023,7 +2025,7 @@
             )
             .overlay {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                    .stroke(NexusIOSTheme.overlay(0.08), lineWidth: 1)
             }
         }
 
@@ -2067,7 +2069,7 @@
             .background(.ultraThinMaterial)
             .overlay(alignment: .top) {
                 Rectangle()
-                    .fill(Color.white.opacity(0.08))
+                    .fill(NexusIOSTheme.overlay(0.08))
                     .frame(height: 1)
             }
         }
@@ -2086,10 +2088,10 @@
             } label: {
                 Label("Keys", systemImage: "command")
                     .font(NexusIOSTheme.bodyFont(12, relativeTo: .caption, weight: .medium))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(NexusIOSTheme.textPrimary)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
-                    .background(Color.white.opacity(0.08), in: Capsule())
+                    .background(NexusIOSTheme.overlay(0.08), in: Capsule())
             }
         }
 
@@ -2557,7 +2559,7 @@
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
-                .background(Color.white.opacity(0.05), in: Capsule())
+                .background(NexusIOSTheme.overlay(0.05), in: Capsule())
                 Spacer()
             }
         }
@@ -2579,7 +2581,7 @@
                     VStack(alignment: .trailing, spacing: 4) {
                         Text(conversation.text)
                             .font(NexusIOSTheme.bodyFont(15))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(NexusIOSTheme.textPrimary)
                             .structuredSessionFeedTextSelection()
                             .fixedSize(horizontal: false, vertical: true)
                             .padding(.horizontal, 14)
@@ -2606,7 +2608,7 @@
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .frame(maxWidth: 420, alignment: .leading)
-                    .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .background(NexusIOSTheme.overlay(0.1), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                     Spacer(minLength: 48)
                 }
                 .structuredSessionFeedRowCompositing()
@@ -2618,7 +2620,7 @@
                             .foregroundStyle(accentColor)
                         Text(conversation.text)
                             .font(NexusIOSTheme.monoFont(12, relativeTo: .callout))
-                            .foregroundStyle(.white.opacity(0.92))
+                            .foregroundStyle(NexusIOSTheme.textPrimary.opacity(0.92))
                             .structuredSessionFeedTextSelection()
                             .fixedSize(horizontal: false, vertical: true)
                         if let detailText = row.detailText {
@@ -2631,7 +2633,7 @@
                     }
                     .padding(14)
                     .frame(maxWidth: 520, alignment: .leading)
-                    .background(Color.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .background(NexusIOSTheme.overlay(0.09), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                     Spacer(minLength: 48)
                 }
                 .structuredSessionFeedRowCompositing()
@@ -2643,7 +2645,7 @@
                             .foregroundStyle(accentColor)
                         Text(conversation.text)
                             .font(NexusIOSTheme.bodyFont(14))
-                            .foregroundStyle(.white.opacity(0.94))
+                            .foregroundStyle(NexusIOSTheme.textPrimary.opacity(0.94))
                             .structuredSessionFeedTextSelection()
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -2662,7 +2664,7 @@
                                 .foregroundStyle(NexusIOSTheme.mutedText)
                             Text(verbatim: conversation.text)
                                 .font(NexusIOSTheme.bodyFont(14))
-                                .foregroundStyle(.white.opacity(0.92))
+                                .foregroundStyle(NexusIOSTheme.textPrimary.opacity(0.92))
                                 .structuredSessionFeedTextSelection()
                                 .fixedSize(horizontal: false, vertical: true)
                             if let detailText = row.detailText {
@@ -2676,7 +2678,7 @@
                         .padding(14)
                         .frame(maxWidth: 520, alignment: .leading)
                         .background(
-                            Color.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            NexusIOSTheme.overlay(0.09), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                         Spacer(minLength: 48)
                     } else {
                         Spacer()
@@ -2685,7 +2687,7 @@
                             .foregroundStyle(NexusIOSTheme.mutedText)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
-                            .background(Color.white.opacity(0.05), in: Capsule())
+                            .background(NexusIOSTheme.overlay(0.05), in: Capsule())
                         Spacer()
                     }
                 }
@@ -2810,7 +2812,7 @@
                     if showsCollapsedPreview {
                         Text(verbatim: text)
                             .font(font)
-                            .foregroundStyle(.white.opacity(0.84))
+                            .foregroundStyle(NexusIOSTheme.textPrimary.opacity(0.84))
                             .structuredSessionFeedTextSelection()
                             .frame(
                                 height: structuredSessionFeedCollapsedDetailViewportHeight,
@@ -2820,7 +2822,7 @@
                     } else {
                         Text(verbatim: text)
                             .font(font)
-                            .foregroundStyle(.white.opacity(0.84))
+                            .foregroundStyle(NexusIOSTheme.textPrimary.opacity(0.84))
                             .structuredSessionFeedTextSelection()
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -2854,11 +2856,11 @@
 
                 Text(request.title)
                     .font(NexusIOSTheme.bodyFont(15, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(NexusIOSTheme.textPrimary)
 
                 Text(request.text)
                     .font(NexusIOSTheme.bodyFont(14))
-                    .foregroundStyle(.white.opacity(0.92))
+                    .foregroundStyle(NexusIOSTheme.textPrimary.opacity(0.92))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -2892,7 +2894,7 @@
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(NexusIOSTheme.overlay(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .stroke(NexusIOSTheme.gold.opacity(0.22))
@@ -2917,7 +2919,7 @@
                 if let title = extensionUI.title, title.isEmpty == false {
                     Text(title)
                         .font(NexusIOSTheme.bodyFont(15, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(NexusIOSTheme.textPrimary)
                 }
 
                 if extensionUI.statuses.isEmpty == false {
@@ -2929,10 +2931,10 @@
                         ForEach(extensionUI.statuses) { status in
                             Text(status.text)
                                 .font(NexusIOSTheme.bodyFont(12))
-                                .foregroundStyle(.white.opacity(0.92))
+                                .foregroundStyle(NexusIOSTheme.textPrimary.opacity(0.92))
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
-                                .background(Color.white.opacity(0.05), in: Capsule())
+                                .background(NexusIOSTheme.overlay(0.05), in: Capsule())
                         }
                     }
                 }
@@ -2950,20 +2952,20 @@
                                     .foregroundStyle(structuredSessionExtensionNotificationColor(notification.kind))
                                 Text(notification.message)
                                     .font(NexusIOSTheme.bodyFont(12))
-                                    .foregroundStyle(.white.opacity(0.92))
+                                    .foregroundStyle(NexusIOSTheme.textPrimary.opacity(0.92))
                                     .textSelection(.enabled)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(10)
                             .background(
-                                Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                NexusIOSTheme.overlay(0.04), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
                     }
                 }
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(NexusIOSTheme.overlay(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .stroke(NexusIOSTheme.teal.opacity(0.22))
@@ -2980,17 +2982,17 @@
                         ForEach(Array(widget.lines.enumerated()), id: \.offset) { _, line in
                             Text(line)
                                 .font(NexusIOSTheme.bodyFont(12))
-                                .foregroundStyle(.white.opacity(0.92))
+                                .foregroundStyle(NexusIOSTheme.textPrimary.opacity(0.92))
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .background(NexusIOSTheme.overlay(0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     .overlay {
                         RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                            .stroke(NexusIOSTheme.overlay(0.08), lineWidth: 1)
                     }
                 }
             }
@@ -3053,11 +3055,11 @@
             .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.white.opacity(0.06))
+                    .fill(NexusIOSTheme.overlay(0.06))
             )
             .overlay {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                    .stroke(NexusIOSTheme.overlay(0.08), lineWidth: 1)
             }
         }
 
@@ -3291,12 +3293,12 @@
 
                 Text(dialog.title)
                     .font(NexusIOSTheme.bodyFont(15, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(NexusIOSTheme.textPrimary)
 
                 if let message = dialog.message, message.isEmpty == false {
                     Text(message)
                         .font(NexusIOSTheme.bodyFont(14))
-                        .foregroundStyle(.white.opacity(0.92))
+                        .foregroundStyle(NexusIOSTheme.textPrimary.opacity(0.92))
                         .textSelection(.enabled)
                 }
 
@@ -3338,7 +3340,7 @@
                         .frame(minHeight: 140)
                         .padding(8)
                         .background(
-                            Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            NexusIOSTheme.overlay(0.05), in: RoundedRectangle(cornerRadius: 14, style: .continuous)
                         )
                         .overlay {
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -3360,7 +3362,7 @@
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(NexusIOSTheme.overlay(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .stroke(NexusIOSTheme.teal.opacity(0.22))
@@ -3424,7 +3426,7 @@
                     VStack(alignment: .leading, spacing: 4) {
                         Text(session.isDefault ? "Default chat" : (session.name ?? "Chat"))
                             .font(NexusIOSTheme.bodyFont(16, weight: .semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(NexusIOSTheme.textPrimary)
                         Text(session.failureMessage ?? session.state.rawValue.capitalized)
                             .font(NexusIOSTheme.bodyFont(12, relativeTo: .caption))
                             .foregroundStyle(deleteDisabled ? NexusIOSTheme.mutedText : accent)
@@ -3485,7 +3487,7 @@
             VStack(alignment: .leading, spacing: 8) {
                 Text(title)
                     .font(NexusIOSTheme.bodyFont(14, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(NexusIOSTheme.textPrimary)
                 Text(detail)
                     .font(NexusIOSTheme.bodyFont(13))
                     .foregroundStyle(NexusIOSTheme.mutedText)
@@ -3506,7 +3508,7 @@
         case .misconfigured:
             NexusIOSTheme.coral
         case .notChecked:
-            Color.white.opacity(0.7)
+            NexusIOSTheme.mutedText
         }
     }
 

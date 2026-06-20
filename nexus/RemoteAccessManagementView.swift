@@ -66,7 +66,7 @@
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Pairing")
                             .font(NexusMacTheme.displayFont(22, relativeTo: .title3))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(NexusMacTheme.textPrimary)
 
                         if let pairing = appModel.remoteAccessState?.activePairing {
                             VStack(alignment: .leading, spacing: 10) {
@@ -76,7 +76,7 @@
 
                                 Text(pairing.code)
                                     .font(NexusMacTheme.monoFont(30, relativeTo: .largeTitle))
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(NexusMacTheme.textPrimary)
 
                                 if let remotePairingEndpoint = appModel.remotePairingEndpoint {
                                     NexusInspectorRow(title: "Mac Address", value: remotePairingEndpoint.displayAddress)
@@ -105,7 +105,7 @@
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Paired Devices")
                             .font(NexusMacTheme.displayFont(22, relativeTo: .title3))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(NexusMacTheme.textPrimary)
 
                         if appModel.pairedDevices.isEmpty {
                             ContentUnavailableView(
@@ -120,7 +120,7 @@
                                         VStack(alignment: .leading, spacing: 4) {
                                             Text(device.name)
                                                 .font(NexusMacTheme.bodyFont(14).weight(.semibold))
-                                                .foregroundStyle(.white)
+                                                .foregroundStyle(NexusMacTheme.textPrimary)
                                             Text(
                                                 "Paired \(device.pairedAt.formatted(date: .abbreviated, time: .shortened))"
                                             )

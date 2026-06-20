@@ -1,18 +1,27 @@
 #if os(macOS)
+    import AppKit
     import SwiftUI
 
     enum NexusMacTheme {
-        static let backgroundTop = Color(red: 0.15, green: 0.16, blue: 0.19)
-        static let backgroundBottom = Color(red: 0.10, green: 0.11, blue: 0.14)
-        static let panel = Color(red: 0.16, green: 0.17, blue: 0.20)
-        static let panelRaised = Color(red: 0.20, green: 0.21, blue: 0.25)
-        static let line = Color.white.opacity(0.10)
-        static let softLine = Color.white.opacity(0.05)
-        static let gold = Color(red: 0.19, green: 0.55, blue: 0.96)
-        static let teal = Color(red: 0.35, green: 0.79, blue: 0.61)
-        static let coral = Color(red: 0.98, green: 0.46, blue: 0.43)
-        static let mist = Color(red: 0.97, green: 0.98, blue: 1.00)
-        static let mutedText = Color.white.opacity(0.64)
+        static let backgroundTop = dynamicColor(light: .rgb(0.956, 0.964, 0.982), dark: .rgb(0.098, 0.110, 0.133))
+        static let backgroundBottom = dynamicColor(light: .rgb(0.910, 0.928, 0.958), dark: .rgb(0.055, 0.063, 0.080))
+        static let panel = dynamicColor(
+            light: .rgb(0.985, 0.989, 0.998, alpha: 0.86), dark: .rgb(0.114, 0.125, 0.153, alpha: 0.86))
+        static let panelRaised = dynamicColor(
+            light: .rgb(0.998, 0.999, 1.000, alpha: 0.94), dark: .rgb(0.145, 0.157, 0.192, alpha: 0.94))
+        static let line = dynamicColor(
+            light: .rgb(0.059, 0.075, 0.102, alpha: 0.10), dark: .rgb(1.000, 1.000, 1.000, alpha: 0.10))
+        static let softLine = dynamicColor(
+            light: .rgb(0.059, 0.075, 0.102, alpha: 0.05), dark: .rgb(1.000, 1.000, 1.000, alpha: 0.05))
+        static let gold = dynamicColor(light: .rgb(0.173, 0.412, 0.902), dark: .rgb(0.415, 0.655, 1.000))
+        static let teal = dynamicColor(light: .rgb(0.102, 0.612, 0.424), dark: .rgb(0.392, 0.890, 0.681))
+        static let coral = dynamicColor(light: .rgb(0.780, 0.200, 0.200), dark: .rgb(1.000, 0.474, 0.474))
+        static let mist = Color.primary
+        static let mutedText = dynamicColor(
+            light: .rgb(0.247, 0.286, 0.357, alpha: 0.78), dark: .rgb(0.855, 0.884, 0.934, alpha: 0.74))
+        static let subtleText = dynamicColor(
+            light: .rgb(0.247, 0.286, 0.357, alpha: 0.56), dark: .rgb(0.855, 0.884, 0.934, alpha: 0.52))
+        static let textPrimary = Color.primary
 
         static let backdropGradient = LinearGradient(
             colors: [backgroundTop, backgroundBottom],
@@ -29,12 +38,26 @@
             case "broken", "failed", "misconfigured", "exited":
                 coral
             default:
-                Color.white.opacity(0.7)
+                mutedText
             }
         }
 
+        static func overlay(_ opacity: Double) -> Color {
+            dynamicColor(
+                light: .rgb(0.059, 0.075, 0.102, alpha: min(opacity * 0.95, 1.0)),
+                dark: .rgb(1.000, 1.000, 1.000, alpha: min(opacity, 1.0))
+            )
+        }
+
+        static func shadow(_ opacity: Double) -> Color {
+            dynamicColor(
+                light: .rgb(0.059, 0.075, 0.102, alpha: min(opacity * 0.60, 1.0)),
+                dark: .rgb(0.000, 0.000, 0.000, alpha: min(opacity, 1.0))
+            )
+        }
+
         static func displayFont(_ size: CGFloat, relativeTo style: Font.TextStyle = .title) -> Font {
-            .system(size: size, weight: .semibold, design: .rounded)
+            .system(size: size, weight: .semibold, design: .default)
         }
 
         static func bodyFont(_ size: CGFloat, relativeTo style: Font.TextStyle = .body) -> Font {
@@ -44,6 +67,20 @@
         static func monoFont(_ size: CGFloat, relativeTo style: Font.TextStyle = .body) -> Font {
             .system(size: size, weight: .regular, design: .monospaced)
         }
+
+        private static func dynamicColor(light: NSColor, dark: NSColor) -> Color {
+            Color(
+                nsColor: NSColor(name: nil) { appearance in
+                    appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
+                }
+            )
+        }
+    }
+
+    private extension NSColor {
+        static func rgb(_ red: CGFloat, _ green: CGFloat, _ blue: CGFloat, alpha: CGFloat = 1.0) -> NSColor {
+            NSColor(srgbRed: red, green: green, blue: blue, alpha: alpha)
+        }
     }
 
     struct NexusBackdrop: View {
@@ -52,23 +89,35 @@
                 NexusMacTheme.backdropGradient
                     .ignoresSafeArea()
 
-                Circle()
-                    .fill(NexusMacTheme.gold.opacity(0.16))
-                    .frame(width: 280)
-                    .blur(radius: 90)
-                    .offset(x: -220, y: -260)
+                LinearGradient(
+                    colors: [NexusMacTheme.overlay(0.035), .clear, NexusMacTheme.overlay(0.018)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .blendMode(.overlay)
+                .ignoresSafeArea()
 
                 Circle()
-                    .fill(Color.white.opacity(0.07))
+                    .fill(NexusMacTheme.gold.opacity(0.12))
+                    .frame(width: 420)
+                    .blur(radius: 120)
+                    .offset(x: -320, y: -320)
+
+                Circle()
+                    .fill(NexusMacTheme.teal.opacity(0.10))
                     .frame(width: 360)
-                    .blur(radius: 120)
-                    .offset(x: 260, y: -200)
+                    .blur(radius: 140)
+                    .offset(x: 300, y: 280)
 
-                Circle()
-                    .fill(NexusMacTheme.teal.opacity(0.08))
-                    .frame(width: 320)
-                    .blur(radius: 120)
-                    .offset(x: 260, y: 260)
+                Rectangle()
+                    .fill(
+                        LinearGradient(
+                            colors: [NexusMacTheme.overlay(0.020), .clear],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .ignoresSafeArea()
             }
         }
     }
@@ -76,34 +125,56 @@
     struct NexusPanelModifier: ViewModifier {
         var tint: Color
         var radius: CGFloat
+        var raised: Bool = false
 
         func body(content: Content) -> some View {
+            let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+
             content
-                .background(
-                    RoundedRectangle(cornerRadius: radius, style: .continuous)
-                        .fill(NexusMacTheme.panel.opacity(0.95))
+                .background {
+                    shape
+                        .fill((raised ? NexusMacTheme.panelRaised : NexusMacTheme.panel))
                         .overlay {
-                            RoundedRectangle(cornerRadius: radius, style: .continuous)
+                            shape
                                 .fill(
                                     LinearGradient(
-                                        colors: [Color.white.opacity(0.06), .clear, tint.opacity(0.10)],
+                                        colors: [
+                                            NexusMacTheme.overlay(0.065),
+                                            .clear,
+                                            tint.opacity(0.08),
+                                        ],
                                         startPoint: .topLeading,
                                         endPoint: .bottomTrailing
                                     )
                                 )
                         }
+                        .overlay(alignment: .top) {
+                            shape
+                                .fill(
+                                    LinearGradient(
+                                        colors: [NexusMacTheme.overlay(0.13), .clear],
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    )
+                                )
+                                .mask(alignment: .top) {
+                                    Rectangle()
+                                        .frame(height: 1)
+                                        .clipShape(shape)
+                                }
+                        }
                         .overlay {
-                            RoundedRectangle(cornerRadius: radius, style: .continuous)
+                            shape
                                 .strokeBorder(NexusMacTheme.line, lineWidth: 1)
                         }
-                        .shadow(color: .black.opacity(0.22), radius: 24, y: 10)
-                )
+                        .shadow(color: NexusMacTheme.shadow(0.20), radius: raised ? 28 : 22, y: raised ? 14 : 10)
+                }
         }
     }
 
     extension View {
-        func nexusPanel(tint: Color = .clear, radius: CGFloat = 22) -> some View {
-            modifier(NexusPanelModifier(tint: tint, radius: radius))
+        func nexusPanel(tint: Color = .clear, radius: CGFloat = 22, raised: Bool = false) -> some View {
+            modifier(NexusPanelModifier(tint: tint, radius: radius, raised: raised))
         }
     }
 
@@ -119,20 +190,21 @@
         }
 
         var body: some View {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 7) {
                 Text(eyebrow.uppercased())
                     .font(NexusMacTheme.monoFont(11, relativeTo: .caption))
-                    .tracking(2.4)
+                    .tracking(2.2)
                     .foregroundStyle(NexusMacTheme.gold)
 
                 Text(title)
                     .font(NexusMacTheme.displayFont(28, relativeTo: .largeTitle))
-                    .foregroundStyle(NexusMacTheme.mist)
+                    .foregroundStyle(NexusMacTheme.textPrimary)
 
                 if let detail {
                     Text(detail)
                         .font(NexusMacTheme.bodyFont(14))
                         .foregroundStyle(NexusMacTheme.mutedText)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
@@ -148,12 +220,12 @@
             VStack(alignment: .leading, spacing: 10) {
                 Text(title.uppercased())
                     .font(NexusMacTheme.monoFont(11, relativeTo: .caption))
-                    .tracking(2.2)
+                    .tracking(2.0)
                     .foregroundStyle(accent)
 
                 Text(value)
                     .font(NexusMacTheme.displayFont(24, relativeTo: .title))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(NexusMacTheme.textPrimary)
 
                 Text(detail)
                     .font(NexusMacTheme.bodyFont(13, relativeTo: .caption))
@@ -161,7 +233,7 @@
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(18)
-            .nexusPanel(tint: accent, radius: 18)
+            .nexusPanel(tint: accent, radius: 18, raised: true)
         }
     }
 
@@ -177,10 +249,10 @@
                 Text(text)
                     .font(NexusMacTheme.bodyFont(12, relativeTo: .caption).weight(.medium))
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(NexusMacTheme.textPrimary)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(color.opacity(0.18), in: Capsule())
+            .background(NexusMacTheme.overlay(0.055), in: Capsule())
             .overlay {
                 Capsule()
                     .stroke(color.opacity(0.28), lineWidth: 1)
@@ -195,10 +267,10 @@
         var body: some View {
             Label(text, systemImage: icon)
                 .font(NexusMacTheme.bodyFont(12, relativeTo: .caption))
-                .foregroundStyle(NexusMacTheme.mist)
+                .foregroundStyle(NexusMacTheme.textPrimary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
-                .background(Color.white.opacity(0.06), in: Capsule())
+                .background(NexusMacTheme.overlay(0.045), in: Capsule())
                 .overlay {
                     Capsule().stroke(NexusMacTheme.softLine, lineWidth: 1)
                 }
@@ -217,7 +289,7 @@
                     .foregroundStyle(NexusMacTheme.gold)
                 Text(value)
                     .font(NexusMacTheme.bodyFont(13))
-                    .foregroundStyle(.white.opacity(0.92))
+                    .foregroundStyle(NexusMacTheme.textPrimary.opacity(0.92))
                     .textSelection(.enabled)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -231,8 +303,17 @@
                 .foregroundStyle(.white)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
-                .background(NexusMacTheme.gold.opacity(configuration.isPressed ? 0.76 : 0.96), in: Capsule())
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(NexusMacTheme.gold.opacity(configuration.isPressed ? 0.84 : 0.96))
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(NexusMacTheme.gold.opacity(0.18), lineWidth: 1)
+                }
+                .shadow(color: NexusMacTheme.gold.opacity(configuration.isPressed ? 0.08 : 0.16), radius: 14, y: 8)
                 .scaleEffect(configuration.isPressed ? 0.985 : 1)
+                .animation(.snappy(duration: 0.18), value: configuration.isPressed)
         }
     }
 
@@ -240,13 +321,19 @@
         func makeBody(configuration: Configuration) -> some View {
             configuration.label
                 .font(NexusMacTheme.bodyFont(13, relativeTo: .callout).weight(.medium))
-                .foregroundStyle(.white.opacity(configuration.isPressed ? 0.8 : 0.94))
+                .foregroundStyle(NexusMacTheme.textPrimary.opacity(configuration.isPressed ? 0.82 : 0.94))
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
-                .background(Color.white.opacity(configuration.isPressed ? 0.07 : 0.10), in: Capsule())
+                .background(
+                    NexusMacTheme.overlay(configuration.isPressed ? 0.07 : 0.10),
+                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                )
                 .overlay {
-                    Capsule().stroke(NexusMacTheme.softLine, lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(NexusMacTheme.softLine, lineWidth: 1)
                 }
+                .scaleEffect(configuration.isPressed ? 0.99 : 1)
+                .animation(.snappy(duration: 0.18), value: configuration.isPressed)
         }
     }
 #endif

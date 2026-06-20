@@ -43,13 +43,13 @@
 
 ## Verification checklist
 
-- [ ] macOS app builds
-- [ ] Modules tests for touched presentation code pass
-- [ ] iOS simulator build/run works with `NEXUS_REMOTE_CLIENT_FIXTURE=streaming-feed-profile`
-- [ ] verify home → workspace → provider → session navigation
+- [x] macOS app builds
+- [x] Modules tests for touched presentation code pass
+- [x] iOS simulator build/run works with `NEXUS_REMOTE_CLIENT_FIXTURE=streaming-feed-profile`
+- [x] verify home → workspace → provider → session navigation
 - [ ] verify session composer send flow in fixture
-- [ ] verify light mode
-- [ ] verify dark mode
+- [x] verify light mode
+- [x] verify dark mode
 
 ## Work log
 
@@ -73,3 +73,7 @@
 
 - simulator verification
 - lint/tests
+- lowered iOS deployment target from 26.5 to 26.4 so the installed 26.4 simulator runtime can actually run Nexus
+- validated light home, dark home, and light session screens in the simulator
+- validated home → workspace → provider → session navigation in the simulator
+- `xcodebuildmcp macos test` selective run is currently blocked by an existing macOS test-bundle code-sign mismatch in this environment

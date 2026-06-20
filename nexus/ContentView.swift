@@ -52,7 +52,7 @@
                     .navigationSplitViewStyle(.balanced)
                 #endif
             }
-            .preferredColorScheme(.dark)
+            .tint(NexusMacTheme.gold)
             .task {
                 if appModel.serviceStatus == nil, appModel.serviceErrorMessage == nil {
                     await appModel.refresh()
@@ -134,7 +134,7 @@
                         VStack(alignment: .leading, spacing: 3) {
                             Text("Nexus")
                                 .font(NexusMacTheme.displayFont(24, relativeTo: .title2))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(NexusMacTheme.textPrimary)
                             Text("Your agent workspaces.")
                                 .font(NexusMacTheme.bodyFont(12, relativeTo: .caption))
                                 .foregroundStyle(NexusMacTheme.mutedText)
@@ -373,7 +373,7 @@
                         VStack(alignment: .leading, spacing: 12) {
                             ProgressView()
                                 .tint(NexusMacTheme.gold)
-                            Text("Loading Nexus…")
+                            Text("Loading Nexus...")
                                 .font(NexusMacTheme.bodyFont(15))
                                 .foregroundStyle(NexusMacTheme.mutedText)
                         }
@@ -500,12 +500,12 @@
                                             )
                                             Spacer()
                                             Image(systemName: "arrow.up.right")
-                                                .foregroundStyle(.white.opacity(0.5))
+                                                .foregroundStyle(NexusMacTheme.textPrimary.opacity(0.5))
                                         }
 
                                         Text(workspace.name)
                                             .font(NexusMacTheme.displayFont(22, relativeTo: .title3))
-                                            .foregroundStyle(.white)
+                                            .foregroundStyle(NexusMacTheme.textPrimary)
 
                                         Text(summary.targetSummary)
                                             .font(NexusMacTheme.bodyFont(13))
@@ -599,7 +599,7 @@
                         VStack(alignment: .leading, spacing: 12) {
                             Text("Agents")
                                 .font(NexusMacTheme.displayFont(22, relativeTo: .title3))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(NexusMacTheme.textPrimary)
 
                             if let overview {
                                 VStack(spacing: 12) {
@@ -608,7 +608,7 @@
                                     }
                                 }
                             } else {
-                                Text("Loading providers…")
+                                Text("Loading providers...")
                                     .font(NexusMacTheme.bodyFont(14))
                                     .foregroundStyle(NexusMacTheme.mutedText)
                                     .padding(18)
@@ -667,7 +667,7 @@
                             VStack(alignment: .leading, spacing: 10) {
                                 Text("Diagnostics")
                                     .font(NexusMacTheme.displayFont(22, relativeTo: .title3))
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(NexusMacTheme.textPrimary)
                                 ForEach(Array(detail.health.diagnostics.enumerated()), id: \.offset) { _, diagnostic in
                                     Text(diagnostic.message)
                                         .font(NexusMacTheme.bodyFont(13))
@@ -683,7 +683,7 @@
                             HStack {
                                 Text("Default Session")
                                     .font(NexusMacTheme.displayFont(22, relativeTo: .title3))
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(NexusMacTheme.textPrimary)
                                 Spacer()
                                 Button(defaultSessionButtonTitle(for: detail)) {
                                     Task {
@@ -732,7 +732,7 @@
                             HStack {
                                 Text("Named Sessions")
                                     .font(NexusMacTheme.displayFont(22, relativeTo: .title3))
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(NexusMacTheme.textPrimary)
                                 Spacer()
                                 Button("New Session") {
                                     Task {
@@ -782,7 +782,7 @@
                             VStack(alignment: .leading, spacing: 10) {
                                 Text("Failed Session Records")
                                     .font(NexusMacTheme.displayFont(22, relativeTo: .title3))
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(NexusMacTheme.textPrimary)
 
                                 ForEach(detail.failedSessions) { session in
                                     providerSessionRow(
@@ -801,7 +801,7 @@
                             }
                         }
                     } else {
-                        Text("Loading provider detail…")
+                        Text("Loading provider detail...")
                             .font(NexusMacTheme.bodyFont(14))
                             .foregroundStyle(NexusMacTheme.mutedText)
                             .padding(20)
@@ -832,7 +832,7 @@
                     VStack(alignment: .leading, spacing: 2) {
                         Text(summary.session.providerID.displayName)
                             .font(NexusMacTheme.bodyFont(17).weight(.semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(NexusMacTheme.textPrimary)
 
                         if let context {
                             Text(sessionSubtitle(for: context, surface: surface))
@@ -875,7 +875,7 @@
                     } label: {
                         Image(systemName: "ellipsis.circle")
                             .font(.title3)
-                            .foregroundStyle(.white.opacity(0.86))
+                            .foregroundStyle(NexusMacTheme.textPrimary.opacity(0.86))
                     }
                     .menuStyle(.borderlessButton)
                     .buttonStyle(.plain)
@@ -919,7 +919,7 @@
                     HStack {
                         Text(card.provider.displayName)
                             .font(NexusMacTheme.bodyFont(16).weight(.semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(NexusMacTheme.textPrimary)
                         Spacer()
                         NexusStatusPill(
                             text: card.health.state.rawValue.replacingOccurrences(of: "Checked", with: " checked"),
@@ -928,7 +928,7 @@
 
                     Text(card.defaultSession.summary)
                         .font(NexusMacTheme.bodyFont(14))
-                        .foregroundStyle(.white.opacity(0.92))
+                        .foregroundStyle(NexusMacTheme.textPrimary.opacity(0.92))
 
                     if let namedSessionSummary = card.namedSessionSummary {
                         Text(namedSessionSummary)
@@ -982,7 +982,7 @@
                     VStack(alignment: .leading, spacing: 6) {
                         Text(title)
                             .font(NexusMacTheme.displayFont(20, relativeTo: .title3))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(NexusMacTheme.textPrimary)
                         Text(summary)
                             .font(NexusMacTheme.bodyFont(13))
                             .foregroundStyle(NexusMacTheme.mutedText)
@@ -1009,7 +1009,7 @@
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(diagnostic.message)
                                     .font(NexusMacTheme.bodyFont(12, relativeTo: .caption))
-                                    .foregroundStyle(.white.opacity(0.9))
+                                    .foregroundStyle(NexusMacTheme.textPrimary.opacity(0.9))
                                 Text(diagnostic.code)
                                     .font(NexusMacTheme.monoFont(11, relativeTo: .caption2))
                                     .foregroundStyle(NexusMacTheme.mutedText)
@@ -1042,7 +1042,7 @@
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title)
                         .font(NexusMacTheme.bodyFont(14).weight(.semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(NexusMacTheme.textPrimary)
                         .lineLimit(1)
                     Text(subtitle)
                         .font(NexusMacTheme.bodyFont(11, relativeTo: .caption))
@@ -1054,7 +1054,7 @@
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(NexusMacTheme.overlay(0.04), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
 
         private func providerHealthColor(_ state: ProviderHealthSummary.State) -> Color {
@@ -1066,7 +1066,7 @@
             case .misconfigured:
                 NexusMacTheme.coral
             case .notChecked:
-                Color.white.opacity(0.65)
+                NexusMacTheme.mutedText
             }
         }
 
@@ -1176,7 +1176,7 @@
                     )
                     Text(session.failureMessage ?? session.state.rawValue.capitalized)
                         .font(NexusMacTheme.bodyFont(14))
-                        .foregroundStyle(.white.opacity(0.9))
+                        .foregroundStyle(NexusMacTheme.textPrimary.opacity(0.9))
                 }
 
                 Spacer()
@@ -1675,7 +1675,7 @@
                             }
                             Text(
                                 appModel.isLoadingOlderFocusedStructuredSessionHistory
-                                    ? "Loading older activity…" : "Load older activity")
+                                    ? "Loading older activity..." : "Load older activity")
                         }
                         .frame(maxWidth: .infinity)
                     }
@@ -1709,7 +1709,7 @@
                     Spacer(minLength: 48)
                     Text(conversation.text)
                         .font(NexusMacTheme.bodyFont(13))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(NexusMacTheme.textPrimary)
                         .structuredSessionFeedTextSelection()
                         .multilineTextAlignment(.trailing)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1734,7 +1734,7 @@
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
-                .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .background(NexusMacTheme.overlay(0.1), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .frame(maxWidth: 520, alignment: .leading)
             case .command:
                 VStack(alignment: .leading, spacing: 8) {
@@ -1743,7 +1743,7 @@
                         .foregroundStyle(accent)
                     Text(conversation.text)
                         .font(NexusMacTheme.monoFont(11, relativeTo: .callout))
-                        .foregroundStyle(.white.opacity(0.92))
+                        .foregroundStyle(NexusMacTheme.textPrimary.opacity(0.92))
                         .structuredSessionFeedTextSelection()
                         .fixedSize(horizontal: false, vertical: true)
                     if let detailText = row.detailText {
@@ -1755,7 +1755,7 @@
                     }
                 }
                 .padding(12)
-                .background(Color.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(NexusMacTheme.overlay(0.09), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .frame(maxWidth: 620, alignment: .leading)
             case .error:
                 VStack(alignment: .leading, spacing: 5) {
@@ -1764,7 +1764,7 @@
                         .foregroundStyle(accent)
                     Text(conversation.text)
                         .font(NexusMacTheme.bodyFont(13))
-                        .foregroundStyle(.white.opacity(0.94))
+                        .foregroundStyle(NexusMacTheme.textPrimary.opacity(0.94))
                         .structuredSessionFeedTextSelection()
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -1780,7 +1780,7 @@
                                 .foregroundStyle(NexusMacTheme.mutedText)
                             Text(verbatim: conversation.text)
                                 .font(NexusMacTheme.bodyFont(13))
-                                .foregroundStyle(.white.opacity(0.92))
+                                .foregroundStyle(NexusMacTheme.textPrimary.opacity(0.92))
                                 .structuredSessionFeedTextSelection()
                                 .fixedSize(horizontal: false, vertical: true)
                             if let detailText = row.detailText {
@@ -1793,7 +1793,7 @@
                         }
                         .padding(12)
                         .background(
-                            Color.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            NexusMacTheme.overlay(0.09), in: RoundedRectangle(cornerRadius: 14, style: .continuous)
                         )
                         .frame(maxWidth: 620, alignment: .leading)
                     } else {
@@ -1802,7 +1802,7 @@
                             .foregroundStyle(NexusMacTheme.mutedText)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
-                            .background(Color.white.opacity(0.05), in: Capsule())
+                            .background(NexusMacTheme.overlay(0.05), in: Capsule())
                             .frame(maxWidth: .infinity, alignment: .center)
                     }
                 }
@@ -1907,7 +1907,7 @@
                     if showsCollapsedPreview {
                         Text(verbatim: text)
                             .font(font)
-                            .foregroundStyle(.white.opacity(0.84))
+                            .foregroundStyle(NexusMacTheme.textPrimary.opacity(0.84))
                             .structuredSessionFeedTextSelection()
                             .frame(
                                 height: structuredSessionFeedCollapsedDetailViewportHeight,
@@ -1917,7 +1917,7 @@
                     } else {
                         Text(verbatim: text)
                             .font(font)
-                            .foregroundStyle(.white.opacity(0.84))
+                            .foregroundStyle(NexusMacTheme.textPrimary.opacity(0.84))
                             .structuredSessionFeedTextSelection()
                     }
                 }
@@ -1950,7 +1950,7 @@
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Color.white.opacity(0.05), in: Capsule())
+            .background(NexusMacTheme.overlay(0.05), in: Capsule())
             .frame(maxWidth: .infinity, alignment: .center)
         }
 
@@ -1965,11 +1965,11 @@
 
                 Text(request.title)
                     .font(NexusMacTheme.bodyFont(14).weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(NexusMacTheme.textPrimary)
 
                 Text(request.text)
                     .font(NexusMacTheme.bodyFont(13))
-                    .foregroundStyle(.white.opacity(0.92))
+                    .foregroundStyle(NexusMacTheme.textPrimary.opacity(0.92))
                     .structuredSessionFeedTextSelection()
                     .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -2008,7 +2008,7 @@
                 if let title = extensionUI.title, title.isEmpty == false {
                     Text(title)
                         .font(NexusMacTheme.bodyFont(14).weight(.semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(NexusMacTheme.textPrimary)
                 }
 
                 if extensionUI.statuses.isEmpty == false {
@@ -2020,10 +2020,10 @@
                         ForEach(extensionUI.statuses) { status in
                             Text(status.text)
                                 .font(NexusMacTheme.bodyFont(12))
-                                .foregroundStyle(.white.opacity(0.92))
+                                .foregroundStyle(NexusMacTheme.textPrimary.opacity(0.92))
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
-                                .background(Color.white.opacity(0.05), in: Capsule())
+                                .background(NexusMacTheme.overlay(0.05), in: Capsule())
                         }
                     }
                 }
@@ -2041,13 +2041,13 @@
                                     .foregroundStyle(structuredSessionExtensionNotificationColor(notification.kind))
                                 Text(notification.message)
                                     .font(NexusMacTheme.bodyFont(12))
-                                    .foregroundStyle(.white.opacity(0.92))
+                                    .foregroundStyle(NexusMacTheme.textPrimary.opacity(0.92))
                                     .structuredSessionFeedTextSelection()
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(10)
                             .background(
-                                Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                NexusMacTheme.overlay(0.04), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
                     }
                 }
@@ -2071,7 +2071,7 @@
         private func structuredSessionActivityColor(for emphasis: StructuredSessionActivityEmphasis) -> Color {
             switch emphasis {
             case .neutral:
-                Color.white.opacity(0.55)
+                NexusMacTheme.overlay(0.55)
             case .accent:
                 NexusMacTheme.gold
             case .critical:
@@ -2341,7 +2341,7 @@
                         }
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
-                        .background(Color.white.opacity(0.08), in: Capsule())
+                        .background(NexusMacTheme.overlay(0.08), in: Capsule())
                         .overlay {
                             Capsule()
                                 .stroke(NexusMacTheme.softLine, lineWidth: 1)
@@ -2353,7 +2353,7 @@
                 }
             }
             .padding(14)
-            .background(Color.white.opacity(0.02))
+            .background(NexusMacTheme.overlay(0.02))
             .task(id: chrome.session.id) {
                 draftState = StructuredSessionComposerDraftState()
                 draftState.observe(editorText: chrome.extensionUI?.editorText)
@@ -2383,7 +2383,7 @@
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(command.displayText)
                                         .font(NexusMacTheme.monoFont(12, relativeTo: .callout))
-                                        .foregroundStyle(.white)
+                                        .foregroundStyle(NexusMacTheme.textPrimary)
                                     Text(command.summary)
                                         .font(NexusMacTheme.bodyFont(11, relativeTo: .caption))
                                         .foregroundStyle(NexusMacTheme.mutedText)
@@ -2398,7 +2398,7 @@
                         .buttonStyle(.plain)
                         .background(
                             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(Color.white.opacity(0.03))
+                                .fill(NexusMacTheme.overlay(0.03))
                         )
                         .overlay {
                             RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -2430,14 +2430,14 @@
                         ForEach(Array(widget.lines.enumerated()), id: \.offset) { _, line in
                             Text(line)
                                 .font(NexusMacTheme.bodyFont(12))
-                                .foregroundStyle(.white.opacity(0.92))
+                                .foregroundStyle(NexusMacTheme.textPrimary.opacity(0.92))
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .background(NexusMacTheme.overlay(0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
             }
         }
@@ -2462,7 +2462,7 @@
             .foregroundStyle(NexusMacTheme.mutedText)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(NexusMacTheme.overlay(0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .stroke(NexusMacTheme.softLine, lineWidth: 1)
@@ -2776,12 +2776,12 @@
 
                 Text(dialog.title)
                     .font(NexusMacTheme.bodyFont(14).weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(NexusMacTheme.textPrimary)
 
                 if let message = dialog.message, message.isEmpty == false {
                     Text(message)
                         .font(NexusMacTheme.bodyFont(13))
-                        .foregroundStyle(.white.opacity(0.92))
+                        .foregroundStyle(NexusMacTheme.textPrimary.opacity(0.92))
                         .textSelection(.enabled)
                 }
 
@@ -2840,7 +2840,7 @@
                         .frame(minHeight: 140)
                         .padding(8)
                         .background(
-                            Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            NexusMacTheme.overlay(0.05), in: RoundedRectangle(cornerRadius: 14, style: .continuous)
                         )
                         .overlay {
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
