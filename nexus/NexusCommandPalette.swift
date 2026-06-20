@@ -27,6 +27,22 @@ extension Notification.Name {
     static let nexusNewLocalWorkspace = Notification.Name("nexus.newLocalWorkspace")
     static let nexusNewRemoteWorkspace = Notification.Name("nexus.newRemoteWorkspace")
     static let nexusNewWorkspaceGroup = Notification.Name("nexus.newWorkspaceGroup")
-    static let nexusShowHosts = Notification.Name("nexus.showHosts")
-    static let nexusShowRemoteAccess = Notification.Name("nexus.showRemoteAccess")
+    static let nexusTakeController = Notification.Name("nexus.takeController")
+}
+
+/// Published by `ContentView` via `.focusedValue` so the `Session` menu (`nexusApp.swift`)
+/// can enable "Take Controller" only when a Paired Device currently holds Controller for
+/// the focused Session, without the App scene needing direct access to `NexusAppModel`.
+/// Must stay a plain `Equatable` value (not a closure-bearing struct): SwiftUI can't diff
+/// non-Equatable focused values, so every `ContentView` render would republish a
+/// "changed" value and re-trigger the App's Scene body forever.
+private struct NexusSessionControllerAvailabilityKey: FocusedValueKey {
+    typealias Value = Bool
+}
+
+extension FocusedValues {
+    var nexusSessionControllerIsTakeable: Bool? {
+        get { self[NexusSessionControllerAvailabilityKey.self] }
+        set { self[NexusSessionControllerAvailabilityKey.self] = newValue }
+    }
 }

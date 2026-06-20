@@ -2,9 +2,8 @@
     import NexusDomain
     import SwiftUI
 
-    struct HostManagementSheet: View {
+    struct HostManagementView: View {
         @Bindable var appModel: NexusAppModel
-        @Binding var isPresented: Bool
 
         @State private var selection: UUID?
         @State private var editorMode: HostEditorMode?
@@ -16,20 +15,11 @@
                 NexusBackdrop()
 
                 VStack(alignment: .leading, spacing: 18) {
-                    HStack {
-                        NexusSectionHeader(
-                            eyebrow: "Remote catalog",
-                            title: "Hosts",
-                            detail: "Create, edit, validate, and inspect the remote Hosts that power Nexus workspaces."
-                        )
-
-                        Spacer()
-
-                        Button("Done") {
-                            isPresented = false
-                        }
-                        .buttonStyle(NexusSecondaryButtonStyle())
-                    }
+                    NexusSectionHeader(
+                        eyebrow: "Remote catalog",
+                        title: "Hosts",
+                        detail: "Create, edit, validate, and inspect the remote Hosts that power Nexus workspaces."
+                    )
 
                     HSplitView {
                         VStack(alignment: .leading, spacing: 12) {
@@ -100,9 +90,8 @@
                     }
                 }
                 .padding(24)
-                .frame(minWidth: 820, minHeight: 480)
+                .frame(minWidth: 760, minHeight: 480)
                 .nexusPanel(tint: NexusMacTheme.teal, radius: 30)
-                .padding(28)
             }
             .task {
                 if selection == nil {

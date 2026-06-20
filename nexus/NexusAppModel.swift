@@ -669,6 +669,22 @@
             try await applyFocusedSessionActionResponse(screen, ifCurrentScreenMatches: baselineScreen)
         }
 
+        /// Reclaims Mac Controller for the focused Session without sending any input,
+        /// for the menu-driven "Take Controller" action. Mirrors the side effect that
+        /// already happens implicitly whenever the Mac sends input or resizes the
+        /// terminal (`SessionControllerRegistry.claimMacControl`), at the Session's
+        /// current size so nothing visibly reflows.
+        func reclaimFocusedSessionController() async throws {
+            guard let baselineScreen = focusedSessionScreen else {
+                return
+            }
+
+            try await resizeFocusedSession(
+                columns: baselineScreen.terminalColumns,
+                rows: baselineScreen.terminalRows
+            )
+        }
+
         func resizeFocusedSession(columns: Int, rows: Int) async throws {
             guard let baselineScreen = focusedSessionScreen else {
                 return

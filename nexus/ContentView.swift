@@ -6,14 +6,15 @@
 
     struct ContentView: View {
         @Bindable var appModel: NexusAppModel
+        let settingsTabSelection: NexusSettingsTabSelection
+
+        @Environment(\.openSettings) private var openSettings
 
         @State private var selection: SidebarSelection?
         @State private var isShowingCreateWorkspaceGroupSheet = false
         @State private var isShowingQuickSwitchSheet = false
         @State private var isShowingCreateRemoteWorkspaceSheet = false
         @State private var newWorkspaceGroupName = ""
-        @State private var isShowingHostsSheet = false
-        @State private var isShowingRemoteAccessSheet = false
         @State private var quickSwitchQuery = ""
         @State private var quickSwitchResults: [NavigationItem] = []
         @State private var quickSwitchSearchCoordinator = QuickSwitchSearchCoordinator<[NavigationItem]>()
@@ -92,12 +93,6 @@
             .sheet(isPresented: $isShowingCreateWorkspaceGroupSheet) {
                 createWorkspaceGroupSheet
             }
-            .sheet(isPresented: $isShowingHostsSheet) {
-                HostManagementSheet(appModel: appModel, isPresented: $isShowingHostsSheet)
-            }
-            .sheet(isPresented: $isShowingRemoteAccessSheet) {
-                RemoteAccessManagementSheet(appModel: appModel, isPresented: $isShowingRemoteAccessSheet)
-            }
             .sheet(isPresented: $isShowingQuickSwitchSheet) {
                 quickSwitchSheet
             }
@@ -132,11 +127,31 @@
                 newWorkspaceGroupName = ""
                 isShowingCreateWorkspaceGroupSheet = true
             }
-            .onReceive(NotificationCenter.default.publisher(for: .nexusShowHosts)) { _ in
-                isShowingHostsSheet = true
+
+            .onReceive(NotificationCenter.default.publisher(for: .nexusTakeController)) { _ in
+                takeFocusedSessionController()
             }
-            .onReceive(NotificationCenter.default.publisher(for: .nexusShowRemoteAccess)) { _ in
-                isShowingRemoteAccessSheet = true
+            .focusedValue(\.nexusSessionControllerIsTakeable, isFocusedSessionControllerTakeable)
+        }
+
+        private var isFocusedSessionControllerTakeable: Bool {
+            guard case .pairedDevice = appModel.focusedSessionScreen?.controller else {
+                return false
+            }
+            return true
+        }
+
+        private func takeFocusedSessionController() {
+            guard isFocusedSessionControllerTakeable else {
+                return
+            }
+
+            Task {
+                do {
+                    try await appModel.reclaimFocusedSessionController()
+                } catch {
+                    presentedError = PresentedError(message: error.localizedDescription)
+                }
             }
         }
 
@@ -253,10 +268,12 @@
 
                     Menu {
                         Button("Hosts") {
-                            isShowingHostsSheet = true
+                            settingsTabSelection.tab = .hosts
+                            openSettings()
                         }
                         Button("Remote Access") {
-                            isShowingRemoteAccessSheet = true
+                            settingsTabSelection.tab = .remoteAccess
+                            openSettings()
                         }
                     } label: {
                         Image(systemName: "ellipsis.circle")
@@ -1255,14 +1272,20 @@
                     title: "Hosts",
                     subtitle: "Review saved remote Host profiles.",
                     systemImage: "network",
-                    perform: { isShowingHostsSheet = true }
+                    perform: {
+                        settingsTabSelection.tab = .hosts
+                        openSettings()
+                    }
                 ),
                 NexusCommandPaletteAction(
                     id: "show-remote-access",
                     title: "Remote Access",
                     subtitle: "Manage Paired Devices and pairing.",
                     systemImage: "point.3.connected.trianglepath.dotted",
-                    perform: { isShowingRemoteAccessSheet = true }
+                    perform: {
+                        settingsTabSelection.tab = .remoteAccess
+                        openSettings()
+                    }
                 ),
             ]
         }
@@ -3319,7 +3342,7 @@
 
     #Preview {
         if let appModel = try? NexusAppModel.live() {
-            ContentView(appModel: appModel)
+            ContentView(appModel: appModel, settingsTabSelection: NexusSettingsTabSelection())
         }
     }
 #endif

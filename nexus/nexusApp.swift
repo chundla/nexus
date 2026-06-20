@@ -10,6 +10,9 @@ import SwiftUI
 @main
 struct nexusApp: App {
     #if os(macOS)
+        @FocusedValue(\.nexusSessionControllerIsTakeable) private var isSessionControllerTakeable
+        @Environment(\.openSettings) private var openSettings
+
         @State private var appModel = {
             do {
                 return try NexusAppModel.bootstrap()
@@ -17,6 +20,7 @@ struct nexusApp: App {
                 fatalError("Could not bootstrap Nexus background service: \(error)")
             }
         }()
+        @State private var settingsTabSelection = NexusSettingsTabSelection()
     #else
         @State private var pairingModel = RemoteClientPairingModel.bootstrap()
     #endif
@@ -24,7 +28,7 @@ struct nexusApp: App {
     var body: some Scene {
         WindowGroup {
             #if os(macOS)
-                ContentView(appModel: appModel)
+                ContentView(appModel: appModel, settingsTabSelection: settingsTabSelection)
                     .frame(minWidth: 1100, minHeight: 760)
             #else
                 RemoteClientHomeView(model: pairingModel)
@@ -61,13 +65,28 @@ struct nexusApp: App {
 
                 CommandMenu("Remote") {
                     Button("Hosts\u{2026}") {
-                        NotificationCenter.default.post(name: .nexusShowHosts, object: nil)
+                        settingsTabSelection.tab = .hosts
+                        openSettings()
                     }
 
                     Button("Remote Access\u{2026}") {
-                        NotificationCenter.default.post(name: .nexusShowRemoteAccess, object: nil)
+                        settingsTabSelection.tab = .remoteAccess
+                        openSettings()
                     }
                 }
+
+                CommandMenu("Session") {
+                    Button("Take Controller") {
+                        NotificationCenter.default.post(name: .nexusTakeController, object: nil)
+                    }
+                    .disabled(isSessionControllerTakeable != true)
+                }
+            }
+        #endif
+
+        #if os(macOS)
+            Settings {
+                NexusSettingsRootView(appModel: appModel, tabSelection: settingsTabSelection)
             }
         #endif
     }

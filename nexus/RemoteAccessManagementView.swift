@@ -1,9 +1,8 @@
 #if os(macOS)
     import SwiftUI
 
-    struct RemoteAccessManagementSheet: View {
+    struct RemoteAccessManagementView: View {
         @Bindable var appModel: NexusAppModel
-        @Binding var isPresented: Bool
 
         @State private var pendingRevocation: PairedDevice?
         @State private var presentedError: RemoteAccessPresentedError?
@@ -13,21 +12,12 @@
                 NexusBackdrop()
 
                 VStack(alignment: .leading, spacing: 18) {
-                    HStack {
-                        NexusSectionHeader(
-                            eyebrow: "Remote client lane",
-                            title: "Remote Access",
-                            detail:
-                                "Enable Remote Access while Nexus is running, start first-time Pairing, and manage trusted Paired Devices."
-                        )
-
-                        Spacer()
-
-                        Button("Done") {
-                            isPresented = false
-                        }
-                        .buttonStyle(NexusSecondaryButtonStyle())
-                    }
+                    NexusSectionHeader(
+                        eyebrow: "Remote client lane",
+                        title: "Remote Access",
+                        detail:
+                            "Enable Remote Access while Nexus is running, start first-time Pairing, and manage trusted Paired Devices."
+                    )
 
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
@@ -147,9 +137,8 @@
                     .nexusPanel(tint: NexusMacTheme.coral, radius: 22)
                 }
                 .padding(24)
-                .frame(minWidth: 720, minHeight: 560)
+                .frame(minWidth: 680, minHeight: 560)
                 .nexusPanel(tint: NexusMacTheme.teal, radius: 30)
-                .padding(28)
             }
             .task {
                 do {
