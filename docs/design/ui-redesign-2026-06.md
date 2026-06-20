@@ -110,39 +110,65 @@ original pitch.
 - No provider-identity accent colors exist anywhere yet. Card/header tinting is
   entirely health-driven today.
 
-### Slice 5 — status tone consolidation
+### Slice 5 — status tone consolidation ✅
 
 - [x] Add one shared `NexusStatusTone` model (healthy/warning/critical/blocked/unknown)
       with color + SF Symbol, used by Provider Health, Host Validation, Workspace
-      Availability, and Session State.
-- [x] Replace the three drifting color/symbol functions in `ContentView.swift` with
-      tone-based mappings; delete the dead `NexusMacTheme.statusColor(String)` helper.
-- [x] Verify lint + a focused build.
+      Availability, and Session State. Lives in `nexus/NexusStatusTone.swift`, with
+      platform-specific `color` extensions for macOS and iOS.
+- [x] Replace the three drifting color/symbol functions in `ContentView.swift`
+      (`providerHealthColor`, `sessionStateColor`, `hostValidationStateColor`/`Symbol`,
+      `workspaceAvailabilityStateColor`/`Symbol`) with tone-based mappings; delete the
+      dead `NexusMacTheme.statusColor(String)` helper.
+- [x] Apply the same consolidation to iOS: removed `RemoteClientHomeView.swift`'s
+      duplicate `providerHealthColor`/`remoteSessionStateColor` helpers, which used the
+      same colors as macOS's theme tokens (parity was already correct there — the real
+      drift was macOS's raw `.green`/`.orange`/`.red`/`.secondary` in Host Validation and
+      Workspace Availability vs. theme tokens everywhere else).
+- [x] Verified: macOS + iOS Simulator builds both succeed, `./scripts/lint-swift.sh`
+      passes. Commit `ea951f6`.
 
-### Slice 6 — provider identity accents
+### Slice 6 — provider identity accents ✅
 
-- [x] Add per-provider accent colors (Claude, Codex, Pi, IBM Bob) to
-      `MacDesignSystem.swift` and `IOSDesignSystem.swift`, distinct from the existing
-      semantic gold/teal/coral tones.
-- [x] Apply provider accent to: `ProviderCard` icon glyph, Provider Detail header icon,
-      Focused Session header provider glyph. Health/state color stays on status pills —
-      provider accent is identity-only, never a substitute for health signal.
-- [x] Verify lint + a focused build.
+- [x] Added `claudeAccent`/`codexAccent`/`piAccent`/`ibmBobAccent` to
+      `MacDesignSystem.swift` and `IOSDesignSystem.swift`, plus a
+      `providerAccent(_ id: ProviderID)` accessor on each theme, distinct from the
+      existing semantic gold/teal/coral tones.
+- [x] Applied provider accent to: `ProviderCard` icon glyph (mac + iOS), Provider Detail
+      header icon (mac), Focused Session header provider name text color (mac + iOS).
+      Health/state color stays on status pills and panel tints — provider accent is
+      identity-only, never a substitute for health signal.
+- [x] Verified in the iOS Simulator (Pi provider card and "Pi" agent row render in the
+      violet identity accent against the existing fixture data) and in the running
+      macOS app against real local data (Codex blue, Claude terracotta, IBM Bob steel
+      blue, Pi violet all visibly distinct in the workspace overview). Commit `df8a697`.
 
-### Slice 7 — command palette (⌘K)
+### Slice 7 — command palette (⌘K) ✅
 
-- [x] Promote the existing Quick Switch sheet into a real Command Palette: keep
-      workspace-first search, add a ranked Actions section (New Workspace, New Named
-      Session, Take Controller, Toggle Sidebar Mode, Hosts, Remote Access).
-- [x] Bind `⌘K` globally (menu command + keyboard shortcut), not just the sidebar
-      search button.
-- [x] Verify lint + a focused build.
+- [x] Promoted the existing Quick Switch sheet (`nexus/NexusCommandPalette.swift` +
+      `ContentView.swift`) into a Command Palette: kept workspace-first search, added a
+      ranked Actions section (New Local Workspace, New Remote Workspace, New Workspace
+      Group, Hosts, Remote Access) filtered by the same query text as navigation
+      results.
+- [x] Bound `⌘K` to the palette via the macOS "Go" menu (see Slice 8) rather than
+      duplicating the shortcut on the sidebar search button, to avoid two competing
+      claims on the same shortcut.
+- [x] Verified in the running macOS app: opening via Go menu, typing "remote" correctly
+      narrows the Actions section to New Remote Workspace / Hosts / Remote Access.
 
-### Slice 8 — menu bar discoverability
+### Slice 8 — menu bar discoverability ✅
 
-- [x] Add `CommandMenu`s in `nexusApp.swift` mirroring the palette's actions, so every
-      power action has a discoverable menu home, per HIG.
-- [x] Verify lint + a focused build.
+- [x] Added `.commands` in `nexusApp.swift`: `File` gets New Local Workspace (⌘N), New
+      Remote Workspace (⇧⌘N), New Workspace Group; a new `Go` menu gets Command
+      Palette… (⌘K); a new `Remote` menu gets Hosts… and Remote Access…. Menu items post
+      `NotificationCenter` notifications (`nexus/NexusCommandPalette.swift`) that
+      `ContentView` observes via `.onReceive`, since the App scene doesn't own
+      `ContentView`'s local sheet/selection state.
+- [x] Verified in the running macOS app: Go and Remote menus appear with the expected
+      items and shortcuts; Go > Command Palette… opens the palette.
+- Deferred: Session-specific menu items (e.g. "Take Controller") were not added in this
+  pass — they need live focused-session context that the App-scene notification pattern
+  doesn't carry cleanly yet. Worth a follow-up once there's a concrete need.
 
 ### Explicitly deferred (not in this pass)
 
@@ -151,3 +177,4 @@ original pitch.
   style pass. Tracked here so it isn't lost, not attempted in Phase 2.
 - Any 3-pane / collapsing-pane navigation change — not applicable; see reality check
   above.
+- Session-specific menu commands (see Slice 8 note above).
