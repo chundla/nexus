@@ -1851,7 +1851,7 @@
                         }
                         .frame(minHeight: horizontalSizeClass == .regular ? 520 : 380)
                         .background(
-                            Color.black.opacity(0.92), in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            NexusIOSTheme.terminalSurface, in: RoundedRectangle(cornerRadius: 20, style: .continuous)
                         )
                         .overlay(alignment: .topLeading) {
                             Text("Live terminal")
@@ -2021,7 +2021,7 @@
             .frame(maxHeight: 220)
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color.black.opacity(0.86))
+                    .fill(NexusIOSTheme.terminalSurface)
             )
             .overlay {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -2602,7 +2602,7 @@
                             conversation,
                             rowID: row.id,
                             font: NexusIOSTheme.bodyFont(15),
-                            color: .white.opacity(0.94)
+                            color: NexusIOSTheme.terminalText.opacity(0.94)
                         )
                     }
                     .padding(.horizontal, 14)
@@ -2840,7 +2840,7 @@
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(10)
-            .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(NexusIOSTheme.terminalOverlay, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
 
         private func structuredSessionApprovalRequestView(
@@ -3150,8 +3150,8 @@
         @ViewBuilder
         private func terminalSegmentView(_ segment: RemoteTerminalDisplaySegment) -> some View {
             let colors = resolvedTerminalColors(for: segment.style)
-            let foreground = segment.isCursor ? Color.black : colors.foreground
-            let background = segment.isCursor ? Color.white : colors.background
+            let foreground = segment.isCursor ? NexusIOSTheme.backgroundTop : colors.foreground
+            let background = segment.isCursor ? NexusIOSTheme.terminalText : colors.background
             let text = Text(segment.renderedText)
                 .font(.system(size: 17, design: .monospaced))
                 .fontWeight(segment.style.isBold ? .bold : .regular)
@@ -3173,8 +3173,8 @@
         }
 
         private func resolvedTerminalColors(for style: TerminalStyle) -> (foreground: Color, background: Color) {
-            let defaultForeground = Color.white
-            let defaultBackground = Color.black
+            let defaultForeground = NexusIOSTheme.terminalText
+            let defaultBackground = NexusIOSTheme.terminalSurface
             let foreground = color(for: style.foregroundColor) ?? defaultForeground
             let background = color(for: style.backgroundColor)
 

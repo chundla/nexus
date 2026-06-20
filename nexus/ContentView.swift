@@ -1729,7 +1729,7 @@
                         conversation,
                         rowID: row.id,
                         font: NexusMacTheme.bodyFont(13),
-                        color: .white.opacity(0.94)
+                        color: NexusMacTheme.terminalText.opacity(0.94)
                     )
                 }
                 .padding(.horizontal, 12)
@@ -1934,7 +1934,7 @@
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(10)
-            .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .background(NexusMacTheme.terminalOverlay, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
 
         private func structuredSessionThinkingIndicatorView(_ indicator: StructuredSessionThinkingIndicator)
@@ -2170,8 +2170,8 @@
         }
 
         private func resolvedTerminalColors(for style: TerminalStyle) -> (foreground: Color, background: Color) {
-            let defaultForeground = Color.white
-            let defaultBackground = Color.black
+            let defaultForeground = NexusMacTheme.terminalText
+            let defaultBackground = NexusMacTheme.terminalSurface
             let foreground = color(for: style.foregroundColor) ?? defaultForeground
             let background = color(for: style.backgroundColor)
 
@@ -2412,7 +2412,7 @@
             .frame(maxHeight: 220)
             .background(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color.black.opacity(0.88))
+                    .fill(NexusMacTheme.terminalSurface)
             )
             .overlay {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)

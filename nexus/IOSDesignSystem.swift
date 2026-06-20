@@ -22,6 +22,11 @@
         static let subtleText = dynamicColor(
             light: .rgb(0.255, 0.294, 0.369, alpha: 0.56), dark: .rgb(0.871, 0.898, 0.945, alpha: 0.52))
         static let textPrimary = Color.primary
+        static let terminalText = dynamicColor(light: .rgb(0.968, 0.975, 0.992), dark: .rgb(0.968, 0.975, 0.992))
+        static let terminalSurface = dynamicColor(
+            light: .rgb(0.071, 0.086, 0.122, alpha: 0.86), dark: .rgb(0.020, 0.024, 0.035, alpha: 0.92))
+        static let terminalOverlay = dynamicColor(
+            light: .rgb(0.071, 0.086, 0.122, alpha: 0.22), dark: .rgb(0.000, 0.000, 0.000, alpha: 0.30))
 
         static let backdropGradient = LinearGradient(
             colors: [backgroundTop, backgroundBottom],
