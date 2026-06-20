@@ -104,3 +104,50 @@ enum NexusStatusTone {
         }
     }
 #endif
+
+#if os(iOS)
+    extension NexusStatusTone {
+        var color: Color {
+            switch self {
+            case .healthy:
+                NexusIOSTheme.teal
+            case .warning:
+                NexusIOSTheme.gold
+            case .critical:
+                NexusIOSTheme.coral
+            case .blocked:
+                NexusIOSTheme.subtleText
+            case .unknown:
+                NexusIOSTheme.mutedText
+            }
+        }
+    }
+
+    extension ProviderHealthSummary.State {
+        var tone: NexusStatusTone {
+            switch self {
+            case .available:
+                .healthy
+            case .unavailable, .blocked:
+                .warning
+            case .misconfigured:
+                .critical
+            case .notChecked:
+                .unknown
+            }
+        }
+    }
+
+    extension Session.State {
+        var tone: NexusStatusTone {
+            switch self {
+            case .ready:
+                .healthy
+            case .interrupted:
+                .warning
+            case .exited, .failed:
+                .critical
+            }
+        }
+    }
+#endif

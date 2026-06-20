@@ -1,4 +1,5 @@
 #if os(iOS)
+    import NexusDomain
     import SwiftUI
     import UIKit
 
@@ -27,6 +28,26 @@
             light: .rgb(0.071, 0.086, 0.122, alpha: 0.86), dark: .rgb(0.020, 0.024, 0.035, alpha: 0.92))
         static let terminalOverlay = dynamicColor(
             light: .rgb(0.071, 0.086, 0.122, alpha: 0.22), dark: .rgb(0.000, 0.000, 0.000, alpha: 0.30))
+
+        /// Identity-only accents for pattern-matching "which agent is this" at a glance.
+        /// Never substitute for health/state color on status pills.
+        static let claudeAccent = dynamicColor(light: .rgb(0.745, 0.404, 0.165), dark: .rgb(0.929, 0.624, 0.345))
+        static let codexAccent = dynamicColor(light: .rgb(0.137, 0.502, 0.694), dark: .rgb(0.439, 0.769, 0.937))
+        static let piAccent = dynamicColor(light: .rgb(0.522, 0.337, 0.831), dark: .rgb(0.706, 0.580, 0.988))
+        static let ibmBobAccent = dynamicColor(light: .rgb(0.286, 0.420, 0.612), dark: .rgb(0.557, 0.690, 0.886))
+
+        static func providerAccent(_ id: ProviderID) -> Color {
+            switch id {
+            case .claude:
+                claudeAccent
+            case .codex:
+                codexAccent
+            case .pi:
+                piAccent
+            case .ibmBob:
+                ibmBobAccent
+            }
+        }
 
         static let backdropGradient = LinearGradient(
             colors: [backgroundTop, backgroundBottom],

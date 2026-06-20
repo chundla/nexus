@@ -977,7 +977,7 @@
         let providerCard: WorkspaceProviderCard
 
         private var accent: Color {
-            providerHealthColor(providerCard.health.state)
+            providerCard.health.state.tone.color
         }
 
         private var subtitle: String {
@@ -998,7 +998,7 @@
                 VStack(alignment: .leading, spacing: 5) {
                     Text(providerCard.provider.displayName)
                         .font(NexusIOSTheme.bodyFont(17, weight: .semibold))
-                        .foregroundStyle(NexusIOSTheme.textPrimary)
+                        .foregroundStyle(NexusIOSTheme.providerAccent(providerCard.provider.id))
                     Text(subtitle)
                         .font(NexusIOSTheme.bodyFont(13))
                         .foregroundStyle(NexusIOSTheme.mutedText)
@@ -1128,7 +1128,7 @@
         }
 
         private var accent: Color {
-            providerHealthColor(detail?.health.state ?? providerCard.health.state)
+            (detail?.health.state ?? providerCard.health.state).tone.color
         }
 
         private var horizontalPadding: CGFloat {
@@ -1219,7 +1219,7 @@
                                 NexusIOSTheme.displayFont(
                                     horizontalSizeClass == .regular ? 32 : 28, relativeTo: .largeTitle)
                             )
-                            .foregroundStyle(NexusIOSTheme.textPrimary)
+                            .foregroundStyle(NexusIOSTheme.providerAccent(providerCard.provider.id))
                         Text(overview.workspace.name)
                             .font(NexusIOSTheme.bodyFont(14, weight: .medium))
                             .foregroundStyle(NexusIOSTheme.mutedText)
@@ -1252,7 +1252,7 @@
                 )
 
                 if let session = defaultSessionSection.session {
-                    RemoteProviderSessionSummaryCard(session: session, accent: remoteSessionStateColor(session.state)) {
+                    RemoteProviderSessionSummaryCard(session: session, accent: session.state.tone.color) {
                         openedSession = session
                     } deleteAction: {
                         if defaultSessionSection.canDeleteSessionRecord {
@@ -1301,7 +1301,7 @@
                 case .sessions(let sessions):
                     ForEach(sessions) { session in
                         RemoteProviderSessionSummaryCard(
-                            session: session, accent: remoteSessionStateColor(session.state)
+                            session: session, accent: session.state.tone.color
                         ) {
                             openedSession = session
                         } deleteAction: {
@@ -1634,7 +1634,7 @@
         }
 
         private var accent: Color {
-            remoteSessionStateColor(currentSession.state)
+            currentSession.state.tone.color
         }
 
         private var horizontalPadding: CGFloat {
@@ -1773,7 +1773,7 @@
                 VStack(spacing: 1) {
                     Text(sessionTitle)
                         .font(NexusIOSTheme.bodyFont(15, weight: .semibold))
-                        .foregroundStyle(NexusIOSTheme.textPrimary)
+                        .foregroundStyle(NexusIOSTheme.providerAccent(currentSession.providerID))
                     Text(sessionSubtitle)
                         .font(NexusIOSTheme.bodyFont(11, relativeTo: .caption))
                         .foregroundStyle(NexusIOSTheme.mutedText)
@@ -3496,30 +3496,6 @@
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .nexusIOSPanel(tint: accent, radius: 18)
-        }
-    }
-
-    private func providerHealthColor(_ state: ProviderHealthSummary.State) -> Color {
-        switch state {
-        case .available:
-            NexusIOSTheme.teal
-        case .unavailable, .blocked:
-            NexusIOSTheme.gold
-        case .misconfigured:
-            NexusIOSTheme.coral
-        case .notChecked:
-            NexusIOSTheme.mutedText
-        }
-    }
-
-    private func remoteSessionStateColor(_ state: Session.State) -> Color {
-        switch state {
-        case .ready:
-            NexusIOSTheme.teal
-        case .interrupted:
-            NexusIOSTheme.gold
-        case .exited, .failed:
-            NexusIOSTheme.coral
         }
     }
 

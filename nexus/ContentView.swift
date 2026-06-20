@@ -633,7 +633,17 @@
                 VStack(alignment: .leading, spacing: 20) {
                     if let detail {
                         VStack(alignment: .leading, spacing: 18) {
-                            HStack(alignment: .top) {
+                            HStack(alignment: .top, spacing: 14) {
+                                Image(
+                                    systemName: detail.prelaunchPrimarySurface == .terminal
+                                        ? "terminal.fill" : "message.fill"
+                                )
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(NexusMacTheme.providerAccent(providerID))
+                                .frame(width: 28, height: 28)
+                                .background(
+                                    NexusMacTheme.providerAccent(providerID).opacity(0.15), in: Circle())
+
                                 NexusSectionHeader(
                                     eyebrow: "Provider briefing",
                                     title: providerID.displayName,
@@ -821,6 +831,8 @@
             let surface = summary.primarySurface
             let stateColor = summary.session.state.tone.color
 
+            let providerAccent = NexusMacTheme.providerAccent(summary.session.providerID)
+
             return VStack(alignment: .leading, spacing: 14) {
                 HStack(spacing: 10) {
                     Circle()
@@ -830,7 +842,7 @@
                     VStack(alignment: .leading, spacing: 2) {
                         Text(summary.session.providerID.displayName)
                             .font(NexusMacTheme.bodyFont(17).weight(.semibold))
-                            .foregroundStyle(NexusMacTheme.textPrimary)
+                            .foregroundStyle(providerAccent)
 
                         if let context {
                             Text(sessionSubtitle(for: context, surface: surface))
@@ -905,13 +917,14 @@
 
         private func providerCard(workspaceID: UUID, card: WorkspaceProviderCard) -> some View {
             let accent = card.health.state.tone.color
+            let identityAccent = NexusMacTheme.providerAccent(card.provider.id)
 
             return HStack(alignment: .top, spacing: 14) {
                 Image(systemName: card.prelaunchPrimarySurface == .terminal ? "terminal.fill" : "message.fill")
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(accent)
+                    .foregroundStyle(identityAccent)
                     .frame(width: 28, height: 28)
-                    .background(accent.opacity(0.15), in: Circle())
+                    .background(identityAccent.opacity(0.15), in: Circle())
 
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
