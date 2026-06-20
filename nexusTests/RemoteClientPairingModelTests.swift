@@ -2604,8 +2604,10 @@ struct RemoteClientPairingModelTests {
         #expect(model.focusedSessionIsStale)
         #expect(model.focusedSessionSurfaceSupport == .supported)
 
-        try await Task.sleep(nanoseconds: 1_100_000_000)
-        await Task.yield()
+        try await waitUntilAsync(timeoutNanoseconds: 5_000_000_000, pollIntervalNanoseconds: 50_000_000) {
+            model.focusedSessionScreen == recoveredViewerScreen && model.focusedSessionIsStale == false
+                && model.focusedSessionIsController == false
+        }
 
         #expect(model.focusedSessionScreen == recoveredViewerScreen)
         #expect(model.focusedSessionIsStale == false)
@@ -6110,5 +6112,24 @@ private final class TestRemoteSessionScreenObservation: SessionScreenObservation
 
     func cancel() async {
         onCancel()
+    }
+}
+
+@MainActor
+private func waitUntilAsync(
+    timeoutNanoseconds: UInt64 = 5_000_000_000,
+    pollIntervalNanoseconds: UInt64 = 50_000_000,
+    until predicate: @escaping @MainActor () async -> Bool
+) async throws {
+    let deadline = ContinuousClock.now.advanced(by: .nanoseconds(Int64(timeoutNanoseconds)))
+
+    while await predicate() == false {
+        guard ContinuousClock.now < deadline else {
+            throw NSError(
+                domain: "RemoteClientPairingModelTests", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for async condition"])
+        }
+
+        try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
     }
 }

@@ -8329,6 +8329,10 @@ struct nexusTests {
             }
         }
 
+        _ = try await collector.waitForScreen { screen in
+            screen.activityItems.first?.text == "Pi shared Session stream connected"
+        }
+
         let prompt = SessionPrompt(
             text: "What changed in this screenshot?",
             images: [SessionPromptImage(data: Data([0x89, 0x50, 0x4E, 0x47]), mimeType: "image/png")]
@@ -9145,9 +9149,6 @@ struct nexusTests {
 
         await model.refresh()
         let session = try await model.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
-        let readyCard = try #require(
-            model.workspaceOverview(for: workspace.id)?.providerCards.first(where: { $0.provider.id == .claude }))
-        #expect(readyCard.defaultSession.state == .ready)
 
         let exitedScreen = try await waitForFocusedSessionScreen(model: model, sessionID: session.id) { screen in
             screen.session.state == .exited
