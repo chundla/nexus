@@ -119,6 +119,25 @@
             .alert(item: $presentedError) { error in
                 Alert(title: Text("Nexus"), message: Text(error.message))
             }
+            .onReceive(NotificationCenter.default.publisher(for: .nexusOpenCommandPalette)) { _ in
+                openCommandPalette()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .nexusNewLocalWorkspace)) { _ in
+                addLocalWorkspace()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .nexusNewRemoteWorkspace)) { _ in
+                isShowingCreateRemoteWorkspaceSheet = true
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .nexusNewWorkspaceGroup)) { _ in
+                newWorkspaceGroupName = ""
+                isShowingCreateWorkspaceGroupSheet = true
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .nexusShowHosts)) { _ in
+                isShowingHostsSheet = true
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .nexusShowRemoteAccess)) { _ in
+                isShowingRemoteAccessSheet = true
+            }
         }
 
         private var sidebarContent: some View {
@@ -143,15 +162,12 @@
                         Spacer()
 
                         Button {
-                            quickSwitchSearchCoordinator.cancel()
-                            quickSwitchQuery = ""
-                            quickSwitchResults = []
-                            isShowingQuickSwitchSheet = true
+                            openCommandPalette()
                         } label: {
                             Image(systemName: "magnifyingglass")
                         }
                         .buttonStyle(NexusSecondaryButtonStyle())
-                        .help("Quick Switch")
+                        .help("Command Palette (⌘K)")
                     }
 
                     Picker("Sidebar Mode", selection: $sidebarMode) {
@@ -388,17 +404,20 @@
         }
 
         private var quickSwitchSheet: some View {
-            ZStack {
+            let trimmedQuery = quickSwitchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+            let matchingActions = commandPaletteActions.filter { $0.matches(trimmedQuery) }
+
+            return ZStack {
                 NexusBackdrop()
 
                 VStack(alignment: .leading, spacing: 18) {
                     NexusSectionHeader(
-                        eyebrow: "Quick switch",
-                        title: "Jump to a workspace or session.",
+                        eyebrow: "Command palette",
+                        title: "Jump anywhere, or run an action.",
                         detail: "Search when you need it. Otherwise, your workspaces are already sorted by recency."
                     )
 
-                    TextField("Search Workspaces, Providers, and Sessions", text: $quickSwitchQuery)
+                    TextField("Search Workspaces, Providers, Sessions, and Actions", text: $quickSwitchQuery)
                         .textFieldStyle(.roundedBorder)
                         .onChange(of: quickSwitchQuery) { _, newValue in
                             quickSwitchSearchCoordinator.updateQuery(
@@ -413,42 +432,66 @@
                         }
 
                     WorkspaceBrowseNavigationBoundary(appModel: appModel, selection: selection) { presentation in
-                        List(
-                            quickSwitchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                ? presentation.quickSwitchItems : quickSwitchResults
-                        ) { item in
-                            Button {
-                                quickSwitchSearchCoordinator.cancel()
-                                isShowingQuickSwitchSheet = false
-                                navigate(to: item.target)
-                            } label: {
-                                sidebarNavigationItemView(
-                                    title: item.title,
-                                    subtitle: item.subtitle,
-                                    systemImage: navigationItemIcon(for: item.kind),
-                                    accent: item.kind == .session ? NexusMacTheme.teal : NexusMacTheme.gold
-                                )
+                        let navigationItems =
+                            trimmedQuery.isEmpty ? presentation.quickSwitchItems : quickSwitchResults
+
+                        List {
+                            if matchingActions.isEmpty == false {
+                                Section("Actions") {
+                                    ForEach(matchingActions) { action in
+                                        Button {
+                                            isShowingQuickSwitchSheet = false
+                                            action.perform()
+                                        } label: {
+                                            sidebarNavigationItemView(
+                                                title: action.title,
+                                                subtitle: action.subtitle,
+                                                systemImage: action.systemImage,
+                                                accent: NexusMacTheme.gold
+                                            )
+                                        }
+                                        .buttonStyle(.plain)
+                                        .listRowBackground(Color.clear)
+                                    }
+                                }
                             }
-                            .buttonStyle(.plain)
-                            .listRowBackground(Color.clear)
+
+                            if navigationItems.isEmpty == false {
+                                Section("Workspaces & Sessions") {
+                                    ForEach(navigationItems) { item in
+                                        Button {
+                                            quickSwitchSearchCoordinator.cancel()
+                                            isShowingQuickSwitchSheet = false
+                                            navigate(to: item.target)
+                                        } label: {
+                                            sidebarNavigationItemView(
+                                                title: item.title,
+                                                subtitle: item.subtitle,
+                                                systemImage: navigationItemIcon(for: item.kind),
+                                                accent: item.kind == .session ? NexusMacTheme.teal : NexusMacTheme.gold
+                                            )
+                                        }
+                                        .buttonStyle(.plain)
+                                        .listRowBackground(Color.clear)
+                                    }
+                                }
+                            }
                         }
                         .listStyle(.plain)
                         .scrollContentBackground(.hidden)
                         .overlay {
-                            if quickSwitchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
-                                quickSwitchResults.isEmpty
-                            {
+                            if trimmedQuery.isEmpty == false, navigationItems.isEmpty, matchingActions.isEmpty {
                                 ContentUnavailableView(
                                     "No matches",
                                     systemImage: "magnifyingglass",
-                                    description: Text("Try a Workspace, Provider, or Session name.")
+                                    description: Text("Try a Workspace, Provider, Session, or Action name.")
                                 )
                             }
                         }
                     }
                 }
                 .padding(24)
-                .frame(minWidth: 480, minHeight: 380)
+                .frame(minWidth: 480, minHeight: 460)
                 .nexusPanel(tint: NexusMacTheme.teal, radius: 28)
                 .padding(28)
             }
@@ -1172,6 +1215,56 @@
             }
 
             return session.providerID == .ibmBob && workspace.kind == .local
+        }
+
+        private func openCommandPalette() {
+            quickSwitchSearchCoordinator.cancel()
+            quickSwitchQuery = ""
+            quickSwitchResults = []
+            isShowingQuickSwitchSheet = true
+        }
+
+        private var commandPaletteActions: [NexusCommandPaletteAction] {
+            [
+                NexusCommandPaletteAction(
+                    id: "new-local-workspace",
+                    title: "New Local Workspace",
+                    subtitle: "Add a folder on this Mac.",
+                    systemImage: "folder.badge.plus",
+                    perform: { self.addLocalWorkspace() }
+                ),
+                NexusCommandPaletteAction(
+                    id: "new-remote-workspace",
+                    title: "New Remote Workspace",
+                    subtitle: "Add a Host and remote path.",
+                    systemImage: "macbook.and.iphone",
+                    perform: { isShowingCreateRemoteWorkspaceSheet = true }
+                ),
+                NexusCommandPaletteAction(
+                    id: "new-workspace-group",
+                    title: "New Workspace Group",
+                    subtitle: "Create a curated lane for related Workspaces.",
+                    systemImage: "line.3.horizontal.decrease.circle",
+                    perform: {
+                        newWorkspaceGroupName = ""
+                        isShowingCreateWorkspaceGroupSheet = true
+                    }
+                ),
+                NexusCommandPaletteAction(
+                    id: "show-hosts",
+                    title: "Hosts",
+                    subtitle: "Review saved remote Host profiles.",
+                    systemImage: "network",
+                    perform: { isShowingHostsSheet = true }
+                ),
+                NexusCommandPaletteAction(
+                    id: "show-remote-access",
+                    title: "Remote Access",
+                    subtitle: "Manage Paired Devices and pairing.",
+                    systemImage: "point.3.connected.trianglepath.dotted",
+                    perform: { isShowingRemoteAccessSheet = true }
+                ),
+            ]
         }
 
         private func navigate(to target: NavigationTarget) {

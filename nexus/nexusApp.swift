@@ -33,6 +33,42 @@ struct nexusApp: App {
         #if os(macOS)
             .defaultSize(width: 1460, height: 920)
             .windowToolbarStyle(.unifiedCompact(showsTitle: false))
+            .commands {
+                CommandGroup(replacing: .newItem) {
+                    Button("New Local Workspace") {
+                        NotificationCenter.default.post(name: .nexusNewLocalWorkspace, object: nil)
+                    }
+                    .keyboardShortcut("n", modifiers: .command)
+
+                    Button("New Remote Workspace") {
+                        NotificationCenter.default.post(name: .nexusNewRemoteWorkspace, object: nil)
+                    }
+                    .keyboardShortcut("n", modifiers: [.command, .shift])
+
+                    Divider()
+
+                    Button("New Workspace Group") {
+                        NotificationCenter.default.post(name: .nexusNewWorkspaceGroup, object: nil)
+                    }
+                }
+
+                CommandMenu("Go") {
+                    Button("Command Palette\u{2026}") {
+                        NotificationCenter.default.post(name: .nexusOpenCommandPalette, object: nil)
+                    }
+                    .keyboardShortcut("k", modifiers: .command)
+                }
+
+                CommandMenu("Remote") {
+                    Button("Hosts\u{2026}") {
+                        NotificationCenter.default.post(name: .nexusShowHosts, object: nil)
+                    }
+
+                    Button("Remote Access\u{2026}") {
+                        NotificationCenter.default.post(name: .nexusShowRemoteAccess, object: nil)
+                    }
+                }
+            }
         #endif
     }
 }
