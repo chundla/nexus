@@ -206,7 +206,7 @@ original pitch.
 - [x] Verified live: CPU stays at 0% through window activation and Settings tab
       switching after the fix.
 
-### Slice 11 — 3-pane navigation, collapsing to 2 ✅
+### Slice 11 — 3-pane navigation, collapsing to 2 ✅ (superseded — see Slice 12)
 
 - [x] Replaced the single-detail-pane `NavigationSplitView` with a structural switch in
       `ContentView.body`: when no Session is focused, a 3-column
@@ -240,6 +240,54 @@ original pitch.
   structural view swap (SwiftUI tears down and rebuilds the column tree), which is
   visually a snap, not a slide. Worth a follow-up with `matchedGeometryEffect` or a
   custom transition if the snap reads as jarring in practice.
+- **Superseded in Slice 12**: collapsing to 2 panes turned out to be the wrong call —
+  it evicted the Workspace/Provider context the moment you opened a Session, so you
+  lost your place in browsing to look at one. Slice 12 keeps a single 3-column
+  `NavigationSplitView` always mounted; a focused Session renders in the detail
+  column without tearing down the middle column.
+
+### Slice 12 — seamless chrome, clickable rows, unified Sessions, composer overflow ✅
+
+- [x] **Always-3-pane navigation.** Replaced Slice 11's structural 2-vs-3-column switch
+      with a single 3-column `NavigationSplitView` that's always mounted: sidebar |
+      middle (Workspace/Provider/Group Detail) | detail (focused Session, or a quiet
+      placeholder when nothing is focused). Browse selection (`selection`) and the
+      focused Session (`focusedSessionID`) are independent `@State`, so opening a
+      Session never evicts the Workspace/Provider context you came from — it's still
+      sitting in the middle column when you back out of the Session.
+- [x] **Window chrome blends with the app.** Added `nexus/NexusWindowChrome.swift` and
+      applied it to `ContentView` and `NexusSettingsRootView` so the titlebar/toolbar
+      area picks up the same background as the content instead of rendering as a flat
+      white bar above it. Verified in both light and dark mode against the running app.
+- [x] **Clickable provider rows.** Added `NexusIconBadge`/`NexusListRow`/
+      `NexusRowDivider` primitives (`nexus/MacDesignSystem.swift`) and rebuilt the
+      Workspace Overview's provider cards as seamless rows where the entire row
+      launches/resumes the Provider's default Session on tap — matching how every other
+      browse row in Nexus already behaved. "View Details" moved to a right-click
+      context menu since it's the secondary, occasional action, not the primary one.
+- [x] **One Sessions list per Provider.** Provider Detail's separate Default/Named/
+      Failed Sessions sections collapsed into a single scannable Sessions list: click a
+      row to relaunch/resume/focus it, right-click to delete or stop it.
+- [x] **Composer overflow with a native disclosure chevron.** Added
+      `nexus/ComposerOverflowHeuristic.swift` to detect when composer draft text would
+      exceed a 3-line collapsed limit, and a chevron overlay
+      (`composerDisclosureControl`) on both the macOS session composer
+      (`ContentView.swift`) and the iOS composer (`RemoteClientHomeView.swift`) to
+      expand to a taller cap (12 lines on macOS, 14 on iOS) and back. Swapped the
+      macOS composer's `Capsule` shape for a `RoundedRectangle(cornerRadius: 18)` — a
+      capsule distorts into an ellipse-ish shape once the field wraps to multiple
+      lines; a rounded rectangle doesn't.
+- [x] Verified live in the running macOS app (light and dark mode): provider row tap
+      launches/resumes the default Session and keeps the middle column showing
+      Provider Detail next to the focused Session; the composer caps at 3 lines and
+      shows the chevron only on overflow, and toggling it round-trips correctly.
+- **Found during verification, fixed separately (NexusService, not UI styling)**:
+      Provider Detail's subtitle (`detail.workspace.name` + `detail.health.version`)
+      was rendering raw terminal OSC escape sequences for Codex (iTerm2's
+      shell-integration banner) because nothing had surfaced `health.version` in the
+      UI before. Root cause lived in `ProviderHealthFacts`, shared by every provider
+      module — fixed there (commit `df7c065`), strictly a stdout-parsing correctness
+      fix with no contract or ADR change.
 
 ### Explicitly deferred (not in this pass)
 
