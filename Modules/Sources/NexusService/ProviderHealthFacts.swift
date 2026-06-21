@@ -24,6 +24,77 @@
         let stderr: String
     }
 
+    extension ProviderCommandResult {
+        /// Interactive login shells (used to resolve provider executables over SSH and
+        /// locally) can emit terminal control sequences — e.g. iTerm2's OSC 1337 shell
+        /// integration banner — on the same stream as the real command output, with no
+        /// separating newline. Strip them so version/path parsing and diagnostics surface
+        /// the actual CLI output instead of `]1337;RemoteHost=...` noise.
+        var sanitizedStdout: String { stripTerminalControlSequences(stdout) }
+        var sanitizedStderr: String { stripTerminalControlSequences(stderr) }
+    }
+
+    func stripTerminalControlSequences(_ text: String) -> String {
+        let escape: Character = "\u{1B}"
+        let bell: Character = "\u{07}"
+
+        var output = ""
+        var index = text.startIndex
+        while index < text.endIndex {
+            let character = text[index]
+            guard character == escape else {
+                output.append(character)
+                index = text.index(after: index)
+                continue
+            }
+
+            let next = text.index(after: index)
+            guard next < text.endIndex else {
+                index = next
+                continue
+            }
+
+            if text[next] == "]" {
+                // OSC sequence: ESC ] ... (BEL | ESC \\)
+                var scan = text.index(after: next)
+                while scan < text.endIndex {
+                    if text[scan] == bell {
+                        scan = text.index(after: scan)
+                        break
+                    }
+                    if text[scan] == escape {
+                        let afterEscape = text.index(after: scan)
+                        if afterEscape < text.endIndex, text[afterEscape] == "\\" {
+                            scan = text.index(after: afterEscape)
+                            break
+                        }
+                    }
+                    scan = text.index(after: scan)
+                }
+                index = scan
+                continue
+            }
+
+            if text[next] == "[" {
+                // CSI sequence: ESC [ ... final-byte (e.g. ANSI color codes)
+                var scan = text.index(after: next)
+                while scan < text.endIndex {
+                    let isFinalByte = text[scan].isLetter
+                    scan = text.index(after: scan)
+                    if isFinalByte {
+                        break
+                    }
+                }
+                index = scan
+                continue
+            }
+
+            // Bare ESC with an unrecognized sequence: drop just the ESC byte.
+            index = next
+        }
+        return output
+    }
+
     protocol CodexReadinessProbing: Sendable {
         func probe(executable: String, workingDirectory: String) async throws
     }
@@ -320,7 +391,7 @@
                     return .probeFailed(firstDiagnosticLine(stdout: result.stdout, stderr: result.stderr))
                 }
 
-                let outputLines = result.stdout
+                let outputLines = result.sanitizedStdout
                     .split(whereSeparator: \.isNewline)
                     .map(String.init)
                     .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -370,7 +441,7 @@
                 )
             }
 
-            let outputLines = result.stdout
+            let outputLines = result.sanitizedStdout
                 .split(whereSeparator: \.isNewline)
                 .map(String.init)
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -432,7 +503,7 @@
                 )
             }
 
-            let outputLines = result.stdout
+            let outputLines = result.sanitizedStdout
                 .split(whereSeparator: \.isNewline)
                 .map(String.init)
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -537,7 +608,7 @@
                     firstDiagnosticLine(stdout: resolutionResult.stdout, stderr: resolutionResult.stderr))
             }
 
-            let outputLines = resolutionResult.stdout
+            let outputLines = resolutionResult.sanitizedStdout
                 .split(whereSeparator: \.isNewline)
                 .map(String.init)
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -713,7 +784,7 @@
                         continue
                     }
 
-                    let candidate = result.stdout
+                    let candidate = result.sanitizedStdout
                         .split(whereSeparator: \.isNewline)
                         .map(String.init)
                         .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -788,7 +859,7 @@
                     return nil
                 }
 
-                let version = result.stdout
+                let version = result.sanitizedStdout
                     .split(whereSeparator: \.isNewline)
                     .map(String.init)
                     .first?
@@ -990,6 +1061,7 @@
 
         private func firstDiagnosticLine(stdout: String, stderr: String) -> String {
             [stderr, stdout]
+                .map(stripTerminalControlSequences)
                 .joined(separator: "\n")
                 .split(whereSeparator: \.isNewline)
                 .map(String.init)

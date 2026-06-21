@@ -36,6 +36,24 @@
             #expect(health == expected)
         }
 
+        @Test func stripTerminalControlSequencesRemovesOSCBannerWithNoSeparatingNewline() {
+            let noise =
+                "\u{1B}]1337;RemoteHost=ck@IBMMacBookski\u{07}\u{1B}]1337;CurrentDir=/\u{07}"
+                + "\u{1B}]1337;ShellIntegrationVersion=14;shell=zsh\u{07}codex-cli 0.136.0\n"
+
+            #expect(stripTerminalControlSequences(noise) == "codex-cli 0.136.0\n")
+        }
+
+        @Test func stripTerminalControlSequencesRemovesANSIColorCodes() {
+            let colored = "\u{1B}[32mcodex-cli 0.136.0\u{1B}[0m\n"
+
+            #expect(stripTerminalControlSequences(colored) == "codex-cli 0.136.0\n")
+        }
+
+        @Test func stripTerminalControlSequencesLeavesPlainTextUntouched() {
+            #expect(stripTerminalControlSequences("codex-cli 0.136.0\n") == "codex-cli 0.136.0\n")
+        }
+
         @Test func localCodexHealthResolvesExecutableFromLoginShellWhenServicePathsMissIt() throws {
             let tempRoot = FileManager.default.temporaryDirectory
                 .appendingPathComponent("ProviderHealthFactsLocalShellResolutionTests", isDirectory: true)
@@ -94,6 +112,58 @@
             #expect(readinessProbe.invocations.count == 1)
             #expect(readinessProbe.invocations.first?.executable == executablePath.path(percentEncoded: false))
             #expect(readinessProbe.invocations.first?.workingDirectory == workspaceFolder.path(percentEncoded: false))
+        }
+
+        @Test func localCodexHealthVersionStripsLoginShellTerminalControlSequences() throws {
+            let tempRoot = FileManager.default.temporaryDirectory
+                .appendingPathComponent("ProviderHealthFactsLocalShellResolutionTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+
+            let workspaceFolder = tempRoot.appendingPathComponent("workspace", isDirectory: true)
+            try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
+
+            let executablePath = tempRoot.appendingPathComponent("codex", isDirectory: false)
+            try "#!/bin/sh\nexit 0\n".write(to: executablePath, atomically: true, encoding: .utf8)
+            #expect(chmod(executablePath.path(percentEncoded: false), 0o755) == 0)
+
+            // iTerm2's shell integration script prints OSC 1337 banners terminated by BEL,
+            // not newline, so a login shell's real `--version` output can land on the same
+            // line as the banner with no separator.
+            let shellIntegrationNoise =
+                "\u{1B}]1337;RemoteHost=ck@IBMMacBookski\u{07}\u{1B}]1337;CurrentDir=/\u{07}"
+                + "\u{1B}]1337;ShellIntegrationVersion=14;shell=zsh\u{07}"
+
+            let shellBuilder = LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"])
+            let readinessProbe = RecordingCodexReadinessProbe()
+            let evaluator = ProviderHealthFacts(
+                executableResolver: TestExecutableResolver(executables: [:]),
+                commandRunner: TestCommandRunner(results: [
+                    .init(executable: "/bin/zsh", arguments: ["-lic", "command -v codex"]): .success(
+                        stdout: "\(executablePath.path(percentEncoded: false))\n"),
+                    .init(
+                        executable: "/bin/zsh",
+                        arguments: ["-lic", "'\(executablePath.path(percentEncoded: false))' '--version'"]):
+                        .success(stdout: "\(shellIntegrationNoise)codex-cli 0.136.0\n"),
+                ]),
+                localShellCommandBuilder: shellBuilder,
+                codexReadinessProbe: readinessProbe
+            )
+
+            let health = evaluator.healthSummary(
+                for: .codex,
+                workspace: Workspace(
+                    id: UUID(),
+                    name: "Local",
+                    kind: .local,
+                    folderPath: workspaceFolder.path(percentEncoded: false),
+                    primaryGroupID: UUID()
+                ),
+                remoteContext: nil
+            )
+
+            #expect(health.version == "codex-cli 0.136.0")
+            #expect(health.summary == "Codex codex-cli 0.136.0 is available")
         }
 
         @Test func localShellCommandBuilderAvoidsInteractivePosixShellForLaunches() {
@@ -243,6 +313,60 @@
             #expect(readinessProbe.invocations.count == 1)
             #expect(readinessProbe.invocations.first?.hostID == hostID)
             #expect(readinessProbe.invocations.first?.executable == "/home/tester/.local/bin/codex")
+        }
+
+        @Test func remoteCodexHealthVersionStripsLoginShellTerminalControlSequences() {
+            let workspaceID = UUID()
+            let hostID = UUID()
+            let host = NexusDomain.Host(id: hostID, name: "Build Server", sshTarget: "build-box")
+
+            // iTerm2's shell integration script prints OSC 1337 banners terminated by BEL,
+            // not newline, so a remote login shell's real `--version` output can land on the
+            // same line as the banner with no separator.
+            let shellIntegrationNoise =
+                "\u{1B}]1337;RemoteHost=ck@IBMMacBookski\u{07}\u{1B}]1337;CurrentDir=/\u{07}"
+                + "\u{1B}]1337;ShellIntegrationVersion=14;shell=zsh\u{07}"
+
+            let runner = RecordingRemoteCommandRunner(
+                stdout: "/home/tester/.local/bin/codex\n\(shellIntegrationNoise)codex-cli 0.136.0\n"
+            )
+            let readinessProbe = RecordingRemoteCodexReadinessProbe()
+            let evaluator = ProviderHealthFacts(
+                executableResolver: TestExecutableResolver(executables: [:]),
+                commandRunner: runner,
+                remoteCodexReadinessProbe: readinessProbe
+            )
+
+            let health = evaluator.healthSummary(
+                for: .codex,
+                workspace: Workspace(
+                    id: workspaceID,
+                    name: "Remote",
+                    kind: .remote,
+                    folderPath: "/srv/api",
+                    primaryGroupID: UUID(),
+                    remoteHostID: hostID
+                ),
+                remoteContext: RemoteWorkspaceHealthContext(
+                    host: host,
+                    hostValidation: HostValidationSnapshot(
+                        hostID: hostID,
+                        state: .available,
+                        summary: "Host is available",
+                        checkedAt: Date()
+                    ),
+                    workspaceAvailability: WorkspaceAvailabilitySnapshot(
+                        workspaceID: workspaceID,
+                        state: .available,
+                        summary: "Workspace is available",
+                        checkedAt: Date()
+                    )
+                )
+            )
+
+            #expect(health.version == "codex-cli 0.136.0")
+            #expect(health.summary == "Codex codex-cli 0.136.0 is available")
+            #expect(health.resolvedExecutable == "/home/tester/.local/bin/codex")
             #expect(readinessProbe.invocations.first?.workingDirectory == "/srv/api")
         }
 
