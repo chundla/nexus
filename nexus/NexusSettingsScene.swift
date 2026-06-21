@@ -29,6 +29,7 @@
                     .tag(NexusSettingsTab.remoteAccess)
             }
             .frame(minWidth: 780, minHeight: 600)
+            .nexusSeamlessWindowChrome()
         }
     }
 #endif

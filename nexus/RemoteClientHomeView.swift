@@ -1487,6 +1487,7 @@
 
         @State private var terminalDraft = ""
         @State private var structuredPrompt = ""
+        @State private var isComposerExpanded = false
         @State private var terminalViewportSize: CGSize = .zero
         @State private var terminalViewportResizeCoordinator = TerminalViewportResizeCoordinator()
         @State private var isShowingStopConfirmation = false
@@ -1890,6 +1891,29 @@
             }
         }
 
+        private var needsComposerDisclosureControl: Bool {
+            ComposerOverflowHeuristic.exceedsCollapsedLineLimit(
+                structuredPrompt, collapsedLines: 3, averageCharactersPerLine: 32)
+        }
+
+        private var composerDisclosureControl: some View {
+            Button {
+                withAnimation(.snappy(duration: 0.18)) {
+                    isComposerExpanded.toggle()
+                }
+            } label: {
+                Image(systemName: isComposerExpanded ? "chevron.down" : "chevron.up")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(NexusIOSTheme.mutedText)
+                    .frame(width: 28, height: 16)
+                    .background(.thinMaterial, in: Capsule())
+                    .overlay {
+                        Capsule().stroke(NexusIOSTheme.softLine, lineWidth: 1)
+                    }
+            }
+            .buttonStyle(.plain)
+        }
+
         @ViewBuilder
         private var structuredComposerBar: some View {
             if let structuredChromePresentation,
@@ -1919,10 +1943,15 @@
                                 .focused($isStructuredPromptFocused)
                                 .textInputAutocapitalization(.sentences)
                                 .autocorrectionDisabled()
-                                .lineLimit(1...6)
+                                .lineLimit(isComposerExpanded ? 1...14 : 1...3)
                                 .disabled(isPerformingAction || structuredChromePresentation.isAgentTurnInProgress)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .nexusIOSTextField(tint: NexusIOSTheme.gold)
+                                .overlay(alignment: .top) {
+                                    if needsComposerDisclosureControl {
+                                        composerDisclosureControl.offset(y: -11)
+                                    }
+                                }
 
                             if sendAffordance.isVisible {
                                 Button {

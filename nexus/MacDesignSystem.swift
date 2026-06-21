@@ -349,4 +349,60 @@
                 .animation(.snappy(duration: 0.18), value: configuration.isPressed)
         }
     }
+
+    /// Identity badge shared by every browse row (sidebar, provider list, session list,
+    /// Settings lists) so the icon treatment never has to be redeclared per screen.
+    struct NexusIconBadge: View {
+        let systemImage: String
+        let accent: Color
+        var size: CGFloat = 30
+
+        var body: some View {
+            Image(systemName: systemImage)
+                .font(.system(size: size * 0.46, weight: .semibold))
+                .foregroundStyle(accent)
+                .frame(width: size, height: size)
+                .background(accent.opacity(0.14), in: Circle())
+        }
+    }
+
+    /// A single seamless, scannable row: tap to act, hover to highlight, no per-row card
+    /// chrome or shadow. This is the shared building block for the sidebar, the middle
+    /// pane's Provider list, a Provider's Sessions list, and Settings catalogs — one row
+    /// language across the whole app instead of a different one per screen.
+    struct NexusListRow<Content: View>: View {
+        let action: () -> Void
+        @ViewBuilder var content: () -> Content
+
+        @State private var isHovering = false
+
+        var body: some View {
+            Button(action: action) {
+                content()
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 11)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(isHovering ? NexusMacTheme.overlay(0.055) : Color.clear)
+            )
+            .onHover { hovering in
+                isHovering = hovering
+            }
+        }
+    }
+
+    /// Hairline divider matching the row inset, for stacking `NexusListRow`s into one
+    /// seamless list without each row drawing its own border.
+    struct NexusRowDivider: View {
+        var body: some View {
+            Rectangle()
+                .fill(NexusMacTheme.softLine)
+                .frame(height: 1)
+                .padding(.leading, 14)
+        }
+    }
 #endif
