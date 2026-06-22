@@ -25,6 +25,45 @@
             #expect(environment?["EMPTY"] == "")
         }
 
+        @Test func localShellEnvironmentResolverReusesCachedResultWithinTTL() {
+            let runner = CountingCommandRunner(
+                result: .success(stdout: "PATH=/shell/bin\0")
+            )
+            let cache = ResolvedEnvironmentCache(ttl: 300, currentDate: { Date(timeIntervalSince1970: 0) })
+            let resolver = LocalShellEnvironmentResolver(
+                baseEnvironment: [:],
+                commandRunner: runner,
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
+                cache: cache
+            )
+
+            _ = resolver.resolvedEnvironment()
+            _ = resolver.resolvedEnvironment()
+            _ = resolver.resolvedEnvironment()
+
+            #expect(runner.invocationCount == 1)
+        }
+
+        @Test func localShellEnvironmentResolverRefreshesAfterTTLExpires() {
+            let runner = CountingCommandRunner(
+                result: .success(stdout: "PATH=/shell/bin\0")
+            )
+            var now = Date(timeIntervalSince1970: 0)
+            let cache = ResolvedEnvironmentCache(ttl: 10, currentDate: { now })
+            let resolver = LocalShellEnvironmentResolver(
+                baseEnvironment: [:],
+                commandRunner: runner,
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
+                cache: cache
+            )
+
+            _ = resolver.resolvedEnvironment()
+            now = now.addingTimeInterval(11)
+            _ = resolver.resolvedEnvironment()
+
+            #expect(runner.invocationCount == 2)
+        }
+
         @Test func processPiRPCTransportUsesProvidedEnvironmentForShebangInterpreterResolution() async throws {
             let fixture = try makeShebangFixture()
             let transport = try ProcessPiRPCTransport(
@@ -101,6 +140,37 @@
                     domain: "TestCommandRunner", code: 1,
                     userInfo: [NSLocalizedDescriptionKey: "Missing stub for \(executable) \(arguments)"])
             }
+
+            switch result {
+            case .success(let stdout, let stderr, let exitStatus):
+                return ProviderCommandResult(exitStatus: exitStatus, stdout: stdout, stderr: stderr)
+            }
+        }
+    }
+
+    private final class CountingCommandRunner: ProviderCommandRunning, @unchecked Sendable {
+        enum StubbedResult {
+            case success(stdout: String, stderr: String = "", exitStatus: Int32 = 0)
+        }
+
+        private let lock = NSLock()
+        private let result: StubbedResult
+        private var count = 0
+
+        init(result: StubbedResult) {
+            self.result = result
+        }
+
+        var invocationCount: Int {
+            lock.lock()
+            defer { lock.unlock() }
+            return count
+        }
+
+        func run(executable: String, arguments: [String], currentDirectoryURL: URL?) throws -> ProviderCommandResult {
+            lock.lock()
+            count += 1
+            lock.unlock()
 
             switch result {
             case .success(let stdout, let stderr, let exitStatus):
