@@ -25,11 +25,11 @@
             #expect(environment?["EMPTY"] == "")
         }
 
-        @Test func localShellEnvironmentResolverReusesCachedResultWithinTTL() {
+        @Test func localShellEnvironmentResolverReusesCachedResultIndefinitely() {
             let runner = CountingCommandRunner(
                 result: .success(stdout: "PATH=/shell/bin\0")
             )
-            let cache = ResolvedEnvironmentCache(ttl: 300, currentDate: { Date(timeIntervalSince1970: 0) })
+            let cache = ResolvedEnvironmentCache()
             let resolver = LocalShellEnvironmentResolver(
                 baseEnvironment: [:],
                 commandRunner: runner,
@@ -44,12 +44,14 @@
             #expect(runner.invocationCount == 1)
         }
 
-        @Test func localShellEnvironmentResolverRefreshesAfterTTLExpires() {
+        @Test func localShellEnvironmentResolverLoadsFromPersistenceBeforeSpawningShell() {
             let runner = CountingCommandRunner(
                 result: .success(stdout: "PATH=/shell/bin\0")
             )
-            var now = Date(timeIntervalSince1970: 0)
-            let cache = ResolvedEnvironmentCache(ttl: 10, currentDate: { now })
+            let persistence = TestLocalShellEnvironmentPersistence(
+                cachedEnvironment: ["PATH": "/persisted/bin"]
+            )
+            let cache = ResolvedEnvironmentCache(persistence: persistence)
             let resolver = LocalShellEnvironmentResolver(
                 baseEnvironment: [:],
                 commandRunner: runner,
@@ -57,11 +59,53 @@
                 cache: cache
             )
 
-            _ = resolver.resolvedEnvironment()
-            now = now.addingTimeInterval(11)
-            _ = resolver.resolvedEnvironment()
+            let environment = resolver.resolvedEnvironment()
 
-            #expect(runner.invocationCount == 2)
+            #expect(environment?["PATH"] == "/persisted/bin")
+            #expect(runner.invocationCount == 0)
+        }
+
+        @Test func localShellEnvironmentResolverRefreshUpdatesCacheAndPersistence() {
+            let runner = CountingCommandRunner(
+                result: .success(stdout: "PATH=/shell/bin\0")
+            )
+            let persistence = TestLocalShellEnvironmentPersistence(
+                cachedEnvironment: ["PATH": "/persisted/bin"]
+            )
+            let cache = ResolvedEnvironmentCache(persistence: persistence)
+            let resolver = LocalShellEnvironmentResolver(
+                baseEnvironment: [:],
+                commandRunner: runner,
+                localShellCommandBuilder: LocalShellCommandBuilder(environment: ["SHELL": "/bin/zsh"]),
+                cache: cache
+            )
+
+            resolver.refreshResolvedEnvironment()
+            let environment = resolver.resolvedEnvironment()
+
+            #expect(environment?["PATH"] == "/shell/bin")
+            #expect(runner.invocationCount == 1)
+            #expect(persistence.savedEnvironment?["PATH"] == "/shell/bin")
+        }
+
+        @Test func nexusMetadataStorePersistsLocalShellEnvironmentCacheAcrossInstances() throws {
+            let storeURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("LocalShellEnvironmentResolverTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+                .appendingPathComponent("Nexus.sqlite", isDirectory: false)
+            try FileManager.default.createDirectory(
+                at: storeURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+
+            let firstStore = try NexusMetadataStore(storeURL: storeURL)
+            #expect(firstStore.loadCachedLocalShellEnvironment() == nil)
+
+            firstStore.saveCachedLocalShellEnvironment(["PATH": "/persisted/bin", "NVM_DIR": "/Users/tester/.nvm"])
+
+            let secondStore = try NexusMetadataStore(storeURL: storeURL)
+            let reloaded = secondStore.loadCachedLocalShellEnvironment()
+
+            #expect(reloaded?["PATH"] == "/persisted/bin")
+            #expect(reloaded?["NVM_DIR"] == "/Users/tester/.nvm")
         }
 
         @Test func processPiRPCTransportUsesProvidedEnvironmentForShebangInterpreterResolution() async throws {
@@ -176,6 +220,28 @@
             case .success(let stdout, let stderr, let exitStatus):
                 return ProviderCommandResult(exitStatus: exitStatus, stdout: stdout, stderr: stderr)
             }
+        }
+    }
+
+    private final class TestLocalShellEnvironmentPersistence: LocalShellEnvironmentPersisting, @unchecked Sendable {
+        private let lock = NSLock()
+        private var cachedEnvironment: [String: String]?
+        private(set) var savedEnvironment: [String: String]?
+
+        init(cachedEnvironment: [String: String]?) {
+            self.cachedEnvironment = cachedEnvironment
+        }
+
+        func loadCachedLocalShellEnvironment() -> [String: String]? {
+            lock.lock()
+            defer { lock.unlock() }
+            return cachedEnvironment
+        }
+
+        func saveCachedLocalShellEnvironment(_ environment: [String: String]) {
+            lock.lock()
+            savedEnvironment = environment
+            lock.unlock()
         }
     }
 

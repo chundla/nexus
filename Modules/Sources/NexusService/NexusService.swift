@@ -1734,6 +1734,7 @@
         private let piStructuredSessionHistoryStore: PiStructuredSessionHistoryStore
         private let piSessionRedirectLock = NSLock()
         private var pendingPiSessionRedirects: [UUID: UUID] = [:]
+        private var prewarmTask: Task<Void, Never>?
 
         private init(
             listener: NSXPCListener,
@@ -1942,7 +1943,7 @@
                 .url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
                 .appendingPathComponent("Nexus", isDirectory: true)
 
-            return try bootstrap(rootURL: rootURL)
+            return try bootstrap(rootURL: rootURL, prewarmOnLaunch: true)
         }
 
         public static func bootstrapForTests() throws -> NexusService {
@@ -1968,7 +1969,8 @@
             sessionRecordStoreFactory: ((NexusMetadataStore) -> any SessionRecordStore)? = nil,
             remoteAccessRuntime: RemoteAccessRuntime = RemoteAccessRuntime(),
             providerModuleRegistry: ProviderModuleRegistry? = nil,
-            ibmBobNativeSessionCleaner: any IBMBobNativeSessionCleaning = IBMBobNativeSessionCleaner()
+            ibmBobNativeSessionCleaner: any IBMBobNativeSessionCleaning = IBMBobNativeSessionCleaner(),
+            prewarmOnLaunch: Bool = false
         ) throws -> NexusService {
             try bootstrap(
                 rootURL: rootURL,
@@ -1981,7 +1983,8 @@
                 sessionRecordStoreFactory: sessionRecordStoreFactory,
                 remoteAccessRuntime: remoteAccessRuntime,
                 providerModuleRegistry: providerModuleRegistry,
-                ibmBobNativeSessionCleaner: ibmBobNativeSessionCleaner
+                ibmBobNativeSessionCleaner: ibmBobNativeSessionCleaner,
+                prewarmOnLaunch: prewarmOnLaunch
             )
         }
 
@@ -2020,7 +2023,8 @@
             sessionRecordStoreFactory: ((NexusMetadataStore) -> any SessionRecordStore)? = nil,
             remoteAccessRuntime: RemoteAccessRuntime = RemoteAccessRuntime(),
             providerModuleRegistry: ProviderModuleRegistry? = nil,
-            ibmBobNativeSessionCleaner: any IBMBobNativeSessionCleaning = IBMBobNativeSessionCleaner()
+            ibmBobNativeSessionCleaner: any IBMBobNativeSessionCleaning = IBMBobNativeSessionCleaner(),
+            prewarmOnLaunch: Bool = false
         ) throws -> NexusService {
             try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
 
@@ -2034,13 +2038,19 @@
             let resolvedProviderModuleRegistry =
                 providerModuleRegistry
                 ?? ServiceSessionProviderRegistry.providerModules()
+            let localShellEnvironmentResolver = LocalShellEnvironmentResolver(
+                cache: ResolvedEnvironmentCache(persistence: metadataStore)
+            )
             let resolvedSessionRuntimeManager =
                 sessionRuntimeManager
                 ?? InMemorySessionRuntimeManager(
-                    launcher: ProcessSessionRuntimeLauncher(providerModuleRegistry: resolvedProviderModuleRegistry)
+                    launcher: ProcessSessionRuntimeLauncher(
+                        providerModuleRegistry: resolvedProviderModuleRegistry,
+                        localShellEnvironmentResolver: localShellEnvironmentResolver
+                    )
                 )
             remoteAccessRuntime.restore(isEnabled: try metadataStore.remoteAccessEnabled())
-            return NexusService(
+            let service = NexusService(
                 listener: NSXPCListener.anonymous(),
                 storeURL: storeURL,
                 metadataStore: metadataStore,
@@ -2055,6 +2065,43 @@
                 ibmBobNativeSessionCleaner: ibmBobNativeSessionCleaner,
                 providerModuleRegistry: resolvedProviderModuleRegistry
             )
+            if prewarmOnLaunch {
+                service.prewarmLocalProviderHealthAndShellEnvironment(
+                    localShellEnvironmentResolver: localShellEnvironmentResolver)
+            }
+            return service
+        }
+
+        /// On a cold service start the user's login shell environment and every local Provider's
+        /// health (executable resolution, version, readiness handshake) are unknown, and computing
+        /// either synchronously on first click can cost several seconds each. Both rarely change
+        /// between launches, so resolve them once here in the background — by the time the user
+        /// actually clicks a Provider, `WorkspaceCatalog.providerHealthSummary` and the resolved
+        /// shell environment are already warm.
+        private func prewarmLocalProviderHealthAndShellEnvironment(
+            localShellEnvironmentResolver: LocalShellEnvironmentResolver
+        ) {
+            prewarmTask = Task.detached(priority: .utility) { [weak self] in
+                localShellEnvironmentResolver.refreshResolvedEnvironment()
+
+                guard let self, let workspaces = try? self.metadataStore.listWorkspaces() else {
+                    return
+                }
+
+                for workspace in workspaces where workspace.kind == .local {
+                    for providerID in ProviderID.allCases {
+                        _ = try? await self.workspaceCatalog.providerHealthSummary(
+                            for: providerID,
+                            workspace: workspace,
+                            remoteContext: nil
+                        )
+                    }
+                }
+            }
+        }
+
+        func waitForPrewarmToComplete() async {
+            await prewarmTask?.value
         }
 
         public func serviceStatus() -> NexusServiceStatus {

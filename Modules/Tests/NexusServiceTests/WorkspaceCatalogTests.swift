@@ -27,6 +27,88 @@
             )
         }
 
+        @Test func providerDetailReusesStaleLocalProviderHealthSnapshotInsteadOfRecomputing() async throws {
+            let now = Date(timeIntervalSince1970: 5_000)
+            let evaluator = CountingProviderHealthEvaluator(
+                summariesByProvider: [
+                    ProviderID.claude: ProviderHealthSummary(
+                        state: .available,
+                        summary: "Fresh Claude health should stay unused",
+                        resolvedExecutable: "/tmp/fresh-claude",
+                        launchability: .launchable
+                    )
+                ]
+            )
+            let fixture = try WorkspaceCatalogFixture(
+                providerHealthEvaluator: evaluator,
+                providerModuleRegistry: ProviderModuleRegistry(
+                    modules: [
+                        ProviderID.claude: TestProviderModule(providerID: .claude) {
+                            workspace, remoteContext, providerHealthEvaluator in
+                            await providerHealthEvaluator.healthSummary(
+                                for: .claude, workspace: workspace, remoteContext: remoteContext)
+                        }
+                    ]
+                ),
+                currentDate: { now }
+            )
+            let cached = try fixture.metadataStore.saveProviderHealth(
+                workspaceID: fixture.workspace.id,
+                providerID: ProviderID.claude,
+                summary: ProviderHealthSummary(
+                    state: .unavailable,
+                    summary: "Stale Claude health",
+                    launchability: .notLaunchable
+                ),
+                checkedAt: now.addingTimeInterval(-120)
+            )
+
+            let detail = try await fixture.catalog.providerDetail(
+                workspaceID: fixture.workspace.id, providerID: .claude)
+
+            #expect(detail.health == cached)
+            #expect(await evaluator.callCount(for: ProviderID.claude) == 0)
+        }
+
+        @Test func providerDetailPersistsFreshlyEvaluatedLocalProviderHealthForReuse() async throws {
+            let now = Date(timeIntervalSince1970: 6_000)
+            let evaluator = CountingProviderHealthEvaluator(
+                summariesByProvider: [
+                    ProviderID.claude: ProviderHealthSummary(
+                        state: .available,
+                        summary: "Fresh Claude health",
+                        resolvedExecutable: "/tmp/fresh-claude",
+                        launchability: .launchable
+                    )
+                ]
+            )
+            let fixture = try WorkspaceCatalogFixture(
+                providerHealthEvaluator: evaluator,
+                providerModuleRegistry: ProviderModuleRegistry(
+                    modules: [
+                        ProviderID.claude: TestProviderModule(providerID: .claude) {
+                            workspace, remoteContext, providerHealthEvaluator in
+                            await providerHealthEvaluator.healthSummary(
+                                for: .claude, workspace: workspace, remoteContext: remoteContext)
+                        }
+                    ]
+                ),
+                currentDate: { now }
+            )
+
+            let detail = try await fixture.catalog.providerDetail(
+                workspaceID: fixture.workspace.id, providerID: .claude)
+            let persisted = try fixture.metadataStore.providerHealth(
+                workspaceID: fixture.workspace.id, providerID: .claude)
+
+            #expect(detail.health.summary == "Fresh Claude health")
+            #expect(persisted?.summary == "Fresh Claude health")
+            #expect(await evaluator.callCount(for: ProviderID.claude) == 1)
+
+            _ = try await fixture.catalog.providerDetail(workspaceID: fixture.workspace.id, providerID: .claude)
+            #expect(await evaluator.callCount(for: ProviderID.claude) == 1)
+        }
+
         @Test func workspaceOverviewUsesProviderModuleRegistryForPiCatalogReads() async throws {
             let fixture = try WorkspaceCatalogFixture(
                 providerModuleRegistry: ProviderModuleRegistry(

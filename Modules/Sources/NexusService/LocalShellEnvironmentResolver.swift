@@ -5,40 +5,63 @@
         func resolvedEnvironment() -> [String: String]?
     }
 
-    /// `resolvedEnvironment()` spawns an interactive login shell (`-lic`) to capture
-    /// shell-managed PATH/env state (nvm, pyenv, etc.). That spawn alone costs multiple
-    /// seconds on common shell setups, so repeat calls within `ttl` reuse the last result
-    /// instead of paying the interactive-shell tax on every Session launch.
+    protocol LocalShellEnvironmentPersisting: Sendable {
+        func loadCachedLocalShellEnvironment() -> [String: String]?
+        func saveCachedLocalShellEnvironment(_ environment: [String: String])
+    }
+
+    /// `resolvedEnvironment()` spawns an interactive login shell (`zsh -lic`) to capture
+    /// nvm/pyenv-managed PATH and env state. That spawn alone costs multiple seconds on
+    /// common shell setups (shell integration, version managers, prompt themes). A user's
+    /// login shell environment essentially never changes while the service is running, so
+    /// this cache is a blanket, indefinite cache rather than a short TTL: resolve once,
+    /// reuse forever, and only pay the shell-spawn cost again via an explicit `refresh()`
+    /// (driven by service startup prewarm), never synchronously on a Session launch.
     final class ResolvedEnvironmentCache: @unchecked Sendable {
         private let lock = NSLock()
-        private let ttl: TimeInterval
-        private let currentDate: () -> Date
+        private let persistence: (any LocalShellEnvironmentPersisting)?
         private var cachedEnvironment: [String: String]?
-        private var resolvedAt: Date?
+        private var hasLoadedFromPersistence = false
 
-        init(ttl: TimeInterval = 300, currentDate: @escaping () -> Date = Date.init) {
-            self.ttl = ttl
-            self.currentDate = currentDate
+        init(persistence: (any LocalShellEnvironmentPersisting)? = nil) {
+            self.persistence = persistence
         }
 
         func value(resolve: () -> [String: String]?) -> [String: String]? {
             lock.lock()
-            if let cachedEnvironment, let resolvedAt, currentDate().timeIntervalSince(resolvedAt) <= ttl {
+            if hasLoadedFromPersistence == false {
+                hasLoadedFromPersistence = true
+                cachedEnvironment = persistence?.loadCachedLocalShellEnvironment()
+            }
+            if let cachedEnvironment {
                 lock.unlock()
                 return cachedEnvironment
             }
             lock.unlock()
 
             let resolved = resolve()
+            store(resolved)
+            return resolved
+        }
+
+        @discardableResult
+        func refresh(resolve: () -> [String: String]?) -> [String: String]? {
+            let resolved = resolve()
+            store(resolved)
+            return resolved
+        }
+
+        private func store(_ resolved: [String: String]?) {
+            guard let resolved else {
+                return
+            }
 
             lock.lock()
-            if let resolved {
-                cachedEnvironment = resolved
-                resolvedAt = currentDate()
-            }
+            cachedEnvironment = resolved
+            hasLoadedFromPersistence = true
             lock.unlock()
 
-            return resolved
+            persistence?.saveCachedLocalShellEnvironment(resolved)
         }
     }
 
@@ -62,6 +85,11 @@
 
         func resolvedEnvironment() -> [String: String]? {
             cache.value { resolveUncached() }
+        }
+
+        @discardableResult
+        func refreshResolvedEnvironment() -> [String: String]? {
+            cache.refresh { resolveUncached() }
         }
 
         private func resolveUncached() -> [String: String]? {

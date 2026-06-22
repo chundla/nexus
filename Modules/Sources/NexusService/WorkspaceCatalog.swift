@@ -280,6 +280,14 @@
             )
         }
 
+        /// Provider Health probes (executable resolution, version, readiness handshakes) spawn
+        /// real shells/processes and can each cost multiple seconds. A local Provider's launchability
+        /// essentially never changes between launches, so once we have *any* persisted local snapshot
+        /// we trust it indefinitely here — the same stale-while-revalidate trade-off `workspaceOverview`
+        /// already makes for browse mode. Remote snapshots stay time-gated by `isRecent`: SSH
+        /// connectivity and remote executables can legitimately drift between launches in a way a
+        /// local PATH does not. `preferFreshRemoteCheck` remains the explicit escape hatch for callers
+        /// that need a guaranteed-fresh remote check.
         func providerHealthSummary(
             for providerID: ProviderID,
             workspace: Workspace,
@@ -291,18 +299,14 @@
             if preferFreshRemoteCheck == false,
                 let snapshot = try dependencies.metadataStore.providerHealth(
                     workspaceID: workspace.id, providerID: providerID),
-                workspace.kind != .remote,
-                isRecent(snapshot.checkedAt)
+                workspace.kind != .remote
             {
                 return snapshot
             }
 
             guard workspace.kind == .remote else {
-                return await providerModule.providerHealthSummary(
-                    for: workspace,
-                    remoteContext: remoteContext,
-                    providerHealthEvaluator: dependencies.providerHealthEvaluator
-                )
+                return try await evaluateAndPersistProviderHealth(
+                    for: providerID, workspace: workspace, remoteContext: remoteContext)
             }
 
             if preferFreshRemoteCheck == false,
@@ -314,17 +318,8 @@
                 return snapshot
             }
 
-            let evaluated = await providerModule.providerHealthSummary(
-                for: workspace,
-                remoteContext: remoteContext,
-                providerHealthEvaluator: dependencies.providerHealthEvaluator
-            )
-            return try dependencies.metadataStore.saveProviderHealth(
-                workspaceID: workspace.id,
-                providerID: providerID,
-                summary: evaluated,
-                checkedAt: Date()
-            )
+            return try await evaluateAndPersistProviderHealth(
+                for: providerID, workspace: workspace, remoteContext: remoteContext)
         }
 
         func reconcileSessionRuntimeState(_ session: Session) throws -> Session {

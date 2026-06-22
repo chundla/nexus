@@ -60,6 +60,66 @@
             #expect(await secondEvaluator.callCount(for: .claude) == 0)
         }
 
+        @Test func startupPrewarmPopulatesLocalProviderHealthBeforeFirstProviderDetailRequest() async throws {
+            let rootURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusServiceSessionLaunchFactReuseTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
+            try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
+
+            let setupService = try NexusService.bootstrapForTests(
+                rootURL: rootURL,
+                providerHealthEvaluator: CountingProviderHealthEvaluator(summariesByProvider: [:]),
+                sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: StaticSessionRuntimeLauncher())
+            )
+            let group = try setupService.createWorkspaceGroup(name: "Solo Group")
+            let workspace = try setupService.createLocalWorkspace(
+                name: "Local Claude",
+                folderPath: workspaceFolder.path(percentEncoded: false),
+                primaryGroupID: group.id
+            )
+
+            let prewarmEvaluator = CountingProviderHealthEvaluator(
+                summariesByProvider: [
+                    .claude: ProviderHealthSummary(
+                        state: .available,
+                        summary: "Prewarmed Claude health",
+                        resolvedExecutable: "/tmp/prewarmed-claude",
+                        launchability: .launchable
+                    )
+                ]
+            )
+            let prewarmedService = try NexusService.bootstrapForTests(
+                rootURL: rootURL,
+                providerHealthEvaluator: prewarmEvaluator,
+                sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: StaticSessionRuntimeLauncher()),
+                prewarmOnLaunch: true
+            )
+            await prewarmedService.waitForPrewarmToComplete()
+            #expect(await prewarmEvaluator.callCount(for: .claude) == 1)
+
+            let onClickEvaluator = CountingProviderHealthEvaluator(
+                summariesByProvider: [
+                    .claude: ProviderHealthSummary(
+                        state: .available,
+                        summary: "Fresh Claude health should stay unused",
+                        resolvedExecutable: "/tmp/fresh-claude",
+                        launchability: .launchable
+                    )
+                ]
+            )
+            let onClickService = try NexusService.bootstrapForTests(
+                rootURL: rootURL,
+                providerHealthEvaluator: onClickEvaluator,
+                sessionRuntimeManager: InMemorySessionRuntimeManager(launcher: StaticSessionRuntimeLauncher())
+            )
+
+            let detail = try await onClickService.getProviderDetail(workspaceID: workspace.id, providerID: .claude)
+
+            #expect(detail.health.summary == "Prewarmed Claude health")
+            #expect(await onClickEvaluator.callCount(for: .claude) == 0)
+        }
+
         @Test func remoteRelaunchWithLaunchSnapshotSkipsFreshProviderHealthChecks() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceSessionLaunchFactReuseTests", isDirectory: true)
