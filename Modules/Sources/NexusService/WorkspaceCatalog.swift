@@ -61,7 +61,13 @@
     }
 
     final class WorkspaceCatalog: WorkspaceCatalogReading, @unchecked Sendable {
-        private static let maxConcurrentWorkspaceProviderCardLoads = 2
+        /// Each Provider's catalog read (cold path: a real executable resolution + version/readiness
+        /// probe, each multiple seconds) is fully independent — no shared mutable state forces
+        /// serialization between Providers. Capping this below `ProviderID.allCases.count` only
+        /// serializes otherwise-parallel work: measured opening a Workspace with zero cached Provider
+        /// Health snapshots (e.g. first-ever browse) at ~9.4s wall time with a cap of 2 versus ~5.9s
+        /// (bound by the single slowest Provider probe) with full parallelism.
+        private static let maxConcurrentWorkspaceProviderCardLoads = ProviderID.allCases.count
 
         private let dependencies: WorkspaceCatalogDependencies
 

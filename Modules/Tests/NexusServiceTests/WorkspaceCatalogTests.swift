@@ -302,7 +302,7 @@
             #expect(overviews.map(\.workspace.id) == [secondWorkspace.id, fixture.workspace.id])
         }
 
-        @Test func workspaceOverviewBoundsProviderCardConcurrencyWhilePreservingProviderOrder() async throws {
+        @Test func workspaceOverviewLoadsAllProviderCardsConcurrentlyWhilePreservingProviderOrder() async throws {
             let tracker = ProviderCatalogReadConcurrencyTracker()
             let fixture = try WorkspaceCatalogFixture(
                 providerModuleRegistry: ProviderModuleRegistry(
@@ -316,10 +316,10 @@
             let overview = try await fixture.catalog.workspaceOverview(workspaceID: fixture.workspace.id)
 
             #expect(overview.providerCards.map(\.provider.id) == ProviderID.allCases)
-            #expect(await tracker.maximumConcurrentReads() == 2)
+            #expect(await tracker.maximumConcurrentReads() == ProviderID.allCases.count)
         }
 
-        @Test func workspaceOverviewBrowsePreservesStaleProviderSummariesWhileBoundingProviderCardConcurrency()
+        @Test func workspaceOverviewBrowsePreservesStaleProviderSummariesWhileLoadingProviderCardsConcurrently()
             async throws
         {
             let now = Date(timeIntervalSince1970: 1_500)
@@ -354,7 +354,7 @@
                 overview.providerCards.map(\.health.summary)
                     == ProviderID.allCases.map { "Stale \($0.displayName) health" })
             #expect(overview.usesStaleBrowseFacts)
-            #expect(await tracker.maximumConcurrentReads() == 2)
+            #expect(await tracker.maximumConcurrentReads() == ProviderID.allCases.count)
         }
 
         @Test func workspaceOverviewReusesRecentLocalProviderHealthSnapshot() async throws {

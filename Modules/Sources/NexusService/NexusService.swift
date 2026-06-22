@@ -2088,13 +2088,36 @@
                     return
                 }
 
-                for workspace in workspaces where workspace.kind == .local {
-                    for providerID in ProviderID.allCases {
-                        _ = try? await self.workspaceCatalog.providerHealthSummary(
-                            for: providerID,
-                            workspace: workspace,
-                            remoteContext: nil
-                        )
+                let prewarmTargets = workspaces.filter { $0.kind == .local }.flatMap { workspace in
+                    ProviderID.allCases.map { (workspace, $0) }
+                }
+
+                // Each (Workspace, Provider) Health probe is independent — spawn them with the same
+                // bounded concurrency as a foreground workspaceOverview load instead of one at a time,
+                // so a Mac with many local Workspaces finishes prewarming before the user can click.
+                await withTaskGroup(of: Void.self) { group in
+                    var nextTargetIndex = 0
+
+                    func addNextTaskIfNeeded() {
+                        guard nextTargetIndex < prewarmTargets.count else {
+                            return
+                        }
+                        let (workspace, providerID) = prewarmTargets[nextTargetIndex]
+                        nextTargetIndex += 1
+                        group.addTask {
+                            _ = try? await self.workspaceCatalog.providerHealthSummary(
+                                for: providerID,
+                                workspace: workspace,
+                                remoteContext: nil
+                            )
+                        }
+                    }
+
+                    for _ in 0..<min(prewarmTargets.count, ProviderID.allCases.count) {
+                        addNextTaskIfNeeded()
+                    }
+                    while await group.next() != nil {
+                        addNextTaskIfNeeded()
                     }
                 }
             }
