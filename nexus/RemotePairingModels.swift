@@ -55,6 +55,8 @@ nonisolated struct RemotePairingHTTPClient {
         }
     }
 
+    static let statusRequestTimeoutInterval: TimeInterval = 2
+
     private let sessionBox: SessionBox
 
     private var session: URLSession {
@@ -76,7 +78,8 @@ nonisolated struct RemotePairingHTTPClient {
     }
 
     func fetchStatus(host: String, port: Int) async throws -> RemotePairedMacStatus {
-        let request = URLRequest(url: URL(string: "http://\(host):\(port)/remote-client/status")!)
+        var request = URLRequest(url: URL(string: "http://\(host):\(port)/remote-client/status")!)
+        request.timeoutInterval = Self.statusRequestTimeoutInterval
         let (data, response) = try await session.data(for: request)
         let httpResponse = response as? HTTPURLResponse
         guard httpResponse?.statusCode == 200 else {
@@ -596,3 +599,5 @@ nonisolated struct RemoteSessionKeyRequest: Codable, Sendable {
 nonisolated struct RemotePairingErrorResponse: Codable, Sendable {
     let message: String
 }
+
+extension RemotePairingHTTPClient: RemotePairingClient {}

@@ -182,15 +182,6 @@
             isRefreshingAvailability = true
             defer { isRefreshingAvailability = false }
             await model.refreshPairedMacAvailability()
-
-            if let activePairedMac = model.activePairedMac,
-                model.availability(for: activePairedMac) == .available
-            {
-                await model.refreshActivePairedMacCatalog()
-            } else {
-                model.catalog = nil
-                model.catalogErrorMessage = nil
-            }
         }
 
     }

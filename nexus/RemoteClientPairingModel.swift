@@ -8,7 +8,7 @@ import Observation
     import UIKit
 #endif
 
-protocol RemotePairingClient {
+protocol RemotePairingClient: Sendable {
     func fetchStatus(host: String, port: Int) async throws -> RemotePairedMacStatus
     func completePairing(host: String, port: Int, pairingCode: String, deviceName: String) async throws -> PairedMac
     func fetchCatalog(for pairedMac: PairedMac) async throws -> RemoteWorkspaceCatalog
@@ -110,8 +110,6 @@ extension RemotePairingClient {
         )
     }
 }
-
-extension RemotePairingHTTPClient: RemotePairingClient {}
 
 protocol PairedMacStore {
     func loadPairedMacs() -> [PairedMac]
@@ -347,22 +345,77 @@ final class RemoteClientPairingModel {
         pairedMacAvailability[pairedMac.id] ?? .unknown
     }
 
-    func refreshPairedMacAvailability() async {
-        var nextAvailability: [PairedMac.ID: PairedMacAvailability] = [:]
+    static let pairedMacAvailabilityProbeConcurrencyLimit = 4
 
-        for pairedMac in pairedMacs {
-            do {
-                let status = try await client.fetchStatus(host: pairedMac.host, port: pairedMac.port)
-                nextAvailability[pairedMac.id] =
-                    status.isRemoteAccessEnabled
-                    ? .available
-                    : .remoteAccessDisabled
-            } catch {
-                nextAvailability[pairedMac.id] = .unavailablePairedMac
-            }
+    func refreshPairedMacAvailability() async {
+        let pairedMacsToProbe = pairedMacs
+        let activePairedMacIDAtRefreshStart = activePairedMacID
+        pairedMacAvailability = Dictionary(
+            uniqueKeysWithValues: pairedMacsToProbe.map { ($0.id, PairedMacAvailability.unknown) })
+
+        guard pairedMacsToProbe.isEmpty == false else {
+            catalog = nil
+            catalogErrorMessage = nil
+            return
         }
 
-        pairedMacAvailability = nextAvailability
+        var nextPairedMacIndex = 0
+        let client = client
+        await withTaskGroup(of: (PairedMac, PairedMacAvailability).self) { group in
+            func enqueueNextProbe() {
+                guard nextPairedMacIndex < pairedMacsToProbe.count else {
+                    return
+                }
+
+                let pairedMac = pairedMacsToProbe[nextPairedMacIndex]
+                nextPairedMacIndex += 1
+                group.addTask {
+                    let availability = await Self.resolveAvailability(for: pairedMac, client: client)
+                    return (pairedMac, availability)
+                }
+            }
+
+            let initialProbeCount = min(
+                Self.pairedMacAvailabilityProbeConcurrencyLimit,
+                pairedMacsToProbe.count
+            )
+            for _ in 0..<initialProbeCount {
+                enqueueNextProbe()
+            }
+
+            while let (pairedMac, availability) = await group.next() {
+                guard pairedMacs.contains(where: { $0.id == pairedMac.id }) else {
+                    enqueueNextProbe()
+                    continue
+                }
+
+                pairedMacAvailability[pairedMac.id] = availability
+                if pairedMac.id == activePairedMacIDAtRefreshStart,
+                    pairedMac.id == activePairedMacID
+                {
+                    if availability == .available {
+                        await refreshActivePairedMacCatalog()
+                    } else {
+                        catalog = nil
+                        catalogErrorMessage = nil
+                    }
+                }
+
+                enqueueNextProbe()
+            }
+        }
+    }
+
+    private nonisolated static func resolveAvailability(
+        for pairedMac: PairedMac,
+        client: any RemotePairingClient
+    ) async -> PairedMacAvailability {
+        do {
+            let status = try await client.fetchStatus(host: pairedMac.host, port: pairedMac.port)
+            return status.isRemoteAccessEnabled ? .available : .remoteAccessDisabled
+        } catch {
+            return .unavailablePairedMac
+        }
     }
 
     func refreshActivePairedMacCatalog() async {
