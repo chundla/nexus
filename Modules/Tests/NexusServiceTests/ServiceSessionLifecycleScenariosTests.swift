@@ -253,7 +253,7 @@
                         )
                     },
                     remoteWorkspaceHealthContext: { _ in Optional<RemoteWorkspaceHealthContext>.none },
-                    providerHealthSummary: { _, _, _ in
+                    providerHealthSummary: { _, _, _, _ in
                         ProviderHealthSummary(
                             state: .available,
                             summary: "Ready",
@@ -352,7 +352,7 @@
                         )
                     },
                     remoteWorkspaceHealthContext: { _ in Optional<RemoteWorkspaceHealthContext>.none },
-                    providerHealthSummary: { _, _, _ in
+                    providerHealthSummary: { _, _, _, _ in
                         ProviderHealthSummary(
                             state: .available,
                             summary: "Ready",
@@ -471,7 +471,7 @@
                         )
                     },
                     remoteWorkspaceHealthContext: { _ in Optional<RemoteWorkspaceHealthContext>.none },
-                    providerHealthSummary: { _, _, _ in fixture.health },
+                    providerHealthSummary: { _, _, _, _ in fixture.health },
                     resolveNamedSessionName: { requestedName, _ in requestedName ?? "Session 1" },
                     reconcileSessionRuntimeState: { $0 },
                     sessionMayRemainReadyWithoutRuntime: { _, _ in false },
@@ -690,7 +690,7 @@
                         overrideProviderModule ?? providerModule(for: providerID)
                     },
                     remoteWorkspaceHealthContext: { _ in Optional<RemoteWorkspaceHealthContext>.none },
-                    providerHealthSummary: { _, _, _ in health },
+                    providerHealthSummary: { _, _, _, _ in health },
                     resolveNamedSessionName: { requestedName, _ in requestedName ?? "Session 1" },
                     reconcileSessionRuntimeState: { $0 },
                     sessionMayRemainReadyWithoutRuntime: { _, _ in false },

@@ -840,12 +840,13 @@
         }
 
         private func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) {
+            selection = .provider(workspaceID, providerID)
+
             Task {
                 do {
                     let session = try await appModel.launchOrResumeDefaultSession(
                         workspaceID: workspaceID, providerID: providerID)
                     focusedSessionID = session.id
-                    selection = .provider(workspaceID, providerID)
                 } catch {
                     presentedError = PresentedError(message: error.localizedDescription)
                 }

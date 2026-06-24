@@ -1817,11 +1817,13 @@
                             try self.workspaceCatalog.remoteWorkspaceHealthContext(
                                 for: workspace, refreshHostValidation: true)
                         },
-                        providerHealthSummary: { [unowned self] providerID, workspace, remoteContext in
+                        providerHealthSummary: {
+                            [unowned self] providerID, workspace, remoteContext, preferFreshLocalCheck in
                             try await self.workspaceCatalog.providerHealthSummary(
                                 for: providerID,
                                 workspace: workspace,
-                                remoteContext: remoteContext
+                                remoteContext: remoteContext,
+                                preferFreshLocalCheck: preferFreshLocalCheck
                             )
                         },
                         resolveNamedSessionName: { [unowned self] requestedName, existingSessions in

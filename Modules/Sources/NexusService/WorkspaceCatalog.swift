@@ -20,6 +20,37 @@
         case forceFresh
     }
 
+    private struct LocalProviderHealthTaskKey: Hashable {
+        let workspaceID: UUID
+        let providerID: ProviderID
+    }
+
+    private actor LocalProviderHealthTaskRegistry {
+        private var tasksByKey: [LocalProviderHealthTaskKey: Task<ProviderHealthSummary, Error>] = [:]
+
+        func task(
+            for key: LocalProviderHealthTaskKey,
+            create: @escaping @Sendable () async throws -> ProviderHealthSummary
+        ) -> Task<ProviderHealthSummary, Error> {
+            if let existingTask = tasksByKey[key] {
+                return existingTask
+            }
+
+            let task = Task(operation: create)
+            tasksByKey[key] = task
+
+            Task { [self] in
+                _ = try? await task.value
+                await removeTask(for: key)
+            }
+            return task
+        }
+
+        private func removeTask(for key: LocalProviderHealthTaskKey) {
+            tasksByKey.removeValue(forKey: key)
+        }
+    }
+
     struct WorkspaceCatalogDependencies {
         let metadataStore: NexusMetadataStore
         let sessionRecordStore: any SessionRecordStore
@@ -70,6 +101,7 @@
         private static let maxConcurrentWorkspaceProviderCardLoads = ProviderID.allCases.count
 
         private let dependencies: WorkspaceCatalogDependencies
+        private let localProviderHealthTaskRegistry = LocalProviderHealthTaskRegistry()
 
         init(dependencies: WorkspaceCatalogDependencies) {
             self.dependencies = dependencies
@@ -298,11 +330,13 @@
             for providerID: ProviderID,
             workspace: Workspace,
             remoteContext: RemoteWorkspaceHealthContext?,
+            preferFreshLocalCheck: Bool = false,
             preferFreshRemoteCheck: Bool = false
         ) async throws -> ProviderHealthSummary {
             let providerModule = providerModule(for: providerID)
 
-            if preferFreshRemoteCheck == false,
+            if preferFreshLocalCheck == false,
+                preferFreshRemoteCheck == false,
                 let snapshot = try dependencies.metadataStore.providerHealth(
                     workspaceID: workspace.id, providerID: providerID),
                 workspace.kind != .remote
@@ -667,17 +701,67 @@
                     }
                     return (snapshot, true)
                 }
+
+                if workspace.kind == .local {
+                    return (pendingWorkspaceOverviewProviderHealthSummary(for: providerID), true)
+                }
             case .forceFresh:
-                break
+                return (
+                    try await evaluateAndPersistProviderHealth(
+                        for: providerID,
+                        workspace: workspace,
+                        remoteContext: remoteContext
+                    ),
+                    false
+                )
             }
 
             return (
                 try await evaluateAndPersistProviderHealth(
-                    for: providerID, workspace: workspace, remoteContext: remoteContext), false
+                    for: providerID,
+                    workspace: workspace,
+                    remoteContext: remoteContext
+                ),
+                false
+            )
+        }
+
+        private func pendingWorkspaceOverviewProviderHealthSummary(for providerID: ProviderID)
+            -> ProviderHealthSummary
+        {
+            ProviderHealthSummary(
+                state: .notChecked,
+                summary: "Checking \(providerID.displayName)…",
+                launchability: .launchable
             )
         }
 
         private func evaluateAndPersistProviderHealth(
+            for providerID: ProviderID,
+            workspace: Workspace,
+            remoteContext: RemoteWorkspaceHealthContext?
+        ) async throws -> ProviderHealthSummary {
+            guard workspace.kind == .local else {
+                return try await evaluateAndPersistProviderHealthUncoalesced(
+                    for: providerID,
+                    workspace: workspace,
+                    remoteContext: remoteContext
+                )
+            }
+
+            let task = await localProviderHealthTaskRegistry.task(
+                for: LocalProviderHealthTaskKey(workspaceID: workspace.id, providerID: providerID)
+            ) { [self] in
+                try await self.evaluateAndPersistProviderHealthUncoalesced(
+                    for: providerID,
+                    workspace: workspace,
+                    remoteContext: remoteContext
+                )
+            }
+            return try await task.value
+        }
+
+        private func evaluateAndPersistProviderHealthUncoalesced(
             for providerID: ProviderID,
             workspace: Workspace,
             remoteContext: RemoteWorkspaceHealthContext?

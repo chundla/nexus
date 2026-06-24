@@ -5,7 +5,7 @@
     import Testing
 
     struct NexusServiceSessionLaunchFactReuseTests {
-        @Test func freshLocalLaunchReusesRecentProviderHealthSnapshotAcrossBootstrap() async throws {
+        @Test func freshLocalLaunchUsesFreshProviderHealthAcrossBootstrap() async throws {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("NexusServiceSessionLaunchFactReuseTests", isDirectory: true)
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -34,8 +34,9 @@
                 primaryGroupID: group.id
             )
 
-            _ = try await firstService.getWorkspaceOverview(workspaceID: workspace.id)
-            #expect(await firstEvaluator.callCount(for: .claude) == 1)
+            let firstOverview = try await firstService.getWorkspaceOverview(workspaceID: workspace.id)
+            #expect(firstOverview.usesStaleBrowseFacts)
+            #expect(await firstEvaluator.callCount(for: .claude) == 0)
 
             let secondEvaluator = CountingProviderHealthEvaluator(
                 summariesByProvider: [
@@ -57,7 +58,7 @@
                 workspaceID: workspace.id, providerID: .claude)
 
             #expect(session.state == .ready)
-            #expect(await secondEvaluator.callCount(for: .claude) == 0)
+            #expect(await secondEvaluator.callCount(for: .claude) == 1)
         }
 
         @Test func startupPrewarmPopulatesLocalProviderHealthBeforeFirstProviderDetailRequest() async throws {

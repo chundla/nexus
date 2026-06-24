@@ -470,8 +470,10 @@
             let session = try await client.launchOrResumeDefaultSession(
                 workspaceID: workspaceID, providerID: providerID)
             try await focusSession(sessionID: session.id)
-            try await refreshWorkspaceOverview(for: workspaceID)
-            try await refreshProviderDetailIfLoaded(workspaceID: workspaceID, providerID: providerID)
+            refreshWorkspaceOverviewAndLoadedProviderDetailInBackground(
+                workspaceID: workspaceID,
+                providerID: providerID
+            )
             return session
         }
 
@@ -1144,6 +1146,28 @@
             }
 
             try await refreshProviderDetail(workspaceID: workspaceID, providerID: providerID)
+        }
+
+        private func refreshWorkspaceOverviewAndLoadedProviderDetailInBackground(
+            workspaceID: UUID,
+            providerID: ProviderID
+        ) {
+            Task { @MainActor [weak self] in
+                guard let self else {
+                    return
+                }
+
+                async let workspaceOverviewRefresh: Void = {
+                    _ = try? await refreshWorkspaceOverview(for: workspaceID)
+                }()
+                async let providerDetailRefresh: Void = {
+                    _ = try? await refreshProviderDetailIfLoaded(
+                        workspaceID: workspaceID,
+                        providerID: providerID
+                    )
+                }()
+                _ = await (workspaceOverviewRefresh, providerDetailRefresh)
+            }
         }
 
         private func applyFocusedSessionActionResponse(
