@@ -6790,6 +6790,180 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelCreateLocalWorkspacePublishesWorkspaceBeforeOverviewRefreshCompletes() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Local")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Local API",
+            kind: .local,
+            folderPath: "/tmp/local-api",
+            primaryGroupID: group.id
+        )
+        let overview = WorkspaceOverview(
+            workspace: workspace,
+            providerCards: [
+                WorkspaceProviderCard(
+                    provider: Provider(id: .claude),
+                    health: ProviderHealthSummary(state: .available, summary: "Local Claude available"),
+                    defaultSession: ProviderDefaultSessionSummary(
+                        state: .notCreated,
+                        summary: "No default session yet",
+                        actionTitle: "Launch"
+                    )
+                )
+            ]
+        )
+        let loader = ControlledWorkspaceOverviewLoader(modeByWorkspaceID: [workspace.id: .suspended])
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: overview,
+            session: session,
+            screen: SessionScreen(session: session, transcript: "Claude ready"),
+            workspaces: [],
+            workspaceGroups: [group],
+            workspaceOverviewLoader: { workspaceID in
+                try await loader.load(workspaceID: workspaceID, overview: overview)
+            },
+            refreshWorkspaceOverviewHandler: { workspaceID in
+                try await loader.load(workspaceID: workspaceID, overview: overview)
+            }
+        )
+        let model = NexusAppModel(client: client)
+
+        let createTask = Task {
+            try await model.createLocalWorkspace(folderPath: "/tmp/local-api", primaryGroupID: group.id)
+        }
+
+        do {
+            try await waitUntilAsync(timeoutNanoseconds: 1_000_000_000, pollIntervalNanoseconds: 10_000_000) {
+                await MainActor.run {
+                    model.workspaces.map(\.id) == [workspace.id]
+                        && model.workspaceOverview(for: workspace.id) == nil
+                }
+            }
+        } catch {
+            loader.resume(workspaceID: workspace.id, with: overview)
+            _ = try? await createTask.value
+            throw error
+        }
+
+        #expect(client.workspaceOverviewRequestCount == 0)
+        try await waitUntil(timeoutNanoseconds: 1_000_000_000, pollIntervalNanoseconds: 10_000_000) {
+            loader.requestedWorkspaceIDs() == [workspace.id]
+        }
+        #expect(client.refreshWorkspaceOverviewRequestCount == 1)
+
+        loader.resume(workspaceID: workspace.id, with: overview)
+        let createdWorkspace = try await createTask.value
+
+        #expect(createdWorkspace == workspace)
+        try await waitUntilAsync {
+            await MainActor.run {
+                model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary
+                    == "Local Claude available"
+            }
+        }
+    }
+
+    @MainActor
+    @Test func appModelCreateRemoteWorkspacePublishesWorkspaceBeforeOverviewRefreshCompletes() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Remote")
+        let host = NexusDomain.Host(id: UUID(), name: "Build Server", sshTarget: "build-box", port: 2222)
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Remote API",
+            kind: .remote,
+            folderPath: "/srv/api",
+            primaryGroupID: group.id,
+            remoteHostID: host.id
+        )
+        let overview = WorkspaceOverview(
+            workspace: workspace,
+            providerCards: [
+                WorkspaceProviderCard(
+                    provider: Provider(id: .pi),
+                    health: ProviderHealthSummary(state: .available, summary: "Remote Pi available"),
+                    defaultSession: ProviderDefaultSessionSummary(
+                        state: .notCreated,
+                        summary: "No default session yet",
+                        actionTitle: "Launch"
+                    )
+                )
+            ]
+        )
+        let loader = ControlledWorkspaceOverviewLoader(modeByWorkspaceID: [workspace.id: .suspended])
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: overview,
+            session: session,
+            screen: SessionScreen(session: session, transcript: "Pi ready"),
+            workspaces: [],
+            workspaceGroups: [group],
+            workspaceOverviewLoader: { workspaceID in
+                try await loader.load(workspaceID: workspaceID, overview: overview)
+            },
+            refreshWorkspaceOverviewHandler: { workspaceID in
+                try await loader.load(workspaceID: workspaceID, overview: overview)
+            },
+            hosts: [host]
+        )
+        let model = NexusAppModel(client: client)
+
+        try await model.refreshHosts()
+        let createTask = Task {
+            try await model.createRemoteWorkspace(
+                name: "Remote API",
+                hostID: host.id,
+                remotePath: "/srv/api",
+                primaryGroupID: group.id
+            )
+        }
+
+        do {
+            try await waitUntilAsync(timeoutNanoseconds: 1_000_000_000, pollIntervalNanoseconds: 10_000_000) {
+                await MainActor.run {
+                    model.workspaces.map(\.id) == [workspace.id]
+                        && model.workspaceOverview(for: workspace.id) == nil
+                }
+            }
+        } catch {
+            loader.resume(workspaceID: workspace.id, with: overview)
+            _ = try? await createTask.value
+            throw error
+        }
+
+        #expect(model.workspaceTargetSummary(for: workspace) == "Build Server • /srv/api")
+        #expect(client.workspaceOverviewRequestCount == 0)
+        try await waitUntil(timeoutNanoseconds: 1_000_000_000, pollIntervalNanoseconds: 10_000_000) {
+            loader.requestedWorkspaceIDs() == [workspace.id]
+        }
+        #expect(client.refreshWorkspaceOverviewRequestCount == 1)
+
+        loader.resume(workspaceID: workspace.id, with: overview)
+        let createdWorkspace = try await createTask.value
+
+        #expect(createdWorkspace == workspace)
+        try await waitUntilAsync {
+            await MainActor.run {
+                model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary
+                    == "Remote Pi available"
+            }
+        }
+    }
+
+    @MainActor
     @Test func appModelCreatesRemoteWorkspaceAndFormatsWorkspaceTargetSummary() async throws {
         let group = WorkspaceGroup(id: UUID(), name: "Remote")
         let host = NexusDomain.Host(id: UUID(), name: "Build Server", sshTarget: "build-box", port: 2222)
@@ -6827,8 +7001,12 @@ struct nexusTests {
 
         #expect(createdWorkspace == workspace)
         #expect(model.workspaces == [workspace])
-        #expect(model.workspaceOverview(for: workspace.id)?.workspace == workspace)
         #expect(model.workspaceTargetSummary(for: workspace) == "Build Server • /srv/api")
+        try await waitUntilAsync {
+            await MainActor.run {
+                model.workspaceOverview(for: workspace.id)?.workspace == workspace
+            }
+        }
     }
 
     @MainActor

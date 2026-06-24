@@ -368,9 +368,8 @@
         func createLocalWorkspace(folderPath: String, primaryGroupID: UUID?) async throws -> Workspace {
             let workspace = try await client.createLocalWorkspace(
                 name: nil, folderPath: folderPath, primaryGroupID: primaryGroupID)
-            let overview = try await client.getWorkspaceOverview(workspaceID: workspace.id)
-            workspaces.append(workspace)
-            workspaceOverviews[workspace.id] = overview
+            applyCreatedWorkspaceShell(workspace)
+            refreshWorkspaceOverviewInBackground(workspaceID: workspace.id)
             return workspace
         }
 
@@ -383,9 +382,8 @@
                 remotePath: remotePath,
                 primaryGroupID: primaryGroupID
             )
-            let overview = try await client.getWorkspaceOverview(workspaceID: workspace.id)
-            workspaces.append(workspace)
-            workspaceOverviews[workspace.id] = overview
+            applyCreatedWorkspaceShell(workspace)
+            refreshWorkspaceOverviewInBackground(workspaceID: workspace.id)
             return workspace
         }
 
@@ -921,6 +919,24 @@
             applyWorkspaceOverview(overview)
         }
 
+        private func applyCreatedWorkspaceShell(_ workspace: Workspace) {
+            if let index = workspaces.firstIndex(where: { $0.id == workspace.id }) {
+                workspaces[index] = workspace
+            } else {
+                workspaces.append(workspace)
+            }
+        }
+
+        private func refreshWorkspaceOverviewInBackground(workspaceID: UUID) {
+            Task { @MainActor [weak self] in
+                guard let self else {
+                    return
+                }
+
+                _ = try? await self.refreshWorkspaceOverview(for: workspaceID)
+            }
+        }
+
         private func startWorkspaceOverviewRefresh() -> UInt64 {
             backgroundWorkspaceOverviewLoadTask?.cancel()
             backgroundWorkspaceOverviewLoadTask = nil
@@ -1267,10 +1283,10 @@
                 }
 
                 async let workspaceOverviewRefresh: Void = {
-                    _ = try? await refreshWorkspaceOverview(for: workspaceID)
+                    _ = try? await self.refreshWorkspaceOverview(for: workspaceID)
                 }()
                 async let providerDetailRefresh: Void = {
-                    _ = try? await refreshProviderDetailIfLoaded(
+                    _ = try? await self.refreshProviderDetailIfLoaded(
                         workspaceID: workspaceID,
                         providerID: providerID
                     )
