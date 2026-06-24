@@ -458,33 +458,48 @@
         {
             let session = try await client.createNamedSession(
                 workspaceID: workspaceID, providerID: providerID, name: name)
+            applyOptimisticSessionMutation(session)
+            applyOptimisticAlternateSessionCountDelta(workspaceID: workspaceID, providerID: providerID, delta: 1)
             try await focusSession(sessionID: session.id)
-            try await refreshWorkspaceOverview(for: workspaceID)
-            try await refreshProviderDetail(workspaceID: workspaceID, providerID: providerID)
+            refreshWorkspaceOverviewAndProviderDetailInBackground(
+                workspaceID: workspaceID,
+                providerID: providerID
+            )
             return session
         }
 
         func launchOrResumeSession(sessionID: UUID, workspaceID: UUID, providerID: ProviderID) async throws -> Session {
             let session = try await client.launchOrResumeSession(sessionID: sessionID)
             let screen = try await client.getSessionScreen(sessionID: session.id)
-            try await applyFocusedSessionScreen(screen)
+            applyOptimisticSessionMutation(session)
+            try await applyFocusedSessionScreen(screen, refreshCatalogOnStateChange: false)
             try await focusSession(sessionID: session.id)
-            try await refreshWorkspaceOverview(for: workspaceID)
-            try await refreshProviderDetailIfLoaded(workspaceID: workspaceID, providerID: providerID)
+            refreshWorkspaceOverviewAndLoadedProviderDetailInBackground(
+                workspaceID: workspaceID,
+                providerID: providerID
+            )
             return session
         }
 
         func stopSession(sessionID: UUID, workspaceID: UUID, providerID: ProviderID) async throws -> Session {
             let session = try await client.stopSession(sessionID: sessionID)
-            if focusedSessionScreen?.session.id == sessionID {
-                try await refreshFocusedSession()
+            applyOptimisticSessionMutation(session)
+            if let focusedSessionScreen, focusedSessionScreen.session.id == sessionID {
+                try await applyFocusedSessionScreen(
+                    focusedSessionScreen.replacingSession(session),
+                    refreshCatalogOnStateChange: false
+                )
             }
-            try await refreshWorkspaceOverview(for: workspaceID)
-            try await refreshProviderDetail(workspaceID: workspaceID, providerID: providerID)
+            refreshWorkspaceOverviewAndProviderDetailInBackground(
+                workspaceID: workspaceID,
+                providerID: providerID
+            )
             return session
         }
 
         func deleteSessionRecord(sessionID: UUID, workspaceID: UUID, providerID: ProviderID) async throws -> Bool {
+            let deletedSession = localSessionSnapshot(
+                sessionID: sessionID, workspaceID: workspaceID, providerID: providerID)
             let deleted = try await client.deleteSessionRecord(sessionID: sessionID)
             guard deleted else {
                 return false
@@ -500,8 +515,16 @@
                 focusedSessionID = nil
                 focusedSessionWorkspaceID = nil
             }
-            try await refreshWorkspaceOverview(for: workspaceID)
-            try await refreshProviderDetail(workspaceID: workspaceID, providerID: providerID)
+            applyOptimisticSessionRecordDeletion(
+                sessionID: sessionID,
+                workspaceID: workspaceID,
+                providerID: providerID,
+                deletedSession: deletedSession
+            )
+            refreshWorkspaceOverviewAndProviderDetailInBackground(
+                workspaceID: workspaceID,
+                providerID: providerID
+            )
             return true
         }
 
@@ -1273,9 +1296,130 @@
             try await refreshProviderDetail(workspaceID: workspaceID, providerID: providerID)
         }
 
+        private func applyOptimisticSessionMutation(_ session: Session) {
+            let key = ProviderDetailKey(workspaceID: session.workspaceID, providerID: session.providerID)
+            if let detail = providerDetails[key] {
+                providerDetails[key] = detail.replacingSession(session)
+                if let updatedDetail = providerDetails[key] {
+                    syncRecentNavigationSessionWorkspaceIDs(for: updatedDetail)
+                }
+            }
+
+            if session.isDefault {
+                applyOptimisticDefaultSessionSummary(session)
+            }
+        }
+
+        private func applyOptimisticSessionRecordDeletion(
+            sessionID: UUID,
+            workspaceID: UUID,
+            providerID: ProviderID,
+            deletedSession: Session?
+        ) {
+            let key = ProviderDetailKey(workspaceID: workspaceID, providerID: providerID)
+            if let detail = providerDetails[key] {
+                providerDetails[key] = detail.removingSession(sessionID: sessionID)
+            }
+
+            if deletedSession?.isDefault == false {
+                applyOptimisticAlternateSessionCountDelta(workspaceID: workspaceID, providerID: providerID, delta: -1)
+            }
+        }
+
+        private func localSessionSnapshot(sessionID: UUID, workspaceID: UUID, providerID: ProviderID) -> Session? {
+            if focusedSessionScreen?.session.id == sessionID {
+                return focusedSessionScreen?.session
+            }
+
+            let detail = providerDetails[ProviderDetailKey(workspaceID: workspaceID, providerID: providerID)]
+            if detail?.defaultSession?.id == sessionID {
+                return detail?.defaultSession
+            }
+
+            return detail?.alternateSessions.first(where: { $0.id == sessionID })
+                ?? detail?.failedSessions.first(where: { $0.id == sessionID })
+        }
+
+        private func applyOptimisticAlternateSessionCountDelta(
+            workspaceID: UUID,
+            providerID: ProviderID,
+            delta: Int
+        ) {
+            guard let overview = workspaceOverviews[workspaceID],
+                let providerIndex = overview.providerCards.firstIndex(where: { $0.provider.id == providerID })
+            else {
+                return
+            }
+
+            let card = overview.providerCards[providerIndex]
+            var providerCards = overview.providerCards
+            providerCards[providerIndex] = WorkspaceProviderCard(
+                provider: card.provider,
+                health: card.health,
+                capabilities: card.capabilities,
+                prelaunchPrimarySurface: card.prelaunchPrimarySurface,
+                defaultSession: card.defaultSession,
+                alternateSessionCount: max(0, card.alternateSessionCount + delta)
+            )
+            workspaceOverviews[workspaceID] = WorkspaceOverview(
+                workspace: overview.workspace,
+                providerCards: providerCards,
+                remoteTarget: overview.remoteTarget,
+                usesStaleBrowseFacts: overview.usesStaleBrowseFacts
+            )
+        }
+
+        private func applyOptimisticDefaultSessionSummary(_ session: Session) {
+            guard let overview = workspaceOverviews[session.workspaceID],
+                let providerIndex = overview.providerCards.firstIndex(where: { $0.provider.id == session.providerID })
+            else {
+                return
+            }
+
+            let card = overview.providerCards[providerIndex]
+            var providerCards = overview.providerCards
+            providerCards[providerIndex] = WorkspaceProviderCard(
+                provider: card.provider,
+                health: card.health,
+                capabilities: card.capabilities,
+                prelaunchPrimarySurface: card.prelaunchPrimarySurface,
+                defaultSession: card.defaultSession.replacingSession(session),
+                alternateSessionCount: card.alternateSessionCount
+            )
+            workspaceOverviews[session.workspaceID] = WorkspaceOverview(
+                workspace: overview.workspace,
+                providerCards: providerCards,
+                remoteTarget: overview.remoteTarget,
+                usesStaleBrowseFacts: overview.usesStaleBrowseFacts
+            )
+        }
+
+        private func refreshWorkspaceOverviewAndProviderDetailInBackground(
+            workspaceID: UUID,
+            providerID: ProviderID
+        ) {
+            refreshWorkspaceOverviewAndProviderDetailInBackground(
+                workspaceID: workspaceID,
+                providerID: providerID,
+                refreshProviderDetailOnlyIfLoaded: false
+            )
+        }
+
         private func refreshWorkspaceOverviewAndLoadedProviderDetailInBackground(
             workspaceID: UUID,
             providerID: ProviderID
+        ) {
+            refreshWorkspaceOverviewAndProviderDetailInBackground(
+                workspaceID: workspaceID,
+                providerID: providerID,
+                refreshProviderDetailOnlyIfLoaded: true
+            )
+        }
+
+        private func refreshWorkspaceOverviewAndProviderDetailInBackground(
+            workspaceID: UUID,
+            providerID: ProviderID,
+            refreshProviderDetailOnlyIfLoaded: Bool
         ) {
             Task { @MainActor [weak self] in
                 guard let self else {
@@ -1286,10 +1430,14 @@
                     _ = try? await self.refreshWorkspaceOverview(for: workspaceID)
                 }()
                 async let providerDetailRefresh: Void = {
-                    _ = try? await self.refreshProviderDetailIfLoaded(
-                        workspaceID: workspaceID,
-                        providerID: providerID
-                    )
+                    if refreshProviderDetailOnlyIfLoaded {
+                        _ = try? await self.refreshProviderDetailIfLoaded(
+                            workspaceID: workspaceID,
+                            providerID: providerID
+                        )
+                    } else {
+                        _ = try? await self.refreshProviderDetail(workspaceID: workspaceID, providerID: providerID)
+                    }
                 }()
                 _ = await (workspaceOverviewRefresh, providerDetailRefresh)
             }
@@ -1362,7 +1510,10 @@
             try? await applyFocusedSessionScreen(screen)
         }
 
-        private func applyFocusedSessionScreen(_ screen: SessionScreen) async throws {
+        private func applyFocusedSessionScreen(
+            _ screen: SessionScreen,
+            refreshCatalogOnStateChange: Bool = true
+        ) async throws {
             let previousScreen = focusedSessionScreen?.session.id == screen.session.id ? focusedSessionScreen : nil
             let previousState = previousScreen?.session.state
             focusedSessionScreen = screen
@@ -1378,7 +1529,7 @@
                 recentNavigationSessionWorkspaceIDs[screen.session.id] = screen.session.workspaceID
             }
 
-            if let previousState, previousState != screen.session.state {
+            if refreshCatalogOnStateChange, let previousState, previousState != screen.session.state {
                 try await refreshWorkspaceOverview(for: screen.session.workspaceID)
                 try await refreshProviderDetailIfLoaded(
                     workspaceID: screen.session.workspaceID,
@@ -1432,6 +1583,113 @@
             if focusedStructuredSessionChromePresentation != presentation {
                 focusedStructuredSessionChromePresentation = presentation
             }
+        }
+    }
+
+    private extension ProviderDetail {
+        func replacingSession(_ session: Session) -> ProviderDetail {
+            let defaultSession = session.isDefault ? session : self.defaultSession
+            let alternateSessions: [Session]
+            let failedSessions: [Session]
+
+            if session.isDefault {
+                alternateSessions = self.alternateSessions
+                failedSessions = self.failedSessions.filter { $0.id != session.id }
+            } else if session.state == .failed {
+                alternateSessions = self.alternateSessions.filter { $0.id != session.id }
+                failedSessions = self.failedSessions.replacingOrAppending(session)
+            } else {
+                alternateSessions = self.alternateSessions.replacingOrAppending(session)
+                failedSessions = self.failedSessions.filter { $0.id != session.id }
+            }
+
+            return ProviderDetail(
+                workspace: workspace,
+                provider: provider,
+                health: health,
+                capabilities: capabilities,
+                prelaunchPrimarySurface: prelaunchPrimarySurface,
+                defaultSession: defaultSession,
+                alternateSessions: alternateSessions,
+                failedSessions: failedSessions
+            )
+        }
+
+        func removingSession(sessionID: UUID) -> ProviderDetail {
+            ProviderDetail(
+                workspace: workspace,
+                provider: provider,
+                health: health,
+                capabilities: capabilities,
+                prelaunchPrimarySurface: prelaunchPrimarySurface,
+                defaultSession: defaultSession?.id == sessionID ? nil : defaultSession,
+                alternateSessions: alternateSessions.filter { $0.id != sessionID },
+                failedSessions: failedSessions.filter { $0.id != sessionID }
+            )
+        }
+    }
+
+    private extension Array where Element == Session {
+        func replacingOrAppending(_ session: Session) -> [Session] {
+            guard let index = firstIndex(where: { $0.id == session.id }) else {
+                return self + [session]
+            }
+
+            var sessions = self
+            sessions[index] = session
+            return sessions
+        }
+    }
+
+    private extension ProviderDefaultSessionSummary {
+        func replacingSession(_ session: Session) -> ProviderDefaultSessionSummary {
+            ProviderDefaultSessionSummary(
+                state: State(sessionState: session.state),
+                summary: session.failureMessage ?? summary,
+                actionTitle: session.state == .ready ? "Resume" : "Relaunch",
+                sessionID: session.id
+            )
+        }
+    }
+
+    private extension ProviderDefaultSessionSummary.State {
+        init(sessionState: Session.State) {
+            switch sessionState {
+            case .ready:
+                self = .ready
+            case .interrupted:
+                self = .interrupted
+            case .exited:
+                self = .exited
+            case .failed:
+                self = .failed
+            }
+        }
+    }
+
+    private extension SessionScreen {
+        func replacingSession(_ session: Session) -> SessionScreen {
+            SessionScreen(
+                session: session,
+                primarySurface: primarySurface,
+                controller: controller,
+                transcript: transcript,
+                terminalColumns: terminalColumns,
+                terminalRows: terminalRows,
+                activityItems: activityItems,
+                approvalRequests: approvalRequests,
+                extensionUI: extensionUI,
+                slashCommands: slashCommands,
+                providerEvents: providerEvents,
+                providerFacts: providerFacts,
+                finalOutputDiagnostic: finalOutputDiagnostic,
+                isAgentTurnInProgress: isAgentTurnInProgress,
+                visibleLines: visibleLines,
+                styledVisibleLines: styledVisibleLines,
+                cursorRow: cursorRow,
+                cursorColumn: cursorColumn,
+                cursorVisible: cursorVisible
+            )
         }
     }
 
