@@ -150,6 +150,7 @@
         private var workspaceOverviewRefreshGeneration: UInt64 = 0
 
         private static let initialWorkspaceOverviewLoadCount = 3
+        private static let impactedWorkspaceOverviewRefreshParallelism = 3
 
         var focusedStructuredSessionDiagnosticSnapshot: StructuredSessionClientDiagnosticSnapshot? {
             guard let screen = focusedSessionScreen,
@@ -425,9 +426,7 @@
                 workspaces
                 .filter { $0.remoteHostID == hostID }
                 .map(\.id)
-            for workspaceID in impactedWorkspaceIDs {
-                try await refreshWorkspaceOverview(for: workspaceID)
-            }
+            refreshImpactedWorkspaceOverviewsInBackground(workspaceIDs: impactedWorkspaceIDs)
 
             return snapshot
         }
@@ -957,6 +956,47 @@
                 }
 
                 _ = try? await self.refreshWorkspaceOverview(for: workspaceID)
+            }
+        }
+
+        private func refreshImpactedWorkspaceOverviewsInBackground(workspaceIDs: [UUID]) {
+            guard workspaceIDs.isEmpty == false else {
+                return
+            }
+
+            let boundedParallelism = min(Self.impactedWorkspaceOverviewRefreshParallelism, workspaceIDs.count)
+            Task { @MainActor [weak self, client] in
+                guard let self else {
+                    return
+                }
+
+                await withTaskGroup(of: WorkspaceOverview?.self) { group in
+                    var nextWorkspaceIndex = 0
+
+                    for _ in 0..<boundedParallelism {
+                        let workspaceID = workspaceIDs[nextWorkspaceIndex]
+                        nextWorkspaceIndex += 1
+                        group.addTask {
+                            try? await client.refreshWorkspaceOverview(workspaceID: workspaceID)
+                        }
+                    }
+
+                    while let overview = await group.next() {
+                        if let overview {
+                            self.applyWorkspaceOverview(overview)
+                        }
+
+                        guard nextWorkspaceIndex < workspaceIDs.count else {
+                            continue
+                        }
+
+                        let workspaceID = workspaceIDs[nextWorkspaceIndex]
+                        nextWorkspaceIndex += 1
+                        group.addTask {
+                            try? await client.refreshWorkspaceOverview(workspaceID: workspaceID)
+                        }
+                    }
+                }
             }
         }
 

@@ -6717,6 +6717,143 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelValidateHostPublishesHostDetailBeforeImpactedWorkspaceRefreshesFinish() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Remote")
+        let host = NexusDomain.Host(id: UUID(), name: "Build Server", sshTarget: "build-box", port: nil)
+        let workspaces = (1...4).map { index in
+            Workspace(
+                id: UUID(),
+                name: "Remote API \(index)",
+                kind: .remote,
+                folderPath: "/srv/api-\(index)",
+                primaryGroupID: group.id,
+                remoteHostID: host.id
+            )
+        }
+        let initialOverviewsByID = Dictionary(
+            uniqueKeysWithValues: workspaces.map { workspace in
+                (
+                    workspace.id,
+                    WorkspaceOverview(
+                        workspace: workspace,
+                        providerCards: [
+                            WorkspaceProviderCard(
+                                provider: Provider(id: .pi),
+                                health: ProviderHealthSummary(
+                                    state: .blocked,
+                                    summary: "Provider Health is blocked by Host Validation"
+                                ),
+                                defaultSession: ProviderDefaultSessionSummary(
+                                    state: .notCreated,
+                                    summary: "No default session yet",
+                                    actionTitle: "Launch"
+                                )
+                            )
+                        ]
+                    )
+                )
+            }
+        )
+        let refreshedOverviewsByID = Dictionary(
+            uniqueKeysWithValues: workspaces.map { workspace in
+                (
+                    workspace.id,
+                    WorkspaceOverview(
+                        workspace: workspace,
+                        providerCards: [
+                            WorkspaceProviderCard(
+                                provider: Provider(id: .pi),
+                                health: ProviderHealthSummary(
+                                    state: .available,
+                                    summary: "Remote Pi available for \(workspace.name)"
+                                ),
+                                defaultSession: ProviderDefaultSessionSummary(
+                                    state: .notCreated,
+                                    summary: "No default session yet",
+                                    actionTitle: "Launch"
+                                )
+                            )
+                        ]
+                    )
+                )
+            }
+        )
+        let loader = ControlledWorkspaceOverviewLoader(
+            modeByWorkspaceID: Dictionary(uniqueKeysWithValues: workspaces.map { ($0.id, .suspended) })
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspaces[0].id,
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: initialOverviewsByID[workspaces[0].id]!,
+            session: session,
+            screen: SessionScreen(session: session, transcript: "Pi ready"),
+            workspaces: workspaces,
+            workspaceGroups: [group],
+            workspaceOverviewsByID: initialOverviewsByID,
+            refreshWorkspaceOverviewHandler: { workspaceID in
+                try await loader.load(workspaceID: workspaceID, overview: refreshedOverviewsByID[workspaceID]!)
+            },
+            hosts: [host]
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+
+        let validateTask = Task {
+            try await model.validateHost(hostID: host.id)
+        }
+
+        do {
+            try await waitUntil(timeoutNanoseconds: 1_000_000_000, pollIntervalNanoseconds: 10_000_000) {
+                loader.requestedWorkspaceIDs().count == 3
+            }
+            let snapshot = try await value(of: validateTask, timeoutNanoseconds: 1_000_000_000)
+
+            #expect(snapshot.hostID == host.id)
+            #expect(snapshot.state == .available)
+            #expect(model.hostDetail(for: host.id) == HostDetail(host: host, latestValidation: snapshot))
+            #expect(loader.requestedWorkspaceIDs().count == 3)
+
+            try await Task.sleep(nanoseconds: 100_000_000)
+            #expect(loader.requestedWorkspaceIDs().count == 3)
+
+            let firstRequestedWorkspaceID = try #require(loader.requestedWorkspaceIDs().first)
+            loader.resume(
+                workspaceID: firstRequestedWorkspaceID, with: refreshedOverviewsByID[firstRequestedWorkspaceID]!)
+
+            try await waitUntil(timeoutNanoseconds: 1_000_000_000, pollIntervalNanoseconds: 10_000_000) {
+                loader.requestedWorkspaceIDs().count == 4
+            }
+
+            for workspaceID in loader.requestedWorkspaceIDs() {
+                loader.resume(workspaceID: workspaceID, with: refreshedOverviewsByID[workspaceID]!)
+            }
+
+            try await waitUntilAsync(timeoutNanoseconds: 1_000_000_000, pollIntervalNanoseconds: 10_000_000) {
+                await MainActor.run {
+                    workspaces.allSatisfy { workspace in
+                        model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.state == .available
+                    }
+                }
+            }
+        } catch {
+            for _ in workspaces.indices {
+                for workspaceID in loader.requestedWorkspaceIDs() {
+                    loader.resume(workspaceID: workspaceID, with: refreshedOverviewsByID[workspaceID]!)
+                }
+                try? await Task.sleep(nanoseconds: 10_000_000)
+            }
+            validateTask.cancel()
+            throw error
+        }
+    }
+
+    @MainActor
     @Test func appModelValidateHostRefreshesRemoteWorkspaceOverview() async throws {
         let sshRunner = StubCommandRunner(results: [
             StubCommandRunner.Invocation(
