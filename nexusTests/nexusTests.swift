@@ -7205,6 +7205,78 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelCoalescesConcurrentProviderDetailLoadsForSameProvider() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let overview = WorkspaceOverview(
+            workspace: workspace,
+            providerCards: [
+                WorkspaceProviderCard(
+                    provider: Provider(id: .claude),
+                    health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+                    defaultSession: ProviderDefaultSessionSummary(
+                        state: .ready,
+                        summary: "Default Session ready",
+                        actionTitle: "Resume",
+                        sessionID: session.id
+                    )
+                )
+            ]
+        )
+        let detail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+            defaultSession: session,
+            alternateSessions: [],
+            failedSessions: []
+        )
+        let gate = SuspendedResultGate<ProviderDetail>()
+        let client = TrackingServiceClient(
+            workspaceOverview: overview,
+            session: session,
+            screen: SessionScreen(session: session, transcript: "Claude ready"),
+            providerDetailHandler: { _, _ in
+                try await gate.wait()
+            }
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+
+        let firstLoadTask = Task { @MainActor in
+            try await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
+        }
+        let secondLoadTask = Task { @MainActor in
+            try await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
+        }
+
+        try await waitUntil { client.providerDetailRequestCount == 1 }
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(client.providerDetailRequestCount == 1)
+
+        await gate.resume(returning: detail)
+        try await firstLoadTask.value
+        try await secondLoadTask.value
+
+        #expect(client.providerDetailRequestCount == 1)
+        #expect(model.providerDetail(for: workspace.id, providerID: .claude) == detail)
+    }
+
+    @MainActor
     @Test func appModelWorkspaceBrowseSidebarPresentationUsesLoadedSessionRoutingForRecentOrdering() async throws {
         let group = WorkspaceGroup(id: UUID(), name: "Group")
         let alphaWorkspace = Workspace(

@@ -142,6 +142,7 @@
         private let remotePairingServerFactory: (() throws -> any RemotePairingServing)?
         private var focusedSessionObservation: (any SessionScreenObservation)?
         private var staleWorkspaceOverviewRefreshTasks: [UUID: Task<Void, Never>] = [:]
+        private var providerDetailRefreshTasks: [ProviderDetailKey: Task<ProviderDetail, Error>] = [:]
         private var backgroundWorkspaceOverviewLoadTask: Task<Void, Never>?
         private var workspaceOverviewRefreshGeneration: UInt64 = 0
 
@@ -1147,12 +1148,28 @@
         }
 
         private func refreshProviderDetail(workspaceID: UUID, providerID: ProviderID) async throws {
-            let detail = try await client.getProviderDetail(
-                workspaceID: workspaceID,
-                providerID: providerID
-            )
-            providerDetails[ProviderDetailKey(workspaceID: workspaceID, providerID: providerID)] = detail
-            syncRecentNavigationSessionWorkspaceIDs(for: detail)
+            let key = ProviderDetailKey(workspaceID: workspaceID, providerID: providerID)
+            if let existingTask = providerDetailRefreshTasks[key] {
+                _ = try await existingTask.value
+                return
+            }
+
+            let task = Task<ProviderDetail, Error> { @MainActor [weak self] in
+                guard let self else {
+                    throw CancellationError()
+                }
+
+                let detail = try await client.getProviderDetail(
+                    workspaceID: workspaceID,
+                    providerID: providerID
+                )
+                providerDetails[key] = detail
+                syncRecentNavigationSessionWorkspaceIDs(for: detail)
+                return detail
+            }
+            providerDetailRefreshTasks[key] = task
+            defer { providerDetailRefreshTasks.removeValue(forKey: key) }
+            _ = try await task.value
         }
 
         private func refreshProviderDetailIfLoaded(workspaceID: UUID, providerID: ProviderID) async throws {
