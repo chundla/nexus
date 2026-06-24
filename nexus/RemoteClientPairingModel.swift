@@ -217,6 +217,11 @@ struct RemoteWorkspaceBrowsePresentation: Equatable {
     }
 }
 
+struct RemoteProviderDetailPlaceholder: Equatable {
+    let workspace: Workspace
+    let providerCard: WorkspaceProviderCard
+}
+
 @MainActor
 @Observable
 final class RemoteClientPairingModel {
@@ -263,6 +268,10 @@ final class RemoteClientPairingModel {
     private var focusedSessionObservation: (any SessionScreenObservation)?
     private var focusedSessionObservationStartupTask: Task<Void, Never>?
     private var focusedSessionReconnectTask: Task<Void, Never>?
+    private var catalogRefreshPairedMacID: PairedMac.ID?
+    private var catalogRefreshWaiters: [CheckedContinuation<RemoteWorkspaceCatalog, Error>] = []
+    private var providerDetailRefreshWaiters: [RemoteProviderDetailKey: [CheckedContinuation<ProviderDetail, Error>]] =
+        [:]
 
     var activePairedMac: PairedMac? {
         guard let activePairedMacID else {
@@ -354,6 +363,7 @@ final class RemoteClientPairingModel {
             uniqueKeysWithValues: pairedMacsToProbe.map { ($0.id, PairedMacAvailability.unknown) })
 
         guard pairedMacsToProbe.isEmpty == false else {
+            cancelCatalogRefreshWaiters()
             catalog = nil
             catalogErrorMessage = nil
             return
@@ -396,6 +406,7 @@ final class RemoteClientPairingModel {
                     if availability == .available {
                         await refreshActivePairedMacCatalog()
                     } else {
+                        cancelCatalogRefreshWaiters()
                         catalog = nil
                         catalogErrorMessage = nil
                     }
@@ -420,13 +431,18 @@ final class RemoteClientPairingModel {
 
     func refreshActivePairedMacCatalog() async {
         guard let pairedMac = activePairedMac else {
+            cancelCatalogRefreshWaiters()
             catalog = nil
             catalogErrorMessage = nil
             return
         }
 
         do {
-            catalog = try await client.fetchCatalog(for: pairedMac)
+            let refreshedCatalog = try await refreshedCatalog(for: pairedMac)
+            guard activePairedMac?.id == pairedMac.id else {
+                return
+            }
+            catalog = refreshedCatalog
             syncFocusedSessionWorkspaceLocation()
             catalogErrorMessage = nil
             pairingRecoveryMessage = nil
@@ -442,7 +458,6 @@ final class RemoteClientPairingModel {
                 pairedMac: pairedMac,
                 error: normalizedError
             )
-            catalog = nil
             catalogErrorMessage = normalizedError.localizedDescription
         }
     }
@@ -461,6 +476,17 @@ final class RemoteClientPairingModel {
 
     func providerCard(workspaceID: UUID, providerID: ProviderID) -> WorkspaceProviderCard? {
         workspaceOverview(id: workspaceID)?.providerCards.first(where: { $0.provider.id == providerID })
+    }
+
+    func providerDetailPlaceholder(for workspaceID: UUID, providerID: ProviderID) -> RemoteProviderDetailPlaceholder? {
+        guard providerDetail(for: workspaceID, providerID: providerID) == nil,
+            let overview = workspaceOverview(id: workspaceID),
+            let providerCard = overview.providerCards.first(where: { $0.provider.id == providerID })
+        else {
+            return nil
+        }
+
+        return RemoteProviderDetailPlaceholder(workspace: overview.workspace, providerCard: providerCard)
     }
 
     func resolvedSession(workspaceID: UUID, providerID: ProviderID, sessionID: UUID) -> Session? {
@@ -567,6 +593,8 @@ final class RemoteClientPairingModel {
                 providerID: providerID,
                 forceRefresh: true
             )
+        } catch is CancellationError {
+            return
         } catch {
             let key = RemoteProviderDetailKey(workspaceID: workspaceID, providerID: providerID)
             providerDetails[key] = nil
@@ -707,6 +735,23 @@ final class RemoteClientPairingModel {
         workspaceID: UUID? = nil,
         forceFetchIfAlreadyFocused: Bool = false
     ) async {
+        if focusedSessionID == sessionID,
+            forceFetchIfAlreadyFocused == false,
+            focusedSessionObservation != nil
+        {
+            setFocusedSessionWorkspaceID(workspaceID ?? resolvedWorkspaceID(for: sessionID))
+            return
+        }
+
+        if focusedSessionID == sessionID,
+            forceFetchIfAlreadyFocused == false,
+            let focusedSessionObservationStartupTask
+        {
+            setFocusedSessionWorkspaceID(workspaceID ?? resolvedWorkspaceID(for: sessionID))
+            await focusedSessionObservationStartupTask.value
+            return
+        }
+
         focusedSessionID = sessionID
         setFocusedSessionWorkspaceID(workspaceID ?? resolvedWorkspaceID(for: sessionID))
         await startFocusedSessionObservation(
@@ -1073,6 +1118,8 @@ final class RemoteClientPairingModel {
 
         focusedSessionReconnectTask?.cancel()
         focusedSessionReconnectTask = nil
+        focusedSessionObservationStartupTask?.cancel()
+        focusedSessionObservationStartupTask = nil
 
         let observation = focusedSessionObservation
         focusedSessionObservation = nil
@@ -1206,6 +1253,8 @@ final class RemoteClientPairingModel {
     }
 
     private func clearRemoteBrowseState() {
+        cancelCatalogRefreshWaiters()
+        cancelProviderDetailRefreshWaiters()
         catalog = nil
         catalogErrorMessage = nil
         providerDetails = [:]
@@ -1242,6 +1291,88 @@ final class RemoteClientPairingModel {
         return nil
     }
 
+    private func refreshedCatalog(for pairedMac: PairedMac) async throws -> RemoteWorkspaceCatalog {
+        if catalogRefreshPairedMacID == pairedMac.id {
+            return try await withCheckedThrowingContinuation { continuation in
+                catalogRefreshWaiters.append(continuation)
+            }
+        }
+
+        cancelCatalogRefreshWaiters()
+        catalogRefreshPairedMacID = pairedMac.id
+        do {
+            let catalog = try await client.fetchCatalog(for: pairedMac)
+            resumeCatalogRefreshWaiters(returning: catalog, pairedMacID: pairedMac.id)
+            return catalog
+        } catch {
+            resumeCatalogRefreshWaiters(throwing: error, pairedMacID: pairedMac.id)
+            throw error
+        }
+    }
+
+    private func resumeCatalogRefreshWaiters(
+        returning catalog: RemoteWorkspaceCatalog,
+        pairedMacID: PairedMac.ID
+    ) {
+        guard catalogRefreshPairedMacID == pairedMacID else {
+            return
+        }
+
+        let waiters = catalogRefreshWaiters
+        catalogRefreshWaiters.removeAll()
+        catalogRefreshPairedMacID = nil
+        for waiter in waiters {
+            waiter.resume(returning: catalog)
+        }
+    }
+
+    private func resumeCatalogRefreshWaiters(throwing error: any Error, pairedMacID: PairedMac.ID) {
+        guard catalogRefreshPairedMacID == pairedMacID else {
+            return
+        }
+
+        let waiters = catalogRefreshWaiters
+        catalogRefreshWaiters.removeAll()
+        catalogRefreshPairedMacID = nil
+        for waiter in waiters {
+            waiter.resume(throwing: error)
+        }
+    }
+
+    private func cancelCatalogRefreshWaiters() {
+        let waiters = catalogRefreshWaiters
+        catalogRefreshWaiters.removeAll()
+        catalogRefreshPairedMacID = nil
+        for waiter in waiters {
+            waiter.resume(throwing: CancellationError())
+        }
+    }
+
+    private func resumeProviderDetailRefreshWaiters(
+        returning detail: ProviderDetail,
+        key: RemoteProviderDetailKey
+    ) {
+        let waiters = providerDetailRefreshWaiters.removeValue(forKey: key) ?? []
+        for waiter in waiters {
+            waiter.resume(returning: detail)
+        }
+    }
+
+    private func resumeProviderDetailRefreshWaiters(throwing error: any Error, key: RemoteProviderDetailKey) {
+        let waiters = providerDetailRefreshWaiters.removeValue(forKey: key) ?? []
+        for waiter in waiters {
+            waiter.resume(throwing: error)
+        }
+    }
+
+    private func cancelProviderDetailRefreshWaiters() {
+        let waiters = providerDetailRefreshWaiters.values.flatMap { $0 }
+        providerDetailRefreshWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume(throwing: CancellationError())
+        }
+    }
+
     private func storedOrFetchedProviderDetail(
         workspaceID: UUID,
         providerID: ProviderID,
@@ -1251,6 +1382,11 @@ final class RemoteClientPairingModel {
         if forceRefresh == false, let detail = providerDetails[key] {
             return detail
         }
+        if providerDetailRefreshWaiters[key] != nil {
+            return try await withCheckedThrowingContinuation { continuation in
+                providerDetailRefreshWaiters[key, default: []].append(continuation)
+            }
+        }
 
         guard let pairedMac = activePairedMac else {
             providerDetails[key] = nil
@@ -1258,15 +1394,23 @@ final class RemoteClientPairingModel {
             throw RemoteClientPairingModelError.pairedMacNotFound
         }
 
+        providerDetailRefreshWaiters[key] = []
         do {
             let detail = try await client.fetchProviderDetail(
                 for: pairedMac,
                 workspaceID: workspaceID,
                 providerID: providerID
             )
+            guard activePairedMac?.id == pairedMac.id else {
+                throw CancellationError()
+            }
             providerDetails[key] = detail
             providerDetailErrorMessages[key] = nil
+            resumeProviderDetailRefreshWaiters(returning: detail, key: key)
             return detail
+        } catch is CancellationError {
+            resumeProviderDetailRefreshWaiters(throwing: CancellationError(), key: key)
+            throw CancellationError()
         } catch {
             let normalizedError = loggedRemoteActionError(
                 error,
@@ -1275,6 +1419,7 @@ final class RemoteClientPairingModel {
                 workspaceID: workspaceID,
                 providerID: providerID
             )
+            resumeProviderDetailRefreshWaiters(throwing: normalizedError, key: key)
             throw normalizedError
         }
     }

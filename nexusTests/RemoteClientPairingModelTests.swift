@@ -1411,6 +1411,58 @@ struct RemoteClientPairingModelTests {
             ])
     }
 
+    @Test func coalescesConcurrentFocusRequestsForSameRemoteSession() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let session = Session(id: UUID(), workspaceID: UUID(), providerID: .claude, isDefault: true, state: .ready)
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+        let observationStartGate = AsyncGate()
+        let client = StubRemotePairingClient(
+            result: pairedMac,
+            sessionScreen: SessionScreen(session: session, transcript: "Claude ready"),
+            emitsInitialObservedScreen: false,
+            observeSessionStartGate: observationStartGate
+        )
+        let model = RemoteClientPairingModel(client: client, store: store)
+
+        let firstFocusTask = Task { @MainActor in
+            await model.focusRemoteSession(sessionID: session.id)
+        }
+        try await waitUntilAsync(timeoutNanoseconds: 1_000_000_000) {
+            client.requestLog.contains("observeSessionScreen")
+        }
+
+        let secondFocusTask = Task { @MainActor in
+            await model.focusRemoteSession(sessionID: session.id)
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(await observationStartGate.waiterCount() == 1)
+        #expect(client.requestLog == ["observeSessionScreen", "fetchSessionScreen"])
+
+        await observationStartGate.open()
+        await firstFocusTask.value
+        await secondFocusTask.value
+
+        #expect(client.requestLog == ["observeSessionScreen", "fetchSessionScreen"])
+        #expect(model.focusedSessionScreen?.session.id == session.id)
+
+        await model.focusRemoteSession(sessionID: session.id)
+
+        #expect(client.requestLog == ["observeSessionScreen", "fetchSessionScreen"])
+    }
+
     @Test func focusRemoteSessionFallsBackToFetchedScreenWhenObservationStartupStalls() async throws {
         let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -3578,6 +3630,230 @@ struct RemoteClientPairingModelTests {
 
         #expect(model.providerDetail(for: workspace.id, providerID: .claude) == detail)
         #expect(model.providerDetailErrorMessage(for: workspace.id, providerID: .claude) == nil)
+    }
+
+    @Test func catalogRefreshFailurePreservesCachedRemoteBrowseShell() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .remote,
+            folderPath: "/srv/nexus",
+            primaryGroupID: UUID()
+        )
+        let cachedCatalog = RemoteWorkspaceCatalog(
+            workspaceGroups: [],
+            recentNavigation: [],
+            workspaceOverviews: [WorkspaceOverview(workspace: workspace, providerCards: [])]
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+        let model = RemoteClientPairingModel(
+            client: StubRemotePairingClient(
+                result: pairedMac,
+                catalogResult: .failure(NSError(domain: NSURLErrorDomain, code: NSURLErrorCannotConnectToHost))
+            ),
+            store: store
+        )
+        model.catalog = cachedCatalog
+
+        await model.refreshActivePairedMacCatalog()
+
+        #expect(model.catalog == cachedCatalog)
+        #expect(model.catalogErrorMessage != nil)
+    }
+
+    @Test func coalescesConcurrentRemoteCatalogRefreshesForActivePairedMac() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .remote,
+            folderPath: "/srv/nexus",
+            primaryGroupID: UUID()
+        )
+        let catalog = RemoteWorkspaceCatalog(
+            workspaceGroups: [],
+            recentNavigation: [],
+            workspaceOverviews: [WorkspaceOverview(workspace: workspace, providerCards: [])]
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+        let catalogGate = AsyncGate()
+        let client = StubRemotePairingClient(
+            result: pairedMac,
+            catalog: catalog,
+            catalogFetchGate: catalogGate
+        )
+        let model = RemoteClientPairingModel(client: client, store: store)
+
+        let firstRefreshTask = Task { @MainActor in
+            await model.refreshActivePairedMacCatalog()
+        }
+        try await waitUntilAsync(timeoutNanoseconds: 1_000_000_000) {
+            client.catalogFetchStarted
+        }
+
+        let secondRefreshTask = Task { @MainActor in
+            await model.refreshActivePairedMacCatalog()
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(await catalogGate.waiterCount() == 1)
+        #expect(client.requestLog == ["fetchCatalog"])
+
+        await catalogGate.open()
+        await firstRefreshTask.value
+        await secondRefreshTask.value
+
+        #expect(client.requestLog == ["fetchCatalog"])
+        #expect(model.catalog == catalog)
+    }
+
+    @Test func exposesRemoteProviderDetailPlaceholderFromWorkspaceOverviewUntilDetailLoads() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let groupID = UUID()
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .remote,
+            folderPath: "/srv/nexus",
+            primaryGroupID: groupID
+        )
+        let providerCard = WorkspaceProviderCard(
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .available, summary: "Claude available", version: "1.2.3"),
+            defaultSession: ProviderDefaultSessionSummary(
+                state: .ready,
+                summary: "Default Session ready",
+                actionTitle: "Resume",
+                sessionID: UUID()
+            ),
+            alternateSessionCount: 2
+        )
+        let catalog = RemoteWorkspaceCatalog(
+            workspaceGroups: [WorkspaceGroup(id: groupID, name: "Client Work")],
+            recentNavigation: [],
+            workspaceOverviews: [WorkspaceOverview(workspace: workspace, providerCards: [providerCard])]
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let detail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .claude),
+            health: providerCard.health,
+            defaultSession: nil,
+            alternateSessions: [],
+            failedSessions: []
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+        let model = RemoteClientPairingModel(
+            client: StubRemotePairingClient(result: pairedMac, catalog: catalog, providerDetail: detail),
+            store: store
+        )
+
+        await model.refreshActivePairedMacCatalog()
+
+        let placeholder = try #require(model.providerDetailPlaceholder(for: workspace.id, providerID: .claude))
+        #expect(placeholder.workspace == workspace)
+        #expect(placeholder.providerCard == providerCard)
+
+        await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
+
+        #expect(model.providerDetailPlaceholder(for: workspace.id, providerID: .claude) == nil)
+    }
+
+    @Test func coalescesConcurrentProviderDetailLoadsForSameRemoteProvider() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: UUID()
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let detail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+            defaultSession: nil,
+            alternateSessions: [],
+            failedSessions: []
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+        let providerDetailGate = AsyncGate()
+        let client = StubRemotePairingClient(
+            result: pairedMac,
+            providerDetail: detail,
+            providerDetailFetchGate: providerDetailGate
+        )
+        let model = RemoteClientPairingModel(client: client, store: store)
+
+        let firstLoadTask = Task { @MainActor in
+            await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
+        }
+
+        try await waitUntilAsync(timeoutNanoseconds: 1_000_000_000) {
+            client.providerDetailFetchStarted
+        }
+
+        let secondLoadTask = Task { @MainActor in
+            await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(await providerDetailGate.waiterCount() == 1)
+        #expect(client.requestLog == ["fetchProviderDetail"])
+
+        await providerDetailGate.open()
+        await firstLoadTask.value
+        await secondLoadTask.value
+
+        #expect(client.requestLog == ["fetchProviderDetail"])
+        #expect(model.providerDetail(for: workspace.id, providerID: .claude) == detail)
     }
 
     @Test func launchingDefaultRemoteSessionRefreshesProviderDetailAndFocusesSession() async throws {
@@ -6267,6 +6543,10 @@ private actor AsyncGate {
         for continuation in continuations {
             continuation.resume()
         }
+    }
+
+    func waiterCount() -> Int {
+        waiters.count
     }
 }
 
