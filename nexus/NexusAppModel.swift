@@ -143,6 +143,9 @@
         private var focusedSessionObservation: (any SessionScreenObservation)?
         private var staleWorkspaceOverviewRefreshTasks: [UUID: Task<Void, Never>] = [:]
         private var providerDetailRefreshTasks: [ProviderDetailKey: Task<ProviderDetail, Error>] = [:]
+        private var sessionScreenRefreshTasks: [UUID: Task<SessionScreen, Error>] = [:]
+        private var focusSessionTasks: [UUID: Task<Void, Error>] = [:]
+        private var focusedSessionGeneration: UInt64 = 0
         private var backgroundWorkspaceOverviewLoadTask: Task<Void, Never>?
         private var workspaceOverviewRefreshGeneration: UInt64 = 0
 
@@ -543,20 +546,61 @@
                 return
             }
 
-            await stopFocusingSession()
-            focusedSessionID = sessionID
-            if focusedSessionScreen?.session.id != sessionID {
-                focusedSessionWorkspaceID = nil
+            if let existingTask = focusSessionTasks[sessionID] {
+                try await existingTask.value
+                return
             }
-            let updatePump = focusedSessionScreenUpdatePump
-            let observation = try await client.observeSessionScreen(sessionID: sessionID) { screen in
-                submitToCoalescingMainActorValuePump(updatePump, value: screen)
+
+            focusedSessionGeneration &+= 1
+            let generation = focusedSessionGeneration
+            let task = Task<Void, Error> { @MainActor [weak self] in
+                guard let self else {
+                    throw CancellationError()
+                }
+
+                if focusedSessionScreen?.session.id == sessionID, focusedSessionObservation != nil {
+                    return
+                }
+
+                await stopFocusingSession(advancingGeneration: false)
+                focusedSessionID = sessionID
+                if focusedSessionScreen?.session.id != sessionID {
+                    focusedSessionWorkspaceID = nil
+                }
+                let updatePump = focusedSessionScreenUpdatePump
+                let observation = try await client.observeSessionScreen(sessionID: sessionID) { screen in
+                    submitToCoalescingMainActorValuePump(updatePump, value: screen)
+                }
+
+                guard Task.isCancelled == false,
+                    focusedSessionGeneration == generation,
+                    focusedSessionID == sessionID
+                else {
+                    await observation.cancel()
+                    throw CancellationError()
+                }
+
+                focusedSessionObservation = observation
+                await focusedSessionScreenUpdatePump.flush()
             }
-            focusedSessionObservation = observation
-            await focusedSessionScreenUpdatePump.flush()
+            focusSessionTasks[sessionID] = task
+            defer { focusSessionTasks.removeValue(forKey: sessionID) }
+            try await task.value
         }
 
         func stopFocusingSession() async {
+            await stopFocusingSession(advancingGeneration: true)
+        }
+
+        private func stopFocusingSession(advancingGeneration: Bool) async {
+            if advancingGeneration {
+                focusedSessionGeneration &+= 1
+                for task in focusSessionTasks.values {
+                    task.cancel()
+                }
+                focusSessionTasks.removeAll()
+            }
+
             focusedSessionScreenUpdatePump.reset()
             let observation = focusedSessionObservation
             focusedSessionObservation = nil
@@ -579,8 +623,7 @@
         }
 
         func loadSessionScreen(sessionID: UUID) async throws {
-            let screen = try await client.getSessionScreen(sessionID: sessionID)
-            try await applyFocusedSessionScreen(screen)
+            _ = try await refreshSessionScreen(sessionID: sessionID)
         }
 
         /// Drains coalesced focused-session observation updates (for tests and action/observation ordering).
@@ -1145,6 +1188,25 @@
             for session in sessionIDsInDetail where relevantSessionIDs.contains(session.id) {
                 recentNavigationSessionWorkspaceIDs[session.id] = detail.workspace.id
             }
+        }
+
+        private func refreshSessionScreen(sessionID: UUID) async throws -> SessionScreen {
+            if let existingTask = sessionScreenRefreshTasks[sessionID] {
+                return try await existingTask.value
+            }
+
+            let task = Task<SessionScreen, Error> { @MainActor [weak self] in
+                guard let self else {
+                    throw CancellationError()
+                }
+
+                let screen = try await client.getSessionScreen(sessionID: sessionID)
+                try await applyFocusedSessionScreen(screen)
+                return screen
+            }
+            sessionScreenRefreshTasks[sessionID] = task
+            defer { sessionScreenRefreshTasks.removeValue(forKey: sessionID) }
+            return try await task.value
         }
 
         private func refreshProviderDetail(workspaceID: UUID, providerID: ProviderID) async throws {

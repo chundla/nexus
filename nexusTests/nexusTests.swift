@@ -7277,6 +7277,103 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelCoalescesConcurrentSessionScreenLoadsForSameSession() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let screen = SessionScreen(session: session, transcript: "Claude ready")
+        let overview = WorkspaceOverview(workspace: workspace, providerCards: [])
+        let client = TrackingServiceClient(
+            workspaceOverview: overview,
+            session: session,
+            screen: screen
+        )
+        client.getSessionScreenHandler = { _ in
+            try await Task.sleep(nanoseconds: 100_000_000)
+            return screen
+        }
+        let model = NexusAppModel(client: client)
+
+        let firstLoadTask = Task { @MainActor in
+            try await model.loadSessionScreen(sessionID: session.id)
+        }
+        let secondLoadTask = Task { @MainActor in
+            try await model.loadSessionScreen(sessionID: session.id)
+        }
+
+        try await waitUntil { client.getSessionScreenRequestCount == 1 }
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(client.getSessionScreenRequestCount == 1)
+
+        try await firstLoadTask.value
+        try await secondLoadTask.value
+
+        #expect(client.getSessionScreenRequestCount == 1)
+        #expect(model.focusedSessionScreen == screen)
+    }
+
+    @MainActor
+    @Test func appModelCoalescesConcurrentFocusRequestsForSameSession() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let screen = SessionScreen(session: session, transcript: "Claude ready")
+        let overview = WorkspaceOverview(workspace: workspace, providerCards: [])
+        let client = TrackingServiceClient(
+            workspaceOverview: overview,
+            session: session,
+            screen: screen
+        )
+        client.observeSessionScreenHandler = { _, onUpdate in
+            try await Task.sleep(nanoseconds: 100_000_000)
+            onUpdate(screen)
+            return TestSessionScreenObservation {}
+        }
+        let model = NexusAppModel(client: client)
+
+        let firstFocusTask = Task { @MainActor in
+            try await model.focusSession(sessionID: session.id)
+        }
+        let secondFocusTask = Task { @MainActor in
+            try await model.focusSession(sessionID: session.id)
+        }
+
+        try await waitUntil { client.observeSessionScreenRequestCount == 1 }
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(client.observeSessionScreenRequestCount == 1)
+
+        try await firstFocusTask.value
+        try await secondFocusTask.value
+
+        #expect(client.observeSessionScreenRequestCount == 1)
+        #expect(model.focusedSessionScreen == screen)
+    }
+
+    @MainActor
     @Test func appModelWorkspaceBrowseSidebarPresentationUsesLoadedSessionRoutingForRecentOrdering() async throws {
         let group = WorkspaceGroup(id: UUID(), name: "Group")
         let alphaWorkspace = Workspace(
@@ -11955,12 +12052,16 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
     private var structuredHistoryPages: [StructuredSessionHistoryPage]
 
     var getSessionScreenHandler: (@Sendable (UUID) async throws -> SessionScreen)?
+    var observeSessionScreenHandler:
+        (@Sendable (UUID, @escaping @Sendable (SessionScreen) -> Void) async throws -> any SessionScreenObservation)?
     var sendSessionInputHandler: (@Sendable (UUID, String) async throws -> SessionScreen)?
 
     var workspaceOverviewRequestCount = 0
     var workspaceOverviewBatchRequestCount = 0
     var refreshWorkspaceOverviewRequestCount = 0
     var providerDetailRequestCount = 0
+    var getSessionScreenRequestCount = 0
+    var observeSessionScreenRequestCount = 0
     var recordedNavigationTargets: [NavigationTarget] = []
     var respondedApprovalRequests: [(sessionID: UUID, approvalRequestID: UUID, decision: ApprovalRequestDecision)] = []
     var respondedExtensionDialogs: [(sessionID: UUID, dialogID: String, response: SessionExtensionUIDialogResponse)] =
@@ -12429,6 +12530,7 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
     }
 
     func getSessionScreen(sessionID: UUID) async throws -> SessionScreen {
+        getSessionScreenRequestCount += 1
         if let getSessionScreenHandler {
             return try await getSessionScreenHandler(sessionID)
         }
@@ -12467,6 +12569,11 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
     func observeSessionScreen(sessionID: UUID, onUpdate: @escaping @Sendable (SessionScreen) -> Void) async throws
         -> any SessionScreenObservation
     {
+        observeSessionScreenRequestCount += 1
+        if let observeSessionScreenHandler {
+            return try await observeSessionScreenHandler(sessionID, onUpdate)
+        }
+
         let observationID = UUID()
         observedScreenHandlers[observationID] = onUpdate
         onUpdate(screenValue)
