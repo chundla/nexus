@@ -252,43 +252,13 @@
                 }
                 self.serviceErrorMessage = nil
 
-                let orderedWorkspaceIDs = prioritizedWorkspaceOverviewIDs(
-                    for: loadedWorkspaces,
-                    recentNavigation: loadedRecentNavigation
-                )
-                let immediateWorkspaceIDs = Array(orderedWorkspaceIDs.prefix(Self.initialWorkspaceOverviewLoadCount))
-                let backgroundWorkspaceIDs = Array(orderedWorkspaceIDs.dropFirst(immediateWorkspaceIDs.count))
-
-                try await loadWorkspaceOverviews(
-                    for: immediateWorkspaceIDs,
+                scheduleWorkspaceOverviewLoadsInBackground(
+                    for: prioritizedWorkspaceOverviewIDs(
+                        for: loadedWorkspaces,
+                        recentNavigation: loadedRecentNavigation
+                    ),
                     refreshGeneration: refreshGeneration
                 )
-
-                guard backgroundWorkspaceIDs.isEmpty == false else {
-                    return
-                }
-
-                backgroundWorkspaceOverviewLoadTask = Task { @MainActor [weak self] in
-                    guard let self else {
-                        return
-                    }
-                    defer {
-                        if self.workspaceOverviewRefreshGeneration == refreshGeneration {
-                            self.backgroundWorkspaceOverviewLoadTask = nil
-                        }
-                    }
-
-                    do {
-                        try await self.loadWorkspaceOverviews(
-                            for: backgroundWorkspaceIDs,
-                            refreshGeneration: refreshGeneration
-                        )
-                    } catch is CancellationError {
-                        return
-                    } catch {
-                        return
-                    }
-                }
             } catch {
                 backgroundWorkspaceOverviewLoadTask?.cancel()
                 backgroundWorkspaceOverviewLoadTask = nil
@@ -962,8 +932,52 @@
             for workspaceIDs: [UUID],
             refreshGeneration: UInt64
         ) async throws {
+            guard workspaceIDs.isEmpty == false else {
+                return
+            }
+
             let overviews = try await client.getWorkspaceOverviews(workspaceIDs: workspaceIDs)
             applyWorkspaceOverviews(overviews, refreshGeneration: refreshGeneration)
+        }
+
+        private func scheduleWorkspaceOverviewLoadsInBackground(
+            for orderedWorkspaceIDs: [UUID],
+            refreshGeneration: UInt64
+        ) {
+            guard orderedWorkspaceIDs.isEmpty == false else {
+                return
+            }
+
+            let immediateWorkspaceIDs = Array(orderedWorkspaceIDs.prefix(Self.initialWorkspaceOverviewLoadCount))
+            let backgroundWorkspaceIDs = Array(orderedWorkspaceIDs.dropFirst(immediateWorkspaceIDs.count))
+
+            backgroundWorkspaceOverviewLoadTask = Task { @MainActor [weak self] in
+                guard let self else {
+                    return
+                }
+                defer {
+                    if self.workspaceOverviewRefreshGeneration == refreshGeneration {
+                        self.backgroundWorkspaceOverviewLoadTask = nil
+                    }
+                }
+
+                do {
+                    try Task.checkCancellation()
+                    try await self.loadWorkspaceOverviews(
+                        for: immediateWorkspaceIDs,
+                        refreshGeneration: refreshGeneration
+                    )
+                    try Task.checkCancellation()
+                    try await self.loadWorkspaceOverviews(
+                        for: backgroundWorkspaceIDs,
+                        refreshGeneration: refreshGeneration
+                    )
+                } catch is CancellationError {
+                    return
+                } catch {
+                    return
+                }
+            }
         }
 
         private func prioritizedWorkspaceOverviewIDs(

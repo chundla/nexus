@@ -6061,9 +6061,17 @@ struct nexusTests {
         #expect(model.serviceStatus?.state == .running)
         #expect(model.workspaceGroups.map(\.name) == ["Solo Group"])
         #expect(model.workspaces.map(\.name) == ["app-model-workspace"])
+        let workspaceID = try #require(model.workspaces.first).id
+        try await waitUntilAsync {
+            await MainActor.run {
+                model.workspaceOverview(for: workspaceID)?.providerCards.map(\.provider.displayName)
+                    == ["Codex", "Claude", "IBM Bob", "Pi"]
+            }
+        }
         #expect(
-            model.workspaceOverview(for: try #require(model.workspaces.first).id)?.providerCards.map(
-                \.provider.displayName) == ["Codex", "Claude", "IBM Bob", "Pi"])
+            model.workspaceOverview(for: workspaceID)?.providerCards.map(\.provider.displayName) == [
+                "Codex", "Claude", "IBM Bob", "Pi",
+            ])
     }
 
     @MainActor
@@ -6093,7 +6101,7 @@ struct nexusTests {
     }
 
     @MainActor
-    @Test func appModelRefreshPublishesImmediateWorkspaceOverviewsAsOneBatch() async throws {
+    @Test func appModelRefreshPublishesBaseBrowseStateBeforeWorkspaceOverviewsComplete() async throws {
         let group = WorkspaceGroup(id: UUID(), name: "Group")
         let firstWorkspace = Workspace(
             id: UUID(),
@@ -6164,10 +6172,17 @@ struct nexusTests {
             }
         )
         let model = NexusAppModel(client: client)
+        let refreshCompletion = AsyncCompletionProbe()
 
         let refreshTask = Task {
             await model.refresh()
+            await refreshCompletion.markCompleted()
         }
+
+        try await waitUntilAsync(timeoutNanoseconds: 1_000_000_000, pollIntervalNanoseconds: 10_000_000) {
+            await refreshCompletion.isCompleted()
+        }
+        await refreshTask.value
 
         try await waitUntil {
             loader.requestedWorkspaceIDs().count == 2
@@ -6186,7 +6201,13 @@ struct nexusTests {
         #expect(client.providerDetailRequestCount == 0)
 
         loader.resume(workspaceID: secondWorkspace.id, with: secondOverview)
-        await refreshTask.value
+
+        try await waitUntilAsync {
+            await MainActor.run {
+                model.workspaceOverview(for: firstWorkspace.id)?.providerCards.first?.health.summary
+                    == "Alpha Claude available"
+            }
+        }
 
         #expect(
             model.workspaceOverview(for: firstWorkspace.id)?.providerCards.first?.health.summary
@@ -6258,6 +6279,12 @@ struct nexusTests {
         let model = NexusAppModel(client: client)
 
         await model.refresh()
+        try await waitUntilAsync {
+            await MainActor.run {
+                model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary
+                    == "Initial Claude health"
+            }
+        }
         #expect(
             model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary == "Initial Claude health")
 
@@ -6277,6 +6304,12 @@ struct nexusTests {
 
         loader.resume(workspaceID: workspace.id, with: refreshedOverview)
         await refreshTask.value
+        try await waitUntilAsync {
+            await MainActor.run {
+                model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary
+                    == "Refreshed Claude health"
+            }
+        }
 
         #expect(
             model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary == "Refreshed Claude health"
@@ -6347,6 +6380,12 @@ struct nexusTests {
         let model = NexusAppModel(client: client)
 
         await model.refresh()
+        try await waitUntilAsync {
+            await MainActor.run {
+                model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary
+                    == "Cached Claude health"
+            }
+        }
 
         #expect(
             model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary == "Cached Claude health")
@@ -10694,6 +10733,12 @@ struct WorkspaceOverviewRefreshStagingTests {
         loader.resume(workspaceID: betaWorkspace.id, with: betaOverview)
         loader.resume(workspaceID: alphaWorkspace.id, with: alphaOverview)
 
+        try await waitUntilAsync {
+            await MainActor.run {
+                model.workspaceOverview(for: deltaWorkspace.id)?.providerCards.first?.health.summary
+                    == "Delta IBM Bob available"
+            }
+        }
         await refreshTask.value
 
         #expect(
@@ -10961,6 +11006,18 @@ private func waitUntilAsync(
         }
 
         try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
+    }
+}
+
+private actor AsyncCompletionProbe {
+    private var completed = false
+
+    func markCompleted() {
+        completed = true
+    }
+
+    func isCompleted() -> Bool {
+        completed
     }
 }
 
