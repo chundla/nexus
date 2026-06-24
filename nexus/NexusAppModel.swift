@@ -77,6 +77,11 @@
         let hostCount: Int
     }
 
+    struct ProviderDetailPlaceholder: Equatable {
+        let workspace: Workspace
+        let providerCard: WorkspaceProviderCard
+    }
+
     enum WorkspaceBrowseInitialSelection: Equatable {
         case workspace(UUID)
         case workspaceGroup(UUID)
@@ -836,6 +841,17 @@
 
         func providerDetail(for workspaceID: UUID, providerID: ProviderID) -> ProviderDetail? {
             providerDetails[ProviderDetailKey(workspaceID: workspaceID, providerID: providerID)]
+        }
+
+        func providerDetailPlaceholder(for workspaceID: UUID, providerID: ProviderID) -> ProviderDetailPlaceholder? {
+            guard providerDetail(for: workspaceID, providerID: providerID) == nil,
+                let overview = workspaceOverview(for: workspaceID),
+                let providerCard = overview.providerCards.first(where: { $0.provider.id == providerID })
+            else {
+                return nil
+            }
+
+            return ProviderDetailPlaceholder(workspace: overview.workspace, providerCard: providerCard)
         }
 
         var focusedSessionPresentationContext: SessionPresentationContext? {

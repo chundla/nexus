@@ -854,16 +854,42 @@
         }
 
         private func providerDetail(workspaceID: UUID, providerID: ProviderID, detail: ProviderDetail?) -> some View {
+            let placeholder = appModel.providerDetailPlaceholder(for: workspaceID, providerID: providerID)
+
             return ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
                     if let detail {
-                        providerDetailHeader(providerID: providerID, detail: detail)
+                        providerDetailHeader(
+                            providerID: providerID,
+                            workspace: detail.workspace,
+                            health: detail.health,
+                            prelaunchPrimarySurface: detail.prelaunchPrimarySurface
+                        )
 
                         if detail.health.state != .available || detail.health.diagnostics.isEmpty == false {
-                            providerIssueStrip(detail: detail)
+                            providerIssueStrip(health: detail.health)
                         }
 
                         providerSessionsSection(workspaceID: workspaceID, providerID: providerID, detail: detail)
+                    } else if let placeholder {
+                        providerDetailHeader(
+                            providerID: providerID,
+                            workspace: placeholder.workspace,
+                            health: placeholder.providerCard.health,
+                            prelaunchPrimarySurface: placeholder.providerCard.prelaunchPrimarySurface
+                        )
+
+                        if placeholder.providerCard.health.state != .available
+                            || placeholder.providerCard.health.diagnostics.isEmpty == false
+                        {
+                            providerIssueStrip(health: placeholder.providerCard.health)
+                        }
+
+                        providerPlaceholderSessionsSection(
+                            workspaceID: workspaceID,
+                            providerID: providerID,
+                            placeholder: placeholder
+                        )
                     } else {
                         Text("Loading provider detail...")
                             .font(NexusMacTheme.bodyFont(14))
@@ -876,10 +902,15 @@
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
 
-        private func providerDetailHeader(providerID: ProviderID, detail: ProviderDetail) -> some View {
+        private func providerDetailHeader(
+            providerID: ProviderID,
+            workspace: Workspace,
+            health: ProviderHealthSummary,
+            prelaunchPrimarySurface: SessionSurface
+        ) -> some View {
             HStack(spacing: 12) {
                 NexusIconBadge(
-                    systemImage: detail.prelaunchPrimarySurface == .terminal ? "terminal.fill" : "message.fill",
+                    systemImage: prelaunchPrimarySurface == .terminal ? "terminal.fill" : "message.fill",
                     accent: NexusMacTheme.providerAccent(providerID),
                     size: 34
                 )
@@ -889,7 +920,7 @@
                         .font(NexusMacTheme.displayFont(22, relativeTo: .title2))
                         .foregroundStyle(NexusMacTheme.textPrimary)
                     Text(
-                        [detail.workspace.name, detail.health.version].compactMap { $0 }.joined(separator: "  ·  ")
+                        [workspace.name, health.version].compactMap { $0 }.joined(separator: "  ·  ")
                     )
                     .font(NexusMacTheme.bodyFont(12, relativeTo: .caption))
                     .foregroundStyle(NexusMacTheme.mutedText)
@@ -898,22 +929,22 @@
                 Spacer(minLength: 0)
 
                 Circle()
-                    .fill(detail.health.state.tone.color)
+                    .fill(health.state.tone.color)
                     .frame(width: 8, height: 8)
             }
             .padding(.horizontal, 14)
         }
 
-        private func providerIssueStrip(detail: ProviderDetail) -> some View {
+        private func providerIssueStrip(health: ProviderHealthSummary) -> some View {
             VStack(alignment: .leading, spacing: 8) {
                 issueRow(
-                    symbol: detail.health.state.tone.symbolName,
-                    color: detail.health.state.tone.color,
-                    title: "Provider " + detail.health.state.rawValue.lowercased(),
-                    detail: detail.health.summary
+                    symbol: health.state.tone.symbolName,
+                    color: health.state.tone.color,
+                    title: "Provider " + health.state.rawValue.lowercased(),
+                    detail: health.summary
                 )
 
-                ForEach(Array(detail.health.diagnostics.enumerated()), id: \.offset) { _, diagnostic in
+                ForEach(Array(health.diagnostics.enumerated()), id: \.offset) { _, diagnostic in
                     Text(diagnostic.message)
                         .font(NexusMacTheme.bodyFont(12, relativeTo: .caption))
                         .foregroundStyle(NexusMacTheme.mutedText)
@@ -966,6 +997,89 @@
                         }
                     }
                 }
+            }
+        }
+
+        private func providerPlaceholderSessionsSection(
+            workspaceID: UUID,
+            providerID: ProviderID,
+            placeholder: ProviderDetailPlaceholder
+        ) -> some View {
+            let providerCard = placeholder.providerCard
+
+            return VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Sessions")
+                        .font(NexusMacTheme.bodyFont(11, relativeTo: .caption).weight(.semibold))
+                        .tracking(1.4)
+                        .foregroundStyle(NexusMacTheme.mutedText)
+                    Spacer()
+                    Button("New Session") {
+                        createNamedSession(workspaceID: workspaceID, providerID: providerID)
+                    }
+                    .buttonStyle(NexusSecondaryButtonStyle())
+                    .controlSize(.small)
+                    .disabled(providerCard.capabilities.createNamedSession.isEnabled == false)
+                }
+                .padding(.horizontal, 14)
+
+                if providerCard.defaultSession.state != .notCreated {
+                    NexusListRow(
+                        action: {
+                            launchOrResumeDefaultSession(workspaceID: workspaceID, providerID: providerID)
+                        },
+                        content: {
+                            HStack(spacing: 14) {
+                                Circle()
+                                    .fill(providerDefaultSessionTone(providerCard.defaultSession.state).color)
+                                    .frame(width: 8, height: 8)
+
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("Default Session")
+                                        .font(NexusMacTheme.bodyFont(14).weight(.semibold))
+                                        .foregroundStyle(NexusMacTheme.textPrimary)
+                                    Text(providerCard.defaultSession.summary)
+                                        .font(NexusMacTheme.bodyFont(12, relativeTo: .caption))
+                                        .foregroundStyle(NexusMacTheme.mutedText)
+                                        .lineLimit(1)
+                                }
+
+                                Spacer(minLength: 8)
+
+                                Text(providerCard.defaultSession.actionTitle)
+                                    .font(NexusMacTheme.bodyFont(12, relativeTo: .caption).weight(.semibold))
+                                    .foregroundStyle(NexusMacTheme.mutedText)
+                            }
+                        }
+                    )
+                }
+
+                if providerCard.alternateSessionCount > 0 {
+                    Text(
+                        "Loading \(providerCard.alternateSessionCount) named session\(providerCard.alternateSessionCount == 1 ? "" : "s")…"
+                    )
+                    .font(NexusMacTheme.bodyFont(14))
+                    .foregroundStyle(NexusMacTheme.mutedText)
+                    .padding(.horizontal, 14)
+                } else if providerCard.defaultSession.state == .notCreated {
+                    Text("No Sessions yet — launch the default Session or start a new one.")
+                        .font(NexusMacTheme.bodyFont(14))
+                        .foregroundStyle(NexusMacTheme.mutedText)
+                        .padding(.horizontal, 14)
+                }
+            }
+        }
+
+        private func providerDefaultSessionTone(_ state: ProviderDefaultSessionSummary.State) -> NexusStatusTone {
+            switch state {
+            case .notCreated:
+                .unknown
+            case .ready:
+                .healthy
+            case .interrupted:
+                .warning
+            case .exited, .failed:
+                .critical
             }
         }
 

@@ -7098,6 +7098,113 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelExposesProviderDetailPlaceholderFromWorkspaceOverviewUntilDetailLoads() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let providerCard = WorkspaceProviderCard(
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(
+                state: .available,
+                summary: "Claude available",
+                version: "1.2.3"
+            ),
+            capabilities: ProviderCapabilities(
+                launchDefaultSession: ProviderCapability(
+                    action: .launchDefaultSession,
+                    isSupported: true,
+                    isEnabled: true
+                ),
+                createNamedSession: ProviderCapability(
+                    action: .createNamedSession,
+                    isSupported: true,
+                    isEnabled: true
+                )
+            ),
+            defaultSession: ProviderDefaultSessionSummary(
+                state: .ready,
+                summary: "Default Session ready",
+                actionTitle: "Resume",
+                sessionID: session.id
+            ),
+            alternateSessionCount: 2
+        )
+        let overview = WorkspaceOverview(workspace: workspace, providerCards: [providerCard])
+        let gate = SuspendedResultGate<ProviderDetail>()
+        let client = TrackingServiceClient(
+            workspaceOverview: overview,
+            session: session,
+            screen: SessionScreen(session: session, transcript: "Claude ready"),
+            providerDetailHandler: { _, _ in
+                try await gate.wait()
+            }
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+
+        let initialPlaceholder = try #require(model.providerDetailPlaceholder(for: workspace.id, providerID: .claude))
+        #expect(initialPlaceholder.workspace == workspace)
+        #expect(initialPlaceholder.providerCard == providerCard)
+
+        let loadTask = Task { @MainActor in
+            try await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
+        }
+
+        try await waitUntil { client.providerDetailRequestCount == 1 }
+
+        #expect(model.providerDetail(for: workspace.id, providerID: .claude) == nil)
+        let pendingPlaceholder = try #require(model.providerDetailPlaceholder(for: workspace.id, providerID: .claude))
+        #expect(pendingPlaceholder.providerCard.defaultSession.summary == "Default Session ready")
+        #expect(pendingPlaceholder.providerCard.alternateSessionCount == 2)
+
+        await gate.resume(
+            returning: ProviderDetail(
+                workspace: workspace,
+                provider: Provider(id: .claude),
+                health: providerCard.health,
+                capabilities: providerCard.capabilities,
+                defaultSession: session,
+                alternateSessions: [
+                    Session(
+                        id: UUID(),
+                        workspaceID: workspace.id,
+                        providerID: .claude,
+                        name: "Review",
+                        isDefault: false,
+                        state: .ready
+                    ),
+                    Session(
+                        id: UUID(),
+                        workspaceID: workspace.id,
+                        providerID: .claude,
+                        name: "Fix",
+                        isDefault: false,
+                        state: .interrupted
+                    ),
+                ],
+                failedSessions: []
+            )
+        )
+        try await loadTask.value
+
+        #expect(model.providerDetailPlaceholder(for: workspace.id, providerID: .claude) == nil)
+        #expect(model.providerDetail(for: workspace.id, providerID: .claude)?.defaultSession?.id == session.id)
+    }
+
+    @MainActor
     @Test func appModelWorkspaceBrowseSidebarPresentationUsesLoadedSessionRoutingForRecentOrdering() async throws {
         let group = WorkspaceGroup(id: UUID(), name: "Group")
         let alphaWorkspace = Workspace(
