@@ -16,6 +16,8 @@ If the user wants more detail, they will ask. Default to minimal viable response
 
 Nexus is a **workspace-first** macOS control center for coding agent CLIs (local and remote). The **Background Service** owns orchestration, persistence, provider adapters, and session lifecycle; the macOS app talks to it over local IPC.
 
+~40-53% of users will abandon (bounce/close) an application that takes more than 3 seconds to load. 0.1 seconds: Feels instantaneous. 1 second: Keeps thought flow seamless (users notice the delay but stay in control). Aggressively optimize features to be under 1 second of load time.
+
 **Core vocabulary** (use these terms; see `CONTEXT.md` for definitions and synonyms to avoid): **Workspace**, **Provider**, **Session**, **Session Record**, **Host**, **Remote Workspace**, **Paired Mac**, **Remote Client**, **Controller** / **Viewer**.
 
 **Where truth lives:**
