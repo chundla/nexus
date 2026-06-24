@@ -4,6 +4,12 @@ import NexusIPC
 import NexusSessionPresentation
 import Observation
 
+private extension UInt64 {
+    func saturatingSubtract(_ other: UInt64) -> UInt64 {
+        self >= other ? self - other : 0
+    }
+}
+
 #if os(iOS)
     import UIKit
 #endif
@@ -248,6 +254,8 @@ final class RemoteClientPairingModel {
     var focusedSessionIsStale = false
     var focusedSessionErrorMessage: String?
     var remoteFailureBreadcrumbs: [RemoteClientDiagnosticBreadcrumb] = []
+    @ObservationIgnored
+    private(set) var performanceDiagnostics: [PerformanceDiagnosticRecord] = []
     var macHost = ""
     var macPort = "9234"
     var pairingCode = ""
@@ -354,9 +362,48 @@ final class RemoteClientPairingModel {
         pairedMacAvailability[pairedMac.id] ?? .unknown
     }
 
+    private func currentUptimeNanoseconds() -> UInt64 {
+        DispatchTime.now().uptimeNanoseconds
+    }
+
+    private func elapsedMilliseconds(since startedAt: UInt64) -> Int {
+        Int(currentUptimeNanoseconds().saturatingSubtract(startedAt) / 1_000_000)
+    }
+
+    private func recordPerformanceDiagnostic(
+        operation: PerformanceDiagnosticOperation,
+        outcome: PerformanceDiagnosticOutcome = .success,
+        workspaceID: UUID? = nil,
+        providerID: ProviderID? = nil,
+        sessionID: UUID? = nil,
+        startedAt: UInt64,
+        steps: [PerformanceDiagnosticStep],
+        metrics: [String: Int] = [:],
+        failureMessage: String? = nil
+    ) {
+        performanceDiagnostics.insert(
+            PerformanceDiagnosticRecord(
+                operation: operation,
+                outcome: outcome,
+                workspaceID: workspaceID,
+                providerID: providerID,
+                sessionID: sessionID,
+                totalElapsedMilliseconds: elapsedMilliseconds(since: startedAt),
+                steps: steps,
+                metrics: metrics,
+                failureMessage: failureMessage
+            ),
+            at: 0
+        )
+        if performanceDiagnostics.count > 50 {
+            performanceDiagnostics.removeLast(performanceDiagnostics.count - 50)
+        }
+    }
+
     static let pairedMacAvailabilityProbeConcurrencyLimit = 4
 
     func refreshPairedMacAvailability() async {
+        let diagnosticStart = currentUptimeNanoseconds()
         let pairedMacsToProbe = pairedMacs
         let activePairedMacIDAtRefreshStart = activePairedMacID
         pairedMacAvailability = Dictionary(
@@ -415,6 +462,20 @@ final class RemoteClientPairingModel {
                 enqueueNextProbe()
             }
         }
+        recordPerformanceDiagnostic(
+            operation: .remoteClientAvailability,
+            startedAt: diagnosticStart,
+            steps: [
+                PerformanceDiagnosticStep(
+                    name: "probePairedMacs",
+                    elapsedMilliseconds: elapsedMilliseconds(since: diagnosticStart)
+                )
+            ],
+            metrics: [
+                "pairedMacCount": pairedMacsToProbe.count,
+                "availableCount": pairedMacAvailability.values.filter { $0 == .available }.count,
+            ]
+        )
     }
 
     private nonisolated static func resolveAvailability(
@@ -430,6 +491,7 @@ final class RemoteClientPairingModel {
     }
 
     func refreshActivePairedMacCatalog() async {
+        let diagnosticStart = currentUptimeNanoseconds()
         guard let pairedMac = activePairedMac else {
             cancelCatalogRefreshWaiters()
             catalog = nil
@@ -438,6 +500,7 @@ final class RemoteClientPairingModel {
         }
 
         do {
+            let fetchStart = currentUptimeNanoseconds()
             let refreshedCatalog = try await refreshedCatalog(for: pairedMac)
             guard activePairedMac?.id == pairedMac.id else {
                 return
@@ -446,6 +509,20 @@ final class RemoteClientPairingModel {
             syncFocusedSessionWorkspaceLocation()
             catalogErrorMessage = nil
             pairingRecoveryMessage = nil
+            recordPerformanceDiagnostic(
+                operation: .remoteClientCatalog,
+                startedAt: diagnosticStart,
+                steps: [
+                    PerformanceDiagnosticStep(
+                        name: "fetchCatalog",
+                        elapsedMilliseconds: elapsedMilliseconds(since: fetchStart)
+                    )
+                ],
+                metrics: [
+                    "workspaceCount": refreshedCatalog.workspaceOverviews.count,
+                    "workspaceGroupCount": refreshedCatalog.workspaceGroups.count,
+                ]
+            )
         } catch {
             let normalizedError = normalizedRemoteActionError(error, pairedMac: pairedMac)
             if activePairedMac == nil {
@@ -457,6 +534,13 @@ final class RemoteClientPairingModel {
                 operation: .fetchCatalog,
                 pairedMac: pairedMac,
                 error: normalizedError
+            )
+            recordPerformanceDiagnostic(
+                operation: .remoteClientCatalog,
+                outcome: .failure,
+                startedAt: diagnosticStart,
+                steps: [],
+                failureMessage: normalizedError.localizedDescription
             )
             catalogErrorMessage = normalizedError.localizedDescription
         }
@@ -735,6 +819,7 @@ final class RemoteClientPairingModel {
         workspaceID: UUID? = nil,
         forceFetchIfAlreadyFocused: Bool = false
     ) async {
+        let diagnosticStart = currentUptimeNanoseconds()
         if focusedSessionID == sessionID,
             forceFetchIfAlreadyFocused == false,
             focusedSessionObservation != nil
@@ -757,6 +842,18 @@ final class RemoteClientPairingModel {
         await startFocusedSessionObservation(
             forceRestart: true,
             forceFetchIfAlreadyFocused: forceFetchIfAlreadyFocused
+        )
+        recordPerformanceDiagnostic(
+            operation: .remoteClientSessionFocus,
+            workspaceID: focusedSessionWorkspaceID,
+            sessionID: sessionID,
+            startedAt: diagnosticStart,
+            steps: [
+                PerformanceDiagnosticStep(
+                    name: "focusSession",
+                    elapsedMilliseconds: elapsedMilliseconds(since: diagnosticStart)
+                )
+            ]
         )
     }
 
@@ -1395,7 +1492,9 @@ final class RemoteClientPairingModel {
         }
 
         providerDetailRefreshWaiters[key] = []
+        let diagnosticStart = currentUptimeNanoseconds()
         do {
+            let fetchStart = currentUptimeNanoseconds()
             let detail = try await client.fetchProviderDetail(
                 for: pairedMac,
                 workspaceID: workspaceID,
@@ -1406,6 +1505,22 @@ final class RemoteClientPairingModel {
             }
             providerDetails[key] = detail
             providerDetailErrorMessages[key] = nil
+            recordPerformanceDiagnostic(
+                operation: .remoteClientProviderDetail,
+                workspaceID: workspaceID,
+                providerID: providerID,
+                startedAt: diagnosticStart,
+                steps: [
+                    PerformanceDiagnosticStep(
+                        name: "fetchProviderDetail",
+                        elapsedMilliseconds: elapsedMilliseconds(since: fetchStart)
+                    )
+                ],
+                metrics: [
+                    "alternateSessionCount": detail.alternateSessions.count,
+                    "failedSessionCount": detail.failedSessions.count,
+                ]
+            )
             resumeProviderDetailRefreshWaiters(returning: detail, key: key)
             return detail
         } catch is CancellationError {
@@ -1418,6 +1533,15 @@ final class RemoteClientPairingModel {
                 pairedMac: pairedMac,
                 workspaceID: workspaceID,
                 providerID: providerID
+            )
+            recordPerformanceDiagnostic(
+                operation: .remoteClientProviderDetail,
+                outcome: .failure,
+                workspaceID: workspaceID,
+                providerID: providerID,
+                startedAt: diagnosticStart,
+                steps: [],
+                failureMessage: normalizedError.localizedDescription
             )
             resumeProviderDetailRefreshWaiters(throwing: normalizedError, key: key)
             throw normalizedError
@@ -1771,8 +1895,23 @@ final class RemoteClientPairingModel {
             && (focusedSessionScreen?.session.id != sessionID
                 || (forceFetchIfAlreadyFocused && focusedSessionScreen != nil))
         if shouldFetchInitialScreen {
+            let diagnosticStart = currentUptimeNanoseconds()
             do {
                 let initialScreen = try await client.fetchSessionScreen(for: pairedMac, sessionID: sessionID)
+                recordPerformanceDiagnostic(
+                    operation: .remoteClientSessionScreen,
+                    workspaceID: initialScreen.session.workspaceID,
+                    providerID: initialScreen.session.providerID,
+                    sessionID: sessionID,
+                    startedAt: diagnosticStart,
+                    steps: [
+                        PerformanceDiagnosticStep(
+                            name: "fetchSessionScreen",
+                            elapsedMilliseconds: elapsedMilliseconds(since: diagnosticStart)
+                        )
+                    ],
+                    metrics: ["activityItemCount": initialScreen.activityItems.count]
+                )
                 if focusedSessionID == sessionID,
                     focusedSessionScreen?.session.id != sessionID
                         || (forceFetchIfAlreadyFocused && focusedSessionScreen != nil)
@@ -1782,6 +1921,14 @@ final class RemoteClientPairingModel {
                     focusedSessionErrorMessage = nil
                 }
             } catch {
+                recordPerformanceDiagnostic(
+                    operation: .remoteClientSessionScreen,
+                    outcome: .failure,
+                    sessionID: sessionID,
+                    startedAt: diagnosticStart,
+                    steps: [],
+                    failureMessage: error.localizedDescription
+                )
                 if handleUnauthorizedPairedMac(error, pairedMacID: pairedMac.id) {
                     observationTask.cancel()
                     return

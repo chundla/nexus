@@ -2174,15 +2174,24 @@
         }
 
         func validateHost(hostID: UUID) throws -> HostValidationSnapshot {
-            guard let host = try metadataStore.host(id: hostID) else {
-                throw NexusMetadataStoreError.hostNotFound
+            var trace = PerformanceDiagnosticTrace(operation: .validateHost)
+            do {
+                guard let host = try trace.measure("loadHost", { try metadataStore.host(id: hostID) }) else {
+                    throw NexusMetadataStoreError.hostNotFound
+                }
+                let result = trace.measure("validateHost") {
+                    hostValidationEvaluator.validate(host: host)
+                }
+                let snapshot = try trace.measure("saveHostValidation") {
+                    try metadataStore.saveHostValidation(hostID: hostID, result: result, checkedAt: Date())
+                }
+                try? metadataStore.recordPerformanceDiagnostic(trace.finish(outcome: .success))
+                return snapshot
+            } catch {
+                try? metadataStore.recordPerformanceDiagnostic(
+                    trace.finish(outcome: .failure, failureMessage: String(describing: error)))
+                throw error
             }
-
-            return try metadataStore.saveHostValidation(
-                hostID: hostID,
-                result: hostValidationEvaluator.validate(host: host),
-                checkedAt: Date()
-            )
         }
 
         func deleteHost(hostID: UUID) throws -> Bool {
@@ -2321,14 +2330,39 @@
         }
 
         func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: UUID?) throws -> Workspace {
-            try metadataStore.createLocalWorkspace(name: name, folderPath: folderPath, primaryGroupID: primaryGroupID)
+            var trace = PerformanceDiagnosticTrace(operation: .createLocalWorkspace)
+            do {
+                let workspace = try trace.measure("createWorkspace") {
+                    try metadataStore.createLocalWorkspace(
+                        name: name, folderPath: folderPath, primaryGroupID: primaryGroupID)
+                }
+                try? metadataStore.recordPerformanceDiagnostic(
+                    trace.finish(outcome: .success, workspaceID: workspace.id))
+                return workspace
+            } catch {
+                try? metadataStore.recordPerformanceDiagnostic(
+                    trace.finish(outcome: .failure, failureMessage: String(describing: error)))
+                throw error
+            }
         }
 
         func createRemoteWorkspace(name: String?, hostID: UUID, remotePath: String, primaryGroupID: UUID?) throws
             -> Workspace
         {
-            try metadataStore.createRemoteWorkspace(
-                name: name, hostID: hostID, remotePath: remotePath, primaryGroupID: primaryGroupID)
+            var trace = PerformanceDiagnosticTrace(operation: .createRemoteWorkspace)
+            do {
+                let workspace = try trace.measure("createWorkspace") {
+                    try metadataStore.createRemoteWorkspace(
+                        name: name, hostID: hostID, remotePath: remotePath, primaryGroupID: primaryGroupID)
+                }
+                try? metadataStore.recordPerformanceDiagnostic(
+                    trace.finish(outcome: .success, workspaceID: workspace.id))
+                return workspace
+            } catch {
+                try? metadataStore.recordPerformanceDiagnostic(
+                    trace.finish(outcome: .failure, failureMessage: String(describing: error)))
+                throw error
+            }
         }
 
         func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) throws -> Session {
@@ -2360,26 +2394,59 @@
         }
 
         func stopSession(sessionID: UUID) throws -> Session {
-            guard let session = try sessionRecordStore.session(id: sessionID) else {
-                throw NexusMetadataStoreError.sessionNotFound
-            }
+            var trace = PerformanceDiagnosticTrace(operation: .stopSession, sessionID: sessionID)
+            do {
+                guard let session = try trace.measure("loadSession", { try sessionRecordStore.session(id: sessionID) })
+                else {
+                    throw NexusMetadataStoreError.sessionNotFound
+                }
 
-            let resolvedSession = try reconcileSessionRuntimeState(session)
-            guard resolvedSession.state == .ready else {
-                return resolvedSession
-            }
+                let resolvedSession = try trace.measure("reconcileSession") {
+                    try reconcileSessionRuntimeState(session)
+                }
+                guard resolvedSession.state == .ready else {
+                    try? metadataStore.recordPerformanceDiagnostic(
+                        trace.finish(
+                            outcome: .success,
+                            workspaceID: resolvedSession.workspaceID,
+                            providerID: resolvedSession.providerID
+                        ))
+                    return resolvedSession
+                }
 
-            if try stopRequiresActiveIBMBobTurn(resolvedSession),
-                sessionRuntimeManager.hasRuntime(for: resolvedSession) == false
-            {
-                throw IBMBobSessionRuntimeError.noActiveTurnToStop
-            }
+                if try trace.measure(
+                    "validateStopPreconditions", { try stopRequiresActiveIBMBobTurn(resolvedSession) }),
+                    sessionRuntimeManager.hasRuntime(for: resolvedSession) == false
+                {
+                    throw IBMBobSessionRuntimeError.noActiveTurnToStop
+                }
 
-            try sessionRuntimeManager.stop(session: resolvedSession)
-            guard let updatedSession = try sessionRecordStore.session(id: sessionID) else {
-                throw NexusMetadataStoreError.sessionNotFound
+                try trace.measure("stopRuntime") {
+                    try sessionRuntimeManager.stop(session: resolvedSession)
+                }
+                guard
+                    let updatedSession = try trace.measure(
+                        "reloadSession",
+                        { try sessionRecordStore.session(id: sessionID) }
+                    )
+                else {
+                    throw NexusMetadataStoreError.sessionNotFound
+                }
+                let finalSession = try trace.measure("reconcileStoppedSession") {
+                    try reconcileSessionRuntimeState(updatedSession)
+                }
+                try? metadataStore.recordPerformanceDiagnostic(
+                    trace.finish(
+                        outcome: .success,
+                        workspaceID: finalSession.workspaceID,
+                        providerID: finalSession.providerID
+                    ))
+                return finalSession
+            } catch {
+                try? metadataStore.recordPerformanceDiagnostic(
+                    trace.finish(outcome: .failure, failureMessage: String(describing: error)))
+                throw error
             }
-            return try reconcileSessionRuntimeState(updatedSession)
         }
 
         private func resetPiSession(_ session: Session) throws -> SessionScreen {
@@ -2398,43 +2465,80 @@
         }
 
         func deleteSessionRecord(sessionID: UUID) throws -> Bool {
-            guard let session = try sessionRecordStore.session(id: sessionID) else {
-                throw NexusMetadataStoreError.sessionNotFound
-            }
+            var trace = PerformanceDiagnosticTrace(operation: .deleteSessionRecord, sessionID: sessionID)
+            do {
+                guard let session = try trace.measure("loadSession", { try sessionRecordStore.session(id: sessionID) })
+                else {
+                    throw NexusMetadataStoreError.sessionNotFound
+                }
 
-            let resolvedSession = try reconcileSessionRuntimeState(session)
-            if resolvedSession.state == .ready,
-                try readySessionRecordMayBeDeleted(resolvedSession) == false
-            {
-                throw NexusMetadataStoreError.sessionRecordDeletionRequiresStoppedSession
-            }
+                let resolvedSession = try trace.measure("reconcileSession") {
+                    try reconcileSessionRuntimeState(session)
+                }
+                if resolvedSession.state == .ready,
+                    try trace.measure(
+                        "validateDeletePreconditions",
+                        {
+                            try readySessionRecordMayBeDeleted(resolvedSession) == false
+                        })
+                {
+                    throw NexusMetadataStoreError.sessionRecordDeletionRequiresStoppedSession
+                }
 
-            guard let workspace = try metadataStore.workspace(id: resolvedSession.workspaceID) else {
-                throw NexusMetadataStoreError.workspaceNotFound
-            }
-            let host = try workspace.remoteHostID.flatMap { try metadataStore.host(id: $0) }
-            let sessionRecordAdapterMetadata = try sessionRecordStore.sessionRecordAdapterMetadata(
-                sessionID: resolvedSession.id)
-            providerModuleRegistry.module(for: resolvedSession.providerID).prepareDeleteSessionRecord(
-                ProviderModuleDeleteSessionRecordRequest(
-                    session: resolvedSession,
-                    workspace: workspace,
-                    host: host,
-                    sessionRecordAdapterMetadata: sessionRecordAdapterMetadata
-                ),
-                actions: ProviderModuleDeleteSessionRecordActions { [ibmBobNativeSessionCleaner] in
-                    ibmBobNativeSessionCleaner.bestEffortDeleteStoredContinuity(
-                        for: resolvedSession,
-                        workspace: workspace,
-                        host: host,
-                        sessionRecordAdapterMetadata: sessionRecordAdapterMetadata
+                guard
+                    let workspace = try trace.measure(
+                        "loadWorkspace",
+                        { try metadataStore.workspace(id: resolvedSession.workspaceID) }
+                    )
+                else {
+                    throw NexusMetadataStoreError.workspaceNotFound
+                }
+                let host = try trace.measure("loadHost") {
+                    try workspace.remoteHostID.flatMap { try metadataStore.host(id: $0) }
+                }
+                let sessionRecordAdapterMetadata = try trace.measure("loadAdapterMetadata") {
+                    try sessionRecordStore.sessionRecordAdapterMetadata(sessionID: resolvedSession.id)
+                }
+                trace.measure("prepareDeleteSessionRecord") {
+                    providerModuleRegistry.module(for: resolvedSession.providerID).prepareDeleteSessionRecord(
+                        ProviderModuleDeleteSessionRecordRequest(
+                            session: resolvedSession,
+                            workspace: workspace,
+                            host: host,
+                            sessionRecordAdapterMetadata: sessionRecordAdapterMetadata
+                        ),
+                        actions: ProviderModuleDeleteSessionRecordActions { [ibmBobNativeSessionCleaner] in
+                            ibmBobNativeSessionCleaner.bestEffortDeleteStoredContinuity(
+                                for: resolvedSession,
+                                workspace: workspace,
+                                host: host,
+                                sessionRecordAdapterMetadata: sessionRecordAdapterMetadata
+                            )
+                        }
                     )
                 }
-            )
 
-            sessionRuntimeManager.remove(session: resolvedSession)
-            try piStructuredSessionHistoryStore.deleteHistory(sessionID: resolvedSession.id)
-            return try sessionRecordStore.deleteSessionRecord(id: sessionID)
+                trace.measure("removeRuntime") {
+                    sessionRuntimeManager.remove(session: resolvedSession)
+                }
+                try trace.measure("deleteStructuredHistory") {
+                    try piStructuredSessionHistoryStore.deleteHistory(sessionID: resolvedSession.id)
+                }
+                let deleted = try trace.measure("deleteSessionRecord") {
+                    try sessionRecordStore.deleteSessionRecord(id: sessionID)
+                }
+                try? metadataStore.recordPerformanceDiagnostic(
+                    trace.finish(
+                        outcome: .success,
+                        workspaceID: resolvedSession.workspaceID,
+                        providerID: resolvedSession.providerID
+                    ))
+                return deleted
+            } catch {
+                try? metadataStore.recordPerformanceDiagnostic(
+                    trace.finish(outcome: .failure, failureMessage: String(describing: error)))
+                throw error
+            }
         }
 
         func getSessionRecord(sessionID: UUID) throws -> Session {

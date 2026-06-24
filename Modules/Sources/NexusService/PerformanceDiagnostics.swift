@@ -58,15 +58,18 @@ struct PerformanceDiagnosticTrace {
 
     func finish(
         outcome: PerformanceDiagnosticOutcome,
+        workspaceID: UUID? = nil,
+        providerID: ProviderID? = nil,
+        sessionID: UUID? = nil,
         metrics: [String: Int] = [:],
         failureMessage: String? = nil
     ) -> PerformanceDiagnosticRecord {
         PerformanceDiagnosticRecord(
             operation: operation,
             outcome: outcome,
-            workspaceID: workspaceID,
-            providerID: providerID,
-            sessionID: sessionID,
+            workspaceID: workspaceID ?? self.workspaceID,
+            providerID: providerID ?? self.providerID,
+            sessionID: sessionID ?? self.sessionID,
             totalElapsedMilliseconds: elapsedMilliseconds(since: startedAtUptimeNanoseconds),
             steps: steps,
             metrics: metrics,

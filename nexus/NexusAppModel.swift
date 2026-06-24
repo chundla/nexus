@@ -6,6 +6,12 @@
     import NexusSessionPresentation
     import Observation
 
+    private extension UInt64 {
+        func saturatingSubtract(_ other: UInt64) -> UInt64 {
+            self >= other ? self - other : 0
+        }
+    }
+
     struct SessionPresentationContext: Equatable {
         let workspace: Workspace
         let host: NexusDomain.Host?
@@ -116,6 +122,8 @@
         var remoteAccessState: RemoteAccessState?
         var pairedDevices: [PairedDevice] = []
         var focusedSessionScreen: SessionScreen?
+        @ObservationIgnored
+        private(set) var performanceDiagnostics: [PerformanceDiagnosticRecord] = []
         private(set) var focusedSessionSummaryPresentation: FocusedSessionSummaryPresentation?
         private(set) var focusedStructuredSessionPresentation: FocusedStructuredSessionPresentation?
         private(set) var focusedStructuredSessionChromePresentation: FocusedStructuredSessionChromePresentation?
@@ -205,6 +213,44 @@
             return defaultRemoteAccessListeningPort
         }
 
+        private func currentUptimeNanoseconds() -> UInt64 {
+            DispatchTime.now().uptimeNanoseconds
+        }
+
+        private func elapsedMilliseconds(since startedAt: UInt64) -> Int {
+            Int(currentUptimeNanoseconds().saturatingSubtract(startedAt) / 1_000_000)
+        }
+
+        private func recordPerformanceDiagnostic(
+            operation: PerformanceDiagnosticOperation,
+            outcome: PerformanceDiagnosticOutcome = .success,
+            workspaceID: UUID? = nil,
+            providerID: ProviderID? = nil,
+            sessionID: UUID? = nil,
+            startedAt: UInt64,
+            steps: [PerformanceDiagnosticStep],
+            metrics: [String: Int] = [:],
+            failureMessage: String? = nil
+        ) {
+            performanceDiagnostics.insert(
+                PerformanceDiagnosticRecord(
+                    operation: operation,
+                    outcome: outcome,
+                    workspaceID: workspaceID,
+                    providerID: providerID,
+                    sessionID: sessionID,
+                    totalElapsedMilliseconds: elapsedMilliseconds(since: startedAt),
+                    steps: steps,
+                    metrics: metrics,
+                    failureMessage: failureMessage
+                ),
+                at: 0
+            )
+            if performanceDiagnostics.count > 50 {
+                performanceDiagnostics.removeLast(performanceDiagnostics.count - 50)
+            }
+        }
+
         static func live(listeningPort: Int? = 9234) throws -> NexusAppModel {
             let service = try NexusEmbeddedServiceBootstrap.bootstrap()
             let listenerEndpoint = service.listenerEndpoint
@@ -216,6 +262,7 @@
         }
 
         func refresh() async {
+            let diagnosticStart = currentUptimeNanoseconds()
             do {
                 let refreshGeneration = startWorkspaceOverviewRefresh()
 
@@ -252,6 +299,22 @@
                     stopRemotePairingServer()
                 }
                 self.serviceErrorMessage = nil
+                recordPerformanceDiagnostic(
+                    operation: .appStartupBrowse,
+                    startedAt: diagnosticStart,
+                    steps: [
+                        PerformanceDiagnosticStep(
+                            name: "applyBrowseShell",
+                            elapsedMilliseconds: elapsedMilliseconds(since: diagnosticStart)
+                        )
+                    ],
+                    metrics: [
+                        "workspaceCount": loadedWorkspaces.count,
+                        "workspaceGroupCount": loadedWorkspaceGroups.count,
+                        "hostCount": loadedHosts.count,
+                        "recentNavigationCount": loadedRecentNavigation.count,
+                    ]
+                )
 
                 scheduleWorkspaceOverviewLoadsInBackground(
                     for: prioritizedWorkspaceOverviewIDs(
@@ -284,6 +347,13 @@
                 focusedSessionID = nil
                 focusedSessionWorkspaceID = nil
                 serviceErrorMessage = error.localizedDescription
+                recordPerformanceDiagnostic(
+                    operation: .appStartupBrowse,
+                    outcome: .failure,
+                    startedAt: diagnosticStart,
+                    steps: [],
+                    failureMessage: error.localizedDescription
+                )
             }
         }
 
@@ -820,6 +890,7 @@
         }
 
         func workspaceBrowseNavigationPresentation(currentWorkspaceID: UUID?) -> WorkspaceBrowseNavigationPresentation {
+            let diagnosticStart = currentUptimeNanoseconds()
             let sidebarPresentation = workspaceBrowseSidebarPresentation(currentWorkspaceID: currentWorkspaceID)
             let initialSelection =
                 bootstrapInitialSelection
@@ -837,6 +908,20 @@
                 )
             }
 
+            recordPerformanceDiagnostic(
+                operation: .quickSwitchSearch,
+                startedAt: diagnosticStart,
+                steps: [
+                    PerformanceDiagnosticStep(
+                        name: "buildQuickSwitchItems",
+                        elapsedMilliseconds: elapsedMilliseconds(since: diagnosticStart)
+                    )
+                ],
+                metrics: [
+                    "workspaceResultCount": quickSwitchItems.count,
+                    "workspaceGroupCount": sidebarPresentation.workspaceGroups.count,
+                ]
+            )
             return WorkspaceBrowseNavigationPresentation(
                 initialSelection: initialSelection,
                 quickSwitchItems: quickSwitchItems

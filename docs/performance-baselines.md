@@ -6,10 +6,14 @@ Use this workflow before and after performance work so Nexus changes can be comp
 
 | Flow | Automated baseline | UI-facing observation | Service diagnostic capture |
 | --- | --- | --- | --- |
-| App launch | `nexusUITests/testLaunchPerformance` | XCTest launch metric in the UI test report | None today |
+| App launch | `nexusUITests/testLaunchPerformance` | XCTest launch metric in the UI test report | `appStartupBrowse` operation reserved for browse-readiness shell timing |
+| Workspace creation | `NexusServicePerformanceDiagnosticsTests/workspaceCreationIsListedInRecentPerformanceDiagnostics` | Create local/Remote Workspace in the macOS app and verify shell-first rendering | `createLocalWorkspace`, `createRemoteWorkspace` records |
 | Workspace refresh | `NexusServicePerformanceBaselineTests/testWorkspaceRefreshBaseline` | Re-run the same workspace in the macOS app when profiling browse regressions | `workspaceOverview` record |
 | Provider Detail open | `NexusServicePerformanceBaselineTests/testProviderDetailOpenBaseline` | Open the same Provider Detail screen in the macOS app when profiling provider browse regressions | `providerDetail` record |
-| Session open | `NexusServicePerformanceBaselineTests/testSessionOpenBaseline` | Open the same Session lane in the macOS app when profiling Session entry regressions | `launchDefaultSession` record |
+| Session open / mutation | `NexusServicePerformanceBaselineTests/testSessionOpenBaseline`, `NexusServicePerformanceDiagnosticsTests/defaultSessionLaunchIsListedInRecentPerformanceDiagnostics`, `NexusServicePerformanceDiagnosticsTests/stopAndDeleteSessionFailuresAreListedInRecentPerformanceDiagnostics` | Open, create, relaunch, stop, and delete the same Session lane in the macOS app when profiling Session entry regressions | `launchDefaultSession`, `createNamedSession`, `launchSession`, `stopSession`, `deleteSessionRecord` records |
+| Host Validation | `NexusServicePerformanceDiagnosticsTests/hostValidationIsListedInRecentPerformanceDiagnostics` | Validate a Host, then watch impacted Remote Workspace cards reconcile in the background | `validateHost` record |
+| Remote Client browse/session | `RemoteClientPairingModelTests` stale-shell/dedupe/availability tests | Use iPhone `Remote Client` fixture for availability, catalog, Provider Detail, Session open/focus, and Session screen fetch paths | `remoteClientAvailability`, `remoteClientCatalog`, `remoteClientProviderDetail`, `remoteClientSessionFocus`, `remoteClientSessionScreen` operations reserved for client timing snapshots |
+| Quick-switch search | macOS app-model quick-switch presentation tests | Exercise quick switch with recent Workspace / Provider / Session results | `quickSwitchSearch` operation reserved for search latency snapshots |
 | Structured Session activity append | `NexusServicePerformanceBaselineTests/testStructuredSessionActivityAppendBaseline` | Append the same structured activity in the macOS app when profiling feed update regressions | `structuredSessionObservation` delta record |
 
 ## Run the automated baselines
@@ -92,6 +96,20 @@ Manual iPhone SwiftUI validation for long assistant markdown and scroll hitches 
 
 ## Diagnostic fields to compare
 
+### Startup browse readiness
+
+- operation: `appStartupBrowse`
+- compare: `totalElapsedMilliseconds`
+- compare steps: base browse shell state, Workspace Overview background completion
+- target: ~100ms shell where possible; ≤1s seamless; >3s unacceptable unless the slow work is explicitly backgrounded
+
+### Workspace creation
+
+- operations: `createLocalWorkspace`, `createRemoteWorkspace`
+- compare: `totalElapsedMilliseconds`
+- compare steps: `createWorkspace`
+- pair with app-model tests for shell-before-Overview completion
+
 ### Workspace refresh
 
 - operation: `workspaceOverview`
@@ -104,11 +122,31 @@ Manual iPhone SwiftUI validation for long assistant markdown and scroll hitches 
 - compare: `totalElapsedMilliseconds`
 - compare steps: `loadWorkspace`, `loadRemoteTarget`, `loadSessions`, `readProviderCatalog`
 
-### Session open
+### Session open / mutation
 
-- operation: `launchDefaultSession`
+- operations: `launchDefaultSession`, `createNamedSession`, `launchSession`, `stopSession`, `deleteSessionRecord`
 - compare: `totalElapsedMilliseconds`
-- compare steps: `loadWorkspace`, `loadDefaultSession`, `planFreshSessionOpen`, `createDefaultSession`, `ensureLaunchSnapshot`, `launchFreshSession`
+- compare steps: `loadWorkspace`, `loadDefaultSession`, `loadSession`, `planFreshSessionOpen`, `createDefaultSession`, `createNamedSession`, `ensureLaunchSnapshot`, `launchFreshSession`, `reconcileSession`, `stopRuntime`, `deleteSessionRecord`
+
+### Host Validation
+
+- operation: `validateHost`
+- compare: `totalElapsedMilliseconds`
+- compare steps: `loadHost`, `validateHost`, `saveHostValidation`
+- pair with app-model tests for Host Detail-before-impacted-Workspace refresh completion
+
+### Remote Client browse/session loading
+
+- operations: `remoteClientAvailability`, `remoteClientCatalog`, `remoteClientProviderDetail`, `remoteClientSessionFocus`, `remoteClientSessionScreen`
+- compare: `totalElapsedMilliseconds`
+- compare steps: availability probes, catalog fetch, Provider Detail fetch, observation startup, Session screen fetch
+- pair with `RemoteClientPairingModelTests` for stale shells and in-flight dedupe
+
+### Quick-switch search
+
+- operation: `quickSwitchSearch`
+- compare: `totalElapsedMilliseconds`
+- compare metrics: candidate count, Workspace result count, Provider result count, Session result count
 
 ### Structured Session activity append
 
