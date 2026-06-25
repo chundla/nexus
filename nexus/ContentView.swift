@@ -1869,12 +1869,14 @@
             guard initial < total else {
                 return
             }
-            let batch = StructuredSessionFeedMacOSStartupPolicy.visibleTailRowsPerRevealBatch
             Task { @MainActor in
                 var visible = initial
                 while visible < total {
                     await Task.yield()
-                    visible = min(visible + batch, total)
+                    visible = StructuredSessionFeedMacOSStartupPolicy.nextVisibleTailRowCount(
+                        currentVisibleCount: visible,
+                        totalRowCount: total
+                    )
                     structuredSessionMacOSFeedVisibleTailRowCount = visible
                 }
             }

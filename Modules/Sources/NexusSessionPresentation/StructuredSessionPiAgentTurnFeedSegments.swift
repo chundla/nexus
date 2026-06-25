@@ -135,10 +135,28 @@ public func structuredSessionPiStandaloneAssistantPresentation(
     )
 }
 
+/// Trimmed bodies of closed agent-turn final answers. Build once per render and reuse across every
+/// standalone item — rescanning all segments per item turns a single render into O(visible * total) work.
+public func structuredSessionPiFinalAnswerBodies(
+    in segments: [StructuredSessionFeedSegment]
+) -> Set<String> {
+    var bodies: Set<String> = []
+    for segment in segments {
+        guard case .agentTurn(let turn) = segment,
+            turn.isOpen == false,
+            let final = turn.finalAnswer
+        else {
+            continue
+        }
+        bodies.insert(final.text.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+    return bodies
+}
+
 /// Standalone `Pi:` rows duplicate agent-turn `finalAnswer` when history still carries the same message activity item.
 public func structuredSessionPiShouldRenderStandaloneFeedSegment(
     item: SessionActivityItem,
-    in segments: [StructuredSessionFeedSegment]
+    duplicateFinalAnswerBodies: Set<String>
 ) -> Bool {
     guard structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage(item) else {
         return true
@@ -150,18 +168,7 @@ public func structuredSessionPiShouldRenderStandaloneFeedSegment(
     else {
         return true
     }
-    for segment in segments {
-        guard case .agentTurn(let turn) = segment,
-            turn.isOpen == false,
-            let final = turn.finalAnswer
-        else {
-            continue
-        }
-        if final.text.trimmingCharacters(in: .whitespacesAndNewlines) == body {
-            return false
-        }
-    }
-    return true
+    return duplicateFinalAnswerBodies.contains(body) == false
 }
 
 public func structuredSessionPiFeedSegments(for screen: SessionScreen) -> [StructuredSessionFeedSegment]? {

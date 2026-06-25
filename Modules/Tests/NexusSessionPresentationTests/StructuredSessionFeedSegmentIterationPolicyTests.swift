@@ -58,6 +58,45 @@ struct StructuredSessionFeedSegmentIterationPolicyTests {
         )
     }
 
+    /// Fixed-size batch steps cost O(total^2/batch) main-thread work across a progressive reveal
+    /// (each step re-renders `currentVisibleCount` segments). Doubling keeps the step count
+    /// O(log total) so the summed reveal cost stays linear in feed size (post-#264 hang trace).
+    @Test func nextVisibleTailSegmentCountDoublesInsteadOfFixedBatchSteps() {
+        var visible = 3
+        let total = 100
+        var steps = 0
+        while visible < total {
+            visible = StructuredSessionFeedSegmentRevealPolicy.nextVisibleTailSegmentCount(
+                currentVisibleCount: visible,
+                totalFeedSegmentCount: total
+            )
+            steps += 1
+        }
+        #expect(visible == total)
+        #expect(steps <= 10)
+    }
+
+    @Test func nextVisibleTailSegmentCountClampsToTotalAndHandlesEmptyFeed() {
+        #expect(
+            StructuredSessionFeedSegmentRevealPolicy.nextVisibleTailSegmentCount(
+                currentVisibleCount: 90,
+                totalFeedSegmentCount: 100
+            ) == 100
+        )
+        #expect(
+            StructuredSessionFeedSegmentRevealPolicy.nextVisibleTailSegmentCount(
+                currentVisibleCount: 100,
+                totalFeedSegmentCount: 100
+            ) == 100
+        )
+        #expect(
+            StructuredSessionFeedSegmentRevealPolicy.nextVisibleTailSegmentCount(
+                currentVisibleCount: 0,
+                totalFeedSegmentCount: 0
+            ) == 0
+        )
+    }
+
     @Test func thinkingIndicatorStaysVisibleWhileOpenTurnHasReasoningContent() {
         let session = Session(
             id: UUID(),

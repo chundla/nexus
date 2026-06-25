@@ -17,6 +17,13 @@
             StructuredSessionFeedProgressiveRevealPolicy.visibleTailRowsPerRevealBatch
         }
 
+        static func nextVisibleTailRowCount(currentVisibleCount: Int, totalRowCount: Int) -> Int {
+            StructuredSessionFeedProgressiveRevealPolicy.nextVisibleTailRowCount(
+                currentVisibleCount: currentVisibleCount,
+                totalRowCount: totalRowCount
+            )
+        }
+
         static var allowsMarkdownHydrationDuringProgressiveReveal: Bool {
             StructuredSessionFeedProgressiveRevealPolicy.allowsMarkdownHydrationDuringProgressiveReveal
         }

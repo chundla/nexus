@@ -2463,12 +2463,14 @@
             guard initial < total else {
                 return
             }
-            let batch = StructuredSessionFeedProgressiveRevealPolicy.visibleTailRowsPerRevealBatch
             Task { @MainActor in
                 var visible = initial
                 while visible < total {
                     await Task.yield()
-                    visible = min(visible + batch, total)
+                    visible = StructuredSessionFeedProgressiveRevealPolicy.nextVisibleTailRowCount(
+                        currentVisibleCount: visible,
+                        totalRowCount: total
+                    )
                     structuredSessionFeedVisibleTailRowCount = visible
                 }
             }
@@ -2489,6 +2491,7 @@
                 EmptyView()
             } else if feedPresentation.feedSegments != nil {
                 let allSegments = feedPresentation.feedSegments ?? []
+                let duplicateFinalAnswerBodies = structuredSessionPiFinalAnswerBodies(in: allSegments)
                 let visibleSegments =
                     (structuredSessionVisibleFeedSegments(
                         in: feedPresentation,
@@ -2498,7 +2501,10 @@
                         guard case .standalone(let item) = segment else {
                             return true
                         }
-                        return structuredSessionPiShouldRenderStandaloneFeedSegment(item: item, in: allSegments)
+                        return structuredSessionPiShouldRenderStandaloneFeedSegment(
+                            item: item,
+                            duplicateFinalAnswerBodies: duplicateFinalAnswerBodies
+                        )
                     }
                 ForEach(visibleSegments) { segment in
                     StructuredSessionPiFeedSegmentView(

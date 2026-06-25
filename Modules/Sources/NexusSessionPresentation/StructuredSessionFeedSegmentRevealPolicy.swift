@@ -71,6 +71,24 @@ public enum StructuredSessionFeedSegmentRevealPolicy {
         // Step the tail by batch size — jumping straight to `total` on session open mounted the full feed at once (main-thread hang).
         return min(currentVisibleCount + visibleTailSegmentsPerRevealBatch, totalFeedSegmentCount)
     }
+
+    /// Next tail count for the progressive-reveal loop. Doubles each step instead of advancing by a fixed
+    /// batch: a fixed batch needs `total / batch` re-render steps, each re-rendering `currentVisibleCount`
+    /// segments, for O(total^2 / batch) total main-thread work over a long session. Doubling reaches `total`
+    /// in O(log total) steps, keeping the summed reveal cost O(total).
+    public static func nextVisibleTailSegmentCount(
+        currentVisibleCount: Int,
+        totalFeedSegmentCount: Int
+    ) -> Int {
+        guard totalFeedSegmentCount > 0 else {
+            return 0
+        }
+        guard currentVisibleCount < totalFeedSegmentCount else {
+            return totalFeedSegmentCount
+        }
+        let next = max(currentVisibleCount + visibleTailSegmentsPerRevealBatch, currentVisibleCount * 2)
+        return min(next, totalFeedSegmentCount)
+    }
 }
 
 public struct StructuredSessionAgentTurnDisclosureExpansionDefaults: Equatable, Sendable {

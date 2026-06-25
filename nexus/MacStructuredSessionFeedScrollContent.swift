@@ -105,11 +105,15 @@
                     in: feedPresentation,
                     visibleTailItemCount: visibleTailRowCount
                 ) ?? []
+            let duplicateFinalAnswerBodies = structuredSessionPiFinalAnswerBodies(in: all)
             return raw.filter { segment in
                 guard case .standalone(let item) = segment else {
                     return true
                 }
-                return structuredSessionPiShouldRenderStandaloneFeedSegment(item: item, in: all)
+                return structuredSessionPiShouldRenderStandaloneFeedSegment(
+                    item: item,
+                    duplicateFinalAnswerBodies: duplicateFinalAnswerBodies
+                )
             }
         }
 
