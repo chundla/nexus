@@ -2608,7 +2608,7 @@
                             )
                             return .handled
                         }
-                        .onKeyPress(.return) {
+                        .onKeyPress(.tab) {
                             guard slashCommandMenuPresentation.isVisible,
                                 let command = slashCommandMenuPresentation.commands.first(where: {
                                     $0.id == highlightedSlashCommandID
