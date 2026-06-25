@@ -2615,6 +2615,11 @@
                             .background(NexusIOSTheme.gold, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                     }
                     .frame(maxWidth: 420, alignment: .trailing)
+                    .contextMenu {
+                        Button("Copy") {
+                            structuredSessionFeedMarkdownCopyToPasteboard(conversation.text)
+                        }
+                    }
                 }
                 .structuredSessionFeedRowCompositing()
             case .assistant(let label):
@@ -2635,6 +2640,11 @@
                     .padding(.vertical, 10)
                     .frame(maxWidth: 420, alignment: .leading)
                     .background(NexusIOSTheme.overlay(0.1), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .contextMenu {
+                        Button("Copy") {
+                            structuredSessionFeedMarkdownCopyToPasteboard(conversation.text)
+                        }
+                    }
                     Spacer(minLength: 48)
                 }
                 .structuredSessionFeedRowCompositing()

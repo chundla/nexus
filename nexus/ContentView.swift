@@ -1943,6 +1943,11 @@
                         .padding(.vertical, 8)
                         .background(NexusMacTheme.gold, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                         .frame(maxWidth: 520, alignment: .trailing)
+                        .contextMenu {
+                            Button("Copy") {
+                                structuredSessionFeedMarkdownCopyToPasteboard(conversation.text)
+                            }
+                        }
                 }
                 .frame(maxWidth: .infinity, alignment: .trailing)
             case .assistant(let label):
@@ -1962,6 +1967,11 @@
                 .padding(.vertical, 8)
                 .background(NexusMacTheme.overlay(0.1), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .frame(maxWidth: 520, alignment: .leading)
+                .contextMenu {
+                    Button("Copy") {
+                        structuredSessionFeedMarkdownCopyToPasteboard(conversation.text)
+                    }
+                }
             case .command:
                 VStack(alignment: .leading, spacing: 8) {
                     Text(row.title)

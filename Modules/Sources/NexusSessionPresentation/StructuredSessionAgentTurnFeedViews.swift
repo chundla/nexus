@@ -407,6 +407,11 @@ public struct StructuredSessionAgentTurnStackView: View {
             .padding(.vertical, 10)
             .frame(maxWidth: 620, alignment: .leading)
             .background(style.assistantBubbleBackground, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .contextMenu {
+                Button("Copy") {
+                    structuredSessionFeedMarkdownCopyToPasteboard(finalAnswer.text)
+                }
+            }
             Spacer(minLength: 48)
         }
         .structuredSessionFeedRowCompositing()
