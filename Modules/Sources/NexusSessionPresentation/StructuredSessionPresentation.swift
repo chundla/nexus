@@ -1808,11 +1808,14 @@ private func structuredSessionSlashCommandMenuPresentation(
     }
 
     let normalizedQuery = context.query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    // Unlike normalizedQuery, this preserves a trailing space so suggestionQueryPrefix gates
+    // (e.g. "model ") activate as soon as the prefix is typed, not after the next character.
+    let suggestionQuery = context.query.lowercased()
 
     let prefixMatches = commands.filter { command in
         let normalizedCommand = command.matchText.lowercased()
         if let requiredPrefix = command.suggestionQueryPrefix?.lowercased(),
-            normalizedQuery.hasPrefix(requiredPrefix) == false
+            suggestionQuery.hasPrefix(requiredPrefix) == false
         {
             return false
         }
@@ -1827,7 +1830,7 @@ private func structuredSessionSlashCommandMenuPresentation(
         ? commands.filter { command in
             let normalizedCommand = command.matchText.lowercased()
             if let requiredPrefix = command.suggestionQueryPrefix?.lowercased(),
-                normalizedQuery.hasPrefix(requiredPrefix) == false
+                suggestionQuery.hasPrefix(requiredPrefix) == false
             {
                 return false
             }
