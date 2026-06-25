@@ -98,50 +98,44 @@
             }
         }
 
-        private var visibleSegments: [StructuredSessionFeedSegment] {
-            let all = feedPresentation.feedSegments ?? []
-            let raw =
-                structuredSessionVisibleFeedSegments(
-                    in: feedPresentation,
-                    visibleTailItemCount: visibleTailRowCount
-                ) ?? []
-            let duplicateFinalAnswerBodies = structuredSessionPiFinalAnswerBodies(in: all)
-            return raw.filter { segment in
-                guard case .standalone(let item) = segment else {
-                    return true
-                }
-                return structuredSessionPiShouldRenderStandaloneFeedSegment(
-                    item: item,
-                    duplicateFinalAnswerBodies: duplicateFinalAnswerBodies
-                )
-            }
-        }
-
         @ViewBuilder
         private var segmentList: some View {
-            ForEach(visibleSegments) { segment in
-                StructuredSessionPiFeedSegmentView(
-                    segment: segment,
-                    providerDisplayName: structuredPresentation.session.providerID.displayName,
-                    style: macOSPiStructuredSessionFeedSegmentStyle(),
-                    disclosureState: disclosureState,
-                    standaloneRow: { row in
-                        AnyView(activityRow(row))
-                    },
-                    onShowFullAssistantResponse: onShowFullAssistantResponse,
-                    artifactActions: { artifact in
-                        structuredSessionFeedArtifactActionPresentation(
-                            for: artifact,
-                            hasWriterAuthority: true,
-                            usesHostArtifactFetch: false
-                        )
-                    },
-                    onArtifactOpenOnHost: { artifact in
-                        guard let path = artifact.hostPath else { return }
-                        StructuredSessionFeedArtifactHostActions.openOnHost(path: path)
-                    }
+            if let segments = feedPresentation.feedSegments,
+                let visibleIndices = structuredSessionVisibleFeedSegmentIndices(
+                    in: feedPresentation,
+                    visibleTailItemCount: visibleTailRowCount
                 )
-                .id(segment.id)
+            {
+                ForEach(visibleIndices, id: \.self) { index in
+                    let segment = segments[index]
+                    if structuredSessionShouldRenderFeedSegment(
+                        segment,
+                        hiddenStandaloneFeedSegmentIDs: feedPresentation.hiddenStandaloneFeedSegmentIDs
+                    ) {
+                        StructuredSessionPiFeedSegmentView(
+                            segment: segment,
+                            providerDisplayName: structuredPresentation.session.providerID.displayName,
+                            style: macOSPiStructuredSessionFeedSegmentStyle(),
+                            disclosureState: disclosureState,
+                            standaloneRow: { row in
+                                AnyView(activityRow(row))
+                            },
+                            onShowFullAssistantResponse: onShowFullAssistantResponse,
+                            artifactActions: { artifact in
+                                structuredSessionFeedArtifactActionPresentation(
+                                    for: artifact,
+                                    hasWriterAuthority: true,
+                                    usesHostArtifactFetch: false
+                                )
+                            },
+                            onArtifactOpenOnHost: { artifact in
+                                guard let path = artifact.hostPath else { return }
+                                StructuredSessionFeedArtifactHostActions.openOnHost(path: path)
+                            }
+                        )
+                        .id(segment.id)
+                    }
+                }
             }
         }
 

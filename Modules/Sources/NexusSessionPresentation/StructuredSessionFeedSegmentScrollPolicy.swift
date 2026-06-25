@@ -54,21 +54,36 @@ public func structuredSessionActivityRows(
     return Array(feed.activityRows.suffix(visibleSegments.count))
 }
 
-public func structuredSessionVisibleFeedSegments(
+public func structuredSessionVisibleFeedSegmentIndices(
     in feed: StructuredSessionFeedPresentation,
     visibleTailItemCount: Int
-) -> [StructuredSessionFeedSegment]? {
+) -> Range<Int>? {
     guard let segments = feed.feedSegments else {
         return nil
     }
     let total = segments.count
     guard visibleTailItemCount < total else {
-        return segments
+        return 0..<total
     }
     guard visibleTailItemCount > 0 else {
-        return []
+        return 0..<0
     }
-    return Array(segments.suffix(visibleTailItemCount))
+    return (total - visibleTailItemCount)..<total
+}
+
+public func structuredSessionVisibleFeedSegments(
+    in feed: StructuredSessionFeedPresentation,
+    visibleTailItemCount: Int
+) -> [StructuredSessionFeedSegment]? {
+    guard let segments = feed.feedSegments,
+        let visibleIndices = structuredSessionVisibleFeedSegmentIndices(
+            in: feed,
+            visibleTailItemCount: visibleTailItemCount
+        )
+    else {
+        return nil
+    }
+    return Array(segments[visibleIndices])
 }
 
 public func structuredSessionFeedRevealShowsFullTail(

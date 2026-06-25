@@ -171,6 +171,42 @@ public func structuredSessionPiShouldRenderStandaloneFeedSegment(
     return duplicateFinalAnswerBodies.contains(body) == false
 }
 
+/// Standalone Pi assistant rows that duplicate closed-turn final answers. Compute once when the
+/// feed presentation is built; render-time filtering of large segment arrays in SwiftUI `body`
+/// causes heavy copy/destroy churn under repeated layout invalidation.
+public func structuredSessionPiHiddenStandaloneFeedSegmentIDs(
+    in segments: [StructuredSessionFeedSegment]
+) -> Set<UUID> {
+    let duplicateFinalAnswerBodies = structuredSessionPiFinalAnswerBodies(in: segments)
+    guard duplicateFinalAnswerBodies.isEmpty == false else {
+        return []
+    }
+
+    var hiddenIDs: Set<UUID> = []
+    for segment in segments {
+        guard case .standalone(let item) = segment else {
+            continue
+        }
+        if structuredSessionPiShouldRenderStandaloneFeedSegment(
+            item: item,
+            duplicateFinalAnswerBodies: duplicateFinalAnswerBodies
+        ) == false {
+            hiddenIDs.insert(item.id)
+        }
+    }
+    return hiddenIDs
+}
+
+public func structuredSessionShouldRenderFeedSegment(
+    _ segment: StructuredSessionFeedSegment,
+    hiddenStandaloneFeedSegmentIDs: Set<UUID>
+) -> Bool {
+    guard case .standalone(let item) = segment else {
+        return true
+    }
+    return hiddenStandaloneFeedSegmentIDs.contains(item.id) == false
+}
+
 public func structuredSessionPiFeedSegments(for screen: SessionScreen) -> [StructuredSessionFeedSegment]? {
     guard screen.session.providerID == .pi else {
         return nil

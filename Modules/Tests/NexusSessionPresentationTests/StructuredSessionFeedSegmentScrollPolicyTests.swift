@@ -97,6 +97,73 @@ struct StructuredSessionFeedSegmentScrollPolicyTests {
         #expect(Set(tailTwo.map(\.id)) == Set(segmentIDs.suffix(2)))
     }
 
+    @Test func visibleFeedSegmentIndicesUseTailWindowWithoutCopyingSegments() throws {
+        let rows = (0..<5).map { index in
+            StructuredSessionActivityRow(
+                id: UUID(),
+                title: "Row \(index)",
+                systemImage: "message",
+                text: "text \(index)",
+                emphasis: .accent
+            )
+        }
+        let segments: [StructuredSessionFeedSegment] = rows.map { row in
+            .userMessage(StructuredSessionFeedUserMessageSegment(activityItemID: row.id, text: row.text))
+        }
+        let feed = StructuredSessionFeedPresentation(
+            copy: StructuredSessionPresentationCopy(
+                emptyStateTitle: "Empty",
+                emptyStateDescription: "None",
+                composerPlaceholder: "Type"
+            ),
+            activityRows: rows,
+            feedSegments: segments,
+            pendingApprovalRequests: [],
+            thinkingIndicator: nil
+        )
+
+        #expect(structuredSessionVisibleFeedSegmentIndices(in: feed, visibleTailItemCount: 2) == 3..<5)
+        #expect(structuredSessionVisibleFeedSegmentIndices(in: feed, visibleTailItemCount: 5) == 0..<5)
+        #expect(structuredSessionVisibleFeedSegmentIndices(in: feed, visibleTailItemCount: 0) == 0..<0)
+    }
+
+    @Test func feedPresentationCachesHiddenStandalonePiDuplicates() {
+        let duplicateText = "Done with a long enough answer for the cache test."
+        let duplicateID = UUID()
+        let rows = (0..<3).map { index in
+            StructuredSessionActivityRow(
+                id: UUID(),
+                title: "Row \(index)",
+                systemImage: "message",
+                text: "text \(index)",
+                emphasis: .accent
+            )
+        }
+        let segments: [StructuredSessionFeedSegment] = [
+            .agentTurn(
+                StructuredSessionFeedAgentTurnSegment(
+                    id: UUID(),
+                    isOpen: false,
+                    finalAnswer: StructuredSessionFeedAgentTurnFinalAnswerSegment(text: duplicateText)
+                )),
+            .standalone(SessionActivityItem(id: duplicateID, kind: .message, text: "Pi: \(duplicateText)")),
+            .standalone(SessionActivityItem(kind: .message, text: "Pi: unique")),
+        ]
+        let feed = StructuredSessionFeedPresentation(
+            copy: StructuredSessionPresentationCopy(
+                emptyStateTitle: "Empty",
+                emptyStateDescription: "None",
+                composerPlaceholder: "Type"
+            ),
+            activityRows: rows,
+            feedSegments: segments,
+            pendingApprovalRequests: [],
+            thinkingIndicator: nil
+        )
+
+        #expect(feed.hiddenStandaloneFeedSegmentIDs == [duplicateID])
+    }
+
     @Test func scrollTargetUsesOpenAgentTurnSegmentWithoutFinalAnswerPlaceholder() throws {
         let turnAnchorID = UUID()
         let userID = UUID()

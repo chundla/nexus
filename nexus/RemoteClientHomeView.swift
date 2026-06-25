@@ -2490,50 +2490,47 @@
             } else if feedPresentation.activityRows.isEmpty {
                 EmptyView()
             } else if feedPresentation.feedSegments != nil {
-                let allSegments = feedPresentation.feedSegments ?? []
-                let duplicateFinalAnswerBodies = structuredSessionPiFinalAnswerBodies(in: allSegments)
-                let visibleSegments =
-                    (structuredSessionVisibleFeedSegments(
+                if let segments = feedPresentation.feedSegments,
+                    let visibleIndices = structuredSessionVisibleFeedSegmentIndices(
                         in: feedPresentation,
                         visibleTailItemCount: structuredSessionFeedVisibleTailRowCount
-                    ) ?? [])
-                    .filter { segment in
-                        guard case .standalone(let item) = segment else {
-                            return true
-                        }
-                        return structuredSessionPiShouldRenderStandaloneFeedSegment(
-                            item: item,
-                            duplicateFinalAnswerBodies: duplicateFinalAnswerBodies
-                        )
-                    }
-                ForEach(visibleSegments) { segment in
-                    StructuredSessionPiFeedSegmentView(
-                        segment: segment,
-                        providerDisplayName: providerDisplayName,
-                        style: iosPiStructuredSessionFeedSegmentStyle(
-                            feedReaderIsScrollIdle: structuredSessionFeedScrollIsIdle
-                        ),
-                        disclosureState: structuredSessionAgentTurnDisclosureState,
-                        standaloneRow: { row in
-                            AnyView(structuredSessionActivityRowView(row))
-                        },
-                        onShowFullAssistantResponse: { presentation in
-                            presentedStructuredSessionAssistantFullResponse = presentation
-                        },
-                        artifactActions: { artifact in
-                            structuredSessionFeedArtifactActionPresentation(
-                                for: artifact,
-                                hasWriterAuthority: model.focusedSessionIsController,
-                                usesHostArtifactFetch: true
-                            )
-                        },
-                        onArtifactDownload: { artifact in
-                            Task {
-                                await model.downloadFocusedStructuredSessionArtifact(artifact)
-                            }
-                        }
                     )
-                    .id(segment.id)
+                {
+                    ForEach(visibleIndices, id: \.self) { index in
+                        let segment = segments[index]
+                        if structuredSessionShouldRenderFeedSegment(
+                            segment,
+                            hiddenStandaloneFeedSegmentIDs: feedPresentation.hiddenStandaloneFeedSegmentIDs
+                        ) {
+                            StructuredSessionPiFeedSegmentView(
+                                segment: segment,
+                                providerDisplayName: providerDisplayName,
+                                style: iosPiStructuredSessionFeedSegmentStyle(
+                                    feedReaderIsScrollIdle: structuredSessionFeedScrollIsIdle
+                                ),
+                                disclosureState: structuredSessionAgentTurnDisclosureState,
+                                standaloneRow: { row in
+                                    AnyView(structuredSessionActivityRowView(row))
+                                },
+                                onShowFullAssistantResponse: { presentation in
+                                    presentedStructuredSessionAssistantFullResponse = presentation
+                                },
+                                artifactActions: { artifact in
+                                    structuredSessionFeedArtifactActionPresentation(
+                                        for: artifact,
+                                        hasWriterAuthority: model.focusedSessionIsController,
+                                        usesHostArtifactFetch: true
+                                    )
+                                },
+                                onArtifactDownload: { artifact in
+                                    Task {
+                                        await model.downloadFocusedStructuredSessionArtifact(artifact)
+                                    }
+                                }
+                            )
+                            .id(segment.id)
+                        }
+                    }
                 }
 
                 if StructuredSessionFeedProgressiveRevealPolicy.shouldShowThinkingIndicator(
