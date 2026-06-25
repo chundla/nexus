@@ -2531,6 +2531,7 @@
 
         @State private var draftState = StructuredSessionComposerDraftState()
         @State private var isComposerExpanded = false
+        @State private var highlightedSlashCommandID: String?
         @FocusState private var isPromptFocused: Bool
 
         private static let collapsedLineLimit = 1...3
@@ -2548,6 +2549,9 @@
                 for: draftState.draft,
                 chrome: chrome
             )
+            let highlightedSlashCommandID =
+                slashCommandMenuPresentation.commands.first(where: { $0.id == self.highlightedSlashCommandID })?.id
+                ?? slashCommandMenuPresentation.commands.first?.id
             let statusBarPresentation = structuredSessionStatusBarPresentation(
                 for: chrome,
                 workspaceLocation: workspaceLocation
@@ -2555,7 +2559,7 @@
 
             VStack(alignment: .leading, spacing: 8) {
                 if slashCommandMenuPresentation.isVisible {
-                    slashCommandMenu(slashCommandMenuPresentation)
+                    slashCommandMenu(slashCommandMenuPresentation, highlightedCommandID: highlightedSlashCommandID)
                 }
 
                 if aboveEditorWidgets.isEmpty == false {
@@ -2572,6 +2576,39 @@
                         .lineLimit(isComposerExpanded ? Self.expandedLineLimit : Self.collapsedLineLimit)
                         .submitLabel(.send)
                         .disabled(composerPresentation.isEnabled == false || chrome.isAgentTurnInProgress)
+                        .onKeyPress(.upArrow) {
+                            guard slashCommandMenuPresentation.isVisible else {
+                                return .ignored
+                            }
+                            moveSlashCommandHighlight(
+                                by: -1,
+                                from: highlightedSlashCommandID,
+                                in: slashCommandMenuPresentation.commands
+                            )
+                            return .handled
+                        }
+                        .onKeyPress(.downArrow) {
+                            guard slashCommandMenuPresentation.isVisible else {
+                                return .ignored
+                            }
+                            moveSlashCommandHighlight(
+                                by: 1,
+                                from: highlightedSlashCommandID,
+                                in: slashCommandMenuPresentation.commands
+                            )
+                            return .handled
+                        }
+                        .onKeyPress(.return) {
+                            guard slashCommandMenuPresentation.isVisible,
+                                let command = slashCommandMenuPresentation.commands.first(where: {
+                                    $0.id == highlightedSlashCommandID
+                                })
+                            else {
+                                return .ignored
+                            }
+                            draftState.apply(command)
+                            return .handled
+                        }
                         .onSubmit {
                             sendStructuredSessionPrompt()
                         }
@@ -2633,43 +2670,75 @@
             )
         }
 
+        private func moveSlashCommandHighlight(
+            by delta: Int,
+            from currentID: String?,
+            in commands: [StructuredSessionSlashCommand]
+        ) {
+            guard commands.isEmpty == false else {
+                highlightedSlashCommandID = nil
+                return
+            }
+            let currentIndex = commands.firstIndex { $0.id == currentID } ?? 0
+            let nextIndex = (currentIndex + delta + commands.count) % commands.count
+            highlightedSlashCommandID = commands[nextIndex].id
+        }
+
         @ViewBuilder
-        private func slashCommandMenu(_ menu: StructuredSessionSlashCommandMenuPresentation) -> some View {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 4) {
-                    ForEach(menu.commands) { command in
-                        Button {
-                            draftState.apply(command)
-                            isPromptFocused = true
-                        } label: {
-                            HStack(alignment: .top, spacing: 12) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(command.displayText)
-                                        .font(NexusMacTheme.monoFont(12, relativeTo: .callout))
-                                        .foregroundStyle(NexusMacTheme.textPrimary)
-                                    Text(command.summary)
-                                        .font(NexusMacTheme.bodyFont(11, relativeTo: .caption))
-                                        .foregroundStyle(NexusMacTheme.mutedText)
-                                        .multilineTextAlignment(.leading)
+        private func slashCommandMenu(
+            _ menu: StructuredSessionSlashCommandMenuPresentation,
+            highlightedCommandID: String?
+        ) -> some View {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 4) {
+                        ForEach(menu.commands) { command in
+                            let isHighlighted = command.id == highlightedCommandID
+                            Button {
+                                highlightedSlashCommandID = command.id
+                                draftState.apply(command)
+                                isPromptFocused = true
+                            } label: {
+                                HStack(alignment: .top, spacing: 12) {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(command.displayText)
+                                            .font(NexusMacTheme.monoFont(12, relativeTo: .callout))
+                                            .foregroundStyle(NexusMacTheme.textPrimary)
+                                        Text(command.summary)
+                                            .font(NexusMacTheme.bodyFont(11, relativeTo: .caption))
+                                            .foregroundStyle(NexusMacTheme.mutedText)
+                                            .multilineTextAlignment(.leading)
+                                    }
+                                    Spacer(minLength: 0)
                                 }
-                                Spacer(minLength: 0)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 9)
+                                .contentShape(Rectangle())
                             }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 9)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(NexusMacTheme.overlay(0.03))
-                        )
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(NexusMacTheme.softLine.opacity(0.8), lineWidth: 1)
+                            .buttonStyle(.plain)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(
+                                        isHighlighted ? NexusMacTheme.gold.opacity(0.16) : NexusMacTheme.overlay(0.03))
+                            )
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(
+                                        isHighlighted ? NexusMacTheme.gold : NexusMacTheme.softLine.opacity(0.8),
+                                        lineWidth: isHighlighted ? 1.5 : 1
+                                    )
+                            }
+                            .id(command.id)
                         }
                     }
+                    .padding(8)
                 }
-                .padding(8)
+                .onChange(of: highlightedCommandID) { _, newValue in
+                    guard let newValue else {
+                        return
+                    }
+                    proxy.scrollTo(newValue, anchor: .center)
+                }
             }
             .frame(maxWidth: .infinity)
             .frame(maxHeight: 220)
