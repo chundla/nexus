@@ -85,7 +85,10 @@ public struct StructuredSessionProviderFacts: Codable, Equatable, Sendable {
                 return Self.normalizedText(currentDraft)
             }
             return Self.normalizedText(currentDraft + delta)
-        case "turn_end":
+        case "turn_end", "agent_end":
+            // `agent_end` always ends the prompt turn; a turn_end/message_end clear may not have
+            // preceded it (Pi can close a no-tool-call answer with agent_end alone), so any leftover
+            // streamed draft here is stale and must not keep the feed reporting an open turn.
             return nil
         case "message_end":
             if let payload,
