@@ -1835,6 +1835,10 @@ struct StructuredSessionPresentationTests {
         #expect(
             structuredSessionSlashCommandMenuPresentation(for: "/model anth", screen: screen).commands.map(
                 \.displayText) == ["/model anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4"])
+        #expect(
+            structuredSessionSlashCommandMenuPresentation(for: "/model ", screen: screen).commands.map(
+                \.displayText
+            ).contains("/model anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4"))
     }
 
     @Test func structuredSessionSlashCommandMenuUsesLivePiThinkingCommandsOnlyAfterThinkingPrefix() {

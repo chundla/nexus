@@ -33,7 +33,7 @@
                 primaryGroupID: group.id
             )
 
-            let overview = try service.getWorkspaceOverview(workspaceID: workspace.id)
+            let overview = try service.refreshWorkspaceOverview(workspaceID: workspace.id)
             let providerCard = try #require(overview.providerCards.first(where: { $0.provider.id == .pi }))
             let providerDetail = try service.getProviderDetail(workspaceID: workspace.id, providerID: .pi)
 
@@ -74,7 +74,7 @@
                 primaryGroupID: group.id
             )
 
-            let overview = try service.getWorkspaceOverview(workspaceID: workspace.id)
+            let overview = try service.refreshWorkspaceOverview(workspaceID: workspace.id)
             let providerCard = try #require(overview.providerCards.first(where: { $0.provider.id == .pi }))
             let providerDetail = try service.getProviderDetail(workspaceID: workspace.id, providerID: .pi)
 

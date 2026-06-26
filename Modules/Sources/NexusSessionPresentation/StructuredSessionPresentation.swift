@@ -86,20 +86,17 @@ public struct StructuredSessionActivityRowChunk: Identifiable, Equatable {
 
 public struct StructuredSessionFeedPresentation: Equatable {
     public let copy: StructuredSessionPresentationCopy
+    public let activityRows: [StructuredSessionActivityRow]
     public let activityRowChunks: [StructuredSessionActivityRowChunk]
     /// Pi v1 composite feed segments (ADR 0037). `nil` when the client should use flat `activityRows`.
     public let feedSegments: [StructuredSessionFeedSegment]?
+    /// Standalone Pi rows hidden because their body duplicates a closed-turn final answer.
+    public let hiddenStandaloneFeedSegmentIDs: Set<UUID>
     public let pendingApprovalRequests: [SessionApprovalRequest]
     public let thinkingIndicator: StructuredSessionThinkingIndicator?
 
-    public var activityRows: [StructuredSessionActivityRow] {
-        activityRowChunks.flatMap(\.rows)
-    }
-
     /// Row order for feed `LazyVStack` iteration (same as `activityRows`).
-    public var feedActivityRowIDs: [UUID] {
-        activityRows.map(\.id)
-    }
+    public let feedActivityRowIDs: [UUID]
 
     /// Feed items for scroll/reveal policy: segment IDs when composite projection is active (ADR 0037).
     public var feedScrollItemCount: Int {
@@ -118,11 +115,19 @@ public struct StructuredSessionFeedPresentation: Equatable {
         pendingApprovalRequests: [SessionApprovalRequest],
         thinkingIndicator: StructuredSessionThinkingIndicator?
     ) {
+        let canonicalChunks = activityRowChunks ?? structuredSessionActivityRowChunks(for: activityRows)
+        let canonicalRows = canonicalChunks.flatMap(\.rows)
+
         self.copy = copy
-        self.activityRowChunks = activityRowChunks ?? structuredSessionActivityRowChunks(for: activityRows)
+        self.activityRows = canonicalRows
+        self.activityRowChunks = canonicalChunks
         self.feedSegments = feedSegments
+        self.hiddenStandaloneFeedSegmentIDs = structuredSessionPiHiddenStandaloneFeedSegmentIDs(
+            in: feedSegments ?? []
+        )
         self.pendingApprovalRequests = pendingApprovalRequests
         self.thinkingIndicator = thinkingIndicator
+        self.feedActivityRowIDs = canonicalRows.map(\.id)
     }
 }
 
@@ -1808,11 +1813,14 @@ private func structuredSessionSlashCommandMenuPresentation(
     }
 
     let normalizedQuery = context.query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    // Unlike normalizedQuery, this preserves a trailing space so suggestionQueryPrefix gates
+    // (e.g. "model ") activate as soon as the prefix is typed, not after the next character.
+    let suggestionQuery = context.query.lowercased()
 
     let prefixMatches = commands.filter { command in
         let normalizedCommand = command.matchText.lowercased()
         if let requiredPrefix = command.suggestionQueryPrefix?.lowercased(),
-            normalizedQuery.hasPrefix(requiredPrefix) == false
+            suggestionQuery.hasPrefix(requiredPrefix) == false
         {
             return false
         }
@@ -1827,7 +1835,7 @@ private func structuredSessionSlashCommandMenuPresentation(
         ? commands.filter { command in
             let normalizedCommand = command.matchText.lowercased()
             if let requiredPrefix = command.suggestionQueryPrefix?.lowercased(),
-                normalizedQuery.hasPrefix(requiredPrefix) == false
+                suggestionQuery.hasPrefix(requiredPrefix) == false
             {
                 return false
             }

@@ -242,7 +242,10 @@ struct nexusTests {
         }
 
         await sleeper.resumeNext()
-        await Task.yield()
+        try await waitUntil(timeoutNanoseconds: 1_000_000_000, pollIntervalNanoseconds: 1_000_000) {
+            submittedSizes == [.init(columns: 120, rows: 36)]
+                && currentSize == .init(columns: 120, rows: 36)
+        }
 
         #expect(submittedSizes == [.init(columns: 120, rows: 36)])
         #expect(currentSize == .init(columns: 120, rows: 36))
@@ -1133,7 +1136,7 @@ struct nexusTests {
         let session = try await client.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
         resolver.executables = [:]
 
-        let overview = try await client.getWorkspaceOverview(workspaceID: workspace.id)
+        let overview = try await client.refreshWorkspaceOverview(workspaceID: workspace.id)
         let claudeCard = try #require(overview.providerCards.first(where: { $0.provider.id == .claude }))
         let detail = try await client.getProviderDetail(workspaceID: workspace.id, providerID: .claude)
 
@@ -1612,9 +1615,8 @@ struct nexusTests {
         #expect(
             overview.providerCards.map(\.defaultSession.state) == [.notCreated, .notCreated, .notCreated, .notCreated])
         #expect(
-            overview.providerCards.filter { [.ibmBob, .pi].contains($0.provider.id) }.map(\.health.state) == [
-                .unavailable, .unavailable,
-            ])
+            overview.providerCards.map(\.health.state) == [.notChecked, .notChecked, .notChecked, .notChecked])
+        #expect(overview.usesStaleBrowseFacts)
     }
 
     @Test func workspaceOverviewShowsLaunchableClaudeHealthFromServiceOwnedAdapter() async throws {
@@ -1647,7 +1649,7 @@ struct nexusTests {
             primaryGroupID: nil
         )
 
-        let overview = try await client.getWorkspaceOverview(workspaceID: workspace.id)
+        let overview = try await client.refreshWorkspaceOverview(workspaceID: workspace.id)
         let claudeCard = try #require(overview.providerCards.first(where: { $0.provider.id == .claude }))
 
         #expect(claudeCard.health.state == .available)
@@ -1689,7 +1691,7 @@ struct nexusTests {
             primaryGroupID: nil
         )
 
-        let overview = try await client.getWorkspaceOverview(workspaceID: workspace.id)
+        let overview = try await client.refreshWorkspaceOverview(workspaceID: workspace.id)
         let codexCard = try #require(overview.providerCards.first(where: { $0.provider.id == .codex }))
 
         #expect(codexCard.health.state == .available)
@@ -1724,7 +1726,7 @@ struct nexusTests {
             primaryGroupID: nil
         )
 
-        let overview = try await client.getWorkspaceOverview(workspaceID: workspace.id)
+        let overview = try await client.refreshWorkspaceOverview(workspaceID: workspace.id)
         let claudeCard = try #require(overview.providerCards.first(where: { $0.provider.id == .claude }))
 
         #expect(claudeCard.health.state == .unavailable)
@@ -6059,9 +6061,17 @@ struct nexusTests {
         #expect(model.serviceStatus?.state == .running)
         #expect(model.workspaceGroups.map(\.name) == ["Solo Group"])
         #expect(model.workspaces.map(\.name) == ["app-model-workspace"])
+        let workspaceID = try #require(model.workspaces.first).id
+        try await waitUntilAsync {
+            await MainActor.run {
+                model.workspaceOverview(for: workspaceID)?.providerCards.map(\.provider.displayName)
+                    == ["Codex", "Claude", "IBM Bob", "Pi"]
+            }
+        }
         #expect(
-            model.workspaceOverview(for: try #require(model.workspaces.first).id)?.providerCards.map(
-                \.provider.displayName) == ["Codex", "Claude", "IBM Bob", "Pi"])
+            model.workspaceOverview(for: workspaceID)?.providerCards.map(\.provider.displayName) == [
+                "Codex", "Claude", "IBM Bob", "Pi",
+            ])
     }
 
     @MainActor
@@ -6091,7 +6101,7 @@ struct nexusTests {
     }
 
     @MainActor
-    @Test func appModelRefreshPublishesImmediateWorkspaceOverviewsAsOneBatch() async throws {
+    @Test func appModelRefreshPublishesBaseBrowseStateBeforeWorkspaceOverviewsComplete() async throws {
         let group = WorkspaceGroup(id: UUID(), name: "Group")
         let firstWorkspace = Workspace(
             id: UUID(),
@@ -6162,10 +6172,17 @@ struct nexusTests {
             }
         )
         let model = NexusAppModel(client: client)
+        let refreshCompletion = AsyncCompletionProbe()
 
         let refreshTask = Task {
             await model.refresh()
+            await refreshCompletion.markCompleted()
         }
+
+        try await waitUntilAsync(timeoutNanoseconds: 1_000_000_000, pollIntervalNanoseconds: 10_000_000) {
+            await refreshCompletion.isCompleted()
+        }
+        await refreshTask.value
 
         try await waitUntil {
             loader.requestedWorkspaceIDs().count == 2
@@ -6184,7 +6201,13 @@ struct nexusTests {
         #expect(client.providerDetailRequestCount == 0)
 
         loader.resume(workspaceID: secondWorkspace.id, with: secondOverview)
-        await refreshTask.value
+
+        try await waitUntilAsync {
+            await MainActor.run {
+                model.workspaceOverview(for: firstWorkspace.id)?.providerCards.first?.health.summary
+                    == "Alpha Claude available"
+            }
+        }
 
         #expect(
             model.workspaceOverview(for: firstWorkspace.id)?.providerCards.first?.health.summary
@@ -6256,6 +6279,12 @@ struct nexusTests {
         let model = NexusAppModel(client: client)
 
         await model.refresh()
+        try await waitUntilAsync {
+            await MainActor.run {
+                model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary
+                    == "Initial Claude health"
+            }
+        }
         #expect(
             model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary == "Initial Claude health")
 
@@ -6275,6 +6304,12 @@ struct nexusTests {
 
         loader.resume(workspaceID: workspace.id, with: refreshedOverview)
         await refreshTask.value
+        try await waitUntilAsync {
+            await MainActor.run {
+                model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary
+                    == "Refreshed Claude health"
+            }
+        }
 
         #expect(
             model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary == "Refreshed Claude health"
@@ -6343,11 +6378,22 @@ struct nexusTests {
             screen: SessionScreen(session: session, transcript: "Claude ready")
         )
         let model = NexusAppModel(client: client)
+        let refreshGate = SuspendedResultGate<WorkspaceOverview>()
+        client.setRefreshWorkspaceOverviewHandler { _ in
+            try await refreshGate.wait()
+        }
 
         await model.refresh()
+        try await waitUntilAsync {
+            await MainActor.run {
+                model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary
+                    == "Cached Claude health"
+            }
+        }
 
         #expect(
             model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary == "Cached Claude health")
+        await refreshGate.resume(returning: freshOverview)
 
         let deadline = ContinuousClock.now.advanced(by: .seconds(5))
         while model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary != "Fresh Claude health" {
@@ -6676,6 +6722,143 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelValidateHostPublishesHostDetailBeforeImpactedWorkspaceRefreshesFinish() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Remote")
+        let host = NexusDomain.Host(id: UUID(), name: "Build Server", sshTarget: "build-box", port: nil)
+        let workspaces = (1...4).map { index in
+            Workspace(
+                id: UUID(),
+                name: "Remote API \(index)",
+                kind: .remote,
+                folderPath: "/srv/api-\(index)",
+                primaryGroupID: group.id,
+                remoteHostID: host.id
+            )
+        }
+        let initialOverviewsByID = Dictionary(
+            uniqueKeysWithValues: workspaces.map { workspace in
+                (
+                    workspace.id,
+                    WorkspaceOverview(
+                        workspace: workspace,
+                        providerCards: [
+                            WorkspaceProviderCard(
+                                provider: Provider(id: .pi),
+                                health: ProviderHealthSummary(
+                                    state: .blocked,
+                                    summary: "Provider Health is blocked by Host Validation"
+                                ),
+                                defaultSession: ProviderDefaultSessionSummary(
+                                    state: .notCreated,
+                                    summary: "No default session yet",
+                                    actionTitle: "Launch"
+                                )
+                            )
+                        ]
+                    )
+                )
+            }
+        )
+        let refreshedOverviewsByID = Dictionary(
+            uniqueKeysWithValues: workspaces.map { workspace in
+                (
+                    workspace.id,
+                    WorkspaceOverview(
+                        workspace: workspace,
+                        providerCards: [
+                            WorkspaceProviderCard(
+                                provider: Provider(id: .pi),
+                                health: ProviderHealthSummary(
+                                    state: .available,
+                                    summary: "Remote Pi available for \(workspace.name)"
+                                ),
+                                defaultSession: ProviderDefaultSessionSummary(
+                                    state: .notCreated,
+                                    summary: "No default session yet",
+                                    actionTitle: "Launch"
+                                )
+                            )
+                        ]
+                    )
+                )
+            }
+        )
+        let loader = ControlledWorkspaceOverviewLoader(
+            modeByWorkspaceID: Dictionary(uniqueKeysWithValues: workspaces.map { ($0.id, .suspended) })
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspaces[0].id,
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: initialOverviewsByID[workspaces[0].id]!,
+            session: session,
+            screen: SessionScreen(session: session, transcript: "Pi ready"),
+            workspaces: workspaces,
+            workspaceGroups: [group],
+            workspaceOverviewsByID: initialOverviewsByID,
+            refreshWorkspaceOverviewHandler: { workspaceID in
+                try await loader.load(workspaceID: workspaceID, overview: refreshedOverviewsByID[workspaceID]!)
+            },
+            hosts: [host]
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+
+        let validateTask = Task {
+            try await model.validateHost(hostID: host.id)
+        }
+
+        do {
+            try await waitUntil(timeoutNanoseconds: 1_000_000_000, pollIntervalNanoseconds: 10_000_000) {
+                loader.requestedWorkspaceIDs().count == 3
+            }
+            let snapshot = try await value(of: validateTask, timeoutNanoseconds: 1_000_000_000)
+
+            #expect(snapshot.hostID == host.id)
+            #expect(snapshot.state == .available)
+            #expect(model.hostDetail(for: host.id) == HostDetail(host: host, latestValidation: snapshot))
+            #expect(loader.requestedWorkspaceIDs().count == 3)
+
+            try await Task.sleep(nanoseconds: 100_000_000)
+            #expect(loader.requestedWorkspaceIDs().count == 3)
+
+            let firstRequestedWorkspaceID = try #require(loader.requestedWorkspaceIDs().first)
+            loader.resume(
+                workspaceID: firstRequestedWorkspaceID, with: refreshedOverviewsByID[firstRequestedWorkspaceID]!)
+
+            try await waitUntil(timeoutNanoseconds: 1_000_000_000, pollIntervalNanoseconds: 10_000_000) {
+                loader.requestedWorkspaceIDs().count == 4
+            }
+
+            for workspaceID in loader.requestedWorkspaceIDs() {
+                loader.resume(workspaceID: workspaceID, with: refreshedOverviewsByID[workspaceID]!)
+            }
+
+            try await waitUntilAsync(timeoutNanoseconds: 1_000_000_000, pollIntervalNanoseconds: 10_000_000) {
+                await MainActor.run {
+                    workspaces.allSatisfy { workspace in
+                        model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.state == .available
+                    }
+                }
+            }
+        } catch {
+            for _ in workspaces.indices {
+                for workspaceID in loader.requestedWorkspaceIDs() {
+                    loader.resume(workspaceID: workspaceID, with: refreshedOverviewsByID[workspaceID]!)
+                }
+                try? await Task.sleep(nanoseconds: 10_000_000)
+            }
+            validateTask.cancel()
+            throw error
+        }
+    }
+
+    @MainActor
     @Test func appModelValidateHostRefreshesRemoteWorkspaceOverview() async throws {
         let sshRunner = StubCommandRunner(results: [
             StubCommandRunner.Invocation(
@@ -6749,6 +6932,180 @@ struct nexusTests {
     }
 
     @MainActor
+    @Test func appModelCreateLocalWorkspacePublishesWorkspaceBeforeOverviewRefreshCompletes() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Local")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Local API",
+            kind: .local,
+            folderPath: "/tmp/local-api",
+            primaryGroupID: group.id
+        )
+        let overview = WorkspaceOverview(
+            workspace: workspace,
+            providerCards: [
+                WorkspaceProviderCard(
+                    provider: Provider(id: .claude),
+                    health: ProviderHealthSummary(state: .available, summary: "Local Claude available"),
+                    defaultSession: ProviderDefaultSessionSummary(
+                        state: .notCreated,
+                        summary: "No default session yet",
+                        actionTitle: "Launch"
+                    )
+                )
+            ]
+        )
+        let loader = ControlledWorkspaceOverviewLoader(modeByWorkspaceID: [workspace.id: .suspended])
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: overview,
+            session: session,
+            screen: SessionScreen(session: session, transcript: "Claude ready"),
+            workspaces: [],
+            workspaceGroups: [group],
+            workspaceOverviewLoader: { workspaceID in
+                try await loader.load(workspaceID: workspaceID, overview: overview)
+            },
+            refreshWorkspaceOverviewHandler: { workspaceID in
+                try await loader.load(workspaceID: workspaceID, overview: overview)
+            }
+        )
+        let model = NexusAppModel(client: client)
+
+        let createTask = Task {
+            try await model.createLocalWorkspace(folderPath: "/tmp/local-api", primaryGroupID: group.id)
+        }
+
+        do {
+            try await waitUntilAsync(timeoutNanoseconds: 1_000_000_000, pollIntervalNanoseconds: 10_000_000) {
+                await MainActor.run {
+                    model.workspaces.map(\.id) == [workspace.id]
+                        && model.workspaceOverview(for: workspace.id) == nil
+                }
+            }
+        } catch {
+            loader.resume(workspaceID: workspace.id, with: overview)
+            _ = try? await createTask.value
+            throw error
+        }
+
+        #expect(client.workspaceOverviewRequestCount == 0)
+        try await waitUntil(timeoutNanoseconds: 1_000_000_000, pollIntervalNanoseconds: 10_000_000) {
+            loader.requestedWorkspaceIDs() == [workspace.id]
+        }
+        #expect(client.refreshWorkspaceOverviewRequestCount == 1)
+
+        loader.resume(workspaceID: workspace.id, with: overview)
+        let createdWorkspace = try await createTask.value
+
+        #expect(createdWorkspace == workspace)
+        try await waitUntilAsync {
+            await MainActor.run {
+                model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary
+                    == "Local Claude available"
+            }
+        }
+    }
+
+    @MainActor
+    @Test func appModelCreateRemoteWorkspacePublishesWorkspaceBeforeOverviewRefreshCompletes() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Remote")
+        let host = NexusDomain.Host(id: UUID(), name: "Build Server", sshTarget: "build-box", port: 2222)
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Remote API",
+            kind: .remote,
+            folderPath: "/srv/api",
+            primaryGroupID: group.id,
+            remoteHostID: host.id
+        )
+        let overview = WorkspaceOverview(
+            workspace: workspace,
+            providerCards: [
+                WorkspaceProviderCard(
+                    provider: Provider(id: .pi),
+                    health: ProviderHealthSummary(state: .available, summary: "Remote Pi available"),
+                    defaultSession: ProviderDefaultSessionSummary(
+                        state: .notCreated,
+                        summary: "No default session yet",
+                        actionTitle: "Launch"
+                    )
+                )
+            ]
+        )
+        let loader = ControlledWorkspaceOverviewLoader(modeByWorkspaceID: [workspace.id: .suspended])
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .pi,
+            isDefault: true,
+            state: .ready
+        )
+        let client = TrackingServiceClient(
+            workspaceOverview: overview,
+            session: session,
+            screen: SessionScreen(session: session, transcript: "Pi ready"),
+            workspaces: [],
+            workspaceGroups: [group],
+            workspaceOverviewLoader: { workspaceID in
+                try await loader.load(workspaceID: workspaceID, overview: overview)
+            },
+            refreshWorkspaceOverviewHandler: { workspaceID in
+                try await loader.load(workspaceID: workspaceID, overview: overview)
+            },
+            hosts: [host]
+        )
+        let model = NexusAppModel(client: client)
+
+        try await model.refreshHosts()
+        let createTask = Task {
+            try await model.createRemoteWorkspace(
+                name: "Remote API",
+                hostID: host.id,
+                remotePath: "/srv/api",
+                primaryGroupID: group.id
+            )
+        }
+
+        do {
+            try await waitUntilAsync(timeoutNanoseconds: 1_000_000_000, pollIntervalNanoseconds: 10_000_000) {
+                await MainActor.run {
+                    model.workspaces.map(\.id) == [workspace.id]
+                        && model.workspaceOverview(for: workspace.id) == nil
+                }
+            }
+        } catch {
+            loader.resume(workspaceID: workspace.id, with: overview)
+            _ = try? await createTask.value
+            throw error
+        }
+
+        #expect(model.workspaceTargetSummary(for: workspace) == "Build Server • /srv/api")
+        #expect(client.workspaceOverviewRequestCount == 0)
+        try await waitUntil(timeoutNanoseconds: 1_000_000_000, pollIntervalNanoseconds: 10_000_000) {
+            loader.requestedWorkspaceIDs() == [workspace.id]
+        }
+        #expect(client.refreshWorkspaceOverviewRequestCount == 1)
+
+        loader.resume(workspaceID: workspace.id, with: overview)
+        let createdWorkspace = try await createTask.value
+
+        #expect(createdWorkspace == workspace)
+        try await waitUntilAsync {
+            await MainActor.run {
+                model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary
+                    == "Remote Pi available"
+            }
+        }
+    }
+
+    @MainActor
     @Test func appModelCreatesRemoteWorkspaceAndFormatsWorkspaceTargetSummary() async throws {
         let group = WorkspaceGroup(id: UUID(), name: "Remote")
         let host = NexusDomain.Host(id: UUID(), name: "Build Server", sshTarget: "build-box", port: 2222)
@@ -6786,8 +7143,12 @@ struct nexusTests {
 
         #expect(createdWorkspace == workspace)
         #expect(model.workspaces == [workspace])
-        #expect(model.workspaceOverview(for: workspace.id)?.workspace == workspace)
         #expect(model.workspaceTargetSummary(for: workspace) == "Build Server • /srv/api")
+        try await waitUntilAsync {
+            await MainActor.run {
+                model.workspaceOverview(for: workspace.id)?.workspace == workspace
+            }
+        }
     }
 
     @MainActor
@@ -7093,6 +7454,285 @@ struct nexusTests {
 
         #expect(presentationChanged.changed == false)
         #expect(model.workspaceHomePresentation() == initialPresentation)
+    }
+
+    @MainActor
+    @Test func appModelExposesProviderDetailPlaceholderFromWorkspaceOverviewUntilDetailLoads() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let providerCard = WorkspaceProviderCard(
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(
+                state: .available,
+                summary: "Claude available",
+                version: "1.2.3"
+            ),
+            capabilities: ProviderCapabilities(
+                launchDefaultSession: ProviderCapability(
+                    action: .launchDefaultSession,
+                    isSupported: true,
+                    isEnabled: true
+                ),
+                createNamedSession: ProviderCapability(
+                    action: .createNamedSession,
+                    isSupported: true,
+                    isEnabled: true
+                )
+            ),
+            defaultSession: ProviderDefaultSessionSummary(
+                state: .ready,
+                summary: "Default Session ready",
+                actionTitle: "Resume",
+                sessionID: session.id
+            ),
+            alternateSessionCount: 2
+        )
+        let overview = WorkspaceOverview(workspace: workspace, providerCards: [providerCard])
+        let gate = SuspendedResultGate<ProviderDetail>()
+        let client = TrackingServiceClient(
+            workspaceOverview: overview,
+            session: session,
+            screen: SessionScreen(session: session, transcript: "Claude ready"),
+            providerDetailHandler: { _, _ in
+                try await gate.wait()
+            }
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+        try await waitUntilAsync {
+            await MainActor.run { model.providerDetailPlaceholder(for: workspace.id, providerID: .claude) != nil }
+        }
+
+        let initialPlaceholder = try #require(model.providerDetailPlaceholder(for: workspace.id, providerID: .claude))
+        #expect(initialPlaceholder.workspace == workspace)
+        #expect(initialPlaceholder.providerCard == providerCard)
+
+        let loadTask = Task { @MainActor in
+            try await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
+        }
+
+        try await waitUntil { client.providerDetailRequestCount == 1 }
+
+        #expect(model.providerDetail(for: workspace.id, providerID: .claude) == nil)
+        let pendingPlaceholder = try #require(model.providerDetailPlaceholder(for: workspace.id, providerID: .claude))
+        #expect(pendingPlaceholder.providerCard.defaultSession.summary == "Default Session ready")
+        #expect(pendingPlaceholder.providerCard.alternateSessionCount == 2)
+
+        await gate.resume(
+            returning: ProviderDetail(
+                workspace: workspace,
+                provider: Provider(id: .claude),
+                health: providerCard.health,
+                capabilities: providerCard.capabilities,
+                defaultSession: session,
+                alternateSessions: [
+                    Session(
+                        id: UUID(),
+                        workspaceID: workspace.id,
+                        providerID: .claude,
+                        name: "Review",
+                        isDefault: false,
+                        state: .ready
+                    ),
+                    Session(
+                        id: UUID(),
+                        workspaceID: workspace.id,
+                        providerID: .claude,
+                        name: "Fix",
+                        isDefault: false,
+                        state: .interrupted
+                    ),
+                ],
+                failedSessions: []
+            )
+        )
+        try await loadTask.value
+
+        #expect(model.providerDetailPlaceholder(for: workspace.id, providerID: .claude) == nil)
+        #expect(model.providerDetail(for: workspace.id, providerID: .claude)?.defaultSession?.id == session.id)
+    }
+
+    @MainActor
+    @Test func appModelCoalescesConcurrentProviderDetailLoadsForSameProvider() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let overview = WorkspaceOverview(
+            workspace: workspace,
+            providerCards: [
+                WorkspaceProviderCard(
+                    provider: Provider(id: .claude),
+                    health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+                    defaultSession: ProviderDefaultSessionSummary(
+                        state: .ready,
+                        summary: "Default Session ready",
+                        actionTitle: "Resume",
+                        sessionID: session.id
+                    )
+                )
+            ]
+        )
+        let detail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+            defaultSession: session,
+            alternateSessions: [],
+            failedSessions: []
+        )
+        let gate = SuspendedResultGate<ProviderDetail>()
+        let client = TrackingServiceClient(
+            workspaceOverview: overview,
+            session: session,
+            screen: SessionScreen(session: session, transcript: "Claude ready"),
+            providerDetailHandler: { _, _ in
+                try await gate.wait()
+            }
+        )
+        let model = NexusAppModel(client: client)
+
+        await model.refresh()
+
+        let firstLoadTask = Task { @MainActor in
+            try await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
+        }
+        let secondLoadTask = Task { @MainActor in
+            try await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
+        }
+
+        try await waitUntil { client.providerDetailRequestCount == 1 }
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(client.providerDetailRequestCount == 1)
+
+        await gate.resume(returning: detail)
+        try await firstLoadTask.value
+        try await secondLoadTask.value
+
+        #expect(client.providerDetailRequestCount == 1)
+        #expect(model.providerDetail(for: workspace.id, providerID: .claude) == detail)
+    }
+
+    @MainActor
+    @Test func appModelCoalescesConcurrentSessionScreenLoadsForSameSession() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let screen = SessionScreen(session: session, transcript: "Claude ready")
+        let overview = WorkspaceOverview(workspace: workspace, providerCards: [])
+        let client = TrackingServiceClient(
+            workspaceOverview: overview,
+            session: session,
+            screen: screen
+        )
+        client.getSessionScreenHandler = { _ in
+            try await Task.sleep(nanoseconds: 100_000_000)
+            return screen
+        }
+        let model = NexusAppModel(client: client)
+
+        let firstLoadTask = Task { @MainActor in
+            try await model.loadSessionScreen(sessionID: session.id)
+        }
+        let secondLoadTask = Task { @MainActor in
+            try await model.loadSessionScreen(sessionID: session.id)
+        }
+
+        try await waitUntil { client.getSessionScreenRequestCount == 1 }
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(client.getSessionScreenRequestCount == 1)
+
+        try await firstLoadTask.value
+        try await secondLoadTask.value
+
+        #expect(client.getSessionScreenRequestCount == 1)
+        #expect(model.focusedSessionScreen == screen)
+    }
+
+    @MainActor
+    @Test func appModelCoalescesConcurrentFocusRequestsForSameSession() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let session = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let screen = SessionScreen(session: session, transcript: "Claude ready")
+        let overview = WorkspaceOverview(workspace: workspace, providerCards: [])
+        let client = TrackingServiceClient(
+            workspaceOverview: overview,
+            session: session,
+            screen: screen
+        )
+        client.observeSessionScreenHandler = { _, onUpdate in
+            try await Task.sleep(nanoseconds: 100_000_000)
+            onUpdate(screen)
+            return TestSessionScreenObservation {}
+        }
+        let model = NexusAppModel(client: client)
+
+        let firstFocusTask = Task { @MainActor in
+            try await model.focusSession(sessionID: session.id)
+        }
+        let secondFocusTask = Task { @MainActor in
+            try await model.focusSession(sessionID: session.id)
+        }
+
+        try await waitUntil { client.observeSessionScreenRequestCount == 1 }
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(client.observeSessionScreenRequestCount == 1)
+
+        try await firstFocusTask.value
+        try await secondFocusTask.value
+
+        #expect(client.observeSessionScreenRequestCount == 1)
+        #expect(model.focusedSessionScreen == screen)
     }
 
     @MainActor
@@ -8329,6 +8969,10 @@ struct nexusTests {
             }
         }
 
+        _ = try await collector.waitForScreen { screen in
+            screen.activityItems.first?.text == "Pi shared Session stream connected"
+        }
+
         let prompt = SessionPrompt(
             text: "What changed in this screenshot?",
             images: [SessionPromptImage(data: Data([0x89, 0x50, 0x4E, 0x47]), mimeType: "image/png")]
@@ -8637,6 +9281,25 @@ struct nexusTests {
         #expect(refocusedPiScreen.primarySurface == .structuredActivityFeed)
         #expect(refocusedPiScreen.activityItems.map(\.text) == ["Pi shared Session stream connected"])
 
+        try await waitUntilAsync {
+            await MainActor.run {
+                model.workspaceOverview(for: workspace.id)?.providerCards.first(where: { $0.provider.id == .claude })?
+                    .defaultSession.state == .ready
+                    && model.workspaceOverview(for: workspace.id)?.providerCards.first(where: {
+                        $0.provider.id == .codex
+                    })?.defaultSession.state == .ready
+                    && model.workspaceOverview(for: workspace.id)?.providerCards.first(where: {
+                        $0.provider.id == .pi
+                    })?.defaultSession.state == .ready
+                    && model.providerDetail(for: workspace.id, providerID: .claude)?.defaultSession?.id
+                        == claudeSession.id
+                    && model.providerDetail(for: workspace.id, providerID: .codex)?.defaultSession?.id
+                        == codexSession.id
+                    && model.providerDetail(for: workspace.id, providerID: .pi)?.defaultSession?.id
+                        == piSession.id
+            }
+        }
+
         let overview = try #require(model.workspaceOverview(for: workspace.id))
         let claudeCard = try #require(overview.providerCards.first(where: { $0.provider.id == .claude }))
         let codexCard = try #require(overview.providerCards.first(where: { $0.provider.id == .codex }))
@@ -8852,12 +9515,553 @@ struct nexusTests {
         await model.refresh()
         let session = try await model.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
 
+        try await waitUntilAsync {
+            await MainActor.run {
+                model.workspaceOverview(for: workspace.id)?.providerCards.first(where: { $0.provider.id == .claude })?
+                    .defaultSession.state == .ready
+            }
+        }
+
         let claudeCard = try #require(
             model.workspaceOverview(for: workspace.id)?.providerCards.first(where: { $0.provider.id == .claude }))
         #expect(claudeCard.defaultSession.state == .ready)
         #expect(claudeCard.defaultSession.actionTitle == "Resume")
         #expect(model.focusedSessionScreen?.session.id == session.id)
         #expect(model.focusedSessionScreen?.transcript == "Claude ready")
+    }
+
+    @MainActor
+    @Test func appModelLaunchOrResumeDefaultSessionDoesNotAwaitRefreshFollowUps() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let defaultSession = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let staleOverview = WorkspaceOverview(
+            workspace: workspace,
+            providerCards: [
+                WorkspaceProviderCard(
+                    provider: Provider(id: .claude),
+                    health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+                    defaultSession: ProviderDefaultSessionSummary(
+                        state: .notCreated,
+                        summary: "No default session yet",
+                        actionTitle: "Launch"
+                    )
+                )
+            ]
+        )
+        let freshOverview = WorkspaceOverview(
+            workspace: workspace,
+            providerCards: [
+                WorkspaceProviderCard(
+                    provider: Provider(id: .claude),
+                    health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+                    defaultSession: ProviderDefaultSessionSummary(
+                        state: .ready,
+                        summary: "Default session ready",
+                        actionTitle: "Resume",
+                        sessionID: defaultSession.id
+                    )
+                )
+            ]
+        )
+        let staleDetail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+            defaultSession: nil,
+            alternateSessions: [],
+            failedSessions: []
+        )
+        let freshDetail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+            defaultSession: defaultSession,
+            alternateSessions: [],
+            failedSessions: []
+        )
+        let workspaceOverviewGate = SuspendedResultGate<WorkspaceOverview>()
+        let providerDetailGate = SuspendedResultGate<ProviderDetail>()
+        let client = TrackingServiceClient(
+            workspaceOverview: staleOverview,
+            refreshedWorkspaceOverview: freshOverview,
+            session: defaultSession,
+            screen: SessionScreen(session: defaultSession, transcript: "Claude ready"),
+            providerDetail: staleDetail
+        )
+        let model = NexusAppModel(client: client)
+
+        try await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
+        client.setRefreshWorkspaceOverviewHandler { _ in
+            try await workspaceOverviewGate.wait()
+        }
+        client.setProviderDetailHandler { _, _ in
+            try await providerDetailGate.wait()
+        }
+
+        var launchedSession: Session?
+        Task { @MainActor in
+            launchedSession = try? await model.launchOrResumeDefaultSession(
+                workspaceID: workspace.id,
+                providerID: .claude
+            )
+        }
+
+        try await waitUntil { launchedSession != nil }
+        try await waitUntil {
+            client.refreshWorkspaceOverviewRequestCount == 1 && client.providerDetailRequestCount == 2
+        }
+
+        #expect(launchedSession?.id == defaultSession.id)
+        #expect(model.focusedSessionScreen?.session.id == defaultSession.id)
+        #expect(model.providerDetail(for: workspace.id, providerID: .claude)?.defaultSession == nil)
+
+        await workspaceOverviewGate.resume(returning: freshOverview)
+        await providerDetailGate.resume(returning: freshDetail)
+
+        try await waitUntilAsync {
+            await MainActor.run {
+                model.workspaceOverview(for: workspace.id)?.providerCards.first?.defaultSession.sessionID
+                    == defaultSession.id
+                    && model.providerDetail(for: workspace.id, providerID: .claude)?.defaultSession?.id
+                        == defaultSession.id
+            }
+        }
+    }
+
+    @MainActor
+    @Test func appModelCreateNamedSessionDoesNotAwaitRefreshFollowUps() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let defaultSession = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let overview = WorkspaceOverview(
+            workspace: workspace,
+            providerCards: [
+                WorkspaceProviderCard(
+                    provider: Provider(id: .claude),
+                    health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+                    defaultSession: ProviderDefaultSessionSummary(
+                        state: .ready,
+                        summary: "Default session ready",
+                        actionTitle: "Resume",
+                        sessionID: defaultSession.id
+                    )
+                )
+            ]
+        )
+        let detail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+            defaultSession: defaultSession,
+            alternateSessions: [],
+            failedSessions: []
+        )
+        let workspaceOverviewGate = SuspendedResultGate<WorkspaceOverview>()
+        let providerDetailGate = SuspendedResultGate<ProviderDetail>()
+        let client = TrackingServiceClient(
+            workspaceOverview: overview,
+            session: defaultSession,
+            screen: SessionScreen(session: defaultSession, transcript: "Claude ready"),
+            providerDetail: detail
+        )
+        let model = NexusAppModel(client: client)
+        model.workspaceOverviews[workspace.id] = overview
+
+        try await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
+        client.setRefreshWorkspaceOverviewHandler { _ in
+            try await workspaceOverviewGate.wait()
+        }
+        client.setProviderDetailHandler { _, _ in
+            try await providerDetailGate.wait()
+        }
+
+        let createTask = Task { @MainActor in
+            try await model.createNamedSession(workspaceID: workspace.id, providerID: .claude)
+        }
+        let session = try await value(of: createTask, timeoutNanoseconds: 500_000_000)
+
+        #expect(session.isDefault == false)
+        #expect(model.focusedSessionScreen?.session.id == session.id)
+        #expect(
+            model.providerDetail(for: workspace.id, providerID: .claude)?.alternateSessions.map(\.id) == [session.id])
+        #expect(model.workspaceOverview(for: workspace.id)?.providerCards.first?.alternateSessionCount == 1)
+
+        let refreshedOverview = WorkspaceOverview(
+            workspace: workspace,
+            providerCards: [
+                WorkspaceProviderCard(
+                    provider: Provider(id: .claude),
+                    health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+                    defaultSession: ProviderDefaultSessionSummary(
+                        state: .ready,
+                        summary: "Default session ready",
+                        actionTitle: "Resume",
+                        sessionID: defaultSession.id
+                    ),
+                    alternateSessionCount: 1
+                )
+            ]
+        )
+        let refreshedDetail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+            defaultSession: defaultSession,
+            alternateSessions: [session],
+            failedSessions: []
+        )
+        await workspaceOverviewGate.resume(returning: refreshedOverview)
+        await providerDetailGate.resume(returning: refreshedDetail)
+
+        try await waitUntilAsync {
+            await MainActor.run {
+                model.workspaceOverview(for: workspace.id)?.providerCards.first?.alternateSessionCount == 1
+                    && model.providerDetail(for: workspace.id, providerID: .claude)?.alternateSessions.map(\.id)
+                        == [session.id]
+            }
+        }
+    }
+
+    @MainActor
+    @Test func appModelLaunchOrResumeSessionDoesNotAwaitRefreshFollowUps() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let defaultSession = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let namedSession = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            name: "Session 1",
+            isDefault: false,
+            state: .exited
+        )
+        let overview = WorkspaceOverview(
+            workspace: workspace,
+            providerCards: [
+                WorkspaceProviderCard(
+                    provider: Provider(id: .claude),
+                    health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+                    defaultSession: ProviderDefaultSessionSummary(
+                        state: .ready,
+                        summary: "Default session ready",
+                        actionTitle: "Resume",
+                        sessionID: defaultSession.id
+                    ),
+                    alternateSessionCount: 1
+                )
+            ]
+        )
+        let detail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+            defaultSession: defaultSession,
+            alternateSessions: [namedSession],
+            failedSessions: []
+        )
+        let workspaceOverviewGate = SuspendedResultGate<WorkspaceOverview>()
+        let providerDetailGate = SuspendedResultGate<ProviderDetail>()
+        let client = TrackingServiceClient(
+            workspaceOverview: overview,
+            session: namedSession,
+            screen: SessionScreen(session: namedSession, transcript: "Claude ready"),
+            providerDetail: detail
+        )
+        let model = NexusAppModel(client: client)
+
+        try await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
+        try await model.focusSession(sessionID: namedSession.id)
+        client.setRefreshWorkspaceOverviewHandler { _ in
+            try await workspaceOverviewGate.wait()
+        }
+        client.setProviderDetailHandler { _, _ in
+            try await providerDetailGate.wait()
+        }
+
+        let relaunchTask = Task { @MainActor in
+            try await model.launchOrResumeSession(
+                sessionID: namedSession.id,
+                workspaceID: workspace.id,
+                providerID: .claude
+            )
+        }
+        let session = try await value(of: relaunchTask, timeoutNanoseconds: 500_000_000)
+
+        #expect(session.id == namedSession.id)
+        #expect(session.state == .ready)
+        #expect(model.focusedSessionScreen?.session.state == .ready)
+        #expect(model.providerDetail(for: workspace.id, providerID: .claude)?.alternateSessions.first?.state == .ready)
+
+        let refreshedDetail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+            defaultSession: defaultSession,
+            alternateSessions: [session],
+            failedSessions: []
+        )
+        await workspaceOverviewGate.resume(returning: overview)
+        await providerDetailGate.resume(returning: refreshedDetail)
+
+        try await waitUntilAsync {
+            await MainActor.run {
+                model.providerDetail(for: workspace.id, providerID: .claude)?.alternateSessions.first?.state == .ready
+            }
+        }
+    }
+
+    @MainActor
+    @Test func appModelStopSessionDoesNotAwaitRefreshFollowUps() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let defaultSession = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let namedSession = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            name: "Session 1",
+            isDefault: false,
+            state: .ready
+        )
+        let overview = WorkspaceOverview(
+            workspace: workspace,
+            providerCards: [
+                WorkspaceProviderCard(
+                    provider: Provider(id: .claude),
+                    health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+                    defaultSession: ProviderDefaultSessionSummary(
+                        state: .ready,
+                        summary: "Default session ready",
+                        actionTitle: "Resume",
+                        sessionID: defaultSession.id
+                    ),
+                    alternateSessionCount: 1
+                )
+            ]
+        )
+        let detail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+            defaultSession: defaultSession,
+            alternateSessions: [namedSession],
+            failedSessions: []
+        )
+        let workspaceOverviewGate = SuspendedResultGate<WorkspaceOverview>()
+        let providerDetailGate = SuspendedResultGate<ProviderDetail>()
+        let client = TrackingServiceClient(
+            workspaceOverview: overview,
+            session: namedSession,
+            screen: SessionScreen(session: namedSession, transcript: "Claude ready"),
+            providerDetail: detail
+        )
+        let model = NexusAppModel(client: client)
+
+        try await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
+        try await model.focusSession(sessionID: namedSession.id)
+        client.setRefreshWorkspaceOverviewHandler { _ in
+            try await workspaceOverviewGate.wait()
+        }
+        client.setProviderDetailHandler { _, _ in
+            try await providerDetailGate.wait()
+        }
+
+        let stopTask = Task { @MainActor in
+            try await model.stopSession(
+                sessionID: namedSession.id,
+                workspaceID: workspace.id,
+                providerID: .claude
+            )
+        }
+        let session = try await value(of: stopTask, timeoutNanoseconds: 500_000_000)
+
+        #expect(session.state == .exited)
+        #expect(model.focusedSessionScreen?.session.state == .exited)
+        #expect(model.providerDetail(for: workspace.id, providerID: .claude)?.alternateSessions.first?.state == .exited)
+
+        let refreshedDetail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+            defaultSession: defaultSession,
+            alternateSessions: [session],
+            failedSessions: []
+        )
+        await workspaceOverviewGate.resume(returning: overview)
+        await providerDetailGate.resume(returning: refreshedDetail)
+
+        try await waitUntilAsync {
+            await MainActor.run {
+                model.providerDetail(for: workspace.id, providerID: .claude)?.alternateSessions.first?.state == .exited
+            }
+        }
+    }
+
+    @MainActor
+    @Test func appModelDeleteSessionRecordDoesNotAwaitRefreshFollowUps() async throws {
+        let group = WorkspaceGroup(id: UUID(), name: "Group")
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Workspace",
+            kind: .local,
+            folderPath: "/tmp/workspace",
+            primaryGroupID: group.id
+        )
+        let defaultSession = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            isDefault: true,
+            state: .ready
+        )
+        let stoppedSession = Session(
+            id: UUID(),
+            workspaceID: workspace.id,
+            providerID: .claude,
+            name: "Session 1",
+            isDefault: false,
+            state: .exited
+        )
+        let overview = WorkspaceOverview(
+            workspace: workspace,
+            providerCards: [
+                WorkspaceProviderCard(
+                    provider: Provider(id: .claude),
+                    health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+                    defaultSession: ProviderDefaultSessionSummary(
+                        state: .ready,
+                        summary: "Default session ready",
+                        actionTitle: "Resume",
+                        sessionID: defaultSession.id
+                    ),
+                    alternateSessionCount: 1
+                )
+            ]
+        )
+        let refreshedOverview = WorkspaceOverview(
+            workspace: workspace,
+            providerCards: [
+                WorkspaceProviderCard(
+                    provider: Provider(id: .claude),
+                    health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+                    defaultSession: ProviderDefaultSessionSummary(
+                        state: .ready,
+                        summary: "Default session ready",
+                        actionTitle: "Resume",
+                        sessionID: defaultSession.id
+                    )
+                )
+            ]
+        )
+        let detail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+            defaultSession: defaultSession,
+            alternateSessions: [stoppedSession],
+            failedSessions: []
+        )
+        let refreshedDetail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+            defaultSession: defaultSession,
+            alternateSessions: [],
+            failedSessions: []
+        )
+        let workspaceOverviewGate = SuspendedResultGate<WorkspaceOverview>()
+        let providerDetailGate = SuspendedResultGate<ProviderDetail>()
+        let client = TrackingServiceClient(
+            workspaceOverview: overview,
+            session: stoppedSession,
+            screen: SessionScreen(session: stoppedSession, transcript: "Claude ready"),
+            providerDetail: detail
+        )
+        let model = NexusAppModel(client: client)
+        model.workspaceOverviews[workspace.id] = overview
+
+        try await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
+        try await model.focusSession(sessionID: stoppedSession.id)
+        client.setRefreshWorkspaceOverviewHandler { _ in
+            try await workspaceOverviewGate.wait()
+        }
+        client.setProviderDetailHandler { _, _ in
+            try await providerDetailGate.wait()
+        }
+
+        let deleteTask = Task { @MainActor in
+            try await model.deleteSessionRecord(
+                sessionID: stoppedSession.id,
+                workspaceID: workspace.id,
+                providerID: .claude
+            )
+        }
+        let deleted = try await value(of: deleteTask, timeoutNanoseconds: 500_000_000)
+
+        #expect(deleted)
+
+        #expect(model.focusedSessionScreen == nil)
+        #expect(model.providerDetail(for: workspace.id, providerID: .claude)?.alternateSessions.isEmpty == true)
+        #expect(model.workspaceOverview(for: workspace.id)?.providerCards.first?.alternateSessionCount == 0)
+
+        await workspaceOverviewGate.resume(returning: refreshedOverview)
+        await providerDetailGate.resume(returning: refreshedDetail)
+
+        try await waitUntilAsync {
+            await MainActor.run {
+                model.workspaceOverview(for: workspace.id)?.providerCards.first?.alternateSessionCount == 0
+                    && model.providerDetail(for: workspace.id, providerID: .claude)?.alternateSessions.isEmpty == true
+            }
+        }
     }
 
     @MainActor
@@ -8907,6 +10111,7 @@ struct nexusTests {
             providerDetail: providerDetail
         )
         let model = NexusAppModel(client: client)
+        model.workspaceOverviews[workspace.id] = workspaceOverview
 
         try await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
         let namedSession = try await model.createNamedSession(workspaceID: workspace.id, providerID: .claude)
@@ -9044,6 +10249,7 @@ struct nexusTests {
             providerDetail: providerDetail
         )
         let model = NexusAppModel(client: client)
+        model.workspaceOverviews[workspace.id] = workspaceOverview
 
         try await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
         let deleted = try await model.deleteSessionRecord(
@@ -9084,6 +10290,13 @@ struct nexusTests {
 
         await model.refresh()
         let session = try await model.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
+
+        try await waitUntilAsync {
+            await MainActor.run {
+                model.workspaceOverview(for: workspace.id)?.providerCards.first(where: { $0.provider.id == .claude })?
+                    .defaultSession.state == .failed
+            }
+        }
 
         let claudeCard = try #require(
             model.workspaceOverview(for: workspace.id)?.providerCards.first(where: { $0.provider.id == .claude }))
@@ -9145,9 +10358,6 @@ struct nexusTests {
 
         await model.refresh()
         let session = try await model.launchOrResumeDefaultSession(workspaceID: workspace.id, providerID: .claude)
-        let readyCard = try #require(
-            model.workspaceOverview(for: workspace.id)?.providerCards.first(where: { $0.provider.id == .claude }))
-        #expect(readyCard.defaultSession.state == .ready)
 
         let exitedScreen = try await waitForFocusedSessionScreen(model: model, sessionID: session.id) { screen in
             screen.session.state == .exited
@@ -10271,6 +11481,12 @@ struct WorkspaceOverviewRefreshStagingTests {
         loader.resume(workspaceID: betaWorkspace.id, with: betaOverview)
         loader.resume(workspaceID: alphaWorkspace.id, with: alphaOverview)
 
+        try await waitUntilAsync {
+            await MainActor.run {
+                model.workspaceOverview(for: deltaWorkspace.id)?.providerCards.first?.health.summary
+                    == "Delta IBM Bob available"
+            }
+        }
         await refreshTask.value
 
         #expect(
@@ -10538,6 +11754,38 @@ private func waitUntilAsync(
         }
 
         try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
+    }
+}
+
+private func value<T: Sendable>(of task: Task<T, Error>, timeoutNanoseconds: UInt64) async throws -> T {
+    defer { task.cancel() }
+
+    return try await withThrowingTaskGroup(of: T.self) { group in
+        group.addTask {
+            try await task.value
+        }
+        group.addTask {
+            try await Task.sleep(nanoseconds: timeoutNanoseconds)
+            throw NSError(
+                domain: "nexusTests", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for task"])
+        }
+
+        let value = try await group.next()!
+        group.cancelAll()
+        return value
+    }
+}
+
+private actor AsyncCompletionProbe {
+    private var completed = false
+
+    func markCompleted() {
+        completed = true
+    }
+
+    func isCompleted() -> Bool {
+        completed
     }
 }
 
@@ -11559,6 +12807,22 @@ private final class ControlledWorkspaceOverviewLoader: @unchecked Sendable {
     }
 }
 
+private actor SuspendedResultGate<T: Sendable> {
+    private var continuation: CheckedContinuation<T, Error>?
+
+    func wait() async throws -> T {
+        try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func resume(returning value: T) {
+        let continuation = continuation
+        self.continuation = nil
+        continuation?.resume(returning: value)
+    }
+}
+
 private final class FakeRemotePairingServer: RemotePairingServing {
     nonisolated let endpoint: RemotePairingEndpoint
 
@@ -11607,16 +12871,22 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
     private var pairedDevicesValue: [PairedDevice]
     private let workspaceOverviewLoader: (@Sendable (UUID) async throws -> WorkspaceOverview)?
     private let workspaceOverviewBatchLoader: (@Sendable ([UUID]) async throws -> [WorkspaceOverview])?
+    private var refreshWorkspaceOverviewHandler: (@Sendable (UUID) async throws -> WorkspaceOverview)?
+    private var providerDetailHandler: (@Sendable (UUID, ProviderID) async throws -> ProviderDetail)?
     private var observedScreenHandlers: [UUID: @Sendable (SessionScreen) -> Void] = [:]
     private var structuredHistoryPages: [StructuredSessionHistoryPage]
 
     var getSessionScreenHandler: (@Sendable (UUID) async throws -> SessionScreen)?
+    var observeSessionScreenHandler:
+        (@Sendable (UUID, @escaping @Sendable (SessionScreen) -> Void) async throws -> any SessionScreenObservation)?
     var sendSessionInputHandler: (@Sendable (UUID, String) async throws -> SessionScreen)?
 
     var workspaceOverviewRequestCount = 0
     var workspaceOverviewBatchRequestCount = 0
     var refreshWorkspaceOverviewRequestCount = 0
     var providerDetailRequestCount = 0
+    var getSessionScreenRequestCount = 0
+    var observeSessionScreenRequestCount = 0
     var recordedNavigationTargets: [NavigationTarget] = []
     var respondedApprovalRequests: [(sessionID: UUID, approvalRequestID: UUID, decision: ApprovalRequestDecision)] = []
     var respondedExtensionDialogs: [(sessionID: UUID, dialogID: String, response: SessionExtensionUIDialogResponse)] =
@@ -11637,6 +12907,8 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
         workspaceOverviewsByID: [UUID: WorkspaceOverview]? = nil,
         workspaceOverviewLoader: (@Sendable (UUID) async throws -> WorkspaceOverview)? = nil,
         workspaceOverviewBatchLoader: (@Sendable ([UUID]) async throws -> [WorkspaceOverview])? = nil,
+        refreshWorkspaceOverviewHandler: (@Sendable (UUID) async throws -> WorkspaceOverview)? = nil,
+        providerDetailHandler: (@Sendable (UUID, ProviderID) async throws -> ProviderDetail)? = nil,
         hosts: [NexusDomain.Host] = [],
         hostDetails: [UUID: HostDetail] = [:],
         recentNavigation: [NavigationItem] = [],
@@ -11677,7 +12949,21 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
         self.pairedDevicesValue = pairedDevices
         self.workspaceOverviewLoader = workspaceOverviewLoader
         self.workspaceOverviewBatchLoader = workspaceOverviewBatchLoader
+        self.refreshWorkspaceOverviewHandler = refreshWorkspaceOverviewHandler
+        self.providerDetailHandler = providerDetailHandler
         self.structuredHistoryPages = structuredHistoryPages
+    }
+
+    func setRefreshWorkspaceOverviewHandler(
+        _ handler: (@Sendable (UUID) async throws -> WorkspaceOverview)?
+    ) {
+        refreshWorkspaceOverviewHandler = handler
+    }
+
+    func setProviderDetailHandler(
+        _ handler: (@Sendable (UUID, ProviderID) async throws -> ProviderDetail)?
+    ) {
+        providerDetailHandler = handler
     }
 
     func getServiceStatus() async throws -> NexusServiceStatus {
@@ -11901,7 +13187,8 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
     func refreshWorkspaceOverview(workspaceID: UUID) async throws -> WorkspaceOverview {
         refreshWorkspaceOverviewRequestCount += 1
         let refreshed =
-            refreshedWorkspaceOverviewValuesByID[workspaceID]
+            try await refreshWorkspaceOverviewHandler?(workspaceID)
+            ?? refreshedWorkspaceOverviewValuesByID[workspaceID]
             ?? refreshedWorkspaceOverviewValue
             ?? workspaceOverviewValuesByID[workspaceID]
             ?? workspaceOverviewValue
@@ -11914,7 +13201,9 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
 
     func getProviderDetail(workspaceID: UUID, providerID: ProviderID) async throws -> ProviderDetail {
         providerDetailRequestCount += 1
-        return providerDetailValue
+        let detail = try await providerDetailHandler?(workspaceID, providerID) ?? providerDetailValue
+        providerDetailValue = detail
+        return detail
     }
 
     func createLocalWorkspace(name: String?, folderPath: String, primaryGroupID: UUID?) async throws -> Workspace {
@@ -12066,6 +13355,7 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
     }
 
     func getSessionScreen(sessionID: UUID) async throws -> SessionScreen {
+        getSessionScreenRequestCount += 1
         if let getSessionScreenHandler {
             return try await getSessionScreenHandler(sessionID)
         }
@@ -12104,6 +13394,11 @@ private final class TrackingServiceClient: NexusServiceClient, @unchecked Sendab
     func observeSessionScreen(sessionID: UUID, onUpdate: @escaping @Sendable (SessionScreen) -> Void) async throws
         -> any SessionScreenObservation
     {
+        observeSessionScreenRequestCount += 1
+        if let observeSessionScreenHandler {
+            return try await observeSessionScreenHandler(sessionID, onUpdate)
+        }
+
         let observationID = UUID()
         observedScreenHandlers[observationID] = onUpdate
         onUpdate(screenValue)

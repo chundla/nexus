@@ -64,4 +64,18 @@ struct StructuredSessionFeedProgressiveRevealPolicyTests {
             StructuredSessionFeedProgressiveRevealPolicy.shouldShowThinkingIndicator(in: feed, visibleTailRowCount: 1)
                 == true)
     }
+
+    @Test func nextVisibleTailRowCountDoublesTowardTotal() {
+        let next = StructuredSessionFeedProgressiveRevealPolicy.nextVisibleTailRowCount(
+            currentVisibleCount: 3,
+            totalRowCount: 100
+        )
+        #expect(next == 6)
+        #expect(
+            StructuredSessionFeedProgressiveRevealPolicy.nextVisibleTailRowCount(
+                currentVisibleCount: 100,
+                totalRowCount: 100
+            ) == 100
+        )
+    }
 }

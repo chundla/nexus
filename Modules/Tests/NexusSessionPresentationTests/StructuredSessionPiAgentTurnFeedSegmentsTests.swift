@@ -181,7 +181,36 @@ struct StructuredSessionPiAgentTurnFeedSegmentsTests {
             Issue.record("Expected standalone Pi")
             return
         }
-        #expect(structuredSessionPiShouldRenderStandaloneFeedSegment(item: dup, in: segments) == false)
+        let duplicateFinalAnswerBodies = structuredSessionPiFinalAnswerBodies(in: segments)
+        #expect(
+            structuredSessionPiShouldRenderStandaloneFeedSegment(
+                item: dup,
+                duplicateFinalAnswerBodies: duplicateFinalAnswerBodies
+            ) == false
+        )
+    }
+
+    /// The old `in segments:` overload rescanned every segment per standalone item (O(visible * total)
+    /// per render). Callers must build this set once and reuse it across all standalone items in a render.
+    @Test func finalAnswerBodiesCollectsOnlyClosedTurnFinalAnswers() throws {
+        let openTurnID = UUID()
+        let closedTurnID = UUID()
+        let segments: [StructuredSessionFeedSegment] = [
+            .agentTurn(
+                StructuredSessionFeedAgentTurnSegment(
+                    id: openTurnID,
+                    isOpen: true,
+                    finalAnswer: StructuredSessionFeedAgentTurnFinalAnswerSegment(text: "still streaming")
+                )),
+            .agentTurn(
+                StructuredSessionFeedAgentTurnSegment(
+                    id: closedTurnID,
+                    isOpen: false,
+                    finalAnswer: StructuredSessionFeedAgentTurnFinalAnswerSegment(text: "  done answer  ")
+                )),
+        ]
+        let bodies = structuredSessionPiFinalAnswerBodies(in: segments)
+        #expect(bodies == ["done answer"])
     }
 
     @Test func piOpenTurnPostInterimPiCommandsLiveInContinuationTurn() throws {

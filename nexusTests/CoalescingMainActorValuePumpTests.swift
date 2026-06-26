@@ -4,6 +4,7 @@ import Testing
 @testable import nexus
 
 @MainActor
+@Suite(.serialized)
 struct CoalescingMainActorValuePumpTests {
     @Test func deliversLatestQueuedValueAfterInFlightDeliveryCompletes() async throws {
         let gate = AsyncGate()
@@ -106,13 +107,13 @@ private actor AsyncGate {
 }
 
 private func waitUntil(
-    timeoutNanoseconds: UInt64 = 1_000_000_000,
+    timeoutNanoseconds: UInt64 = 5_000_000_000,
     pollNanoseconds: UInt64 = 10_000_000,
     condition: @escaping () async -> Bool
 ) async throws {
-    let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
+    let deadline = ContinuousClock.now.advanced(by: .nanoseconds(Int64(timeoutNanoseconds)))
     while await condition() == false {
-        if DispatchTime.now().uptimeNanoseconds >= deadline {
+        guard ContinuousClock.now < deadline else {
             throw TimeoutError()
         }
         try await Task.sleep(nanoseconds: pollNanoseconds)

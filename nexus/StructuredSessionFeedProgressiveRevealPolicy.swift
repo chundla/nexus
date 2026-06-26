@@ -15,6 +15,13 @@ enum StructuredSessionFeedProgressiveRevealPolicy {
         StructuredSessionFeedSegmentRevealPolicy.visibleTailSegmentsPerRevealBatch
     }
 
+    static func nextVisibleTailRowCount(currentVisibleCount: Int, totalRowCount: Int) -> Int {
+        StructuredSessionFeedSegmentRevealPolicy.nextVisibleTailSegmentCount(
+            currentVisibleCount: currentVisibleCount,
+            totalFeedSegmentCount: totalRowCount
+        )
+    }
+
     static var allowsMarkdownHydrationDuringProgressiveReveal: Bool {
         false
     }

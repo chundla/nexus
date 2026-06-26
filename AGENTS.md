@@ -16,6 +16,8 @@ If the user wants more detail, they will ask. Default to minimal viable response
 
 Nexus is a **workspace-first** macOS control center for coding agent CLIs (local and remote). The **Background Service** owns orchestration, persistence, provider adapters, and session lifecycle; the macOS app talks to it over local IPC.
 
+~40-53% of users will abandon (bounce/close) an application that takes more than 3 seconds to load. 0.1 seconds: Feels instantaneous. 1 second: Keeps thought flow seamless (users notice the delay but stay in control). Aggressively optimize features to be under 1 second of load time.
+
 **Core vocabulary** (use these terms; see `CONTEXT.md` for definitions and synonyms to avoid): **Workspace**, **Provider**, **Session**, **Session Record**, **Host**, **Remote Workspace**, **Paired Mac**, **Remote Client**, **Controller** / **Viewer**.
 
 **Where truth lives:**
@@ -75,6 +77,8 @@ For Xcode/iOS/macOS tasks, prefer **XcodeBuildMCP** (`xcodebuildmcp`) over raw `
 - Cap tool timeouts initially at **120s**; increase only for that specific run if the command is actively progressing. Do not default to long timeouts (e.g. 1200s).
 - Do not run multiple SwiftPM or XcodeBuildMCP test commands **in parallel** — shared build state contends on locks.
 - Prefer narrow `swift test --filter ...` over broad suite filters; if a filtered run times out, narrow the filter before assuming failure.
+- `xcodebuild test -scheme nexus` legitimately takes minutes (build + full suite, often 5-10 min). The 120s cap above does not apply — background it (`> /tmp/x.log 2>&1 &`) and poll the log rather than treating a long-running build as stuck.
+- `nexusTests/` runs hosted inside the real `nexus.app`, which boots the production `NexusAppModel.bootstrap()` against your **real** `~/Library/Application Support/Nexus` store (not a sandboxed test fixture). A large local store can starve the Swift concurrency thread pool and cause unrelated-looking timeouts in tests that poll `@MainActor` state. If a host-app-hosted test times out locally but not in CI, check for local data contention before assuming a logic bug.
 
 ## Code style guidelines
 
@@ -87,7 +91,7 @@ For Xcode/iOS/macOS tasks, prefer **XcodeBuildMCP** (`xcodebuildmcp`) over raw `
 ## Testing instructions
 
 - **Default validation:** one focused `swift test --filter ...` or a single Xcode test class/method tied to the change.
-- **App + IPC integration:** `nexusTests/` and `xcodebuild test` on scheme `nexus`.
+- **App + IPC integration:** `nexusTests/` and `xcodebuild test` on scheme `nexus`. **`swift test --package-path Modules` does not run these** — any change touching `nexus/` (NexusAppModel, RemoteClientPairingModel, ContentView, etc.) or `nexusTests/` is unverified until `xcodebuild test -scheme nexus -project nexus.xcodeproj -destination 'platform=macOS'` has actually been run, not just built. Run it before opening/pushing a PR with app-target changes — do not rely on a green `swift test` run alone.
 - **Structured session / Pi / Codex paths:** heavy coverage lives under `Modules/Tests/NexusServiceTests` and related presentation tests — grep for the feature name before adding duplicate fixtures.
 - **UI / launch performance:** `nexusUITests`, documented in `docs/performance-baselines.md`.
 - **TDD:** use `/skill:tdd` when the user wants red-green-refactor or test-first work.
@@ -113,6 +117,7 @@ For Xcode/iOS/macOS tasks, prefer **XcodeBuildMCP** (`xcodebuildmcp`) over raw `
 - Keep PRs scoped to one vertical slice when possible; link the GitHub issue.
 - Note doc or ADR updates when behavior or domain language changes.
 - Call out concurrency, IPC, or persistence migrations explicitly in the description.
+- If the diff touches `nexus/` or `nexusTests/`, run the full `xcodebuild test -scheme nexus` suite before pushing/opening the PR — don't find out from CI. A change that alters async timing in `NexusAppModel`/`RemoteClientPairingModel` (optimistic updates, shell-first loads, background refresh) is especially likely to break tests that assumed synchronous state availability; re-run the suite even if the change "only" touches the service layer underneath it (e.g. Provider Health resolution timing).
 
 ### Issue Tracker
 

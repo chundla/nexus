@@ -6,14 +6,16 @@
 
     struct ContentView: View {
         @Bindable var appModel: NexusAppModel
+        let settingsTabSelection: NexusSettingsTabSelection
+
+        @Environment(\.openSettings) private var openSettings
 
         @State private var selection: SidebarSelection?
+        @State private var focusedSessionID: UUID?
         @State private var isShowingCreateWorkspaceGroupSheet = false
         @State private var isShowingQuickSwitchSheet = false
         @State private var isShowingCreateRemoteWorkspaceSheet = false
         @State private var newWorkspaceGroupName = ""
-        @State private var isShowingHostsSheet = false
-        @State private var isShowingRemoteAccessSheet = false
         @State private var quickSwitchQuery = ""
         @State private var quickSwitchResults: [NavigationItem] = []
         @State private var quickSwitchSearchCoordinator = QuickSwitchSearchCoordinator<[NavigationItem]>()
@@ -41,18 +43,36 @@
             ZStack {
                 NexusBackdrop()
 
+                // Browsing (sidebar + Workspace/Provider middle pane) and a focused
+                // Session are independent: picking a Workspace never has to evict the
+                // Session you already opened — it keeps living in the detail pane.
                 NavigationSplitView {
                     sidebarContent
-                } detail: {
-                    detailView
-                        .padding(detailPadding)
+                } content: {
+                    middleColumnView
+                        .padding(20)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        #if os(macOS)
+                            .navigationSplitViewColumnWidth(min: 340, ideal: 420, max: 560)
+                        #endif
+                } detail: {
+                    Group {
+                        if focusedSessionID != nil {
+                            focusedSessionColumnView
+                                .padding(16)
+                        } else {
+                            sessionPlaceholderColumnView
+                                .padding(20)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
                 #if os(macOS)
                     .navigationSplitViewStyle(.balanced)
                 #endif
             }
-            .preferredColorScheme(.dark)
+            .tint(NexusMacTheme.gold)
+            .nexusSeamlessWindowChrome()
             .task {
                 if appModel.serviceStatus == nil, appModel.serviceErrorMessage == nil {
                     await appModel.refresh()
@@ -62,21 +82,15 @@
                 switch selection {
                 case .workspaceGroup:
                     sidebarMode = .groups
-                case .workspace, .provider, .session:
+                case .workspace, .provider:
                     sidebarMode = .workspaces
                 case .none:
                     break
                 }
 
                 do {
-                    switch selection {
-                    case .session(let sessionID):
-                        try await appModel.focusSession(sessionID: sessionID)
-                    case .provider(let workspaceID, let providerID):
-                        await appModel.stopFocusingSession()
+                    if case .provider(let workspaceID, let providerID) = selection {
                         try await appModel.loadProviderDetail(workspaceID: workspaceID, providerID: providerID)
-                    default:
-                        await appModel.stopFocusingSession()
                     }
 
                     if let navigationTarget = selection?.navigationTarget {
@@ -86,17 +100,37 @@
                     presentedError = PresentedError(message: error.localizedDescription)
                 }
             }
+            .task(id: focusedSessionID) {
+                do {
+                    if let focusedSessionID {
+                        try await appModel.focusSession(sessionID: focusedSessionID)
+                        try await appModel.recordNavigation(.session(focusedSessionID))
+                    } else {
+                        await appModel.stopFocusingSession()
+                    }
+                } catch {
+                    presentedError = PresentedError(message: error.localizedDescription)
+                }
+            }
+            .onChange(of: appModel.focusedSessionScreen?.session.id) { _, sessionID in
+                guard sessionID == focusedSessionID, let session = appModel.focusedSessionScreen?.session else {
+                    return
+                }
+
+                if case .provider(let workspaceID, let providerID) = selection,
+                    workspaceID == session.workspaceID, providerID == session.providerID
+                {
+                    return
+                }
+
+                selection = .provider(session.workspaceID, session.providerID)
+            }
             .background {
-                SidebarSelectionBootstrapBoundary(appModel: appModel, selection: $selection)
+                SidebarSelectionBootstrapBoundary(
+                    appModel: appModel, selection: $selection, focusedSessionID: $focusedSessionID)
             }
             .sheet(isPresented: $isShowingCreateWorkspaceGroupSheet) {
                 createWorkspaceGroupSheet
-            }
-            .sheet(isPresented: $isShowingHostsSheet) {
-                HostManagementSheet(appModel: appModel, isPresented: $isShowingHostsSheet)
-            }
-            .sheet(isPresented: $isShowingRemoteAccessSheet) {
-                RemoteAccessManagementSheet(appModel: appModel, isPresented: $isShowingRemoteAccessSheet)
             }
             .sheet(isPresented: $isShowingQuickSwitchSheet) {
                 quickSwitchSheet
@@ -119,6 +153,45 @@
             .alert(item: $presentedError) { error in
                 Alert(title: Text("Nexus"), message: Text(error.message))
             }
+            .onReceive(NotificationCenter.default.publisher(for: .nexusOpenCommandPalette)) { _ in
+                openCommandPalette()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .nexusNewLocalWorkspace)) { _ in
+                addLocalWorkspace()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .nexusNewRemoteWorkspace)) { _ in
+                isShowingCreateRemoteWorkspaceSheet = true
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .nexusNewWorkspaceGroup)) { _ in
+                newWorkspaceGroupName = ""
+                isShowingCreateWorkspaceGroupSheet = true
+            }
+
+            .onReceive(NotificationCenter.default.publisher(for: .nexusTakeController)) { _ in
+                takeFocusedSessionController()
+            }
+            .focusedValue(\.nexusSessionControllerIsTakeable, isFocusedSessionControllerTakeable)
+        }
+
+        private var isFocusedSessionControllerTakeable: Bool {
+            guard case .pairedDevice = appModel.focusedSessionScreen?.controller else {
+                return false
+            }
+            return true
+        }
+
+        private func takeFocusedSessionController() {
+            guard isFocusedSessionControllerTakeable else {
+                return
+            }
+
+            Task {
+                do {
+                    try await appModel.reclaimFocusedSessionController()
+                } catch {
+                    presentedError = PresentedError(message: error.localizedDescription)
+                }
+            }
         }
 
         private var sidebarContent: some View {
@@ -134,7 +207,7 @@
                         VStack(alignment: .leading, spacing: 3) {
                             Text("Nexus")
                                 .font(NexusMacTheme.displayFont(24, relativeTo: .title2))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(NexusMacTheme.textPrimary)
                             Text("Your agent workspaces.")
                                 .font(NexusMacTheme.bodyFont(12, relativeTo: .caption))
                                 .foregroundStyle(NexusMacTheme.mutedText)
@@ -143,15 +216,12 @@
                         Spacer()
 
                         Button {
-                            quickSwitchSearchCoordinator.cancel()
-                            quickSwitchQuery = ""
-                            quickSwitchResults = []
-                            isShowingQuickSwitchSheet = true
+                            openCommandPalette()
                         } label: {
                             Image(systemName: "magnifyingglass")
                         }
                         .buttonStyle(NexusSecondaryButtonStyle())
-                        .help("Quick Switch")
+                        .help("Command Palette (⌘K)")
                     }
 
                     Picker("Sidebar Mode", selection: $sidebarMode) {
@@ -237,10 +307,12 @@
 
                     Menu {
                         Button("Hosts") {
-                            isShowingHostsSheet = true
+                            settingsTabSelection.tab = .hosts
+                            openSettings()
                         }
                         Button("Remote Access") {
-                            isShowingRemoteAccessSheet = true
+                            settingsTabSelection.tab = .remoteAccess
+                            openSettings()
                         }
                     } label: {
                         Image(systemName: "ellipsis.circle")
@@ -249,48 +321,54 @@
             }
         }
 
-        private var detailPadding: CGFloat {
-            if case .session = selection {
-                return 16
-            }
-            return 20
-        }
-
         @ViewBuilder
-        private var detailView: some View {
-            if let selection {
-                switch selection {
-                case .workspaceGroup(let groupID):
-                    WorkspaceGroupDetailBoundary(appModel: appModel, groupID: groupID) { presentation in
-                        workspaceGroupDetail(presentation: presentation)
-                    }
-                case .workspace(let workspaceID):
-                    WorkspaceDetailBoundary(appModel: appModel, workspaceID: workspaceID) { presentation in
-                        workspaceDetail(presentation: presentation)
-                    }
-                case .provider(let workspaceID, let providerID):
-                    ProviderDetailBoundary(appModel: appModel, workspaceID: workspaceID, providerID: providerID) {
-                        detail in
-                        providerDetail(workspaceID: workspaceID, providerID: providerID, detail: detail)
-                    }
-                case .session(let sessionID):
-                    FocusedSessionDetailBoundary(sessionID: sessionID, appModel: appModel) { summary, screen, context in
-                        sessionDetailContent(summary: summary, screen: screen, context: context)
-                    } unavailable: {
-                        ContentUnavailableView(
-                            "Session unavailable",
-                            systemImage: "message",
-                            description: Text("Open the session again from its workspace to continue the conversation.")
-                        )
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .nexusPanel(tint: NexusMacTheme.coral)
-                    }
+        private var middleColumnView: some View {
+            switch selection {
+            case .workspaceGroup(let groupID):
+                WorkspaceGroupDetailBoundary(appModel: appModel, groupID: groupID) { presentation in
+                    workspaceGroupDetail(presentation: presentation)
                 }
-            } else {
+            case .workspace(let workspaceID):
+                WorkspaceDetailBoundary(appModel: appModel, workspaceID: workspaceID) { presentation in
+                    workspaceDetail(presentation: presentation)
+                }
+            case .provider(let workspaceID, let providerID):
+                ProviderDetailBoundary(appModel: appModel, workspaceID: workspaceID, providerID: providerID) {
+                    detail in
+                    providerDetail(workspaceID: workspaceID, providerID: providerID, detail: detail)
+                }
+            case .none:
                 WorkspaceHomeBoundary(appModel: appModel) { presentation in
                     overviewDetail(presentation: presentation)
                 }
             }
+        }
+
+        @ViewBuilder
+        private var focusedSessionColumnView: some View {
+            if let focusedSessionID {
+                FocusedSessionDetailBoundary(sessionID: focusedSessionID, appModel: appModel) {
+                    summary, screen, context in
+                    sessionDetailContent(summary: summary, screen: screen, context: context)
+                } unavailable: {
+                    ContentUnavailableView(
+                        "Session unavailable",
+                        systemImage: "message",
+                        description: Text("Open the session again from its workspace to continue the conversation.")
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .nexusPanel(tint: NexusMacTheme.coral)
+                }
+            }
+        }
+
+        private var sessionPlaceholderColumnView: some View {
+            ContentUnavailableView(
+                "No Session focused",
+                systemImage: "bubble.left.and.bubble.right",
+                description: Text("Open a Session from a Provider to start working.")
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
 
         private func overviewDetail(presentation: WorkspaceHomePresentation) -> some View {
@@ -373,7 +451,7 @@
                         VStack(alignment: .leading, spacing: 12) {
                             ProgressView()
                                 .tint(NexusMacTheme.gold)
-                            Text("Loading Nexus…")
+                            Text("Loading Nexus...")
                                 .font(NexusMacTheme.bodyFont(15))
                                 .foregroundStyle(NexusMacTheme.mutedText)
                         }
@@ -388,17 +466,20 @@
         }
 
         private var quickSwitchSheet: some View {
-            ZStack {
+            let trimmedQuery = quickSwitchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+            let matchingActions = commandPaletteActions.filter { $0.matches(trimmedQuery) }
+
+            return ZStack {
                 NexusBackdrop()
 
                 VStack(alignment: .leading, spacing: 18) {
                     NexusSectionHeader(
-                        eyebrow: "Quick switch",
-                        title: "Jump to a workspace or session.",
+                        eyebrow: "Command palette",
+                        title: "Jump anywhere, or run an action.",
                         detail: "Search when you need it. Otherwise, your workspaces are already sorted by recency."
                     )
 
-                    TextField("Search Workspaces, Providers, and Sessions", text: $quickSwitchQuery)
+                    TextField("Search Workspaces, Providers, Sessions, and Actions", text: $quickSwitchQuery)
                         .textFieldStyle(.roundedBorder)
                         .onChange(of: quickSwitchQuery) { _, newValue in
                             quickSwitchSearchCoordinator.updateQuery(
@@ -413,42 +494,66 @@
                         }
 
                     WorkspaceBrowseNavigationBoundary(appModel: appModel, selection: selection) { presentation in
-                        List(
-                            quickSwitchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                ? presentation.quickSwitchItems : quickSwitchResults
-                        ) { item in
-                            Button {
-                                quickSwitchSearchCoordinator.cancel()
-                                isShowingQuickSwitchSheet = false
-                                navigate(to: item.target)
-                            } label: {
-                                sidebarNavigationItemView(
-                                    title: item.title,
-                                    subtitle: item.subtitle,
-                                    systemImage: navigationItemIcon(for: item.kind),
-                                    accent: item.kind == .session ? NexusMacTheme.teal : NexusMacTheme.gold
-                                )
+                        let navigationItems =
+                            trimmedQuery.isEmpty ? presentation.quickSwitchItems : quickSwitchResults
+
+                        List {
+                            if matchingActions.isEmpty == false {
+                                Section("Actions") {
+                                    ForEach(matchingActions) { action in
+                                        Button {
+                                            isShowingQuickSwitchSheet = false
+                                            action.perform()
+                                        } label: {
+                                            sidebarNavigationItemView(
+                                                title: action.title,
+                                                subtitle: action.subtitle,
+                                                systemImage: action.systemImage,
+                                                accent: NexusMacTheme.gold
+                                            )
+                                        }
+                                        .buttonStyle(.plain)
+                                        .listRowBackground(Color.clear)
+                                    }
+                                }
                             }
-                            .buttonStyle(.plain)
-                            .listRowBackground(Color.clear)
+
+                            if navigationItems.isEmpty == false {
+                                Section("Workspaces & Sessions") {
+                                    ForEach(navigationItems) { item in
+                                        Button {
+                                            quickSwitchSearchCoordinator.cancel()
+                                            isShowingQuickSwitchSheet = false
+                                            navigate(to: item.target)
+                                        } label: {
+                                            sidebarNavigationItemView(
+                                                title: item.title,
+                                                subtitle: item.subtitle,
+                                                systemImage: navigationItemIcon(for: item.kind),
+                                                accent: item.kind == .session ? NexusMacTheme.teal : NexusMacTheme.gold
+                                            )
+                                        }
+                                        .buttonStyle(.plain)
+                                        .listRowBackground(Color.clear)
+                                    }
+                                }
+                            }
                         }
                         .listStyle(.plain)
                         .scrollContentBackground(.hidden)
                         .overlay {
-                            if quickSwitchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
-                                quickSwitchResults.isEmpty
-                            {
+                            if trimmedQuery.isEmpty == false, navigationItems.isEmpty, matchingActions.isEmpty {
                                 ContentUnavailableView(
                                     "No matches",
                                     systemImage: "magnifyingglass",
-                                    description: Text("Try a Workspace, Provider, or Session name.")
+                                    description: Text("Try a Workspace, Provider, Session, or Action name.")
                                 )
                             }
                         }
                     }
                 }
                 .padding(24)
-                .frame(minWidth: 480, minHeight: 380)
+                .frame(minWidth: 480, minHeight: 460)
                 .nexusPanel(tint: NexusMacTheme.teal, radius: 28)
                 .padding(28)
             }
@@ -500,12 +605,12 @@
                                             )
                                             Spacer()
                                             Image(systemName: "arrow.up.right")
-                                                .foregroundStyle(.white.opacity(0.5))
+                                                .foregroundStyle(NexusMacTheme.textPrimary.opacity(0.5))
                                         }
 
                                         Text(workspace.name)
                                             .font(NexusMacTheme.displayFont(22, relativeTo: .title3))
-                                            .foregroundStyle(.white)
+                                            .foregroundStyle(NexusMacTheme.textPrimary)
 
                                         Text(summary.targetSummary)
                                             .font(NexusMacTheme.bodyFont(13))
@@ -532,87 +637,43 @@
             let overview = presentation.overview
 
             return ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 22) {
                     if let workspace {
-                        VStack(alignment: .leading, spacing: 16) {
-                            HStack(alignment: .top) {
-                                NexusSectionHeader(
-                                    eyebrow: workspace.kind == .remote ? "Remote workspace" : "Local workspace",
-                                    title: workspace.name,
-                                    detail:
-                                        "Open an agent, continue a session, or jump into a fresh one without leaving this workspace."
-                                )
-                                Spacer()
-                                NexusStatusPill(
-                                    text: workspace.kind == .remote ? "Remote" : "Local",
-                                    color: workspace.kind == .remote ? NexusMacTheme.teal : NexusMacTheme.gold
-                                )
-                            }
-
-                            HStack(spacing: 10) {
-                                if let hostName = presentation.hostName {
-                                    NexusMetaBadge(icon: "network", text: hostName)
-                                }
-                                NexusMetaBadge(
-                                    icon: workspace.kind == .remote
-                                        ? "point.3.connected.trianglepath.dotted" : "folder", text: workspace.folderPath
-                                )
-                                if let groupName = presentation.groupName {
-                                    NexusMetaBadge(icon: "line.3.horizontal.decrease.circle", text: groupName)
-                                }
-                            }
-                        }
-                        .padding(24)
-                        .nexusPanel(tint: workspace.kind == .remote ? NexusMacTheme.teal : NexusMacTheme.gold)
+                        workspaceDetailHeader(workspace: workspace, presentation: presentation)
 
                         if let remoteTarget = overview?.remoteTarget {
-                            HStack(alignment: .top, spacing: 14) {
-                                remoteStatusPanel(
-                                    title: "Workspace",
-                                    stateTitle: workspaceAvailabilityStateTitle(
-                                        remoteTarget.workspaceAvailability.state),
-                                    stateSymbol: workspaceAvailabilityStateSymbol(
-                                        remoteTarget.workspaceAvailability.state),
-                                    stateColor: workspaceAvailabilityStateColor(
-                                        remoteTarget.workspaceAvailability.state),
-                                    summary: remoteTarget.workspaceAvailability.summary,
-                                    checkedAt: remoteTarget.workspaceAvailability.checkedAt,
-                                    diagnostics: remoteTarget.workspaceAvailability.diagnostics.map {
-                                        ($0.code, $0.message)
-                                    }
-                                )
-
-                                remoteStatusPanel(
-                                    title: "Host",
-                                    stateTitle: hostValidationStateTitle(remoteTarget.hostValidation?.state),
-                                    stateSymbol: hostValidationStateSymbol(remoteTarget.hostValidation?.state),
-                                    stateColor: hostValidationStateColor(remoteTarget.hostValidation?.state),
-                                    summary: remoteTarget.hostValidation?.summary
-                                        ?? "Validate this Host to unblock deeper remote checks.",
-                                    checkedAt: remoteTarget.hostValidation?.checkedAt,
-                                    diagnostics: remoteTarget.hostValidation?.diagnostics.map { ($0.code, $0.message) }
-                                        ?? []
-                                )
-                            }
+                            workspaceRemoteIssueStrip(remoteTarget: remoteTarget)
                         }
 
-                        VStack(alignment: .leading, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 8) {
                             Text("Agents")
-                                .font(NexusMacTheme.displayFont(22, relativeTo: .title3))
-                                .foregroundStyle(.white)
+                                .font(NexusMacTheme.bodyFont(11, relativeTo: .caption).weight(.semibold))
+                                .tracking(1.4)
+                                .foregroundStyle(NexusMacTheme.mutedText)
+                                .padding(.horizontal, 14)
 
                             if let overview {
-                                VStack(spacing: 12) {
-                                    ForEach(overview.providerCards) { card in
-                                        providerCard(workspaceID: workspace.id, card: card)
+                                if overview.providerCards.isEmpty {
+                                    Text("No Providers configured.")
+                                        .font(NexusMacTheme.bodyFont(14))
+                                        .foregroundStyle(NexusMacTheme.mutedText)
+                                        .padding(.horizontal, 14)
+                                } else {
+                                    VStack(spacing: 0) {
+                                        ForEach(Array(overview.providerCards.enumerated()), id: \.element.id) {
+                                            index, card in
+                                            if index > 0 {
+                                                NexusRowDivider()
+                                            }
+                                            providerRow(workspaceID: workspace.id, card: card)
+                                        }
                                     }
                                 }
                             } else {
-                                Text("Loading providers…")
+                                Text("Loading providers...")
                                     .font(NexusMacTheme.bodyFont(14))
                                     .foregroundStyle(NexusMacTheme.mutedText)
-                                    .padding(18)
-                                    .nexusPanel(tint: NexusMacTheme.gold, radius: 18)
+                                    .padding(.horizontal, 14)
                             }
                         }
                     } else {
@@ -622,7 +683,6 @@
                             description: Text("Refresh Nexus or choose another workspace from the sidebar.")
                         )
                         .frame(maxWidth: .infinity, minHeight: 280)
-                        .nexusPanel(tint: NexusMacTheme.coral)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -630,187 +690,487 @@
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
 
+        private func workspaceDetailHeader(
+            workspace: Workspace, presentation: WorkspaceBrowseDetailPresentation
+        ) -> some View {
+            var subtitleParts: [String] = []
+            if let hostName = presentation.hostName {
+                subtitleParts.append(hostName)
+            }
+            subtitleParts.append(workspace.folderPath)
+            if let groupName = presentation.groupName {
+                subtitleParts.append(groupName)
+            }
+
+            return VStack(alignment: .leading, spacing: 5) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(workspace.name)
+                        .font(NexusMacTheme.displayFont(24, relativeTo: .title2))
+                        .foregroundStyle(NexusMacTheme.textPrimary)
+                    Spacer()
+                    NexusStatusPill(
+                        text: workspace.kind == .remote ? "Remote" : "Local",
+                        color: workspace.kind == .remote ? NexusMacTheme.teal : NexusMacTheme.gold
+                    )
+                }
+
+                Text(subtitleParts.joined(separator: "  ·  "))
+                    .font(NexusMacTheme.bodyFont(12, relativeTo: .caption))
+                    .foregroundStyle(NexusMacTheme.mutedText)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .padding(.horizontal, 14)
+        }
+
+        /// Only renders when there's an actual Workspace or Host problem to act on \u2014
+        /// a healthy remote target stays silent instead of repeating "everything is fine".
+        @ViewBuilder
+        private func workspaceRemoteIssueStrip(remoteTarget: RemoteWorkspaceTargetOverview) -> some View {
+            let hostState = remoteTarget.hostValidation?.state
+            let hasWorkspaceIssue =
+                remoteTarget.workspaceAvailability.state != .available
+                || remoteTarget.workspaceAvailability.diagnostics.isEmpty == false
+            let hasHostIssue = hostState != .available
+
+            if hasWorkspaceIssue || hasHostIssue {
+                VStack(alignment: .leading, spacing: 8) {
+                    if hasWorkspaceIssue {
+                        issueRow(
+                            symbol: remoteTarget.workspaceAvailability.state.tone.symbolName,
+                            color: remoteTarget.workspaceAvailability.state.tone.color,
+                            title: "Workspace "
+                                + workspaceAvailabilityStateTitle(
+                                    remoteTarget.workspaceAvailability.state
+                                ).lowercased(),
+                            detail: remoteTarget.workspaceAvailability.summary
+                        )
+                    }
+
+                    if hasHostIssue {
+                        issueRow(
+                            symbol: hostState.tone.symbolName,
+                            color: hostState.tone.color,
+                            title: "Host " + hostValidationStateTitle(hostState).lowercased(),
+                            detail: remoteTarget.hostValidation?.summary
+                                ?? "Validate this Host to unblock deeper remote checks."
+                        )
+                    }
+                }
+                .padding(.horizontal, 14)
+            }
+        }
+
+        /// One scannable warning line \u2014 icon, title, detail \u2014 with no card chrome. Used
+        /// anywhere a Workspace/Host/Provider problem needs to surface inline instead of a
+        /// dedicated diagnostics panel nobody reads when things are fine.
+        private func issueRow(symbol: String, color: Color, title: String, detail: String) -> some View {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: symbol)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(color)
+                    .frame(width: 16, height: 16)
+                    .padding(.top, 1)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title.prefix(1).uppercased() + title.dropFirst())
+                        .font(NexusMacTheme.bodyFont(13).weight(.semibold))
+                        .foregroundStyle(NexusMacTheme.textPrimary)
+                    Text(detail)
+                        .font(NexusMacTheme.bodyFont(12, relativeTo: .caption))
+                        .foregroundStyle(NexusMacTheme.mutedText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+
+        /// The entire row launches/resumes the Provider's default Session \u2014 matching how
+        /// every other browse row in Nexus acts on tap. "View Details" moves to the right-click
+        /// menu since it's the secondary, occasional action, not the primary one.
+        private func providerRow(workspaceID: UUID, card: WorkspaceProviderCard) -> some View {
+            let identityAccent = NexusMacTheme.providerAccent(card.provider.id)
+            let healthColor = card.health.state.tone.color
+            let action: () -> Void = {
+                launchOrResumeDefaultSession(workspaceID: workspaceID, providerID: card.provider.id)
+            }
+
+            return NexusListRow(action: action) {
+                HStack(spacing: 14) {
+                    NexusIconBadge(
+                        systemImage: card.prelaunchPrimarySurface == .terminal ? "terminal.fill" : "message.fill",
+                        accent: identityAccent
+                    )
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(card.provider.displayName)
+                            .font(NexusMacTheme.bodyFont(14).weight(.semibold))
+                            .foregroundStyle(NexusMacTheme.textPrimary)
+                        Text(card.defaultSession.summary)
+                            .font(NexusMacTheme.bodyFont(12, relativeTo: .caption))
+                            .foregroundStyle(NexusMacTheme.mutedText)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    if card.alternateSessionCount > 0 {
+                        Text("\(card.alternateSessionCount)")
+                            .font(NexusMacTheme.bodyFont(11, relativeTo: .caption).weight(.semibold))
+                            .foregroundStyle(NexusMacTheme.mutedText)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(NexusMacTheme.overlay(0.06), in: Capsule())
+                    }
+
+                    Circle()
+                        .fill(healthColor)
+                        .frame(width: 6, height: 6)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(NexusMacTheme.mutedText.opacity(0.55))
+                }
+            }
+            .disabled(card.capabilities.launchDefaultSession.isEnabled == false)
+            .contextMenu {
+                Button("View Details") {
+                    selection = .provider(workspaceID, card.provider.id)
+                }
+            }
+        }
+
+        private func launchOrResumeDefaultSession(workspaceID: UUID, providerID: ProviderID) {
+            selection = .provider(workspaceID, providerID)
+
+            Task {
+                do {
+                    let session = try await appModel.launchOrResumeDefaultSession(
+                        workspaceID: workspaceID, providerID: providerID)
+                    focusedSessionID = session.id
+                } catch {
+                    presentedError = PresentedError(message: error.localizedDescription)
+                }
+            }
+        }
+
         private func providerDetail(workspaceID: UUID, providerID: ProviderID, detail: ProviderDetail?) -> some View {
+            let placeholder = appModel.providerDetailPlaceholder(for: workspaceID, providerID: providerID)
+
             return ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 22) {
                     if let detail {
-                        VStack(alignment: .leading, spacing: 18) {
-                            HStack(alignment: .top) {
-                                NexusSectionHeader(
-                                    eyebrow: "Provider briefing",
-                                    title: providerID.displayName,
-                                    detail: detail.health.summary
-                                )
-                                Spacer()
-                                NexusStatusPill(
-                                    text: detail.health.state.rawValue,
-                                    color: providerHealthColor(detail.health.state)
-                                )
-                            }
+                        providerDetailHeader(
+                            providerID: providerID,
+                            workspace: detail.workspace,
+                            health: detail.health,
+                            prelaunchPrimarySurface: detail.prelaunchPrimarySurface
+                        )
 
-                            HStack(spacing: 10) {
-                                NexusMetaBadge(icon: "folder", text: detail.workspace.name)
-                                NexusMetaBadge(
-                                    icon: detail.prelaunchPrimarySurface == .terminal
-                                        ? "terminal" : "sparkles.rectangle.stack",
-                                    text: detail.prelaunchPrimarySurface == .terminal
-                                        ? "Terminal surface" : "Structured surface")
-                                if let version = detail.health.version {
-                                    NexusMetaBadge(icon: "number", text: version)
-                                }
-                            }
-                        }
-                        .padding(26)
-                        .nexusPanel(tint: providerHealthColor(detail.health.state))
-
-                        if detail.health.diagnostics.isEmpty == false {
-                            VStack(alignment: .leading, spacing: 10) {
-                                Text("Diagnostics")
-                                    .font(NexusMacTheme.displayFont(22, relativeTo: .title3))
-                                    .foregroundStyle(.white)
-                                ForEach(Array(detail.health.diagnostics.enumerated()), id: \.offset) { _, diagnostic in
-                                    Text(diagnostic.message)
-                                        .font(NexusMacTheme.bodyFont(13))
-                                        .foregroundStyle(NexusMacTheme.mutedText)
-                                        .padding(14)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .nexusPanel(tint: providerHealthColor(detail.health.state), radius: 16)
-                                }
-                            }
+                        if detail.health.state != .available || detail.health.diagnostics.isEmpty == false {
+                            providerIssueStrip(health: detail.health)
                         }
 
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack {
-                                Text("Default Session")
-                                    .font(NexusMacTheme.displayFont(22, relativeTo: .title3))
-                                    .foregroundStyle(.white)
-                                Spacer()
-                                Button(defaultSessionButtonTitle(for: detail)) {
-                                    Task {
-                                        do {
-                                            let session = try await appModel.launchOrResumeDefaultSession(
-                                                workspaceID: workspaceID, providerID: providerID)
-                                            selection = .session(session.id)
-                                        } catch {
-                                            presentedError = PresentedError(message: error.localizedDescription)
-                                        }
-                                    }
-                                }
-                                .buttonStyle(NexusAccentButtonStyle())
-                                .disabled(detail.capabilities.launchDefaultSession.isEnabled == false)
-                            }
+                        providerSessionsSection(workspaceID: workspaceID, providerID: providerID, detail: detail)
+                    } else if let placeholder {
+                        providerDetailHeader(
+                            providerID: providerID,
+                            workspace: placeholder.workspace,
+                            health: placeholder.providerCard.health,
+                            prelaunchPrimarySurface: placeholder.providerCard.prelaunchPrimarySurface
+                        )
 
-                            if let defaultSession = detail.defaultSession {
-                                providerSessionRow(
-                                    defaultSession,
-                                    primaryActionTitle: defaultSession.state == .ready ? "Open" : "Inspect",
-                                    primaryAction: {
-                                        selection = .session(defaultSession.id)
-                                    },
-                                    secondaryActionTitle: providerSessionCanDeleteRecord(
-                                        defaultSession, workspace: detail.workspace) ? "Delete" : "Stop",
-                                    secondaryAction: {
-                                        if providerSessionCanDeleteRecord(defaultSession, workspace: detail.workspace) {
-                                            deleteSessionRecord(
-                                                defaultSession, workspaceID: workspaceID, providerID: providerID)
-                                        } else {
-                                            stopSession(
-                                                defaultSession, workspaceID: workspaceID, providerID: providerID)
-                                        }
-                                    }
-                                )
-                            } else {
-                                Text("No default session yet.")
-                                    .font(NexusMacTheme.bodyFont(14))
-                                    .foregroundStyle(NexusMacTheme.mutedText)
-                                    .padding(18)
-                                    .nexusPanel(tint: NexusMacTheme.gold, radius: 18)
-                            }
+                        if placeholder.providerCard.health.state != .available
+                            || placeholder.providerCard.health.diagnostics.isEmpty == false
+                        {
+                            providerIssueStrip(health: placeholder.providerCard.health)
                         }
 
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack {
-                                Text("Named Sessions")
-                                    .font(NexusMacTheme.displayFont(22, relativeTo: .title3))
-                                    .foregroundStyle(.white)
-                                Spacer()
-                                Button("New Session") {
-                                    Task {
-                                        do {
-                                            let session = try await appModel.createNamedSession(
-                                                workspaceID: workspaceID, providerID: providerID)
-                                            selection = .session(session.id)
-                                        } catch {
-                                            presentedError = PresentedError(message: error.localizedDescription)
-                                        }
-                                    }
-                                }
-                                .buttonStyle(NexusSecondaryButtonStyle())
-                                .disabled(detail.capabilities.createNamedSession.isEnabled == false)
-                            }
-
-                            if detail.alternateSessions.isEmpty {
-                                Text("No Named Sessions yet.")
-                                    .font(NexusMacTheme.bodyFont(14))
-                                    .foregroundStyle(NexusMacTheme.mutedText)
-                                    .padding(18)
-                                    .nexusPanel(tint: NexusMacTheme.teal, radius: 18)
-                            } else {
-                                ForEach(detail.alternateSessions) { session in
-                                    providerSessionRow(
-                                        session,
-                                        primaryActionTitle: session.state == .ready ? "Open" : "Inspect",
-                                        primaryAction: {
-                                            selection = .session(session.id)
-                                        },
-                                        secondaryActionTitle: providerSessionCanDeleteRecord(
-                                            session, workspace: detail.workspace) ? "Delete" : "Stop",
-                                        secondaryAction: {
-                                            if providerSessionCanDeleteRecord(session, workspace: detail.workspace) {
-                                                deleteSessionRecord(
-                                                    session, workspaceID: workspaceID, providerID: providerID)
-                                            } else {
-                                                stopSession(session, workspaceID: workspaceID, providerID: providerID)
-                                            }
-                                        }
-                                    )
-                                }
-                            }
-                        }
-
-                        if detail.failedSessions.isEmpty == false {
-                            VStack(alignment: .leading, spacing: 10) {
-                                Text("Failed Session Records")
-                                    .font(NexusMacTheme.displayFont(22, relativeTo: .title3))
-                                    .foregroundStyle(.white)
-
-                                ForEach(detail.failedSessions) { session in
-                                    providerSessionRow(
-                                        session,
-                                        primaryActionTitle: "Inspect",
-                                        primaryAction: {
-                                            selection = .session(session.id)
-                                        },
-                                        secondaryActionTitle: "Delete",
-                                        secondaryAction: {
-                                            deleteSessionRecord(
-                                                session, workspaceID: workspaceID, providerID: providerID)
-                                        }
-                                    )
-                                }
-                            }
-                        }
+                        providerPlaceholderSessionsSection(
+                            workspaceID: workspaceID,
+                            providerID: providerID,
+                            placeholder: placeholder
+                        )
                     } else {
-                        Text("Loading provider detail…")
+                        Text("Loading provider detail...")
                             .font(NexusMacTheme.bodyFont(14))
                             .foregroundStyle(NexusMacTheme.mutedText)
-                            .padding(20)
-                            .nexusPanel(tint: NexusMacTheme.gold)
+                            .padding(.horizontal, 14)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .topLeading)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+
+        private func providerDetailHeader(
+            providerID: ProviderID,
+            workspace: Workspace,
+            health: ProviderHealthSummary,
+            prelaunchPrimarySurface: SessionSurface
+        ) -> some View {
+            HStack(spacing: 12) {
+                NexusIconBadge(
+                    systemImage: prelaunchPrimarySurface == .terminal ? "terminal.fill" : "message.fill",
+                    accent: NexusMacTheme.providerAccent(providerID),
+                    size: 34
+                )
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(providerID.displayName)
+                        .font(NexusMacTheme.displayFont(22, relativeTo: .title2))
+                        .foregroundStyle(NexusMacTheme.textPrimary)
+                    Text(
+                        [workspace.name, health.version].compactMap { $0 }.joined(separator: "  ·  ")
+                    )
+                    .font(NexusMacTheme.bodyFont(12, relativeTo: .caption))
+                    .foregroundStyle(NexusMacTheme.mutedText)
+                }
+
+                Spacer(minLength: 0)
+
+                Circle()
+                    .fill(health.state.tone.color)
+                    .frame(width: 8, height: 8)
+            }
+            .padding(.horizontal, 14)
+        }
+
+        private func providerIssueStrip(health: ProviderHealthSummary) -> some View {
+            VStack(alignment: .leading, spacing: 8) {
+                issueRow(
+                    symbol: health.state.tone.symbolName,
+                    color: health.state.tone.color,
+                    title: "Provider " + health.state.rawValue.lowercased(),
+                    detail: health.summary
+                )
+
+                ForEach(Array(health.diagnostics.enumerated()), id: \.offset) { _, diagnostic in
+                    Text(diagnostic.message)
+                        .font(NexusMacTheme.bodyFont(12, relativeTo: .caption))
+                        .foregroundStyle(NexusMacTheme.mutedText)
+                        .padding(.leading, 26)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.horizontal, 14)
+        }
+
+        /// Default, Named, and Failed Sessions used to be three separate sections with
+        /// their own headers and a "relaunch" button living apart from the row it acted
+        /// on. They're really one concept \u2014 a Session you can return to \u2014 so they're one
+        /// scannable list now: click a row to relaunch/resume it, right-click to delete it.
+        private func providerSessionsSection(
+            workspaceID: UUID, providerID: ProviderID, detail: ProviderDetail
+        ) -> some View {
+            let entries = providerSessionRowEntries(workspaceID: workspaceID, providerID: providerID, detail: detail)
+
+            return VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Sessions")
+                        .font(NexusMacTheme.bodyFont(11, relativeTo: .caption).weight(.semibold))
+                        .tracking(1.4)
+                        .foregroundStyle(NexusMacTheme.mutedText)
+                    Spacer()
+                    Button("New Session") {
+                        createNamedSession(workspaceID: workspaceID, providerID: providerID)
+                    }
+                    .buttonStyle(NexusSecondaryButtonStyle())
+                    .controlSize(.small)
+                    .disabled(detail.capabilities.createNamedSession.isEnabled == false)
+                }
+                .padding(.horizontal, 14)
+
+                if entries.isEmpty {
+                    Text("No Sessions yet \u{2014} launch the default Session or start a new one.")
+                        .font(NexusMacTheme.bodyFont(14))
+                        .foregroundStyle(NexusMacTheme.mutedText)
+                        .padding(.horizontal, 14)
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+                            if index > 0 {
+                                NexusRowDivider()
+                            }
+                            sessionRow(
+                                entry.session, workspace: detail.workspace, workspaceID: workspaceID,
+                                providerID: providerID, primaryAction: entry.primaryAction)
+                        }
+                    }
+                }
+            }
+        }
+
+        private func providerPlaceholderSessionsSection(
+            workspaceID: UUID,
+            providerID: ProviderID,
+            placeholder: ProviderDetailPlaceholder
+        ) -> some View {
+            let providerCard = placeholder.providerCard
+
+            return VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Sessions")
+                        .font(NexusMacTheme.bodyFont(11, relativeTo: .caption).weight(.semibold))
+                        .tracking(1.4)
+                        .foregroundStyle(NexusMacTheme.mutedText)
+                    Spacer()
+                    Button("New Session") {
+                        createNamedSession(workspaceID: workspaceID, providerID: providerID)
+                    }
+                    .buttonStyle(NexusSecondaryButtonStyle())
+                    .controlSize(.small)
+                    .disabled(providerCard.capabilities.createNamedSession.isEnabled == false)
+                }
+                .padding(.horizontal, 14)
+
+                if providerCard.defaultSession.state != .notCreated {
+                    NexusListRow(
+                        action: {
+                            launchOrResumeDefaultSession(workspaceID: workspaceID, providerID: providerID)
+                        },
+                        content: {
+                            HStack(spacing: 14) {
+                                Circle()
+                                    .fill(providerDefaultSessionTone(providerCard.defaultSession.state).color)
+                                    .frame(width: 8, height: 8)
+
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("Default Session")
+                                        .font(NexusMacTheme.bodyFont(14).weight(.semibold))
+                                        .foregroundStyle(NexusMacTheme.textPrimary)
+                                    Text(providerCard.defaultSession.summary)
+                                        .font(NexusMacTheme.bodyFont(12, relativeTo: .caption))
+                                        .foregroundStyle(NexusMacTheme.mutedText)
+                                        .lineLimit(1)
+                                }
+
+                                Spacer(minLength: 8)
+
+                                Text(providerCard.defaultSession.actionTitle)
+                                    .font(NexusMacTheme.bodyFont(12, relativeTo: .caption).weight(.semibold))
+                                    .foregroundStyle(NexusMacTheme.mutedText)
+                            }
+                        }
+                    )
+                }
+
+                if providerCard.alternateSessionCount > 0 {
+                    Text(
+                        "Loading \(providerCard.alternateSessionCount) named session\(providerCard.alternateSessionCount == 1 ? "" : "s")…"
+                    )
+                    .font(NexusMacTheme.bodyFont(14))
+                    .foregroundStyle(NexusMacTheme.mutedText)
+                    .padding(.horizontal, 14)
+                } else if providerCard.defaultSession.state == .notCreated {
+                    Text("No Sessions yet — launch the default Session or start a new one.")
+                        .font(NexusMacTheme.bodyFont(14))
+                        .foregroundStyle(NexusMacTheme.mutedText)
+                        .padding(.horizontal, 14)
+                }
+            }
+        }
+
+        private func providerDefaultSessionTone(_ state: ProviderDefaultSessionSummary.State) -> NexusStatusTone {
+            switch state {
+            case .notCreated:
+                .unknown
+            case .ready:
+                .healthy
+            case .interrupted:
+                .warning
+            case .exited, .failed:
+                .critical
+            }
+        }
+
+        private func providerSessionRowEntries(
+            workspaceID: UUID, providerID: ProviderID, detail: ProviderDetail
+        ) -> [ProviderSessionRowEntry] {
+            var entries: [ProviderSessionRowEntry] = []
+
+            if let defaultSession = detail.defaultSession {
+                entries.append(
+                    ProviderSessionRowEntry(session: defaultSession) {
+                        self.launchOrResumeDefaultSession(workspaceID: workspaceID, providerID: providerID)
+                    })
+            }
+
+            for session in detail.alternateSessions {
+                entries.append(
+                    ProviderSessionRowEntry(session: session) {
+                        self.focusedSessionID = session.id
+                        self.selection = .provider(workspaceID, providerID)
+                    })
+            }
+
+            for session in detail.failedSessions {
+                entries.append(
+                    ProviderSessionRowEntry(session: session) {
+                        self.focusedSessionID = session.id
+                        self.selection = .provider(workspaceID, providerID)
+                    })
+            }
+
+            return entries
+        }
+
+        private func sessionRow(
+            _ session: Session,
+            workspace: Workspace,
+            workspaceID: UUID,
+            providerID: ProviderID,
+            primaryAction: @escaping () -> Void
+        ) -> some View {
+            let accent = session.state.tone.color
+            let canDelete = providerSessionCanDeleteRecord(session, workspace: workspace)
+
+            return NexusListRow(action: primaryAction) {
+                HStack(spacing: 14) {
+                    Circle()
+                        .fill(accent)
+                        .frame(width: 8, height: 8)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(session.isDefault ? "Default Session" : (session.name ?? "Named Session"))
+                            .font(NexusMacTheme.bodyFont(14).weight(.semibold))
+                            .foregroundStyle(NexusMacTheme.textPrimary)
+                        Text(session.failureMessage ?? session.state.rawValue.capitalized)
+                            .font(NexusMacTheme.bodyFont(12, relativeTo: .caption))
+                            .foregroundStyle(NexusMacTheme.mutedText)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(NexusMacTheme.mutedText.opacity(0.55))
+                }
+            }
+            .contextMenu {
+                if canDelete {
+                    Button("Delete Session Record", role: .destructive) {
+                        deleteSessionRecord(session, workspaceID: workspaceID, providerID: providerID)
+                    }
+                } else {
+                    Button("Stop Session") {
+                        stopSession(session, workspaceID: workspaceID, providerID: providerID)
+                    }
+                }
+            }
+        }
+
+        private func createNamedSession(workspaceID: UUID, providerID: ProviderID) {
+            Task {
+                do {
+                    let session = try await appModel.createNamedSession(
+                        workspaceID: workspaceID, providerID: providerID)
+                    focusedSessionID = session.id
+                    selection = .provider(workspaceID, providerID)
+                } catch {
+                    presentedError = PresentedError(message: error.localizedDescription)
+                }
+            }
         }
 
         private func sessionDetailContent(
@@ -821,7 +1181,9 @@
             let isReady = summary.session.state == .ready
             let isRemote = context?.isRemote == true
             let surface = summary.primarySurface
-            let stateColor = sessionStateColor(summary.session.state)
+            let stateColor = summary.session.state.tone.color
+
+            let providerAccent = NexusMacTheme.providerAccent(summary.session.providerID)
 
             return VStack(alignment: .leading, spacing: 14) {
                 HStack(spacing: 10) {
@@ -832,7 +1194,7 @@
                     VStack(alignment: .leading, spacing: 2) {
                         Text(summary.session.providerID.displayName)
                             .font(NexusMacTheme.bodyFont(17).weight(.semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(providerAccent)
 
                         if let context {
                             Text(sessionSubtitle(for: context, surface: surface))
@@ -842,6 +1204,16 @@
                     }
 
                     Spacer()
+
+                    Button {
+                        focusedSessionID = nil
+                    } label: {
+                        Image(systemName: "xmark.circle")
+                            .font(.title3)
+                            .foregroundStyle(NexusMacTheme.textPrimary.opacity(0.6))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Close (keeps the Session running)")
 
                     Menu {
                         if isRemote, isReady {
@@ -865,7 +1237,7 @@
                                 Task {
                                     do {
                                         let session = try await appModel.relaunchFocusedSession()
-                                        selection = .session(session.id)
+                                        focusedSessionID = session.id
                                     } catch {
                                         presentedError = PresentedError(message: error.localizedDescription)
                                     }
@@ -875,7 +1247,7 @@
                     } label: {
                         Image(systemName: "ellipsis.circle")
                             .font(.title3)
-                            .foregroundStyle(.white.opacity(0.86))
+                            .foregroundStyle(NexusMacTheme.textPrimary.opacity(0.86))
                     }
                     .menuStyle(.borderlessButton)
                     .buttonStyle(.plain)
@@ -905,127 +1277,6 @@
                 : context.workspace.name
         }
 
-        private func providerCard(workspaceID: UUID, card: WorkspaceProviderCard) -> some View {
-            let accent = providerHealthColor(card.health.state)
-
-            return HStack(alignment: .top, spacing: 14) {
-                Image(systemName: card.prelaunchPrimarySurface == .terminal ? "terminal.fill" : "message.fill")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(accent)
-                    .frame(width: 28, height: 28)
-                    .background(accent.opacity(0.15), in: Circle())
-
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text(card.provider.displayName)
-                            .font(NexusMacTheme.bodyFont(16).weight(.semibold))
-                            .foregroundStyle(.white)
-                        Spacer()
-                        NexusStatusPill(
-                            text: card.health.state.rawValue.replacingOccurrences(of: "Checked", with: " checked"),
-                            color: accent)
-                    }
-
-                    Text(card.defaultSession.summary)
-                        .font(NexusMacTheme.bodyFont(14))
-                        .foregroundStyle(.white.opacity(0.92))
-
-                    if let namedSessionSummary = card.namedSessionSummary {
-                        Text(namedSessionSummary)
-                            .font(NexusMacTheme.bodyFont(12, relativeTo: .caption))
-                            .foregroundStyle(NexusMacTheme.mutedText)
-                    } else {
-                        Text(card.health.summary)
-                            .font(NexusMacTheme.bodyFont(12, relativeTo: .caption))
-                            .foregroundStyle(NexusMacTheme.mutedText)
-                            .lineLimit(2)
-                    }
-
-                    HStack(spacing: 10) {
-                        Button(card.defaultSession.actionTitle) {
-                            Task {
-                                do {
-                                    let session = try await appModel.launchOrResumeDefaultSession(
-                                        workspaceID: workspaceID, providerID: card.provider.id)
-                                    selection = .session(session.id)
-                                } catch {
-                                    presentedError = PresentedError(message: error.localizedDescription)
-                                }
-                            }
-                        }
-                        .buttonStyle(NexusAccentButtonStyle())
-                        .disabled(card.capabilities.launchDefaultSession.isEnabled == false)
-
-                        Button("Details") {
-                            selection = .provider(workspaceID, card.provider.id)
-                        }
-                        .buttonStyle(NexusSecondaryButtonStyle())
-                    }
-                }
-            }
-            .padding(18)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-            .nexusPanel(tint: accent, radius: 18)
-        }
-
-        private func remoteStatusPanel(
-            title: String,
-            stateTitle: String,
-            stateSymbol: String,
-            stateColor: Color,
-            summary: String,
-            checkedAt: Date?,
-            diagnostics: [(code: String, message: String)]
-        ) -> some View {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(title)
-                            .font(NexusMacTheme.displayFont(20, relativeTo: .title3))
-                            .foregroundStyle(.white)
-                        Text(summary)
-                            .font(NexusMacTheme.bodyFont(13))
-                            .foregroundStyle(NexusMacTheme.mutedText)
-                    }
-                    Spacer()
-                    Label(stateTitle, systemImage: stateSymbol)
-                        .font(NexusMacTheme.bodyFont(12, relativeTo: .caption).weight(.semibold))
-                        .foregroundStyle(stateColor)
-                }
-
-                NexusInspectorRow(
-                    title: "Last Checked",
-                    value: checkedAt?.formatted(date: .abbreviated, time: .shortened) ?? "Not checked"
-                )
-
-                if diagnostics.isEmpty == false {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Diagnostics")
-                            .font(NexusMacTheme.monoFont(11, relativeTo: .caption))
-                            .tracking(2)
-                            .foregroundStyle(NexusMacTheme.gold)
-
-                        ForEach(Array(diagnostics.enumerated()), id: \.offset) { _, diagnostic in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(diagnostic.message)
-                                    .font(NexusMacTheme.bodyFont(12, relativeTo: .caption))
-                                    .foregroundStyle(.white.opacity(0.9))
-                                Text(diagnostic.code)
-                                    .font(NexusMacTheme.monoFont(11, relativeTo: .caption2))
-                                    .foregroundStyle(NexusMacTheme.mutedText)
-                            }
-                            .padding(12)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .nexusPanel(tint: stateColor, radius: 14)
-                        }
-                    }
-                }
-            }
-            .padding(20)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .nexusPanel(tint: stateColor, radius: 20)
-        }
-
         private func sidebarNavigationItemView(
             title: String,
             subtitle: String,
@@ -1042,7 +1293,7 @@
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title)
                         .font(NexusMacTheme.bodyFont(14).weight(.semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(NexusMacTheme.textPrimary)
                         .lineLimit(1)
                     Text(subtitle)
                         .font(NexusMacTheme.bodyFont(11, relativeTo: .caption))
@@ -1054,31 +1305,7 @@
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        }
-
-        private func providerHealthColor(_ state: ProviderHealthSummary.State) -> Color {
-            switch state {
-            case .available:
-                NexusMacTheme.teal
-            case .unavailable, .blocked:
-                NexusMacTheme.gold
-            case .misconfigured:
-                NexusMacTheme.coral
-            case .notChecked:
-                Color.white.opacity(0.65)
-            }
-        }
-
-        private func sessionStateColor(_ state: Session.State) -> Color {
-            switch state {
-            case .ready:
-                NexusMacTheme.teal
-            case .interrupted:
-                NexusMacTheme.gold
-            case .exited, .failed:
-                NexusMacTheme.coral
-            }
+            .background(NexusMacTheme.overlay(0.04), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
 
         private func hostValidationStateTitle(_ state: HostValidationSnapshot.State?) -> String {
@@ -1091,32 +1318,6 @@
                 "Broken"
             case .notChecked, .none:
                 "Not checked"
-            }
-        }
-
-        private func hostValidationStateSymbol(_ state: HostValidationSnapshot.State?) -> String {
-            switch state {
-            case .available:
-                "checkmark.circle"
-            case .unavailable:
-                "wifi.exclamationmark"
-            case .broken:
-                "exclamationmark.triangle"
-            case .notChecked, .none:
-                "clock"
-            }
-        }
-
-        private func hostValidationStateColor(_ state: HostValidationSnapshot.State?) -> Color {
-            switch state {
-            case .available:
-                .green
-            case .unavailable:
-                .orange
-            case .broken:
-                .red
-            case .notChecked, .none:
-                .secondary
             }
         }
 
@@ -1133,32 +1334,6 @@
             }
         }
 
-        private func workspaceAvailabilityStateSymbol(_ state: WorkspaceAvailabilitySnapshot.State) -> String {
-            switch state {
-            case .available:
-                "checkmark.circle"
-            case .unavailable:
-                "wifi.exclamationmark"
-            case .broken:
-                "exclamationmark.triangle"
-            case .blocked:
-                "pause.circle"
-            }
-        }
-
-        private func workspaceAvailabilityStateColor(_ state: WorkspaceAvailabilitySnapshot.State) -> Color {
-            switch state {
-            case .available:
-                .green
-            case .unavailable:
-                .orange
-            case .broken:
-                .red
-            case .blocked:
-                .secondary
-            }
-        }
-
         private func providerSessionRow(
             _ session: Session,
             primaryActionTitle: String,
@@ -1166,7 +1341,7 @@
             secondaryActionTitle: String? = nil,
             secondaryAction: (() -> Void)? = nil
         ) -> some View {
-            let accent = sessionStateColor(session.state)
+            let accent = session.state.tone.color
 
             return HStack(alignment: .top, spacing: 16) {
                 VStack(alignment: .leading, spacing: 8) {
@@ -1176,7 +1351,7 @@
                     )
                     Text(session.failureMessage ?? session.state.rawValue.capitalized)
                         .font(NexusMacTheme.bodyFont(14))
-                        .foregroundStyle(.white.opacity(0.9))
+                        .foregroundStyle(NexusMacTheme.textPrimary.opacity(0.9))
                 }
 
                 Spacer()
@@ -1208,6 +1383,7 @@
         private func detachSession(_ session: Session) {
             Task {
                 _ = await appModel.detachFocusedSession()
+                focusedSessionID = nil
                 selection = .provider(session.workspaceID, session.providerID)
             }
         }
@@ -1223,20 +1399,68 @@
             }
         }
 
-        private func defaultSessionButtonTitle(for detail: ProviderDetail) -> String {
-            guard let session = detail.defaultSession else {
-                return "Launch"
-            }
-
-            return session.state == .ready ? "Resume" : "Relaunch"
-        }
-
         private func providerSessionCanDeleteRecord(_ session: Session, workspace: Workspace) -> Bool {
             if session.state != .ready {
                 return true
             }
 
             return session.providerID == .ibmBob && workspace.kind == .local
+        }
+
+        private func openCommandPalette() {
+            quickSwitchSearchCoordinator.cancel()
+            quickSwitchQuery = ""
+            quickSwitchResults = []
+            isShowingQuickSwitchSheet = true
+        }
+
+        private var commandPaletteActions: [NexusCommandPaletteAction] {
+            [
+                NexusCommandPaletteAction(
+                    id: "new-local-workspace",
+                    title: "New Local Workspace",
+                    subtitle: "Add a folder on this Mac.",
+                    systemImage: "folder.badge.plus",
+                    perform: { self.addLocalWorkspace() }
+                ),
+                NexusCommandPaletteAction(
+                    id: "new-remote-workspace",
+                    title: "New Remote Workspace",
+                    subtitle: "Add a Host and remote path.",
+                    systemImage: "macbook.and.iphone",
+                    perform: { isShowingCreateRemoteWorkspaceSheet = true }
+                ),
+                NexusCommandPaletteAction(
+                    id: "new-workspace-group",
+                    title: "New Workspace Group",
+                    subtitle: "Create a curated lane for related Workspaces.",
+                    systemImage: "line.3.horizontal.decrease.circle",
+                    perform: {
+                        newWorkspaceGroupName = ""
+                        isShowingCreateWorkspaceGroupSheet = true
+                    }
+                ),
+                NexusCommandPaletteAction(
+                    id: "show-hosts",
+                    title: "Hosts",
+                    subtitle: "Review saved remote Host profiles.",
+                    systemImage: "network",
+                    perform: {
+                        settingsTabSelection.tab = .hosts
+                        openSettings()
+                    }
+                ),
+                NexusCommandPaletteAction(
+                    id: "show-remote-access",
+                    title: "Remote Access",
+                    subtitle: "Manage Paired Devices and pairing.",
+                    systemImage: "point.3.connected.trianglepath.dotted",
+                    perform: {
+                        settingsTabSelection.tab = .remoteAccess
+                        openSettings()
+                    }
+                ),
+            ]
         }
 
         private func navigate(to target: NavigationTarget) {
@@ -1255,7 +1479,7 @@
                 guard let sessionID = target.sessionID else {
                     return
                 }
-                selection = .session(sessionID)
+                focusedSessionID = sessionID
             }
         }
 
@@ -1645,12 +1869,14 @@
             guard initial < total else {
                 return
             }
-            let batch = StructuredSessionFeedMacOSStartupPolicy.visibleTailRowsPerRevealBatch
             Task { @MainActor in
                 var visible = initial
                 while visible < total {
                     await Task.yield()
-                    visible = min(visible + batch, total)
+                    visible = StructuredSessionFeedMacOSStartupPolicy.nextVisibleTailRowCount(
+                        currentVisibleCount: visible,
+                        totalRowCount: total
+                    )
                     structuredSessionMacOSFeedVisibleTailRowCount = visible
                 }
             }
@@ -1675,7 +1901,7 @@
                             }
                             Text(
                                 appModel.isLoadingOlderFocusedStructuredSessionHistory
-                                    ? "Loading older activity…" : "Load older activity")
+                                    ? "Loading older activity..." : "Load older activity")
                         }
                         .frame(maxWidth: .infinity)
                     }
@@ -1709,7 +1935,7 @@
                     Spacer(minLength: 48)
                     Text(conversation.text)
                         .font(NexusMacTheme.bodyFont(13))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(NexusMacTheme.textPrimary)
                         .structuredSessionFeedTextSelection()
                         .multilineTextAlignment(.trailing)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1717,6 +1943,11 @@
                         .padding(.vertical, 8)
                         .background(NexusMacTheme.gold, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                         .frame(maxWidth: 520, alignment: .trailing)
+                        .contextMenu {
+                            Button("Copy") {
+                                structuredSessionFeedMarkdownCopyToPasteboard(conversation.text)
+                            }
+                        }
                 }
                 .frame(maxWidth: .infinity, alignment: .trailing)
             case .assistant(let label):
@@ -1729,13 +1960,18 @@
                         conversation,
                         rowID: row.id,
                         font: NexusMacTheme.bodyFont(13),
-                        color: .white.opacity(0.94)
+                        color: NexusMacTheme.terminalText.opacity(0.94)
                     )
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
-                .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .background(NexusMacTheme.overlay(0.1), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .frame(maxWidth: 520, alignment: .leading)
+                .contextMenu {
+                    Button("Copy") {
+                        structuredSessionFeedMarkdownCopyToPasteboard(conversation.text)
+                    }
+                }
             case .command:
                 VStack(alignment: .leading, spacing: 8) {
                     Text(row.title)
@@ -1743,7 +1979,7 @@
                         .foregroundStyle(accent)
                     Text(conversation.text)
                         .font(NexusMacTheme.monoFont(11, relativeTo: .callout))
-                        .foregroundStyle(.white.opacity(0.92))
+                        .foregroundStyle(NexusMacTheme.textPrimary.opacity(0.92))
                         .structuredSessionFeedTextSelection()
                         .fixedSize(horizontal: false, vertical: true)
                     if let detailText = row.detailText {
@@ -1755,7 +1991,7 @@
                     }
                 }
                 .padding(12)
-                .background(Color.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(NexusMacTheme.overlay(0.09), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .frame(maxWidth: 620, alignment: .leading)
             case .error:
                 VStack(alignment: .leading, spacing: 5) {
@@ -1764,7 +2000,7 @@
                         .foregroundStyle(accent)
                     Text(conversation.text)
                         .font(NexusMacTheme.bodyFont(13))
-                        .foregroundStyle(.white.opacity(0.94))
+                        .foregroundStyle(NexusMacTheme.textPrimary.opacity(0.94))
                         .structuredSessionFeedTextSelection()
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -1780,7 +2016,7 @@
                                 .foregroundStyle(NexusMacTheme.mutedText)
                             Text(verbatim: conversation.text)
                                 .font(NexusMacTheme.bodyFont(13))
-                                .foregroundStyle(.white.opacity(0.92))
+                                .foregroundStyle(NexusMacTheme.textPrimary.opacity(0.92))
                                 .structuredSessionFeedTextSelection()
                                 .fixedSize(horizontal: false, vertical: true)
                             if let detailText = row.detailText {
@@ -1793,7 +2029,7 @@
                         }
                         .padding(12)
                         .background(
-                            Color.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            NexusMacTheme.overlay(0.09), in: RoundedRectangle(cornerRadius: 14, style: .continuous)
                         )
                         .frame(maxWidth: 620, alignment: .leading)
                     } else {
@@ -1802,7 +2038,7 @@
                             .foregroundStyle(NexusMacTheme.mutedText)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
-                            .background(Color.white.opacity(0.05), in: Capsule())
+                            .background(NexusMacTheme.overlay(0.05), in: Capsule())
                             .frame(maxWidth: .infinity, alignment: .center)
                     }
                 }
@@ -1907,7 +2143,7 @@
                     if showsCollapsedPreview {
                         Text(verbatim: text)
                             .font(font)
-                            .foregroundStyle(.white.opacity(0.84))
+                            .foregroundStyle(NexusMacTheme.textPrimary.opacity(0.84))
                             .structuredSessionFeedTextSelection()
                             .frame(
                                 height: structuredSessionFeedCollapsedDetailViewportHeight,
@@ -1917,7 +2153,7 @@
                     } else {
                         Text(verbatim: text)
                             .font(font)
-                            .foregroundStyle(.white.opacity(0.84))
+                            .foregroundStyle(NexusMacTheme.textPrimary.opacity(0.84))
                             .structuredSessionFeedTextSelection()
                     }
                 }
@@ -1934,7 +2170,7 @@
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(10)
-            .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .background(NexusMacTheme.terminalOverlay, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
 
         private func structuredSessionThinkingIndicatorView(_ indicator: StructuredSessionThinkingIndicator)
@@ -1950,7 +2186,7 @@
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Color.white.opacity(0.05), in: Capsule())
+            .background(NexusMacTheme.overlay(0.05), in: Capsule())
             .frame(maxWidth: .infinity, alignment: .center)
         }
 
@@ -1965,11 +2201,11 @@
 
                 Text(request.title)
                     .font(NexusMacTheme.bodyFont(14).weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(NexusMacTheme.textPrimary)
 
                 Text(request.text)
                     .font(NexusMacTheme.bodyFont(13))
-                    .foregroundStyle(.white.opacity(0.92))
+                    .foregroundStyle(NexusMacTheme.textPrimary.opacity(0.92))
                     .structuredSessionFeedTextSelection()
                     .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -2008,7 +2244,7 @@
                 if let title = extensionUI.title, title.isEmpty == false {
                     Text(title)
                         .font(NexusMacTheme.bodyFont(14).weight(.semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(NexusMacTheme.textPrimary)
                 }
 
                 if extensionUI.statuses.isEmpty == false {
@@ -2020,10 +2256,10 @@
                         ForEach(extensionUI.statuses) { status in
                             Text(status.text)
                                 .font(NexusMacTheme.bodyFont(12))
-                                .foregroundStyle(.white.opacity(0.92))
+                                .foregroundStyle(NexusMacTheme.textPrimary.opacity(0.92))
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
-                                .background(Color.white.opacity(0.05), in: Capsule())
+                                .background(NexusMacTheme.overlay(0.05), in: Capsule())
                         }
                     }
                 }
@@ -2041,13 +2277,13 @@
                                     .foregroundStyle(structuredSessionExtensionNotificationColor(notification.kind))
                                 Text(notification.message)
                                     .font(NexusMacTheme.bodyFont(12))
-                                    .foregroundStyle(.white.opacity(0.92))
+                                    .foregroundStyle(NexusMacTheme.textPrimary.opacity(0.92))
                                     .structuredSessionFeedTextSelection()
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(10)
                             .background(
-                                Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                NexusMacTheme.overlay(0.04), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
                     }
                 }
@@ -2071,7 +2307,7 @@
         private func structuredSessionActivityColor(for emphasis: StructuredSessionActivityEmphasis) -> Color {
             switch emphasis {
             case .neutral:
-                Color.white.opacity(0.55)
+                NexusMacTheme.overlay(0.55)
             case .accent:
                 NexusMacTheme.gold
             case .critical:
@@ -2170,8 +2406,8 @@
         }
 
         private func resolvedTerminalColors(for style: TerminalStyle) -> (foreground: Color, background: Color) {
-            let defaultForeground = Color.white
-            let defaultBackground = Color.black
+            let defaultForeground = NexusMacTheme.terminalText
+            let defaultBackground = NexusMacTheme.terminalSurface
             let foreground = color(for: style.foregroundColor) ?? defaultForeground
             let background = color(for: style.backgroundColor)
 
@@ -2304,7 +2540,18 @@
         let onError: (String) -> Void
 
         @State private var draftState = StructuredSessionComposerDraftState()
+        @State private var isComposerExpanded = false
+        @State private var highlightedSlashCommandID: String?
         @FocusState private var isPromptFocused: Bool
+
+        private static let collapsedLineLimit = 1...3
+        private static let expandedLineLimit = 1...12
+        private static let averageCharactersPerLine = 64
+
+        private var needsDisclosureControl: Bool {
+            ComposerOverflowHeuristic.exceedsCollapsedLineLimit(
+                draftState.draft, collapsedLines: 3, averageCharactersPerLine: Self.averageCharactersPerLine)
+        }
 
         var body: some View {
             let composerPresentation = structuredSessionComposerPresentation(for: chrome, hasWriterAuthority: true)
@@ -2312,6 +2559,9 @@
                 for: draftState.draft,
                 chrome: chrome
             )
+            let highlightedSlashCommandID =
+                slashCommandMenuPresentation.commands.first(where: { $0.id == self.highlightedSlashCommandID })?.id
+                ?? slashCommandMenuPresentation.commands.first?.id
             let statusBarPresentation = structuredSessionStatusBarPresentation(
                 for: chrome,
                 workspaceLocation: workspaceLocation
@@ -2319,7 +2569,7 @@
 
             VStack(alignment: .leading, spacing: 8) {
                 if slashCommandMenuPresentation.isVisible {
-                    slashCommandMenu(slashCommandMenuPresentation)
+                    slashCommandMenu(slashCommandMenuPresentation, highlightedCommandID: highlightedSlashCommandID)
                 }
 
                 if aboveEditorWidgets.isEmpty == false {
@@ -2333,18 +2583,59 @@
                         .focused($isPromptFocused)
                         .font(NexusMacTheme.bodyFont(13))
                         .textFieldStyle(.plain)
-                        .lineLimit(1...4)
+                        .lineLimit(isComposerExpanded ? Self.expandedLineLimit : Self.collapsedLineLimit)
                         .submitLabel(.send)
                         .disabled(composerPresentation.isEnabled == false || chrome.isAgentTurnInProgress)
+                        .onKeyPress(.upArrow) {
+                            guard slashCommandMenuPresentation.isVisible else {
+                                return .ignored
+                            }
+                            moveSlashCommandHighlight(
+                                by: -1,
+                                from: highlightedSlashCommandID,
+                                in: slashCommandMenuPresentation.commands
+                            )
+                            return .handled
+                        }
+                        .onKeyPress(.downArrow) {
+                            guard slashCommandMenuPresentation.isVisible else {
+                                return .ignored
+                            }
+                            moveSlashCommandHighlight(
+                                by: 1,
+                                from: highlightedSlashCommandID,
+                                in: slashCommandMenuPresentation.commands
+                            )
+                            return .handled
+                        }
+                        .onKeyPress(.tab) {
+                            guard slashCommandMenuPresentation.isVisible,
+                                let command = slashCommandMenuPresentation.commands.first(where: {
+                                    $0.id == highlightedSlashCommandID
+                                })
+                            else {
+                                return .ignored
+                            }
+                            draftState.apply(command)
+                            return .handled
+                        }
                         .onSubmit {
                             sendStructuredSessionPrompt()
                         }
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
-                        .background(Color.white.opacity(0.08), in: Capsule())
+                        .background(
+                            NexusMacTheme.overlay(0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        )
                         .overlay {
-                            Capsule()
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
                                 .stroke(NexusMacTheme.softLine, lineWidth: 1)
+                        }
+                        .overlay(alignment: .top) {
+                            if needsDisclosureControl {
+                                composerDisclosureControl
+                                    .offset(y: -11)
+                            }
                         }
                 }
 
@@ -2353,7 +2644,7 @@
                 }
             }
             .padding(14)
-            .background(Color.white.opacity(0.02))
+            .background(NexusMacTheme.overlay(0.02))
             .task(id: chrome.session.id) {
                 draftState = StructuredSessionComposerDraftState()
                 draftState.observe(editorText: chrome.extensionUI?.editorText)
@@ -2363,6 +2654,25 @@
             }
         }
 
+        private var composerDisclosureControl: some View {
+            Button {
+                withAnimation(.snappy(duration: 0.18)) {
+                    isComposerExpanded.toggle()
+                }
+            } label: {
+                Image(systemName: isComposerExpanded ? "chevron.down" : "chevron.up")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(NexusMacTheme.mutedText)
+                    .frame(width: 28, height: 16)
+                    .background(NexusMacTheme.panelRaised, in: Capsule())
+                    .overlay {
+                        Capsule().stroke(NexusMacTheme.softLine, lineWidth: 1)
+                    }
+            }
+            .buttonStyle(.plain)
+            .help(isComposerExpanded ? "Collapse" : "Expand")
+        }
+
         private var draftBinding: Binding<String> {
             Binding(
                 get: { draftState.draft },
@@ -2370,49 +2680,81 @@
             )
         }
 
+        private func moveSlashCommandHighlight(
+            by delta: Int,
+            from currentID: String?,
+            in commands: [StructuredSessionSlashCommand]
+        ) {
+            guard commands.isEmpty == false else {
+                highlightedSlashCommandID = nil
+                return
+            }
+            let currentIndex = commands.firstIndex { $0.id == currentID } ?? 0
+            let nextIndex = (currentIndex + delta + commands.count) % commands.count
+            highlightedSlashCommandID = commands[nextIndex].id
+        }
+
         @ViewBuilder
-        private func slashCommandMenu(_ menu: StructuredSessionSlashCommandMenuPresentation) -> some View {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 4) {
-                    ForEach(menu.commands) { command in
-                        Button {
-                            draftState.apply(command)
-                            isPromptFocused = true
-                        } label: {
-                            HStack(alignment: .top, spacing: 12) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(command.displayText)
-                                        .font(NexusMacTheme.monoFont(12, relativeTo: .callout))
-                                        .foregroundStyle(.white)
-                                    Text(command.summary)
-                                        .font(NexusMacTheme.bodyFont(11, relativeTo: .caption))
-                                        .foregroundStyle(NexusMacTheme.mutedText)
-                                        .multilineTextAlignment(.leading)
+        private func slashCommandMenu(
+            _ menu: StructuredSessionSlashCommandMenuPresentation,
+            highlightedCommandID: String?
+        ) -> some View {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 4) {
+                        ForEach(menu.commands) { command in
+                            let isHighlighted = command.id == highlightedCommandID
+                            Button {
+                                highlightedSlashCommandID = command.id
+                                draftState.apply(command)
+                                isPromptFocused = true
+                            } label: {
+                                HStack(alignment: .top, spacing: 12) {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(command.displayText)
+                                            .font(NexusMacTheme.monoFont(12, relativeTo: .callout))
+                                            .foregroundStyle(NexusMacTheme.textPrimary)
+                                        Text(command.summary)
+                                            .font(NexusMacTheme.bodyFont(11, relativeTo: .caption))
+                                            .foregroundStyle(NexusMacTheme.mutedText)
+                                            .multilineTextAlignment(.leading)
+                                    }
+                                    Spacer(minLength: 0)
                                 }
-                                Spacer(minLength: 0)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 9)
+                                .contentShape(Rectangle())
                             }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 9)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(Color.white.opacity(0.03))
-                        )
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(NexusMacTheme.softLine.opacity(0.8), lineWidth: 1)
+                            .buttonStyle(.plain)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(
+                                        isHighlighted ? NexusMacTheme.gold.opacity(0.16) : NexusMacTheme.overlay(0.03))
+                            )
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(
+                                        isHighlighted ? NexusMacTheme.gold : NexusMacTheme.softLine.opacity(0.8),
+                                        lineWidth: isHighlighted ? 1.5 : 1
+                                    )
+                            }
+                            .id(command.id)
                         }
                     }
+                    .padding(8)
                 }
-                .padding(8)
+                .onChange(of: highlightedCommandID) { _, newValue in
+                    guard let newValue else {
+                        return
+                    }
+                    proxy.scrollTo(newValue, anchor: .center)
+                }
             }
             .frame(maxWidth: .infinity)
             .frame(maxHeight: 220)
             .background(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color.black.opacity(0.88))
+                    .fill(NexusMacTheme.terminalSurface)
             )
             .overlay {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -2430,14 +2772,14 @@
                         ForEach(Array(widget.lines.enumerated()), id: \.offset) { _, line in
                             Text(line)
                                 .font(NexusMacTheme.bodyFont(12))
-                                .foregroundStyle(.white.opacity(0.92))
+                                .foregroundStyle(NexusMacTheme.textPrimary.opacity(0.92))
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .background(NexusMacTheme.overlay(0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
             }
         }
@@ -2462,7 +2804,7 @@
             .foregroundStyle(NexusMacTheme.mutedText)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(NexusMacTheme.overlay(0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .stroke(NexusMacTheme.softLine, lineWidth: 1)
@@ -2776,12 +3118,12 @@
 
                 Text(dialog.title)
                     .font(NexusMacTheme.bodyFont(14).weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(NexusMacTheme.textPrimary)
 
                 if let message = dialog.message, message.isEmpty == false {
                     Text(message)
                         .font(NexusMacTheme.bodyFont(13))
-                        .foregroundStyle(.white.opacity(0.92))
+                        .foregroundStyle(NexusMacTheme.textPrimary.opacity(0.92))
                         .textSelection(.enabled)
                 }
 
@@ -2840,7 +3182,7 @@
                         .frame(minHeight: 140)
                         .padding(8)
                         .background(
-                            Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            NexusMacTheme.overlay(0.05), in: RoundedRectangle(cornerRadius: 14, style: .continuous)
                         )
                         .overlay {
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -2897,9 +3239,9 @@
                 workspaceID
             case .provider(let workspaceID, _):
                 workspaceID
-            case .session:
+            case .none:
                 appModel.focusedSessionWorkspaceID
-            case .workspaceGroup, .none:
+            case .workspaceGroup:
                 nil
             }
         }
@@ -2930,9 +3272,9 @@
                 workspaceID
             case .provider(let workspaceID, _):
                 workspaceID
-            case .session:
+            case .none:
                 appModel.focusedSessionWorkspaceID
-            case .workspaceGroup, .none:
+            case .workspaceGroup:
                 nil
             }
         }
@@ -2941,29 +3283,29 @@
     private struct SidebarSelectionBootstrapBoundary: View {
         @Bindable var appModel: NexusAppModel
         @Binding var selection: SidebarSelection?
+        @Binding var focusedSessionID: UUID?
 
         var body: some View {
             Color.clear
                 .frame(width: 0, height: 0)
-                .task(id: initialSelection) {
-                    guard selection == nil, let initialSelection else {
+                .task(id: initialTarget) {
+                    guard selection == nil, focusedSessionID == nil, let initialTarget else {
                         return
                     }
-                    selection = initialSelection
+
+                    switch initialTarget {
+                    case .workspace(let workspaceID):
+                        selection = .workspace(workspaceID)
+                    case .workspaceGroup(let groupID):
+                        selection = .workspaceGroup(groupID)
+                    case .session(let sessionID):
+                        focusedSessionID = sessionID
+                    }
                 }
         }
 
-        private var initialSelection: SidebarSelection? {
-            switch appModel.workspaceBrowseNavigationPresentation(currentWorkspaceID: nil).initialSelection {
-            case .workspace(let workspaceID):
-                .workspace(workspaceID)
-            case .workspaceGroup(let groupID):
-                .workspaceGroup(groupID)
-            case .session(let sessionID):
-                .session(sessionID)
-            case .none:
-                nil
-            }
+        private var initialTarget: WorkspaceBrowseInitialSelection? {
+            appModel.workspaceBrowseNavigationPresentation(currentWorkspaceID: nil).initialSelection
         }
     }
 
@@ -3105,11 +3447,17 @@
         }
     }
 
+    private struct ProviderSessionRowEntry: Identifiable {
+        let session: Session
+        let primaryAction: () -> Void
+
+        var id: UUID { session.id }
+    }
+
     private enum SidebarSelection: Hashable {
         case workspaceGroup(UUID)
         case workspace(UUID)
         case provider(UUID, ProviderID)
-        case session(UUID)
 
         var navigationTarget: NavigationTarget? {
             switch self {
@@ -3119,8 +3467,6 @@
                 .workspace(workspaceID)
             case .provider(let workspaceID, let providerID):
                 .provider(workspaceID: workspaceID, providerID: providerID)
-            case .session(let sessionID):
-                .session(sessionID)
             }
         }
     }
@@ -3291,7 +3637,7 @@
 
     #Preview {
         if let appModel = try? NexusAppModel.live() {
-            ContentView(appModel: appModel)
+            ContentView(appModel: appModel, settingsTabSelection: NexusSettingsTabSelection())
         }
     }
 #endif

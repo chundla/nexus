@@ -2,9 +2,8 @@
     import NexusDomain
     import SwiftUI
 
-    struct HostManagementSheet: View {
+    struct HostManagementView: View {
         @Bindable var appModel: NexusAppModel
-        @Binding var isPresented: Bool
 
         @State private var selection: UUID?
         @State private var editorMode: HostEditorMode?
@@ -16,20 +15,11 @@
                 NexusBackdrop()
 
                 VStack(alignment: .leading, spacing: 18) {
-                    HStack {
-                        NexusSectionHeader(
-                            eyebrow: "Remote catalog",
-                            title: "Hosts",
-                            detail: "Create, edit, validate, and inspect the remote Hosts that power Nexus workspaces."
-                        )
-
-                        Spacer()
-
-                        Button("Done") {
-                            isPresented = false
-                        }
-                        .buttonStyle(NexusSecondaryButtonStyle())
-                    }
+                    NexusSectionHeader(
+                        eyebrow: "Remote catalog",
+                        title: "Hosts",
+                        detail: "Create, edit, validate, and inspect the remote Hosts that power Nexus workspaces."
+                    )
 
                     HSplitView {
                         VStack(alignment: .leading, spacing: 12) {
@@ -38,7 +28,7 @@
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(host.name)
                                             .font(NexusMacTheme.bodyFont(14).weight(.semibold))
-                                            .foregroundStyle(.white)
+                                            .foregroundStyle(NexusMacTheme.textPrimary)
                                         Text(host.sshTarget)
                                             .font(NexusMacTheme.bodyFont(12, relativeTo: .caption))
                                             .foregroundStyle(NexusMacTheme.mutedText)
@@ -100,9 +90,8 @@
                     }
                 }
                 .padding(24)
-                .frame(minWidth: 820, minHeight: 480)
+                .frame(minWidth: 760, minHeight: 480)
                 .nexusPanel(tint: NexusMacTheme.teal, radius: 30)
-                .padding(28)
             }
             .task {
                 if selection == nil {
@@ -204,7 +193,7 @@
                         VStack(alignment: .leading, spacing: 8) {
                             Text(host.name)
                                 .font(NexusMacTheme.displayFont(26, relativeTo: .title2))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(NexusMacTheme.textPrimary)
                             Text(host.sshTarget)
                                 .font(NexusMacTheme.bodyFont(14))
                                 .foregroundStyle(NexusMacTheme.mutedText)
@@ -243,13 +232,13 @@
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Diagnostics")
                                 .font(NexusMacTheme.displayFont(22, relativeTo: .title3))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(NexusMacTheme.textPrimary)
 
                             ForEach(Array(diagnostics.enumerated()), id: \.offset) { _, diagnostic in
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(diagnostic.message)
                                         .font(NexusMacTheme.bodyFont(14))
-                                        .foregroundStyle(.white.opacity(0.9))
+                                        .foregroundStyle(NexusMacTheme.textPrimary.opacity(0.9))
                                     Text(diagnostic.code)
                                         .font(NexusMacTheme.monoFont(11, relativeTo: .caption))
                                         .foregroundStyle(NexusMacTheme.mutedText)

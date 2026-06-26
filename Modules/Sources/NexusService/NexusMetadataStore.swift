@@ -5,7 +5,7 @@
 
     private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-    final class NexusMetadataStore {
+    final class NexusMetadataStore: LocalShellEnvironmentPersisting, @unchecked Sendable {
         private let database: OpaquePointer?
         private let lock = NSLock()
 
@@ -90,6 +90,12 @@
                     checked_at INTEGER NOT NULL,
                     diagnostics_json TEXT NOT NULL,
                     PRIMARY KEY (workspace_id, provider_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS local_shell_environment_cache (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    environment_json TEXT NOT NULL,
+                    resolved_at INTEGER NOT NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS sessions (
@@ -310,6 +316,53 @@
 
                 try bind("remote_access_enabled", at: 1, in: statement)
                 try bind(Int32(isEnabled ? 1 : 0), at: 2, in: statement)
+                try stepDone(statement)
+            }
+        }
+
+        func loadCachedLocalShellEnvironment() -> [String: String]? {
+            try? localShellEnvironmentCache()
+        }
+
+        func saveCachedLocalShellEnvironment(_ environment: [String: String]) {
+            try? saveLocalShellEnvironmentCache(environment, resolvedAt: Date())
+        }
+
+        func localShellEnvironmentCache() throws -> [String: String]? {
+            try withLock {
+                let statement = try prepare(
+                    "SELECT environment_json FROM local_shell_environment_cache WHERE id = 1 LIMIT 1;"
+                )
+                defer { sqlite3_finalize(statement) }
+
+                guard sqlite3_step(statement) == SQLITE_ROW else {
+                    return nil
+                }
+
+                let json = try readString(column: 0, from: statement)
+                guard let data = json.data(using: .utf8),
+                    let environment = try? JSONDecoder().decode([String: String].self, from: data)
+                else {
+                    return nil
+                }
+
+                return environment
+            }
+        }
+
+        func saveLocalShellEnvironmentCache(_ environment: [String: String], resolvedAt: Date) throws {
+            let json = String(data: try JSONEncoder().encode(environment), encoding: .utf8) ?? "{}"
+            try withLock {
+                let statement = try prepare(
+                    """
+                    INSERT INTO local_shell_environment_cache (id, environment_json, resolved_at) VALUES (1, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET environment_json = excluded.environment_json, resolved_at = excluded.resolved_at;
+                    """
+                )
+                defer { sqlite3_finalize(statement) }
+
+                try bind(json, at: 1, in: statement)
+                try bind(Int64(resolvedAt.timeIntervalSince1970 * 1_000), at: 2, in: statement)
                 try stepDone(statement)
             }
         }

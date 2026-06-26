@@ -134,6 +134,11 @@ public struct StructuredSessionPiFeedSegmentView: View {
         .frame(maxWidth: 520, alignment: .leading)
         .frame(maxWidth: .infinity, alignment: .leading)
         .structuredSessionFeedRowCompositing()
+        .contextMenu {
+            Button("Copy") {
+                structuredSessionFeedMarkdownCopyToPasteboard(assistant.text)
+            }
+        }
     }
 
     @ViewBuilder
@@ -150,6 +155,11 @@ public struct StructuredSessionPiFeedSegmentView: View {
                 .padding(.vertical, 10)
                 .background(style.userBubbleBackground, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                 .frame(maxWidth: 420, alignment: .trailing)
+                .contextMenu {
+                    Button("Copy") {
+                        structuredSessionFeedMarkdownCopyToPasteboard(user.text)
+                    }
+                }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
         .structuredSessionFeedRowCompositing()

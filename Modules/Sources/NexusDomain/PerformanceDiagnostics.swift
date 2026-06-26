@@ -1,11 +1,23 @@
 import Foundation
 
 public enum PerformanceDiagnosticOperation: String, Codable, Equatable, Sendable {
+    case appStartupBrowse
+    case createLocalWorkspace
+    case createRemoteWorkspace
     case workspaceOverview
     case providerDetail
     case launchDefaultSession
     case createNamedSession
     case launchSession
+    case stopSession
+    case deleteSessionRecord
+    case validateHost
+    case remoteClientAvailability
+    case remoteClientCatalog
+    case remoteClientProviderDetail
+    case remoteClientSessionFocus
+    case remoteClientSessionScreen
+    case quickSwitchSearch
     case structuredSessionObservation
 }
 

@@ -121,8 +121,10 @@ struct StructuredSessionIBMBobAgentTurnFeedSegmentsTests {
             Issue.record("Expected composite agent turn")
             return
         }
-        #expect(turn.toolStackItems.count == 1)
-        #expect(turn.toolStackItems[0].subagentOutputs == ["I am Bob."])
+        // attempt_completion's preview duplicates the following plain message; it
+        // is the turn's final answer, not a nested tool/subagent output (#mismatch).
+        #expect(turn.toolStackItems.isEmpty)
+        #expect(turn.finalAnswer?.text == "I am Bob.")
     }
 
     @Test func nonBobSessionsDoNotEmitBobCompositeFeedSegments() {

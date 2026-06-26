@@ -120,7 +120,7 @@
                 .animation(.snappy(duration: 0.28), value: selectedWorkspaceGroupID)
                 .animation(.snappy(duration: 0.28), value: isShowingPairedMacs)
             }
-            .preferredColorScheme(.dark)
+
             .tint(NexusIOSTheme.gold)
             .onAppear {
                 if model.pairedMacs.isEmpty {
@@ -182,15 +182,6 @@
             isRefreshingAvailability = true
             defer { isRefreshingAvailability = false }
             await model.refreshPairedMacAvailability()
-
-            if let activePairedMac = model.activePairedMac,
-                model.availability(for: activePairedMac) == .available
-            {
-                await model.refreshActivePairedMacCatalog()
-            } else {
-                model.catalog = nil
-                model.catalogErrorMessage = nil
-            }
         }
 
     }
@@ -211,7 +202,7 @@
                                 NexusIOSTheme.displayFont(
                                     horizontalSizeClass == .regular ? 34 : 30, relativeTo: .largeTitle)
                             )
-                            .foregroundStyle(.white)
+                            .foregroundStyle(NexusIOSTheme.textPrimary)
 
                         Text("Simple remote chats for your workspaces.")
                             .font(NexusIOSTheme.bodyFont(15))
@@ -283,7 +274,7 @@
                         VStack(alignment: .leading, spacing: 4) {
                             Text(pairedMac.name)
                                 .font(NexusIOSTheme.bodyFont(17, weight: .semibold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(NexusIOSTheme.textPrimary)
                             Text(availability.summary)
                                 .font(NexusIOSTheme.bodyFont(13))
                                 .foregroundStyle(NexusIOSTheme.mutedText)
@@ -298,7 +289,7 @@
                                 .foregroundStyle(NexusIOSTheme.mutedText)
                             Image(systemName: isShowingPairedMacs ? "chevron.up" : "chevron.down")
                                 .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.55))
+                                .foregroundStyle(NexusIOSTheme.textPrimary.opacity(0.55))
                         }
                     }
                     .padding(18)
@@ -322,7 +313,7 @@
                     HStack {
                         Text("Paired Macs")
                             .font(NexusIOSTheme.bodyFont(16, weight: .semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(NexusIOSTheme.textPrimary)
                         Spacer()
                         Text("\(model.pairedMacs.count)")
                             .font(NexusIOSTheme.bodyFont(12, relativeTo: .caption, weight: .medium))
@@ -334,7 +325,9 @@
                         let isActive = model.activePairedMac?.id == pairedMac.id
                         let availability = model.availability(for: pairedMac)
                         let accent =
-                            isActive ? remotePairedMacAvailabilityColor(availability) : Color.white.opacity(0.72)
+                            isActive
+                            ? remotePairedMacAvailabilityColor(availability)
+                            : NexusIOSTheme.textPrimary.opacity(0.72)
 
                         VStack(alignment: .leading, spacing: 12) {
                             HStack(alignment: .top, spacing: 12) {
@@ -342,7 +335,7 @@
                                     HStack(spacing: 8) {
                                         Text(pairedMac.name)
                                             .font(NexusIOSTheme.bodyFont(16, weight: .semibold))
-                                            .foregroundStyle(.white)
+                                            .foregroundStyle(NexusIOSTheme.textPrimary)
                                         if isActive {
                                             NexusIOSStatusPill(
                                                 text: "Current", color: remotePairedMacAvailabilityColor(availability))
@@ -419,7 +412,7 @@
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text("Workspaces")
                                             .font(NexusIOSTheme.bodyFont(22, relativeTo: .title3, weight: .semibold))
-                                            .foregroundStyle(.white)
+                                            .foregroundStyle(NexusIOSTheme.textPrimary)
                                         Text("Your most recently used workspaces rise to the top.")
                                             .font(NexusIOSTheme.bodyFont(13))
                                             .foregroundStyle(NexusIOSTheme.mutedText)
@@ -566,7 +559,7 @@
                     .foregroundStyle(isSelected ? .white : NexusIOSTheme.mutedText)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 9)
-                    .background((isSelected ? NexusIOSTheme.gold : Color.white.opacity(0.06)), in: Capsule())
+                    .background((isSelected ? NexusIOSTheme.gold : NexusIOSTheme.overlay(0.06)), in: Capsule())
                     .overlay {
                         Capsule()
                             .stroke(isSelected ? NexusIOSTheme.gold.opacity(0.3) : NexusIOSTheme.softLine, lineWidth: 1)
@@ -676,7 +669,7 @@
                         HStack(spacing: 8) {
                             Text(overview.workspace.name)
                                 .font(NexusIOSTheme.bodyFont(17, weight: .semibold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(NexusIOSTheme.textPrimary)
                                 .lineLimit(1)
                             if let groupName, showsGroupName {
                                 Text(groupName)
@@ -684,7 +677,7 @@
                                     .foregroundStyle(NexusIOSTheme.mutedText)
                                     .padding(.horizontal, 8)
                                     .padding(.vertical, 4)
-                                    .background(Color.white.opacity(0.06), in: Capsule())
+                                    .background(NexusIOSTheme.overlay(0.06), in: Capsule())
                             }
                         }
 
@@ -708,10 +701,10 @@
                     VStack(alignment: .trailing, spacing: 8) {
                         Text("\(overview.providerCards.count)")
                             .font(NexusIOSTheme.bodyFont(18, weight: .semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(NexusIOSTheme.textPrimary)
                         Image(systemName: "chevron.right")
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.42))
+                            .foregroundStyle(NexusIOSTheme.textPrimary.opacity(0.42))
                     }
                 }
             }
@@ -754,7 +747,7 @@
                 VStack(alignment: .leading, spacing: 5) {
                     Text(item.title)
                         .font(NexusIOSTheme.bodyFont(16, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(NexusIOSTheme.textPrimary)
                     Text(item.subtitle)
                         .font(NexusIOSTheme.bodyFont(12, relativeTo: .caption))
                         .foregroundStyle(NexusIOSTheme.mutedText)
@@ -765,7 +758,7 @@
 
                 Image(systemName: "arrow.up.right")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.44))
+                    .foregroundStyle(NexusIOSTheme.textPrimary.opacity(0.44))
             }
             .padding(18)
             .nexusIOSPanel(tint: accent, radius: 22)
@@ -824,7 +817,7 @@
                                 NexusIOSTheme.displayFont(
                                     horizontalSizeClass == .regular ? 32 : 28, relativeTo: .largeTitle)
                             )
-                            .foregroundStyle(.white)
+                            .foregroundStyle(NexusIOSTheme.textPrimary)
                         Text("Pick an agent and continue the conversation.")
                             .font(NexusIOSTheme.bodyFont(14))
                             .foregroundStyle(NexusIOSTheme.mutedText)
@@ -874,7 +867,7 @@
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Agents")
                             .font(NexusIOSTheme.bodyFont(20, relativeTo: .title3, weight: .semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(NexusIOSTheme.textPrimary)
                         Text(
                             overview.providerCards.isEmpty
                                 ? "Nothing is available yet." : "Choose who you want to talk to."
@@ -975,7 +968,7 @@
         let providerCard: WorkspaceProviderCard
 
         private var accent: Color {
-            providerHealthColor(providerCard.health.state)
+            providerCard.health.state.tone.color
         }
 
         private var subtitle: String {
@@ -996,7 +989,7 @@
                 VStack(alignment: .leading, spacing: 5) {
                     Text(providerCard.provider.displayName)
                         .font(NexusIOSTheme.bodyFont(17, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(NexusIOSTheme.providerAccent(providerCard.provider.id))
                     Text(subtitle)
                         .font(NexusIOSTheme.bodyFont(13))
                         .foregroundStyle(NexusIOSTheme.mutedText)
@@ -1015,7 +1008,7 @@
 
                 Image(systemName: "chevron.right")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.42))
+                    .foregroundStyle(NexusIOSTheme.textPrimary.opacity(0.42))
             }
             .padding(16)
             .nexusIOSPanel(tint: accent, radius: 20)
@@ -1126,7 +1119,7 @@
         }
 
         private var accent: Color {
-            providerHealthColor(detail?.health.state ?? providerCard.health.state)
+            (detail?.health.state ?? providerCard.health.state).tone.color
         }
 
         private var horizontalPadding: CGFloat {
@@ -1217,7 +1210,7 @@
                                 NexusIOSTheme.displayFont(
                                     horizontalSizeClass == .regular ? 32 : 28, relativeTo: .largeTitle)
                             )
-                            .foregroundStyle(.white)
+                            .foregroundStyle(NexusIOSTheme.providerAccent(providerCard.provider.id))
                         Text(overview.workspace.name)
                             .font(NexusIOSTheme.bodyFont(14, weight: .medium))
                             .foregroundStyle(NexusIOSTheme.mutedText)
@@ -1250,7 +1243,7 @@
                 )
 
                 if let session = defaultSessionSection.session {
-                    RemoteProviderSessionSummaryCard(session: session, accent: remoteSessionStateColor(session.state)) {
+                    RemoteProviderSessionSummaryCard(session: session, accent: session.state.tone.color) {
                         openedSession = session
                     } deleteAction: {
                         if defaultSessionSection.canDeleteSessionRecord {
@@ -1285,7 +1278,7 @@
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Other chats")
                             .font(NexusIOSTheme.bodyFont(18, relativeTo: .title3, weight: .semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(NexusIOSTheme.textPrimary)
                         Text("Keep side conversations tucked away until you need them.")
                             .font(NexusIOSTheme.bodyFont(13))
                             .foregroundStyle(NexusIOSTheme.mutedText)
@@ -1299,7 +1292,7 @@
                 case .sessions(let sessions):
                     ForEach(sessions) { session in
                         RemoteProviderSessionSummaryCard(
-                            session: session, accent: remoteSessionStateColor(session.state)
+                            session: session, accent: session.state.tone.color
                         ) {
                             openedSession = session
                         } deleteAction: {
@@ -1485,6 +1478,7 @@
 
         @State private var terminalDraft = ""
         @State private var structuredPrompt = ""
+        @State private var isComposerExpanded = false
         @State private var terminalViewportSize: CGSize = .zero
         @State private var terminalViewportResizeCoordinator = TerminalViewportResizeCoordinator()
         @State private var isShowingStopConfirmation = false
@@ -1632,7 +1626,7 @@
         }
 
         private var accent: Color {
-            remoteSessionStateColor(currentSession.state)
+            currentSession.state.tone.color
         }
 
         private var horizontalPadding: CGFloat {
@@ -1771,7 +1765,7 @@
                 VStack(spacing: 1) {
                     Text(sessionTitle)
                         .font(NexusIOSTheme.bodyFont(15, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(NexusIOSTheme.providerAccent(currentSession.providerID))
                     Text(sessionSubtitle)
                         .font(NexusIOSTheme.bodyFont(11, relativeTo: .caption))
                         .foregroundStyle(NexusIOSTheme.mutedText)
@@ -1800,7 +1794,7 @@
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle")
-                        .foregroundStyle(.white)
+                        .foregroundStyle(NexusIOSTheme.textPrimary)
                 }
             }
         }
@@ -1849,7 +1843,7 @@
                         }
                         .frame(minHeight: horizontalSizeClass == .regular ? 520 : 380)
                         .background(
-                            Color.black.opacity(0.92), in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            NexusIOSTheme.terminalSurface, in: RoundedRectangle(cornerRadius: 20, style: .continuous)
                         )
                         .overlay(alignment: .topLeading) {
                             Text("Live terminal")
@@ -1860,7 +1854,7 @@
                         }
                         .overlay {
                             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                                .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                                .stroke(NexusIOSTheme.overlay(0.06), lineWidth: 1)
                         }
                         .background {
                             GeometryReader { proxy in
@@ -1886,6 +1880,29 @@
                 .padding(.top, 14)
                 .padding(.bottom, 120)
             }
+        }
+
+        private var needsComposerDisclosureControl: Bool {
+            ComposerOverflowHeuristic.exceedsCollapsedLineLimit(
+                structuredPrompt, collapsedLines: 3, averageCharactersPerLine: 32)
+        }
+
+        private var composerDisclosureControl: some View {
+            Button {
+                withAnimation(.snappy(duration: 0.18)) {
+                    isComposerExpanded.toggle()
+                }
+            } label: {
+                Image(systemName: isComposerExpanded ? "chevron.down" : "chevron.up")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(NexusIOSTheme.mutedText)
+                    .frame(width: 28, height: 16)
+                    .background(.thinMaterial, in: Capsule())
+                    .overlay {
+                        Capsule().stroke(NexusIOSTheme.softLine, lineWidth: 1)
+                    }
+            }
+            .buttonStyle(.plain)
         }
 
         @ViewBuilder
@@ -1917,10 +1934,15 @@
                                 .focused($isStructuredPromptFocused)
                                 .textInputAutocapitalization(.sentences)
                                 .autocorrectionDisabled()
-                                .lineLimit(1...6)
+                                .lineLimit(isComposerExpanded ? 1...14 : 1...3)
                                 .disabled(isPerformingAction || structuredChromePresentation.isAgentTurnInProgress)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .nexusIOSTextField(tint: NexusIOSTheme.gold)
+                                .overlay(alignment: .top) {
+                                    if needsComposerDisclosureControl {
+                                        composerDisclosureControl.offset(y: -11)
+                                    }
+                                }
 
                             if sendAffordance.isVisible {
                                 Button {
@@ -1928,7 +1950,7 @@
                                 } label: {
                                     Image(systemName: "arrow.up")
                                         .font(.system(size: 14, weight: .semibold))
-                                        .foregroundStyle(.white)
+                                        .foregroundStyle(NexusIOSTheme.textPrimary)
                                         .frame(width: 34, height: 34)
                                         .background(
                                             sendAffordance.isEnabled
@@ -1971,7 +1993,7 @@
                 .background(.ultraThinMaterial)
                 .overlay(alignment: .top) {
                     Rectangle()
-                        .fill(Color.white.opacity(0.08))
+                        .fill(NexusIOSTheme.overlay(0.08))
                         .frame(height: 1)
                 }
             }
@@ -1991,7 +2013,7 @@
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(command.displayText)
                                     .font(NexusIOSTheme.monoFont(13, relativeTo: .callout))
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(NexusIOSTheme.textPrimary)
                                 Text(command.summary)
                                     .font(NexusIOSTheme.bodyFont(12, relativeTo: .caption))
                                     .foregroundStyle(NexusIOSTheme.mutedText)
@@ -2005,11 +2027,11 @@
                         .buttonStyle(.plain)
                         .background(
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .fill(Color.white.opacity(0.04))
+                                .fill(NexusIOSTheme.overlay(0.04))
                         )
                         .overlay {
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                                .stroke(NexusIOSTheme.overlay(0.08), lineWidth: 1)
                         }
                     }
                 }
@@ -2019,11 +2041,11 @@
             .frame(maxHeight: 220)
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color.black.opacity(0.86))
+                    .fill(NexusIOSTheme.terminalSurface)
             )
             .overlay {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                    .stroke(NexusIOSTheme.overlay(0.08), lineWidth: 1)
             }
         }
 
@@ -2067,7 +2089,7 @@
             .background(.ultraThinMaterial)
             .overlay(alignment: .top) {
                 Rectangle()
-                    .fill(Color.white.opacity(0.08))
+                    .fill(NexusIOSTheme.overlay(0.08))
                     .frame(height: 1)
             }
         }
@@ -2086,10 +2108,10 @@
             } label: {
                 Label("Keys", systemImage: "command")
                     .font(NexusIOSTheme.bodyFont(12, relativeTo: .caption, weight: .medium))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(NexusIOSTheme.textPrimary)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
-                    .background(Color.white.opacity(0.08), in: Capsule())
+                    .background(NexusIOSTheme.overlay(0.08), in: Capsule())
             }
         }
 
@@ -2441,12 +2463,14 @@
             guard initial < total else {
                 return
             }
-            let batch = StructuredSessionFeedProgressiveRevealPolicy.visibleTailRowsPerRevealBatch
             Task { @MainActor in
                 var visible = initial
                 while visible < total {
                     await Task.yield()
-                    visible = min(visible + batch, total)
+                    visible = StructuredSessionFeedProgressiveRevealPolicy.nextVisibleTailRowCount(
+                        currentVisibleCount: visible,
+                        totalRowCount: total
+                    )
                     structuredSessionFeedVisibleTailRowCount = visible
                 }
             }
@@ -2466,46 +2490,47 @@
             } else if feedPresentation.activityRows.isEmpty {
                 EmptyView()
             } else if feedPresentation.feedSegments != nil {
-                let allSegments = feedPresentation.feedSegments ?? []
-                let visibleSegments =
-                    (structuredSessionVisibleFeedSegments(
+                if let segments = feedPresentation.feedSegments,
+                    let visibleIndices = structuredSessionVisibleFeedSegmentIndices(
                         in: feedPresentation,
                         visibleTailItemCount: structuredSessionFeedVisibleTailRowCount
-                    ) ?? [])
-                    .filter { segment in
-                        guard case .standalone(let item) = segment else {
-                            return true
-                        }
-                        return structuredSessionPiShouldRenderStandaloneFeedSegment(item: item, in: allSegments)
-                    }
-                ForEach(visibleSegments) { segment in
-                    StructuredSessionPiFeedSegmentView(
-                        segment: segment,
-                        providerDisplayName: providerDisplayName,
-                        style: iosPiStructuredSessionFeedSegmentStyle(
-                            feedReaderIsScrollIdle: structuredSessionFeedScrollIsIdle
-                        ),
-                        disclosureState: structuredSessionAgentTurnDisclosureState,
-                        standaloneRow: { row in
-                            AnyView(structuredSessionActivityRowView(row))
-                        },
-                        onShowFullAssistantResponse: { presentation in
-                            presentedStructuredSessionAssistantFullResponse = presentation
-                        },
-                        artifactActions: { artifact in
-                            structuredSessionFeedArtifactActionPresentation(
-                                for: artifact,
-                                hasWriterAuthority: model.focusedSessionIsController,
-                                usesHostArtifactFetch: true
-                            )
-                        },
-                        onArtifactDownload: { artifact in
-                            Task {
-                                await model.downloadFocusedStructuredSessionArtifact(artifact)
-                            }
-                        }
                     )
-                    .id(segment.id)
+                {
+                    ForEach(visibleIndices, id: \.self) { index in
+                        let segment = segments[index]
+                        if structuredSessionShouldRenderFeedSegment(
+                            segment,
+                            hiddenStandaloneFeedSegmentIDs: feedPresentation.hiddenStandaloneFeedSegmentIDs
+                        ) {
+                            StructuredSessionPiFeedSegmentView(
+                                segment: segment,
+                                providerDisplayName: providerDisplayName,
+                                style: iosPiStructuredSessionFeedSegmentStyle(
+                                    feedReaderIsScrollIdle: structuredSessionFeedScrollIsIdle
+                                ),
+                                disclosureState: structuredSessionAgentTurnDisclosureState,
+                                standaloneRow: { row in
+                                    AnyView(structuredSessionActivityRowView(row))
+                                },
+                                onShowFullAssistantResponse: { presentation in
+                                    presentedStructuredSessionAssistantFullResponse = presentation
+                                },
+                                artifactActions: { artifact in
+                                    structuredSessionFeedArtifactActionPresentation(
+                                        for: artifact,
+                                        hasWriterAuthority: model.focusedSessionIsController,
+                                        usesHostArtifactFetch: true
+                                    )
+                                },
+                                onArtifactDownload: { artifact in
+                                    Task {
+                                        await model.downloadFocusedStructuredSessionArtifact(artifact)
+                                    }
+                                }
+                            )
+                            .id(segment.id)
+                        }
+                    }
                 }
 
                 if StructuredSessionFeedProgressiveRevealPolicy.shouldShowThinkingIndicator(
@@ -2557,7 +2582,7 @@
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
-                .background(Color.white.opacity(0.05), in: Capsule())
+                .background(NexusIOSTheme.overlay(0.05), in: Capsule())
                 Spacer()
             }
         }
@@ -2579,7 +2604,7 @@
                     VStack(alignment: .trailing, spacing: 4) {
                         Text(conversation.text)
                             .font(NexusIOSTheme.bodyFont(15))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(NexusIOSTheme.textPrimary)
                             .structuredSessionFeedTextSelection()
                             .fixedSize(horizontal: false, vertical: true)
                             .padding(.horizontal, 14)
@@ -2587,6 +2612,11 @@
                             .background(NexusIOSTheme.gold, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                     }
                     .frame(maxWidth: 420, alignment: .trailing)
+                    .contextMenu {
+                        Button("Copy") {
+                            structuredSessionFeedMarkdownCopyToPasteboard(conversation.text)
+                        }
+                    }
                 }
                 .structuredSessionFeedRowCompositing()
             case .assistant(let label):
@@ -2600,13 +2630,18 @@
                             conversation,
                             rowID: row.id,
                             font: NexusIOSTheme.bodyFont(15),
-                            color: .white.opacity(0.94)
+                            color: NexusIOSTheme.terminalText.opacity(0.94)
                         )
                     }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .frame(maxWidth: 420, alignment: .leading)
-                    .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .background(NexusIOSTheme.overlay(0.1), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .contextMenu {
+                        Button("Copy") {
+                            structuredSessionFeedMarkdownCopyToPasteboard(conversation.text)
+                        }
+                    }
                     Spacer(minLength: 48)
                 }
                 .structuredSessionFeedRowCompositing()
@@ -2618,7 +2653,7 @@
                             .foregroundStyle(accentColor)
                         Text(conversation.text)
                             .font(NexusIOSTheme.monoFont(12, relativeTo: .callout))
-                            .foregroundStyle(.white.opacity(0.92))
+                            .foregroundStyle(NexusIOSTheme.textPrimary.opacity(0.92))
                             .structuredSessionFeedTextSelection()
                             .fixedSize(horizontal: false, vertical: true)
                         if let detailText = row.detailText {
@@ -2631,7 +2666,7 @@
                     }
                     .padding(14)
                     .frame(maxWidth: 520, alignment: .leading)
-                    .background(Color.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .background(NexusIOSTheme.overlay(0.09), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                     Spacer(minLength: 48)
                 }
                 .structuredSessionFeedRowCompositing()
@@ -2643,7 +2678,7 @@
                             .foregroundStyle(accentColor)
                         Text(conversation.text)
                             .font(NexusIOSTheme.bodyFont(14))
-                            .foregroundStyle(.white.opacity(0.94))
+                            .foregroundStyle(NexusIOSTheme.textPrimary.opacity(0.94))
                             .structuredSessionFeedTextSelection()
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -2662,7 +2697,7 @@
                                 .foregroundStyle(NexusIOSTheme.mutedText)
                             Text(verbatim: conversation.text)
                                 .font(NexusIOSTheme.bodyFont(14))
-                                .foregroundStyle(.white.opacity(0.92))
+                                .foregroundStyle(NexusIOSTheme.textPrimary.opacity(0.92))
                                 .structuredSessionFeedTextSelection()
                                 .fixedSize(horizontal: false, vertical: true)
                             if let detailText = row.detailText {
@@ -2676,7 +2711,7 @@
                         .padding(14)
                         .frame(maxWidth: 520, alignment: .leading)
                         .background(
-                            Color.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            NexusIOSTheme.overlay(0.09), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                         Spacer(minLength: 48)
                     } else {
                         Spacer()
@@ -2685,7 +2720,7 @@
                             .foregroundStyle(NexusIOSTheme.mutedText)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
-                            .background(Color.white.opacity(0.05), in: Capsule())
+                            .background(NexusIOSTheme.overlay(0.05), in: Capsule())
                         Spacer()
                     }
                 }
@@ -2810,7 +2845,7 @@
                     if showsCollapsedPreview {
                         Text(verbatim: text)
                             .font(font)
-                            .foregroundStyle(.white.opacity(0.84))
+                            .foregroundStyle(NexusIOSTheme.textPrimary.opacity(0.84))
                             .structuredSessionFeedTextSelection()
                             .frame(
                                 height: structuredSessionFeedCollapsedDetailViewportHeight,
@@ -2820,7 +2855,7 @@
                     } else {
                         Text(verbatim: text)
                             .font(font)
-                            .foregroundStyle(.white.opacity(0.84))
+                            .foregroundStyle(NexusIOSTheme.textPrimary.opacity(0.84))
                             .structuredSessionFeedTextSelection()
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -2838,7 +2873,7 @@
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(10)
-            .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(NexusIOSTheme.terminalOverlay, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
 
         private func structuredSessionApprovalRequestView(
@@ -2854,11 +2889,11 @@
 
                 Text(request.title)
                     .font(NexusIOSTheme.bodyFont(15, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(NexusIOSTheme.textPrimary)
 
                 Text(request.text)
                     .font(NexusIOSTheme.bodyFont(14))
-                    .foregroundStyle(.white.opacity(0.92))
+                    .foregroundStyle(NexusIOSTheme.textPrimary.opacity(0.92))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -2892,7 +2927,7 @@
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(NexusIOSTheme.overlay(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .stroke(NexusIOSTheme.gold.opacity(0.22))
@@ -2917,7 +2952,7 @@
                 if let title = extensionUI.title, title.isEmpty == false {
                     Text(title)
                         .font(NexusIOSTheme.bodyFont(15, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(NexusIOSTheme.textPrimary)
                 }
 
                 if extensionUI.statuses.isEmpty == false {
@@ -2929,10 +2964,10 @@
                         ForEach(extensionUI.statuses) { status in
                             Text(status.text)
                                 .font(NexusIOSTheme.bodyFont(12))
-                                .foregroundStyle(.white.opacity(0.92))
+                                .foregroundStyle(NexusIOSTheme.textPrimary.opacity(0.92))
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
-                                .background(Color.white.opacity(0.05), in: Capsule())
+                                .background(NexusIOSTheme.overlay(0.05), in: Capsule())
                         }
                     }
                 }
@@ -2950,20 +2985,20 @@
                                     .foregroundStyle(structuredSessionExtensionNotificationColor(notification.kind))
                                 Text(notification.message)
                                     .font(NexusIOSTheme.bodyFont(12))
-                                    .foregroundStyle(.white.opacity(0.92))
+                                    .foregroundStyle(NexusIOSTheme.textPrimary.opacity(0.92))
                                     .textSelection(.enabled)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(10)
                             .background(
-                                Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                NexusIOSTheme.overlay(0.04), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
                     }
                 }
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(NexusIOSTheme.overlay(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .stroke(NexusIOSTheme.teal.opacity(0.22))
@@ -2980,17 +3015,17 @@
                         ForEach(Array(widget.lines.enumerated()), id: \.offset) { _, line in
                             Text(line)
                                 .font(NexusIOSTheme.bodyFont(12))
-                                .foregroundStyle(.white.opacity(0.92))
+                                .foregroundStyle(NexusIOSTheme.textPrimary.opacity(0.92))
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .background(NexusIOSTheme.overlay(0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     .overlay {
                         RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                            .stroke(NexusIOSTheme.overlay(0.08), lineWidth: 1)
                     }
                 }
             }
@@ -3053,11 +3088,11 @@
             .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.white.opacity(0.06))
+                    .fill(NexusIOSTheme.overlay(0.06))
             )
             .overlay {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                    .stroke(NexusIOSTheme.overlay(0.08), lineWidth: 1)
             }
         }
 
@@ -3148,8 +3183,8 @@
         @ViewBuilder
         private func terminalSegmentView(_ segment: RemoteTerminalDisplaySegment) -> some View {
             let colors = resolvedTerminalColors(for: segment.style)
-            let foreground = segment.isCursor ? Color.black : colors.foreground
-            let background = segment.isCursor ? Color.white : colors.background
+            let foreground = segment.isCursor ? NexusIOSTheme.backgroundTop : colors.foreground
+            let background = segment.isCursor ? NexusIOSTheme.terminalText : colors.background
             let text = Text(segment.renderedText)
                 .font(.system(size: 17, design: .monospaced))
                 .fontWeight(segment.style.isBold ? .bold : .regular)
@@ -3171,8 +3206,8 @@
         }
 
         private func resolvedTerminalColors(for style: TerminalStyle) -> (foreground: Color, background: Color) {
-            let defaultForeground = Color.white
-            let defaultBackground = Color.black
+            let defaultForeground = NexusIOSTheme.terminalText
+            let defaultBackground = NexusIOSTheme.terminalSurface
             let foreground = color(for: style.foregroundColor) ?? defaultForeground
             let background = color(for: style.backgroundColor)
 
@@ -3291,12 +3326,12 @@
 
                 Text(dialog.title)
                     .font(NexusIOSTheme.bodyFont(15, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(NexusIOSTheme.textPrimary)
 
                 if let message = dialog.message, message.isEmpty == false {
                     Text(message)
                         .font(NexusIOSTheme.bodyFont(14))
-                        .foregroundStyle(.white.opacity(0.92))
+                        .foregroundStyle(NexusIOSTheme.textPrimary.opacity(0.92))
                         .textSelection(.enabled)
                 }
 
@@ -3338,7 +3373,7 @@
                         .frame(minHeight: 140)
                         .padding(8)
                         .background(
-                            Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            NexusIOSTheme.overlay(0.05), in: RoundedRectangle(cornerRadius: 14, style: .continuous)
                         )
                         .overlay {
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -3360,7 +3395,7 @@
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(NexusIOSTheme.overlay(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .stroke(NexusIOSTheme.teal.opacity(0.22))
@@ -3424,7 +3459,7 @@
                     VStack(alignment: .leading, spacing: 4) {
                         Text(session.isDefault ? "Default chat" : (session.name ?? "Chat"))
                             .font(NexusIOSTheme.bodyFont(16, weight: .semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(NexusIOSTheme.textPrimary)
                         Text(session.failureMessage ?? session.state.rawValue.capitalized)
                             .font(NexusIOSTheme.bodyFont(12, relativeTo: .caption))
                             .foregroundStyle(deleteDisabled ? NexusIOSTheme.mutedText : accent)
@@ -3485,7 +3520,7 @@
             VStack(alignment: .leading, spacing: 8) {
                 Text(title)
                     .font(NexusIOSTheme.bodyFont(14, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(NexusIOSTheme.textPrimary)
                 Text(detail)
                     .font(NexusIOSTheme.bodyFont(13))
                     .foregroundStyle(NexusIOSTheme.mutedText)
@@ -3494,30 +3529,6 @@
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .nexusIOSPanel(tint: accent, radius: 18)
-        }
-    }
-
-    private func providerHealthColor(_ state: ProviderHealthSummary.State) -> Color {
-        switch state {
-        case .available:
-            NexusIOSTheme.teal
-        case .unavailable, .blocked:
-            NexusIOSTheme.gold
-        case .misconfigured:
-            NexusIOSTheme.coral
-        case .notChecked:
-            Color.white.opacity(0.7)
-        }
-    }
-
-    private func remoteSessionStateColor(_ state: Session.State) -> Color {
-        switch state {
-        case .ready:
-            NexusIOSTheme.teal
-        case .interrupted:
-            NexusIOSTheme.gold
-        case .exited, .failed:
-            NexusIOSTheme.coral
         }
     }
 

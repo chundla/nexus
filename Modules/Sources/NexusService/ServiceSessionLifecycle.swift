@@ -21,7 +21,7 @@
         let providerModule: (ProviderID) -> any ProviderModule
         let remoteWorkspaceHealthContext: (Workspace) throws -> RemoteWorkspaceHealthContext?
         let providerHealthSummary:
-            (ProviderID, Workspace, RemoteWorkspaceHealthContext?) async throws -> ProviderHealthSummary
+            (ProviderID, Workspace, RemoteWorkspaceHealthContext?, Bool) async throws -> ProviderHealthSummary
         let resolveNamedSessionName: (String?, [Session]) -> String
         let reconcileSessionRuntimeState: (Session) throws -> Session
         let sessionMayRemainReadyWithoutRuntime: (Session, Workspace) throws -> Bool
@@ -38,7 +38,8 @@
             providerModule: @escaping (ProviderID) -> any ProviderModule,
             remoteWorkspaceHealthContext: @escaping (Workspace) throws -> RemoteWorkspaceHealthContext?,
             providerHealthSummary:
-                @escaping (ProviderID, Workspace, RemoteWorkspaceHealthContext?) async throws -> ProviderHealthSummary,
+                @escaping (ProviderID, Workspace, RemoteWorkspaceHealthContext?, Bool) async throws ->
+                ProviderHealthSummary,
             resolveNamedSessionName: @escaping (String?, [Session]) -> String,
             reconcileSessionRuntimeState: @escaping (Session) throws -> Session,
             sessionMayRemainReadyWithoutRuntime: @escaping (Session, Workspace) throws -> Bool,
@@ -216,7 +217,11 @@
                         request,
                         ProviderModuleFreshSessionOpenActions(
                             providerHealthSummary: { [self] workspace in
-                                try await self.providerHealthSummary(for: providerID, workspace: workspace)
+                                try await self.providerHealthSummary(
+                                    for: providerID,
+                                    workspace: workspace,
+                                    preferFreshLocalCheck: true
+                                )
                             }
                         )
                     )
@@ -298,7 +303,11 @@
             }
 
             let health = try await trace.measure("providerHealthSummary") {
-                try await providerHealthSummary(for: reconciledSession.providerID, workspace: workspace)
+                try await providerHealthSummary(
+                    for: reconciledSession.providerID,
+                    workspace: workspace,
+                    preferFreshLocalCheck: true
+                )
             }
             guard health.launchability == .launchable, let executable = health.resolvedExecutable else {
                 return try trace.measure("markSessionFailed") {
@@ -346,11 +355,18 @@
             return workspace
         }
 
-        private func providerHealthSummary(for providerID: ProviderID, workspace: Workspace) async throws
-            -> ProviderHealthSummary
-        {
+        private func providerHealthSummary(
+            for providerID: ProviderID,
+            workspace: Workspace,
+            preferFreshLocalCheck: Bool = false
+        ) async throws -> ProviderHealthSummary {
             let remoteContext = try dependencies.remoteWorkspaceHealthContext(workspace)
-            return try await dependencies.providerHealthSummary(providerID, workspace, remoteContext)
+            return try await dependencies.providerHealthSummary(
+                providerID,
+                workspace,
+                remoteContext,
+                preferFreshLocalCheck
+            )
         }
 
         private func launchFreshSession(

@@ -27,6 +27,88 @@
             )
         }
 
+        @Test func providerDetailReusesStaleLocalProviderHealthSnapshotInsteadOfRecomputing() async throws {
+            let now = Date(timeIntervalSince1970: 5_000)
+            let evaluator = CountingProviderHealthEvaluator(
+                summariesByProvider: [
+                    ProviderID.claude: ProviderHealthSummary(
+                        state: .available,
+                        summary: "Fresh Claude health should stay unused",
+                        resolvedExecutable: "/tmp/fresh-claude",
+                        launchability: .launchable
+                    )
+                ]
+            )
+            let fixture = try WorkspaceCatalogFixture(
+                providerHealthEvaluator: evaluator,
+                providerModuleRegistry: ProviderModuleRegistry(
+                    modules: [
+                        ProviderID.claude: TestProviderModule(providerID: .claude) {
+                            workspace, remoteContext, providerHealthEvaluator in
+                            await providerHealthEvaluator.healthSummary(
+                                for: .claude, workspace: workspace, remoteContext: remoteContext)
+                        }
+                    ]
+                ),
+                currentDate: { now }
+            )
+            let cached = try fixture.metadataStore.saveProviderHealth(
+                workspaceID: fixture.workspace.id,
+                providerID: ProviderID.claude,
+                summary: ProviderHealthSummary(
+                    state: .unavailable,
+                    summary: "Stale Claude health",
+                    launchability: .notLaunchable
+                ),
+                checkedAt: now.addingTimeInterval(-120)
+            )
+
+            let detail = try await fixture.catalog.providerDetail(
+                workspaceID: fixture.workspace.id, providerID: .claude)
+
+            #expect(detail.health == cached)
+            #expect(await evaluator.callCount(for: ProviderID.claude) == 0)
+        }
+
+        @Test func providerDetailPersistsFreshlyEvaluatedLocalProviderHealthForReuse() async throws {
+            let now = Date(timeIntervalSince1970: 6_000)
+            let evaluator = CountingProviderHealthEvaluator(
+                summariesByProvider: [
+                    ProviderID.claude: ProviderHealthSummary(
+                        state: .available,
+                        summary: "Fresh Claude health",
+                        resolvedExecutable: "/tmp/fresh-claude",
+                        launchability: .launchable
+                    )
+                ]
+            )
+            let fixture = try WorkspaceCatalogFixture(
+                providerHealthEvaluator: evaluator,
+                providerModuleRegistry: ProviderModuleRegistry(
+                    modules: [
+                        ProviderID.claude: TestProviderModule(providerID: .claude) {
+                            workspace, remoteContext, providerHealthEvaluator in
+                            await providerHealthEvaluator.healthSummary(
+                                for: .claude, workspace: workspace, remoteContext: remoteContext)
+                        }
+                    ]
+                ),
+                currentDate: { now }
+            )
+
+            let detail = try await fixture.catalog.providerDetail(
+                workspaceID: fixture.workspace.id, providerID: .claude)
+            let persisted = try fixture.metadataStore.providerHealth(
+                workspaceID: fixture.workspace.id, providerID: .claude)
+
+            #expect(detail.health.summary == "Fresh Claude health")
+            #expect(persisted?.summary == "Fresh Claude health")
+            #expect(await evaluator.callCount(for: ProviderID.claude) == 1)
+
+            _ = try await fixture.catalog.providerDetail(workspaceID: fixture.workspace.id, providerID: .claude)
+            #expect(await evaluator.callCount(for: ProviderID.claude) == 1)
+        }
+
         @Test func workspaceOverviewUsesProviderModuleRegistryForPiCatalogReads() async throws {
             let fixture = try WorkspaceCatalogFixture(
                 providerModuleRegistry: ProviderModuleRegistry(
@@ -220,7 +302,7 @@
             #expect(overviews.map(\.workspace.id) == [secondWorkspace.id, fixture.workspace.id])
         }
 
-        @Test func workspaceOverviewBoundsProviderCardConcurrencyWhilePreservingProviderOrder() async throws {
+        @Test func workspaceOverviewLoadsAllProviderCardsConcurrentlyWhilePreservingProviderOrder() async throws {
             let tracker = ProviderCatalogReadConcurrencyTracker()
             let fixture = try WorkspaceCatalogFixture(
                 providerModuleRegistry: ProviderModuleRegistry(
@@ -234,10 +316,60 @@
             let overview = try await fixture.catalog.workspaceOverview(workspaceID: fixture.workspace.id)
 
             #expect(overview.providerCards.map(\.provider.id) == ProviderID.allCases)
-            #expect(await tracker.maximumConcurrentReads() == 2)
+            #expect(await tracker.maximumConcurrentReads() == ProviderID.allCases.count)
         }
 
-        @Test func workspaceOverviewBrowsePreservesStaleProviderSummariesWhileBoundingProviderCardConcurrency()
+        @Test func workspaceOverviewBrowseReturnsPendingProviderHealthWhenSnapshotMissing() async throws {
+            let evaluator = CountingProviderHealthEvaluator(
+                summariesByProvider: Dictionary(
+                    uniqueKeysWithValues: ProviderID.allCases.map { providerID in
+                        (
+                            providerID,
+                            ProviderHealthSummary(
+                                state: .available,
+                                summary: "Fresh \(providerID.displayName) health",
+                                resolvedExecutable: "/tmp/\(providerID.rawValue)",
+                                launchability: .launchable
+                            )
+                        )
+                    }
+                )
+            )
+            let fixture = try WorkspaceCatalogFixture(
+                providerHealthEvaluator: evaluator,
+                providerModuleRegistry: ProviderModuleRegistry(
+                    modules: Dictionary(
+                        uniqueKeysWithValues: ProviderID.allCases.map { providerID in
+                            (
+                                providerID,
+                                TestProviderModule(providerID: providerID) {
+                                    workspace, remoteContext, providerHealthEvaluator in
+                                    await providerHealthEvaluator.healthSummary(
+                                        for: providerID,
+                                        workspace: workspace,
+                                        remoteContext: remoteContext
+                                    )
+                                }
+                            )
+                        }
+                    )
+                )
+            )
+
+            let overview = try await fixture.catalog.workspaceOverview(workspaceID: fixture.workspace.id)
+
+            for providerID in ProviderID.allCases {
+                let card = try #require(overview.providerCards.first(where: { $0.provider.id == providerID }))
+                #expect(card.health.state == .notChecked)
+                #expect(card.health.summary == "Checking \(providerID.displayName)…")
+                #expect(card.health.launchability == .launchable)
+                #expect(card.capabilities.launchDefaultSession.isEnabled)
+                #expect(await evaluator.callCount(for: providerID) == 0)
+            }
+            #expect(overview.usesStaleBrowseFacts)
+        }
+
+        @Test func workspaceOverviewBrowsePreservesStaleProviderSummariesWhileLoadingProviderCardsConcurrently()
             async throws
         {
             let now = Date(timeIntervalSince1970: 1_500)
@@ -272,7 +404,75 @@
                 overview.providerCards.map(\.health.summary)
                     == ProviderID.allCases.map { "Stale \($0.displayName) health" })
             #expect(overview.usesStaleBrowseFacts)
-            #expect(await tracker.maximumConcurrentReads() == 2)
+            #expect(await tracker.maximumConcurrentReads() == ProviderID.allCases.count)
+        }
+
+        @Test func localProviderHealthEvaluationCoalescesConcurrentRequests() async throws {
+            let summary = ProviderHealthSummary(
+                state: .available,
+                summary: "Fresh Claude health",
+                resolvedExecutable: "/tmp/fresh-claude",
+                launchability: .launchable
+            )
+            let evaluator = SuspendedProviderHealthEvaluator()
+            let fixture = try WorkspaceCatalogFixture(
+                providerHealthEvaluator: evaluator,
+                providerModuleRegistry: ProviderModuleRegistry(
+                    modules: [
+                        ProviderID.claude: TestProviderModule(providerID: .claude) {
+                            workspace, remoteContext, providerHealthEvaluator in
+                            await providerHealthEvaluator.healthSummary(
+                                for: .claude,
+                                workspace: workspace,
+                                remoteContext: remoteContext
+                            )
+                        }
+                    ]
+                )
+            )
+
+            let catalog = fixture.catalog
+            let workspace = fixture.workspace
+            let metadataStore = fixture.metadataStore
+
+            async let firstSummary = catalog.providerHealthSummary(
+                for: .claude,
+                workspace: workspace,
+                remoteContext: nil
+            )
+            async let secondSummary = catalog.providerHealthSummary(
+                for: .claude,
+                workspace: workspace,
+                remoteContext: nil
+            )
+
+            let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+            while await evaluator.callCount(for: .claude) < 1 {
+                guard ContinuousClock.now < deadline else {
+                    Issue.record("Timed out waiting for the first Provider Health probe")
+                    break
+                }
+                try await Task.sleep(nanoseconds: 10_000_000)
+            }
+            try await Task.sleep(nanoseconds: 100_000_000)
+            #expect(await evaluator.callCount(for: .claude) == 1)
+
+            await evaluator.resumeAll(for: .claude, with: summary)
+
+            let first = try await firstSummary
+            let second = try await secondSummary
+            let persisted = try metadataStore.providerHealth(
+                workspaceID: workspace.id,
+                providerID: .claude
+            )
+
+            #expect(first.summary == summary.summary)
+            #expect(first.resolvedExecutable == summary.resolvedExecutable)
+            #expect(first.launchability == summary.launchability)
+            #expect(first.checkedAt != nil)
+            #expect(second == first)
+            #expect(persisted == first)
+            #expect(await evaluator.callCount(for: .claude) == 1)
         }
 
         @Test func workspaceOverviewReusesRecentLocalProviderHealthSnapshot() async throws {
@@ -311,6 +511,19 @@
                 ),
                 checkedAt: now.addingTimeInterval(-10)
             )
+            for providerID in ProviderID.allCases where providerID != .claude {
+                _ = try fixture.metadataStore.saveProviderHealth(
+                    workspaceID: fixture.workspace.id,
+                    providerID: providerID,
+                    summary: ProviderHealthSummary(
+                        state: .available,
+                        summary: "Cached \(providerID.displayName) health",
+                        resolvedExecutable: "/tmp/\(providerID.rawValue)",
+                        launchability: .launchable
+                    ),
+                    checkedAt: now.addingTimeInterval(-10)
+                )
+            }
 
             let overview = try await fixture.catalog.workspaceOverview(workspaceID: fixture.workspace.id)
             let claudeCard = try #require(overview.providerCards.first(where: { $0.provider.id == ProviderID.claude }))
@@ -436,6 +649,19 @@
                 ),
                 checkedAt: now.addingTimeInterval(-10)
             )
+            for providerID in ProviderID.allCases where providerID != .claude {
+                _ = try fixture.metadataStore.saveProviderHealth(
+                    workspaceID: remoteWorkspace.id,
+                    providerID: providerID,
+                    summary: ProviderHealthSummary(
+                        state: .available,
+                        summary: "Cached \(providerID.displayName) health",
+                        resolvedExecutable: "/tmp/\(providerID.rawValue)",
+                        launchability: .launchable
+                    ),
+                    checkedAt: now.addingTimeInterval(-10)
+                )
+            }
 
             let overview = try await fixture.catalog.workspaceOverview(workspaceID: remoteWorkspace.id)
             let remoteTarget = try #require(overview.remoteTarget)
@@ -1030,6 +1256,47 @@
 
         func callCount(for providerID: ProviderID) -> Int {
             callsByProvider[providerID, default: 0]
+        }
+    }
+
+    private actor SuspendedProviderHealthEvaluator: ProviderHealthEvaluating {
+        private var callsByProvider: [ProviderID: Int] = [:]
+        private var continuationsByProvider: [ProviderID: [CheckedContinuation<ProviderHealthSummary, Never>]] = [:]
+
+        func providerCards(for workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?) async
+            -> [WorkspaceProviderCard]
+        {
+            ProviderID.allCases.map { providerID in
+                WorkspaceProviderCard(
+                    provider: Provider(id: providerID),
+                    health: ProviderHealthSummary(state: .notChecked, summary: "Unused"),
+                    defaultSession: ProviderDefaultSessionSummary(
+                        state: .notCreated,
+                        summary: "No default session yet",
+                        actionTitle: "Launch"
+                    )
+                )
+            }
+        }
+
+        func healthSummary(
+            for providerID: ProviderID, workspace: Workspace, remoteContext: RemoteWorkspaceHealthContext?
+        ) async -> ProviderHealthSummary {
+            callsByProvider[providerID, default: 0] += 1
+            return await withCheckedContinuation { continuation in
+                continuationsByProvider[providerID, default: []].append(continuation)
+            }
+        }
+
+        func callCount(for providerID: ProviderID) -> Int {
+            callsByProvider[providerID, default: 0]
+        }
+
+        func resumeAll(for providerID: ProviderID, with summary: ProviderHealthSummary) {
+            let continuations = continuationsByProvider.removeValue(forKey: providerID) ?? []
+            for continuation in continuations {
+                continuation.resume(returning: summary)
+            }
         }
     }
 

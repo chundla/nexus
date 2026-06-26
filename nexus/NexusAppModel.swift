@@ -6,6 +6,12 @@
     import NexusSessionPresentation
     import Observation
 
+    private extension UInt64 {
+        func saturatingSubtract(_ other: UInt64) -> UInt64 {
+            self >= other ? self - other : 0
+        }
+    }
+
     struct SessionPresentationContext: Equatable {
         let workspace: Workspace
         let host: NexusDomain.Host?
@@ -77,6 +83,11 @@
         let hostCount: Int
     }
 
+    struct ProviderDetailPlaceholder: Equatable {
+        let workspace: Workspace
+        let providerCard: WorkspaceProviderCard
+    }
+
     enum WorkspaceBrowseInitialSelection: Equatable {
         case workspace(UUID)
         case workspaceGroup(UUID)
@@ -111,6 +122,8 @@
         var remoteAccessState: RemoteAccessState?
         var pairedDevices: [PairedDevice] = []
         var focusedSessionScreen: SessionScreen?
+        @ObservationIgnored
+        private(set) var performanceDiagnostics: [PerformanceDiagnosticRecord] = []
         private(set) var focusedSessionSummaryPresentation: FocusedSessionSummaryPresentation?
         private(set) var focusedStructuredSessionPresentation: FocusedStructuredSessionPresentation?
         private(set) var focusedStructuredSessionChromePresentation: FocusedStructuredSessionChromePresentation?
@@ -137,10 +150,15 @@
         private let remotePairingServerFactory: (() throws -> any RemotePairingServing)?
         private var focusedSessionObservation: (any SessionScreenObservation)?
         private var staleWorkspaceOverviewRefreshTasks: [UUID: Task<Void, Never>] = [:]
+        private var providerDetailRefreshTasks: [ProviderDetailKey: Task<ProviderDetail, Error>] = [:]
+        private var sessionScreenRefreshTasks: [UUID: Task<SessionScreen, Error>] = [:]
+        private var focusSessionTasks: [UUID: Task<Void, Error>] = [:]
+        private var focusedSessionGeneration: UInt64 = 0
         private var backgroundWorkspaceOverviewLoadTask: Task<Void, Never>?
         private var workspaceOverviewRefreshGeneration: UInt64 = 0
 
         private static let initialWorkspaceOverviewLoadCount = 3
+        private static let impactedWorkspaceOverviewRefreshParallelism = 3
 
         var focusedStructuredSessionDiagnosticSnapshot: StructuredSessionClientDiagnosticSnapshot? {
             guard let screen = focusedSessionScreen,
@@ -195,6 +213,44 @@
             return defaultRemoteAccessListeningPort
         }
 
+        private func currentUptimeNanoseconds() -> UInt64 {
+            DispatchTime.now().uptimeNanoseconds
+        }
+
+        private func elapsedMilliseconds(since startedAt: UInt64) -> Int {
+            Int(currentUptimeNanoseconds().saturatingSubtract(startedAt) / 1_000_000)
+        }
+
+        private func recordPerformanceDiagnostic(
+            operation: PerformanceDiagnosticOperation,
+            outcome: PerformanceDiagnosticOutcome = .success,
+            workspaceID: UUID? = nil,
+            providerID: ProviderID? = nil,
+            sessionID: UUID? = nil,
+            startedAt: UInt64,
+            steps: [PerformanceDiagnosticStep],
+            metrics: [String: Int] = [:],
+            failureMessage: String? = nil
+        ) {
+            performanceDiagnostics.insert(
+                PerformanceDiagnosticRecord(
+                    operation: operation,
+                    outcome: outcome,
+                    workspaceID: workspaceID,
+                    providerID: providerID,
+                    sessionID: sessionID,
+                    totalElapsedMilliseconds: elapsedMilliseconds(since: startedAt),
+                    steps: steps,
+                    metrics: metrics,
+                    failureMessage: failureMessage
+                ),
+                at: 0
+            )
+            if performanceDiagnostics.count > 50 {
+                performanceDiagnostics.removeLast(performanceDiagnostics.count - 50)
+            }
+        }
+
         static func live(listeningPort: Int? = 9234) throws -> NexusAppModel {
             let service = try NexusEmbeddedServiceBootstrap.bootstrap()
             let listenerEndpoint = service.listenerEndpoint
@@ -206,6 +262,7 @@
         }
 
         func refresh() async {
+            let diagnosticStart = currentUptimeNanoseconds()
             do {
                 let refreshGeneration = startWorkspaceOverviewRefresh()
 
@@ -242,44 +299,30 @@
                     stopRemotePairingServer()
                 }
                 self.serviceErrorMessage = nil
-
-                let orderedWorkspaceIDs = prioritizedWorkspaceOverviewIDs(
-                    for: loadedWorkspaces,
-                    recentNavigation: loadedRecentNavigation
+                recordPerformanceDiagnostic(
+                    operation: .appStartupBrowse,
+                    startedAt: diagnosticStart,
+                    steps: [
+                        PerformanceDiagnosticStep(
+                            name: "applyBrowseShell",
+                            elapsedMilliseconds: elapsedMilliseconds(since: diagnosticStart)
+                        )
+                    ],
+                    metrics: [
+                        "workspaceCount": loadedWorkspaces.count,
+                        "workspaceGroupCount": loadedWorkspaceGroups.count,
+                        "hostCount": loadedHosts.count,
+                        "recentNavigationCount": loadedRecentNavigation.count,
+                    ]
                 )
-                let immediateWorkspaceIDs = Array(orderedWorkspaceIDs.prefix(Self.initialWorkspaceOverviewLoadCount))
-                let backgroundWorkspaceIDs = Array(orderedWorkspaceIDs.dropFirst(immediateWorkspaceIDs.count))
 
-                try await loadWorkspaceOverviews(
-                    for: immediateWorkspaceIDs,
+                scheduleWorkspaceOverviewLoadsInBackground(
+                    for: prioritizedWorkspaceOverviewIDs(
+                        for: loadedWorkspaces,
+                        recentNavigation: loadedRecentNavigation
+                    ),
                     refreshGeneration: refreshGeneration
                 )
-
-                guard backgroundWorkspaceIDs.isEmpty == false else {
-                    return
-                }
-
-                backgroundWorkspaceOverviewLoadTask = Task { @MainActor [weak self] in
-                    guard let self else {
-                        return
-                    }
-                    defer {
-                        if self.workspaceOverviewRefreshGeneration == refreshGeneration {
-                            self.backgroundWorkspaceOverviewLoadTask = nil
-                        }
-                    }
-
-                    do {
-                        try await self.loadWorkspaceOverviews(
-                            for: backgroundWorkspaceIDs,
-                            refreshGeneration: refreshGeneration
-                        )
-                    } catch is CancellationError {
-                        return
-                    } catch {
-                        return
-                    }
-                }
             } catch {
                 backgroundWorkspaceOverviewLoadTask?.cancel()
                 backgroundWorkspaceOverviewLoadTask = nil
@@ -304,6 +347,13 @@
                 focusedSessionID = nil
                 focusedSessionWorkspaceID = nil
                 serviceErrorMessage = error.localizedDescription
+                recordPerformanceDiagnostic(
+                    operation: .appStartupBrowse,
+                    outcome: .failure,
+                    startedAt: diagnosticStart,
+                    steps: [],
+                    failureMessage: error.localizedDescription
+                )
             }
         }
 
@@ -389,9 +439,8 @@
         func createLocalWorkspace(folderPath: String, primaryGroupID: UUID?) async throws -> Workspace {
             let workspace = try await client.createLocalWorkspace(
                 name: nil, folderPath: folderPath, primaryGroupID: primaryGroupID)
-            let overview = try await client.getWorkspaceOverview(workspaceID: workspace.id)
-            workspaces.append(workspace)
-            workspaceOverviews[workspace.id] = overview
+            applyCreatedWorkspaceShell(workspace)
+            refreshWorkspaceOverviewInBackground(workspaceID: workspace.id)
             return workspace
         }
 
@@ -404,9 +453,8 @@
                 remotePath: remotePath,
                 primaryGroupID: primaryGroupID
             )
-            let overview = try await client.getWorkspaceOverview(workspaceID: workspace.id)
-            workspaces.append(workspace)
-            workspaceOverviews[workspace.id] = overview
+            applyCreatedWorkspaceShell(workspace)
+            refreshWorkspaceOverviewInBackground(workspaceID: workspace.id)
             return workspace
         }
 
@@ -448,9 +496,7 @@
                 workspaces
                 .filter { $0.remoteHostID == hostID }
                 .map(\.id)
-            for workspaceID in impactedWorkspaceIDs {
-                try await refreshWorkspaceOverview(for: workspaceID)
-            }
+            refreshImpactedWorkspaceOverviewsInBackground(workspaceIDs: impactedWorkspaceIDs)
 
             return snapshot
         }
@@ -470,8 +516,10 @@
             let session = try await client.launchOrResumeDefaultSession(
                 workspaceID: workspaceID, providerID: providerID)
             try await focusSession(sessionID: session.id)
-            try await refreshWorkspaceOverview(for: workspaceID)
-            try await refreshProviderDetailIfLoaded(workspaceID: workspaceID, providerID: providerID)
+            refreshWorkspaceOverviewAndLoadedProviderDetailInBackground(
+                workspaceID: workspaceID,
+                providerID: providerID
+            )
             return session
         }
 
@@ -479,33 +527,48 @@
         {
             let session = try await client.createNamedSession(
                 workspaceID: workspaceID, providerID: providerID, name: name)
+            applyOptimisticSessionMutation(session)
+            applyOptimisticAlternateSessionCountDelta(workspaceID: workspaceID, providerID: providerID, delta: 1)
             try await focusSession(sessionID: session.id)
-            try await refreshWorkspaceOverview(for: workspaceID)
-            try await refreshProviderDetail(workspaceID: workspaceID, providerID: providerID)
+            refreshWorkspaceOverviewAndProviderDetailInBackground(
+                workspaceID: workspaceID,
+                providerID: providerID
+            )
             return session
         }
 
         func launchOrResumeSession(sessionID: UUID, workspaceID: UUID, providerID: ProviderID) async throws -> Session {
             let session = try await client.launchOrResumeSession(sessionID: sessionID)
             let screen = try await client.getSessionScreen(sessionID: session.id)
-            try await applyFocusedSessionScreen(screen)
+            applyOptimisticSessionMutation(session)
+            try await applyFocusedSessionScreen(screen, refreshCatalogOnStateChange: false)
             try await focusSession(sessionID: session.id)
-            try await refreshWorkspaceOverview(for: workspaceID)
-            try await refreshProviderDetailIfLoaded(workspaceID: workspaceID, providerID: providerID)
+            refreshWorkspaceOverviewAndLoadedProviderDetailInBackground(
+                workspaceID: workspaceID,
+                providerID: providerID
+            )
             return session
         }
 
         func stopSession(sessionID: UUID, workspaceID: UUID, providerID: ProviderID) async throws -> Session {
             let session = try await client.stopSession(sessionID: sessionID)
-            if focusedSessionScreen?.session.id == sessionID {
-                try await refreshFocusedSession()
+            applyOptimisticSessionMutation(session)
+            if let focusedSessionScreen, focusedSessionScreen.session.id == sessionID {
+                try await applyFocusedSessionScreen(
+                    focusedSessionScreen.replacingSession(session),
+                    refreshCatalogOnStateChange: false
+                )
             }
-            try await refreshWorkspaceOverview(for: workspaceID)
-            try await refreshProviderDetail(workspaceID: workspaceID, providerID: providerID)
+            refreshWorkspaceOverviewAndProviderDetailInBackground(
+                workspaceID: workspaceID,
+                providerID: providerID
+            )
             return session
         }
 
         func deleteSessionRecord(sessionID: UUID, workspaceID: UUID, providerID: ProviderID) async throws -> Bool {
+            let deletedSession = localSessionSnapshot(
+                sessionID: sessionID, workspaceID: workspaceID, providerID: providerID)
             let deleted = try await client.deleteSessionRecord(sessionID: sessionID)
             guard deleted else {
                 return false
@@ -521,8 +584,16 @@
                 focusedSessionID = nil
                 focusedSessionWorkspaceID = nil
             }
-            try await refreshWorkspaceOverview(for: workspaceID)
-            try await refreshProviderDetail(workspaceID: workspaceID, providerID: providerID)
+            applyOptimisticSessionRecordDeletion(
+                sessionID: sessionID,
+                workspaceID: workspaceID,
+                providerID: providerID,
+                deletedSession: deletedSession
+            )
+            refreshWorkspaceOverviewAndProviderDetailInBackground(
+                workspaceID: workspaceID,
+                providerID: providerID
+            )
             return true
         }
 
@@ -535,20 +606,61 @@
                 return
             }
 
-            await stopFocusingSession()
-            focusedSessionID = sessionID
-            if focusedSessionScreen?.session.id != sessionID {
-                focusedSessionWorkspaceID = nil
+            if let existingTask = focusSessionTasks[sessionID] {
+                try await existingTask.value
+                return
             }
-            let updatePump = focusedSessionScreenUpdatePump
-            let observation = try await client.observeSessionScreen(sessionID: sessionID) { screen in
-                submitToCoalescingMainActorValuePump(updatePump, value: screen)
+
+            focusedSessionGeneration &+= 1
+            let generation = focusedSessionGeneration
+            let task = Task<Void, Error> { @MainActor [weak self] in
+                guard let self else {
+                    throw CancellationError()
+                }
+
+                if focusedSessionScreen?.session.id == sessionID, focusedSessionObservation != nil {
+                    return
+                }
+
+                await stopFocusingSession(advancingGeneration: false)
+                focusedSessionID = sessionID
+                if focusedSessionScreen?.session.id != sessionID {
+                    focusedSessionWorkspaceID = nil
+                }
+                let updatePump = focusedSessionScreenUpdatePump
+                let observation = try await client.observeSessionScreen(sessionID: sessionID) { screen in
+                    submitToCoalescingMainActorValuePump(updatePump, value: screen)
+                }
+
+                guard Task.isCancelled == false,
+                    focusedSessionGeneration == generation,
+                    focusedSessionID == sessionID
+                else {
+                    await observation.cancel()
+                    throw CancellationError()
+                }
+
+                focusedSessionObservation = observation
+                await focusedSessionScreenUpdatePump.flush()
             }
-            focusedSessionObservation = observation
-            await focusedSessionScreenUpdatePump.flush()
+            focusSessionTasks[sessionID] = task
+            defer { focusSessionTasks.removeValue(forKey: sessionID) }
+            try await task.value
         }
 
         func stopFocusingSession() async {
+            await stopFocusingSession(advancingGeneration: true)
+        }
+
+        private func stopFocusingSession(advancingGeneration: Bool) async {
+            if advancingGeneration {
+                focusedSessionGeneration &+= 1
+                for task in focusSessionTasks.values {
+                    task.cancel()
+                }
+                focusSessionTasks.removeAll()
+            }
+
             focusedSessionScreenUpdatePump.reset()
             let observation = focusedSessionObservation
             focusedSessionObservation = nil
@@ -571,8 +683,7 @@
         }
 
         func loadSessionScreen(sessionID: UUID) async throws {
-            let screen = try await client.getSessionScreen(sessionID: sessionID)
-            try await applyFocusedSessionScreen(screen)
+            _ = try await refreshSessionScreen(sessionID: sessionID)
         }
 
         /// Drains coalesced focused-session observation updates (for tests and action/observation ordering).
@@ -669,6 +780,22 @@
             try await applyFocusedSessionActionResponse(screen, ifCurrentScreenMatches: baselineScreen)
         }
 
+        /// Reclaims Mac Controller for the focused Session without sending any input,
+        /// for the menu-driven "Take Controller" action. Mirrors the side effect that
+        /// already happens implicitly whenever the Mac sends input or resizes the
+        /// terminal (`SessionControllerRegistry.claimMacControl`), at the Session's
+        /// current size so nothing visibly reflows.
+        func reclaimFocusedSessionController() async throws {
+            guard let baselineScreen = focusedSessionScreen else {
+                return
+            }
+
+            try await resizeFocusedSession(
+                columns: baselineScreen.terminalColumns,
+                rows: baselineScreen.terminalRows
+            )
+        }
+
         func resizeFocusedSession(columns: Int, rows: Int) async throws {
             guard let baselineScreen = focusedSessionScreen else {
                 return
@@ -763,6 +890,7 @@
         }
 
         func workspaceBrowseNavigationPresentation(currentWorkspaceID: UUID?) -> WorkspaceBrowseNavigationPresentation {
+            let diagnosticStart = currentUptimeNanoseconds()
             let sidebarPresentation = workspaceBrowseSidebarPresentation(currentWorkspaceID: currentWorkspaceID)
             let initialSelection =
                 bootstrapInitialSelection
@@ -780,6 +908,20 @@
                 )
             }
 
+            recordPerformanceDiagnostic(
+                operation: .quickSwitchSearch,
+                startedAt: diagnosticStart,
+                steps: [
+                    PerformanceDiagnosticStep(
+                        name: "buildQuickSwitchItems",
+                        elapsedMilliseconds: elapsedMilliseconds(since: diagnosticStart)
+                    )
+                ],
+                metrics: [
+                    "workspaceResultCount": quickSwitchItems.count,
+                    "workspaceGroupCount": sidebarPresentation.workspaceGroups.count,
+                ]
+            )
             return WorkspaceBrowseNavigationPresentation(
                 initialSelection: initialSelection,
                 quickSwitchItems: quickSwitchItems
@@ -818,6 +960,17 @@
 
         func providerDetail(for workspaceID: UUID, providerID: ProviderID) -> ProviderDetail? {
             providerDetails[ProviderDetailKey(workspaceID: workspaceID, providerID: providerID)]
+        }
+
+        func providerDetailPlaceholder(for workspaceID: UUID, providerID: ProviderID) -> ProviderDetailPlaceholder? {
+            guard providerDetail(for: workspaceID, providerID: providerID) == nil,
+                let overview = workspaceOverview(for: workspaceID),
+                let providerCard = overview.providerCards.first(where: { $0.provider.id == providerID })
+            else {
+                return nil
+            }
+
+            return ProviderDetailPlaceholder(workspace: overview.workspace, providerCard: providerCard)
         }
 
         var focusedSessionPresentationContext: SessionPresentationContext? {
@@ -873,6 +1026,65 @@
             applyWorkspaceOverview(overview)
         }
 
+        private func applyCreatedWorkspaceShell(_ workspace: Workspace) {
+            if let index = workspaces.firstIndex(where: { $0.id == workspace.id }) {
+                workspaces[index] = workspace
+            } else {
+                workspaces.append(workspace)
+            }
+        }
+
+        private func refreshWorkspaceOverviewInBackground(workspaceID: UUID) {
+            Task { @MainActor [weak self] in
+                guard let self else {
+                    return
+                }
+
+                _ = try? await self.refreshWorkspaceOverview(for: workspaceID)
+            }
+        }
+
+        private func refreshImpactedWorkspaceOverviewsInBackground(workspaceIDs: [UUID]) {
+            guard workspaceIDs.isEmpty == false else {
+                return
+            }
+
+            let boundedParallelism = min(Self.impactedWorkspaceOverviewRefreshParallelism, workspaceIDs.count)
+            Task { @MainActor [weak self, client] in
+                guard let self else {
+                    return
+                }
+
+                await withTaskGroup(of: WorkspaceOverview?.self) { group in
+                    var nextWorkspaceIndex = 0
+
+                    for _ in 0..<boundedParallelism {
+                        let workspaceID = workspaceIDs[nextWorkspaceIndex]
+                        nextWorkspaceIndex += 1
+                        group.addTask {
+                            try? await client.refreshWorkspaceOverview(workspaceID: workspaceID)
+                        }
+                    }
+
+                    while let overview = await group.next() {
+                        if let overview {
+                            self.applyWorkspaceOverview(overview)
+                        }
+
+                        guard nextWorkspaceIndex < workspaceIDs.count else {
+                            continue
+                        }
+
+                        let workspaceID = workspaceIDs[nextWorkspaceIndex]
+                        nextWorkspaceIndex += 1
+                        group.addTask {
+                            try? await client.refreshWorkspaceOverview(workspaceID: workspaceID)
+                        }
+                    }
+                }
+            }
+        }
+
         private func startWorkspaceOverviewRefresh() -> UInt64 {
             backgroundWorkspaceOverviewLoadTask?.cancel()
             backgroundWorkspaceOverviewLoadTask = nil
@@ -884,8 +1096,52 @@
             for workspaceIDs: [UUID],
             refreshGeneration: UInt64
         ) async throws {
+            guard workspaceIDs.isEmpty == false else {
+                return
+            }
+
             let overviews = try await client.getWorkspaceOverviews(workspaceIDs: workspaceIDs)
             applyWorkspaceOverviews(overviews, refreshGeneration: refreshGeneration)
+        }
+
+        private func scheduleWorkspaceOverviewLoadsInBackground(
+            for orderedWorkspaceIDs: [UUID],
+            refreshGeneration: UInt64
+        ) {
+            guard orderedWorkspaceIDs.isEmpty == false else {
+                return
+            }
+
+            let immediateWorkspaceIDs = Array(orderedWorkspaceIDs.prefix(Self.initialWorkspaceOverviewLoadCount))
+            let backgroundWorkspaceIDs = Array(orderedWorkspaceIDs.dropFirst(immediateWorkspaceIDs.count))
+
+            backgroundWorkspaceOverviewLoadTask = Task { @MainActor [weak self] in
+                guard let self else {
+                    return
+                }
+                defer {
+                    if self.workspaceOverviewRefreshGeneration == refreshGeneration {
+                        self.backgroundWorkspaceOverviewLoadTask = nil
+                    }
+                }
+
+                do {
+                    try Task.checkCancellation()
+                    try await self.loadWorkspaceOverviews(
+                        for: immediateWorkspaceIDs,
+                        refreshGeneration: refreshGeneration
+                    )
+                    try Task.checkCancellation()
+                    try await self.loadWorkspaceOverviews(
+                        for: backgroundWorkspaceIDs,
+                        refreshGeneration: refreshGeneration
+                    )
+                } catch is CancellationError {
+                    return
+                } catch {
+                    return
+                }
+            }
         }
 
         private func prioritizedWorkspaceOverviewIDs(
@@ -1112,13 +1368,48 @@
             }
         }
 
+        private func refreshSessionScreen(sessionID: UUID) async throws -> SessionScreen {
+            if let existingTask = sessionScreenRefreshTasks[sessionID] {
+                return try await existingTask.value
+            }
+
+            let task = Task<SessionScreen, Error> { @MainActor [weak self] in
+                guard let self else {
+                    throw CancellationError()
+                }
+
+                let screen = try await client.getSessionScreen(sessionID: sessionID)
+                try await applyFocusedSessionScreen(screen)
+                return screen
+            }
+            sessionScreenRefreshTasks[sessionID] = task
+            defer { sessionScreenRefreshTasks.removeValue(forKey: sessionID) }
+            return try await task.value
+        }
+
         private func refreshProviderDetail(workspaceID: UUID, providerID: ProviderID) async throws {
-            let detail = try await client.getProviderDetail(
-                workspaceID: workspaceID,
-                providerID: providerID
-            )
-            providerDetails[ProviderDetailKey(workspaceID: workspaceID, providerID: providerID)] = detail
-            syncRecentNavigationSessionWorkspaceIDs(for: detail)
+            let key = ProviderDetailKey(workspaceID: workspaceID, providerID: providerID)
+            if let existingTask = providerDetailRefreshTasks[key] {
+                _ = try await existingTask.value
+                return
+            }
+
+            let task = Task<ProviderDetail, Error> { @MainActor [weak self] in
+                guard let self else {
+                    throw CancellationError()
+                }
+
+                let detail = try await client.getProviderDetail(
+                    workspaceID: workspaceID,
+                    providerID: providerID
+                )
+                providerDetails[key] = detail
+                syncRecentNavigationSessionWorkspaceIDs(for: detail)
+                return detail
+            }
+            providerDetailRefreshTasks[key] = task
+            defer { providerDetailRefreshTasks.removeValue(forKey: key) }
+            _ = try await task.value
         }
 
         private func refreshProviderDetailIfLoaded(workspaceID: UUID, providerID: ProviderID) async throws {
@@ -1128,6 +1419,153 @@
             }
 
             try await refreshProviderDetail(workspaceID: workspaceID, providerID: providerID)
+        }
+
+        private func applyOptimisticSessionMutation(_ session: Session) {
+            let key = ProviderDetailKey(workspaceID: session.workspaceID, providerID: session.providerID)
+            if let detail = providerDetails[key] {
+                providerDetails[key] = detail.replacingSession(session)
+                if let updatedDetail = providerDetails[key] {
+                    syncRecentNavigationSessionWorkspaceIDs(for: updatedDetail)
+                }
+            }
+
+            if session.isDefault {
+                applyOptimisticDefaultSessionSummary(session)
+            }
+        }
+
+        private func applyOptimisticSessionRecordDeletion(
+            sessionID: UUID,
+            workspaceID: UUID,
+            providerID: ProviderID,
+            deletedSession: Session?
+        ) {
+            let key = ProviderDetailKey(workspaceID: workspaceID, providerID: providerID)
+            if let detail = providerDetails[key] {
+                providerDetails[key] = detail.removingSession(sessionID: sessionID)
+            }
+
+            if deletedSession?.isDefault == false {
+                applyOptimisticAlternateSessionCountDelta(workspaceID: workspaceID, providerID: providerID, delta: -1)
+            }
+        }
+
+        private func localSessionSnapshot(sessionID: UUID, workspaceID: UUID, providerID: ProviderID) -> Session? {
+            if focusedSessionScreen?.session.id == sessionID {
+                return focusedSessionScreen?.session
+            }
+
+            let detail = providerDetails[ProviderDetailKey(workspaceID: workspaceID, providerID: providerID)]
+            if detail?.defaultSession?.id == sessionID {
+                return detail?.defaultSession
+            }
+
+            return detail?.alternateSessions.first(where: { $0.id == sessionID })
+                ?? detail?.failedSessions.first(where: { $0.id == sessionID })
+        }
+
+        private func applyOptimisticAlternateSessionCountDelta(
+            workspaceID: UUID,
+            providerID: ProviderID,
+            delta: Int
+        ) {
+            guard let overview = workspaceOverviews[workspaceID],
+                let providerIndex = overview.providerCards.firstIndex(where: { $0.provider.id == providerID })
+            else {
+                return
+            }
+
+            let card = overview.providerCards[providerIndex]
+            var providerCards = overview.providerCards
+            providerCards[providerIndex] = WorkspaceProviderCard(
+                provider: card.provider,
+                health: card.health,
+                capabilities: card.capabilities,
+                prelaunchPrimarySurface: card.prelaunchPrimarySurface,
+                defaultSession: card.defaultSession,
+                alternateSessionCount: max(0, card.alternateSessionCount + delta)
+            )
+            workspaceOverviews[workspaceID] = WorkspaceOverview(
+                workspace: overview.workspace,
+                providerCards: providerCards,
+                remoteTarget: overview.remoteTarget,
+                usesStaleBrowseFacts: overview.usesStaleBrowseFacts
+            )
+        }
+
+        private func applyOptimisticDefaultSessionSummary(_ session: Session) {
+            guard let overview = workspaceOverviews[session.workspaceID],
+                let providerIndex = overview.providerCards.firstIndex(where: { $0.provider.id == session.providerID })
+            else {
+                return
+            }
+
+            let card = overview.providerCards[providerIndex]
+            var providerCards = overview.providerCards
+            providerCards[providerIndex] = WorkspaceProviderCard(
+                provider: card.provider,
+                health: card.health,
+                capabilities: card.capabilities,
+                prelaunchPrimarySurface: card.prelaunchPrimarySurface,
+                defaultSession: card.defaultSession.replacingSession(session),
+                alternateSessionCount: card.alternateSessionCount
+            )
+            workspaceOverviews[session.workspaceID] = WorkspaceOverview(
+                workspace: overview.workspace,
+                providerCards: providerCards,
+                remoteTarget: overview.remoteTarget,
+                usesStaleBrowseFacts: overview.usesStaleBrowseFacts
+            )
+        }
+
+        private func refreshWorkspaceOverviewAndProviderDetailInBackground(
+            workspaceID: UUID,
+            providerID: ProviderID
+        ) {
+            refreshWorkspaceOverviewAndProviderDetailInBackground(
+                workspaceID: workspaceID,
+                providerID: providerID,
+                refreshProviderDetailOnlyIfLoaded: false
+            )
+        }
+
+        private func refreshWorkspaceOverviewAndLoadedProviderDetailInBackground(
+            workspaceID: UUID,
+            providerID: ProviderID
+        ) {
+            refreshWorkspaceOverviewAndProviderDetailInBackground(
+                workspaceID: workspaceID,
+                providerID: providerID,
+                refreshProviderDetailOnlyIfLoaded: true
+            )
+        }
+
+        private func refreshWorkspaceOverviewAndProviderDetailInBackground(
+            workspaceID: UUID,
+            providerID: ProviderID,
+            refreshProviderDetailOnlyIfLoaded: Bool
+        ) {
+            Task { @MainActor [weak self] in
+                guard let self else {
+                    return
+                }
+
+                async let workspaceOverviewRefresh: Void = {
+                    _ = try? await self.refreshWorkspaceOverview(for: workspaceID)
+                }()
+                async let providerDetailRefresh: Void = {
+                    if refreshProviderDetailOnlyIfLoaded {
+                        _ = try? await self.refreshProviderDetailIfLoaded(
+                            workspaceID: workspaceID,
+                            providerID: providerID
+                        )
+                    } else {
+                        _ = try? await self.refreshProviderDetail(workspaceID: workspaceID, providerID: providerID)
+                    }
+                }()
+                _ = await (workspaceOverviewRefresh, providerDetailRefresh)
+            }
         }
 
         private func applyFocusedSessionActionResponse(
@@ -1197,7 +1635,10 @@
             try? await applyFocusedSessionScreen(screen)
         }
 
-        private func applyFocusedSessionScreen(_ screen: SessionScreen) async throws {
+        private func applyFocusedSessionScreen(
+            _ screen: SessionScreen,
+            refreshCatalogOnStateChange: Bool = true
+        ) async throws {
             let previousScreen = focusedSessionScreen?.session.id == screen.session.id ? focusedSessionScreen : nil
             let previousState = previousScreen?.session.state
             focusedSessionScreen = screen
@@ -1213,7 +1654,7 @@
                 recentNavigationSessionWorkspaceIDs[screen.session.id] = screen.session.workspaceID
             }
 
-            if let previousState, previousState != screen.session.state {
+            if refreshCatalogOnStateChange, let previousState, previousState != screen.session.state {
                 try await refreshWorkspaceOverview(for: screen.session.workspaceID)
                 try await refreshProviderDetailIfLoaded(
                     workspaceID: screen.session.workspaceID,
@@ -1267,6 +1708,113 @@
             if focusedStructuredSessionChromePresentation != presentation {
                 focusedStructuredSessionChromePresentation = presentation
             }
+        }
+    }
+
+    private extension ProviderDetail {
+        func replacingSession(_ session: Session) -> ProviderDetail {
+            let defaultSession = session.isDefault ? session : self.defaultSession
+            let alternateSessions: [Session]
+            let failedSessions: [Session]
+
+            if session.isDefault {
+                alternateSessions = self.alternateSessions
+                failedSessions = self.failedSessions.filter { $0.id != session.id }
+            } else if session.state == .failed {
+                alternateSessions = self.alternateSessions.filter { $0.id != session.id }
+                failedSessions = self.failedSessions.replacingOrAppending(session)
+            } else {
+                alternateSessions = self.alternateSessions.replacingOrAppending(session)
+                failedSessions = self.failedSessions.filter { $0.id != session.id }
+            }
+
+            return ProviderDetail(
+                workspace: workspace,
+                provider: provider,
+                health: health,
+                capabilities: capabilities,
+                prelaunchPrimarySurface: prelaunchPrimarySurface,
+                defaultSession: defaultSession,
+                alternateSessions: alternateSessions,
+                failedSessions: failedSessions
+            )
+        }
+
+        func removingSession(sessionID: UUID) -> ProviderDetail {
+            ProviderDetail(
+                workspace: workspace,
+                provider: provider,
+                health: health,
+                capabilities: capabilities,
+                prelaunchPrimarySurface: prelaunchPrimarySurface,
+                defaultSession: defaultSession?.id == sessionID ? nil : defaultSession,
+                alternateSessions: alternateSessions.filter { $0.id != sessionID },
+                failedSessions: failedSessions.filter { $0.id != sessionID }
+            )
+        }
+    }
+
+    private extension Array where Element == Session {
+        func replacingOrAppending(_ session: Session) -> [Session] {
+            guard let index = firstIndex(where: { $0.id == session.id }) else {
+                return self + [session]
+            }
+
+            var sessions = self
+            sessions[index] = session
+            return sessions
+        }
+    }
+
+    private extension ProviderDefaultSessionSummary {
+        func replacingSession(_ session: Session) -> ProviderDefaultSessionSummary {
+            ProviderDefaultSessionSummary(
+                state: State(sessionState: session.state),
+                summary: session.failureMessage ?? summary,
+                actionTitle: session.state == .ready ? "Resume" : "Relaunch",
+                sessionID: session.id
+            )
+        }
+    }
+
+    private extension ProviderDefaultSessionSummary.State {
+        init(sessionState: Session.State) {
+            switch sessionState {
+            case .ready:
+                self = .ready
+            case .interrupted:
+                self = .interrupted
+            case .exited:
+                self = .exited
+            case .failed:
+                self = .failed
+            }
+        }
+    }
+
+    private extension SessionScreen {
+        func replacingSession(_ session: Session) -> SessionScreen {
+            SessionScreen(
+                session: session,
+                primarySurface: primarySurface,
+                controller: controller,
+                transcript: transcript,
+                terminalColumns: terminalColumns,
+                terminalRows: terminalRows,
+                activityItems: activityItems,
+                approvalRequests: approvalRequests,
+                extensionUI: extensionUI,
+                slashCommands: slashCommands,
+                providerEvents: providerEvents,
+                providerFacts: providerFacts,
+                finalOutputDiagnostic: finalOutputDiagnostic,
+                isAgentTurnInProgress: isAgentTurnInProgress,
+                visibleLines: visibleLines,
+                styledVisibleLines: styledVisibleLines,
+                cursorRow: cursorRow,
+                cursorColumn: cursorColumn,
+                cursorVisible: cursorVisible
+            )
         }
     }
 

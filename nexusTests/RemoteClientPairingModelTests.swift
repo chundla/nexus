@@ -91,6 +91,105 @@ struct RemoteClientPairingModelTests {
         #expect(model.availability(for: pairedMac) == .remoteAccessDisabled)
     }
 
+    @Test func remoteStatusRequestsUseShortLocalNetworkTimeout() async throws {
+        StatusRequestTimeoutCapturingURLProtocol.reset()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [StatusRequestTimeoutCapturingURLProtocol.self]
+        let client = RemotePairingHTTPClient(session: URLSession(configuration: configuration))
+
+        _ = try await client.fetchStatus(host: "studio.local", port: 9234)
+
+        #expect(
+            StatusRequestTimeoutCapturingURLProtocol.capturedTimeoutInterval()
+                == RemotePairingHTTPClient.statusRequestTimeoutInterval
+        )
+    }
+
+    @Test func refreshesActiveCatalogWhenActivePairedMacBecomesAvailableBeforeUnavailableMacFinishes() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let activeMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600)
+        )
+        let unavailableMac = PairedMac(
+            name: "Offline Mac",
+            host: "offline.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 601)
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([activeMac, unavailableMac])
+        store.saveActivePairedMacID(activeMac.id)
+        let unavailableGate = AsyncGate()
+        let client = StubRemotePairingClient(
+            result: activeMac,
+            statusResultsByHost: [
+                activeMac.host: .success(RemotePairedMacStatus(macName: activeMac.name, isRemoteAccessEnabled: true)),
+                unavailableMac.host: .failure(NSError(domain: NSURLErrorDomain, code: NSURLErrorCannotConnectToHost)),
+            ],
+            statusProbeGatesByHost: [unavailableMac.host: unavailableGate]
+        )
+        let model = RemoteClientPairingModel(client: client, store: store)
+
+        let refreshTask = Task {
+            await model.refreshPairedMacAvailability()
+        }
+        defer {
+            Task {
+                await unavailableGate.open()
+            }
+        }
+
+        try await waitUntilAsync(timeoutNanoseconds: 1_000_000_000) {
+            client.catalogFetchStarted
+        }
+
+        #expect(model.availability(for: activeMac) == .available)
+        #expect(model.availability(for: unavailableMac) == .unknown)
+        await unavailableGate.open()
+        await refreshTask.value
+        #expect(model.availability(for: unavailableMac) == .unavailablePairedMac)
+    }
+
+    @Test func refreshesDelayedPairedMacAvailabilityInParallel() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let pairedMacs = (0..<10).map { index in
+            PairedMac(
+                name: "Studio Mac \(index)",
+                host: "studio-\(index).local",
+                port: 9234,
+                pairedAt: Date(timeIntervalSince1970: TimeInterval(600 + index))
+            )
+        }
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs(pairedMacs)
+        store.saveActivePairedMacID(pairedMacs[0].id)
+        let statusProbeRecorder = StatusProbeRecorder()
+        let model = RemoteClientPairingModel(
+            client: StubRemotePairingClient(
+                result: pairedMacs[0],
+                statusProbeDelayNanoseconds: 150_000_000,
+                statusProbeRecorder: statusProbeRecorder
+            ),
+            store: store
+        )
+
+        await model.refreshPairedMacAvailability()
+
+        let maximumActiveProbeCount = await statusProbeRecorder.maximumActiveProbeCount()
+        #expect(maximumActiveProbeCount > 1)
+        #expect(maximumActiveProbeCount <= RemoteClientPairingModel.pairedMacAvailabilityProbeConcurrencyLimit)
+        #expect(pairedMacs.map { model.availability(for: $0) } == Array(repeating: .available, count: pairedMacs.count))
+    }
+
     @Test func storesSuccessfulPairingAsLastUsedMacForLaterReconnect() async throws {
         let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -1310,6 +1409,58 @@ struct RemoteClientPairingModelTests {
                 "observeSessionScreen",
                 "fetchSessionScreen",
             ])
+    }
+
+    @Test func coalescesConcurrentFocusRequestsForSameRemoteSession() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let session = Session(id: UUID(), workspaceID: UUID(), providerID: .claude, isDefault: true, state: .ready)
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+        let observationStartGate = AsyncGate()
+        let client = StubRemotePairingClient(
+            result: pairedMac,
+            sessionScreen: SessionScreen(session: session, transcript: "Claude ready"),
+            emitsInitialObservedScreen: false,
+            observeSessionStartGate: observationStartGate
+        )
+        let model = RemoteClientPairingModel(client: client, store: store)
+
+        let firstFocusTask = Task { @MainActor in
+            await model.focusRemoteSession(sessionID: session.id)
+        }
+        try await waitUntilAsync(timeoutNanoseconds: 1_000_000_000) {
+            client.requestLog.contains("observeSessionScreen")
+        }
+
+        let secondFocusTask = Task { @MainActor in
+            await model.focusRemoteSession(sessionID: session.id)
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(await observationStartGate.waiterCount() == 1)
+        #expect(client.requestLog == ["observeSessionScreen", "fetchSessionScreen"])
+
+        await observationStartGate.open()
+        await firstFocusTask.value
+        await secondFocusTask.value
+
+        #expect(client.requestLog == ["observeSessionScreen", "fetchSessionScreen"])
+        #expect(model.focusedSessionScreen?.session.id == session.id)
+
+        await model.focusRemoteSession(sessionID: session.id)
+
+        #expect(client.requestLog == ["observeSessionScreen", "fetchSessionScreen"])
     }
 
     @Test func focusRemoteSessionFallsBackToFetchedScreenWhenObservationStartupStalls() async throws {
@@ -2604,8 +2755,10 @@ struct RemoteClientPairingModelTests {
         #expect(model.focusedSessionIsStale)
         #expect(model.focusedSessionSurfaceSupport == .supported)
 
-        try await Task.sleep(nanoseconds: 1_100_000_000)
-        await Task.yield()
+        try await waitUntilAsync(timeoutNanoseconds: 5_000_000_000, pollIntervalNanoseconds: 50_000_000) {
+            model.focusedSessionScreen == recoveredViewerScreen && model.focusedSessionIsStale == false
+                && model.focusedSessionIsController == false
+        }
 
         #expect(model.focusedSessionScreen == recoveredViewerScreen)
         #expect(model.focusedSessionIsStale == false)
@@ -3477,6 +3630,230 @@ struct RemoteClientPairingModelTests {
 
         #expect(model.providerDetail(for: workspace.id, providerID: .claude) == detail)
         #expect(model.providerDetailErrorMessage(for: workspace.id, providerID: .claude) == nil)
+    }
+
+    @Test func catalogRefreshFailurePreservesCachedRemoteBrowseShell() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .remote,
+            folderPath: "/srv/nexus",
+            primaryGroupID: UUID()
+        )
+        let cachedCatalog = RemoteWorkspaceCatalog(
+            workspaceGroups: [],
+            recentNavigation: [],
+            workspaceOverviews: [WorkspaceOverview(workspace: workspace, providerCards: [])]
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+        let model = RemoteClientPairingModel(
+            client: StubRemotePairingClient(
+                result: pairedMac,
+                catalogResult: .failure(NSError(domain: NSURLErrorDomain, code: NSURLErrorCannotConnectToHost))
+            ),
+            store: store
+        )
+        model.catalog = cachedCatalog
+
+        await model.refreshActivePairedMacCatalog()
+
+        #expect(model.catalog == cachedCatalog)
+        #expect(model.catalogErrorMessage != nil)
+    }
+
+    @Test func coalescesConcurrentRemoteCatalogRefreshesForActivePairedMac() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .remote,
+            folderPath: "/srv/nexus",
+            primaryGroupID: UUID()
+        )
+        let catalog = RemoteWorkspaceCatalog(
+            workspaceGroups: [],
+            recentNavigation: [],
+            workspaceOverviews: [WorkspaceOverview(workspace: workspace, providerCards: [])]
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+        let catalogGate = AsyncGate()
+        let client = StubRemotePairingClient(
+            result: pairedMac,
+            catalog: catalog,
+            catalogFetchGate: catalogGate
+        )
+        let model = RemoteClientPairingModel(client: client, store: store)
+
+        let firstRefreshTask = Task { @MainActor in
+            await model.refreshActivePairedMacCatalog()
+        }
+        try await waitUntilAsync(timeoutNanoseconds: 1_000_000_000) {
+            client.catalogFetchStarted
+        }
+
+        let secondRefreshTask = Task { @MainActor in
+            await model.refreshActivePairedMacCatalog()
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(await catalogGate.waiterCount() == 1)
+        #expect(client.requestLog == ["fetchCatalog"])
+
+        await catalogGate.open()
+        await firstRefreshTask.value
+        await secondRefreshTask.value
+
+        #expect(client.requestLog == ["fetchCatalog"])
+        #expect(model.catalog == catalog)
+    }
+
+    @Test func exposesRemoteProviderDetailPlaceholderFromWorkspaceOverviewUntilDetailLoads() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let groupID = UUID()
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .remote,
+            folderPath: "/srv/nexus",
+            primaryGroupID: groupID
+        )
+        let providerCard = WorkspaceProviderCard(
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .available, summary: "Claude available", version: "1.2.3"),
+            defaultSession: ProviderDefaultSessionSummary(
+                state: .ready,
+                summary: "Default Session ready",
+                actionTitle: "Resume",
+                sessionID: UUID()
+            ),
+            alternateSessionCount: 2
+        )
+        let catalog = RemoteWorkspaceCatalog(
+            workspaceGroups: [WorkspaceGroup(id: groupID, name: "Client Work")],
+            recentNavigation: [],
+            workspaceOverviews: [WorkspaceOverview(workspace: workspace, providerCards: [providerCard])]
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let detail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .claude),
+            health: providerCard.health,
+            defaultSession: nil,
+            alternateSessions: [],
+            failedSessions: []
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+        let model = RemoteClientPairingModel(
+            client: StubRemotePairingClient(result: pairedMac, catalog: catalog, providerDetail: detail),
+            store: store
+        )
+
+        await model.refreshActivePairedMacCatalog()
+
+        let placeholder = try #require(model.providerDetailPlaceholder(for: workspace.id, providerID: .claude))
+        #expect(placeholder.workspace == workspace)
+        #expect(placeholder.providerCard == providerCard)
+
+        await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
+
+        #expect(model.providerDetailPlaceholder(for: workspace.id, providerID: .claude) == nil)
+    }
+
+    @Test func coalescesConcurrentProviderDetailLoadsForSameRemoteProvider() async throws {
+        let suiteName = "RemoteClientPairingModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let workspace = Workspace(
+            id: UUID(),
+            name: "Nexus",
+            kind: .local,
+            folderPath: "/tmp/nexus",
+            primaryGroupID: UUID()
+        )
+        let pairedMac = PairedMac(
+            name: "Studio Mac",
+            host: "studio.local",
+            port: 9234,
+            pairedAt: Date(timeIntervalSince1970: 600),
+            pairedDeviceID: UUID()
+        )
+        let detail = ProviderDetail(
+            workspace: workspace,
+            provider: Provider(id: .claude),
+            health: ProviderHealthSummary(state: .available, summary: "Claude available"),
+            defaultSession: nil,
+            alternateSessions: [],
+            failedSessions: []
+        )
+        let store = UserDefaultsPairedMacStore(defaults: defaults)
+        try store.savePairedMacs([pairedMac])
+        store.saveActivePairedMacID(pairedMac.id)
+        let providerDetailGate = AsyncGate()
+        let client = StubRemotePairingClient(
+            result: pairedMac,
+            providerDetail: detail,
+            providerDetailFetchGate: providerDetailGate
+        )
+        let model = RemoteClientPairingModel(client: client, store: store)
+
+        let firstLoadTask = Task { @MainActor in
+            await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
+        }
+
+        try await waitUntilAsync(timeoutNanoseconds: 1_000_000_000) {
+            client.providerDetailFetchStarted
+        }
+
+        let secondLoadTask = Task { @MainActor in
+            await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(await providerDetailGate.waiterCount() == 1)
+        #expect(client.requestLog == ["fetchProviderDetail"])
+
+        await providerDetailGate.open()
+        await firstLoadTask.value
+        await secondLoadTask.value
+
+        #expect(client.requestLog == ["fetchProviderDetail"])
+        #expect(model.providerDetail(for: workspace.id, providerID: .claude) == detail)
     }
 
     @Test func launchingDefaultRemoteSessionRefreshesProviderDetailAndFocusesSession() async throws {
@@ -5646,6 +6023,10 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
     private let observedScreenBeforeSendSessionTextResponse: SessionScreen?
     private let observedScreenBeforeSendSessionInputKeyResponse: SessionScreen?
     private let observeSessionStartGate: AsyncGate?
+    private let statusResultsByHost: [String: Result<RemotePairedMacStatus, any Error>]
+    private let statusProbeGatesByHost: [String: AsyncGate]
+    private let statusProbeDelayNanoseconds: UInt64
+    private let statusProbeRecorder: StatusProbeRecorder?
     private var observationRegistration: ObservationRegistration?
     private(set) var takeSessionControlRequests: [TakeSessionControlRequest] = []
     private(set) var releaseSessionControlRequests: [UUID] = []
@@ -5715,7 +6096,11 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
         initialObservedScreen: SessionScreen? = nil,
         observedScreenBeforeSendSessionTextResponse: SessionScreen? = nil,
         observedScreenBeforeSendSessionInputKeyResponse: SessionScreen? = nil,
-        observeSessionStartGate: AsyncGate? = nil
+        observeSessionStartGate: AsyncGate? = nil,
+        statusResultsByHost: [String: Result<RemotePairedMacStatus, any Error>] = [:],
+        statusProbeGatesByHost: [String: AsyncGate] = [:],
+        statusProbeDelayNanoseconds: UInt64 = 0,
+        statusProbeRecorder: StatusProbeRecorder? = nil
     ) {
         self.result = result
         self.status = status
@@ -5748,10 +6133,26 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
         self.observedScreenBeforeSendSessionTextResponse = observedScreenBeforeSendSessionTextResponse
         self.observedScreenBeforeSendSessionInputKeyResponse = observedScreenBeforeSendSessionInputKeyResponse
         self.observeSessionStartGate = observeSessionStartGate
+        self.statusResultsByHost = statusResultsByHost
+        self.statusProbeGatesByHost = statusProbeGatesByHost
+        self.statusProbeDelayNanoseconds = statusProbeDelayNanoseconds
+        self.statusProbeRecorder = statusProbeRecorder
     }
 
     func fetchStatus(host: String, port: Int) async throws -> RemotePairedMacStatus {
-        try status.get()
+        await statusProbeRecorder?.begin(host: host)
+        do {
+            await statusProbeGatesByHost[host]?.wait()
+            if statusProbeDelayNanoseconds > 0 {
+                try await Task.sleep(nanoseconds: statusProbeDelayNanoseconds)
+            }
+            let resolvedStatus = try (statusResultsByHost[host] ?? status).get()
+            await statusProbeRecorder?.end(host: host)
+            return resolvedStatus
+        } catch {
+            await statusProbeRecorder?.end(host: host)
+            throw error
+        }
     }
 
     func completePairing(host: String, port: Int, pairingCode: String, deviceName: String) async throws -> PairedMac {
@@ -6061,6 +6462,62 @@ private final class StubRemotePairingClient: RemotePairingClient, @unchecked Sen
     }
 }
 
+private final class StatusRequestTimeoutCapturingURLProtocol: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) private static var capturedRequestTimeoutInterval: TimeInterval?
+
+    static func reset() {
+        capturedRequestTimeoutInterval = nil
+    }
+
+    static func capturedTimeoutInterval() -> TimeInterval? {
+        capturedRequestTimeoutInterval
+    }
+
+    override static func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override static func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        Self.capturedRequestTimeoutInterval = request.timeoutInterval
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "application/json"]
+        )!
+        let data = Data(#"{"macName":"Studio Mac","isRemoteAccessEnabled":true}"#.utf8)
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
+private actor StatusProbeRecorder {
+    private var activeProbeCount = 0
+    private var recordedMaximumActiveProbeCount = 0
+
+    func begin(host: String) {
+        _ = host
+        activeProbeCount += 1
+        recordedMaximumActiveProbeCount = max(recordedMaximumActiveProbeCount, activeProbeCount)
+    }
+
+    func end(host: String) {
+        _ = host
+        activeProbeCount -= 1
+    }
+
+    func maximumActiveProbeCount() -> Int {
+        recordedMaximumActiveProbeCount
+    }
+}
+
 private actor AsyncGate {
     private var isOpen = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
@@ -6087,6 +6544,10 @@ private actor AsyncGate {
             continuation.resume()
         }
     }
+
+    func waiterCount() -> Int {
+        waiters.count
+    }
 }
 
 private actor SessionCapture {
@@ -6110,5 +6571,24 @@ private final class TestRemoteSessionScreenObservation: SessionScreenObservation
 
     func cancel() async {
         onCancel()
+    }
+}
+
+@MainActor
+private func waitUntilAsync(
+    timeoutNanoseconds: UInt64 = 5_000_000_000,
+    pollIntervalNanoseconds: UInt64 = 50_000_000,
+    until predicate: @escaping @MainActor () async -> Bool
+) async throws {
+    let deadline = ContinuousClock.now.advanced(by: .nanoseconds(Int64(timeoutNanoseconds)))
+
+    while await predicate() == false {
+        guard ContinuousClock.now < deadline else {
+            throw NSError(
+                domain: "RemoteClientPairingModelTests", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for async condition"])
+        }
+
+        try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
     }
 }

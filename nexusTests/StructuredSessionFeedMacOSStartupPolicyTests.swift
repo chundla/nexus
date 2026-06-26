@@ -84,5 +84,14 @@
                 )
             )
         }
+
+        @Test func nextVisibleTailRowCountForwardsToSharedDoublingPolicy() {
+            #expect(
+                StructuredSessionFeedMacOSStartupPolicy.nextVisibleTailRowCount(
+                    currentVisibleCount: 3,
+                    totalRowCount: 100
+                ) == 6
+            )
+        }
     }
 #endif

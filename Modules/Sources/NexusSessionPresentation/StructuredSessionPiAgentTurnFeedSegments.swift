@@ -135,10 +135,28 @@ public func structuredSessionPiStandaloneAssistantPresentation(
     )
 }
 
+/// Trimmed bodies of closed agent-turn final answers. Build once per render and reuse across every
+/// standalone item — rescanning all segments per item turns a single render into O(visible * total) work.
+public func structuredSessionPiFinalAnswerBodies(
+    in segments: [StructuredSessionFeedSegment]
+) -> Set<String> {
+    var bodies: Set<String> = []
+    for segment in segments {
+        guard case .agentTurn(let turn) = segment,
+            turn.isOpen == false,
+            let final = turn.finalAnswer
+        else {
+            continue
+        }
+        bodies.insert(final.text.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+    return bodies
+}
+
 /// Standalone `Pi:` rows duplicate agent-turn `finalAnswer` when history still carries the same message activity item.
 public func structuredSessionPiShouldRenderStandaloneFeedSegment(
     item: SessionActivityItem,
-    in segments: [StructuredSessionFeedSegment]
+    duplicateFinalAnswerBodies: Set<String>
 ) -> Bool {
     guard structuredSessionPiFeedSegmentIsPrimaryPiAssistantMessage(item) else {
         return true
@@ -150,18 +168,43 @@ public func structuredSessionPiShouldRenderStandaloneFeedSegment(
     else {
         return true
     }
+    return duplicateFinalAnswerBodies.contains(body) == false
+}
+
+/// Standalone Pi assistant rows that duplicate closed-turn final answers. Compute once when the
+/// feed presentation is built; render-time filtering of large segment arrays in SwiftUI `body`
+/// causes heavy copy/destroy churn under repeated layout invalidation.
+public func structuredSessionPiHiddenStandaloneFeedSegmentIDs(
+    in segments: [StructuredSessionFeedSegment]
+) -> Set<UUID> {
+    let duplicateFinalAnswerBodies = structuredSessionPiFinalAnswerBodies(in: segments)
+    guard duplicateFinalAnswerBodies.isEmpty == false else {
+        return []
+    }
+
+    var hiddenIDs: Set<UUID> = []
     for segment in segments {
-        guard case .agentTurn(let turn) = segment,
-            turn.isOpen == false,
-            let final = turn.finalAnswer
-        else {
+        guard case .standalone(let item) = segment else {
             continue
         }
-        if final.text.trimmingCharacters(in: .whitespacesAndNewlines) == body {
-            return false
+        if structuredSessionPiShouldRenderStandaloneFeedSegment(
+            item: item,
+            duplicateFinalAnswerBodies: duplicateFinalAnswerBodies
+        ) == false {
+            hiddenIDs.insert(item.id)
         }
     }
-    return true
+    return hiddenIDs
+}
+
+public func structuredSessionShouldRenderFeedSegment(
+    _ segment: StructuredSessionFeedSegment,
+    hiddenStandaloneFeedSegmentIDs: Set<UUID>
+) -> Bool {
+    guard case .standalone(let item) = segment else {
+        return true
+    }
+    return hiddenStandaloneFeedSegmentIDs.contains(item.id) == false
 }
 
 public func structuredSessionPiFeedSegments(for screen: SessionScreen) -> [StructuredSessionFeedSegment]? {

@@ -106,6 +106,87 @@
             #expect(record.steps.contains(where: { $0.name == "ensureLaunchSnapshot" }))
             #expect(record.steps.contains(where: { $0.name == "launchFreshSession" }))
         }
+
+        @Test func workspaceCreationIsListedInRecentPerformanceDiagnostics() throws {
+            let rootURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusServiceTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            let workspaceFolder = rootURL.appendingPathComponent("workspace", isDirectory: true)
+            try FileManager.default.createDirectory(at: workspaceFolder, withIntermediateDirectories: true)
+
+            let service = try NexusService.bootstrapForTests(rootURL: rootURL)
+            let group = try service.createWorkspaceGroup(name: "Solo Group")
+            let workspace = try service.createLocalWorkspace(
+                name: "Local Workspace",
+                folderPath: workspaceFolder.path(percentEncoded: false),
+                primaryGroupID: group.id
+            )
+            let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: nil as Int?)
+            let remoteWorkspace = try service.createRemoteWorkspace(
+                name: "Remote Workspace",
+                hostID: host.id,
+                remotePath: "/srv/api",
+                primaryGroupID: group.id
+            )
+            let diagnostics = try service.listPerformanceDiagnostics(limit: 10)
+            let localRecord = try #require(diagnostics.first(where: { $0.operation == .createLocalWorkspace }))
+            let remoteRecord = try #require(diagnostics.first(where: { $0.operation == .createRemoteWorkspace }))
+
+            #expect(localRecord.workspaceID == workspace.id)
+            #expect(localRecord.steps.contains(where: { $0.name == "createWorkspace" }))
+            #expect(remoteRecord.workspaceID == remoteWorkspace.id)
+            #expect(remoteRecord.steps.contains(where: { $0.name == "createWorkspace" }))
+        }
+
+        @Test func hostValidationIsListedInRecentPerformanceDiagnostics() throws {
+            let rootURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusServiceTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            let service = try NexusService.bootstrapForTests(
+                rootURL: rootURL,
+                hostValidationEvaluator: PerformanceDiagnosticHostValidationEvaluator()
+            )
+            let host = try service.createHost(name: "Build Server", sshTarget: "build-box", port: nil as Int?)
+
+            _ = try service.validateHost(hostID: host.id)
+            let diagnostics = try service.listPerformanceDiagnostics(limit: 10)
+            let record = try #require(diagnostics.first)
+
+            #expect(record.operation == .validateHost)
+            #expect(record.steps.contains(where: { $0.name == "loadHost" }))
+            #expect(record.steps.contains(where: { $0.name == "validateHost" }))
+            #expect(record.steps.contains(where: { $0.name == "saveHostValidation" }))
+        }
+
+        @Test func stopAndDeleteSessionFailuresAreListedInRecentPerformanceDiagnostics() throws {
+            let rootURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("NexusServiceTests", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            let service = try NexusService.bootstrapForTests(rootURL: rootURL)
+            let missingSessionID = UUID()
+
+            #expect(throws: (any Error).self) {
+                _ = try service.stopSession(sessionID: missingSessionID)
+            }
+            let stopRecord = try #require(
+                try service.listPerformanceDiagnostics(limit: 10)
+                    .first(where: { $0.operation == .stopSession })
+            )
+            #expect(stopRecord.sessionID == missingSessionID)
+            #expect(stopRecord.outcome == .failure)
+            #expect(stopRecord.steps.contains(where: { $0.name == "loadSession" }))
+
+            #expect(throws: (any Error).self) {
+                _ = try service.deleteSessionRecord(sessionID: missingSessionID)
+            }
+            let deleteRecord = try #require(
+                try service.listPerformanceDiagnostics(limit: 10)
+                    .first(where: { $0.operation == .deleteSessionRecord })
+            )
+            #expect(deleteRecord.sessionID == missingSessionID)
+            #expect(deleteRecord.outcome == .failure)
+            #expect(deleteRecord.steps.contains(where: { $0.name == "loadSession" }))
+        }
     }
 
     private func makePerformanceDiagnosticIBMBobService(rootURL: URL) throws -> NexusService {
@@ -136,6 +217,18 @@
     private struct PerformanceDiagnosticStubShellEnvironmentResolver: LocalShellEnvironmentResolving {
         func resolvedEnvironment() -> [String: String]? {
             ["SHELL": "/bin/zsh", "PATH": "/tmp/bin"]
+        }
+    }
+
+    private struct PerformanceDiagnosticHostValidationEvaluator: HostValidationEvaluating {
+        func validate(host: NexusDomain.Host) -> HostValidationResult {
+            HostValidationResult(
+                state: .available,
+                summary: "Host is available",
+                diagnostics: [
+                    HostValidationDiagnostic(severity: .info, code: "sshTarget", message: host.sshTarget)
+                ]
+            )
         }
     }
 

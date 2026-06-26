@@ -190,7 +190,7 @@ func structuredSessionFeedMarkdownFenceLanguage(from line: String) -> String? {
     return remainder.isEmpty ? nil : String(remainder)
 }
 
-func structuredSessionFeedMarkdownCopyToPasteboard(_ text: String) {
+public func structuredSessionFeedMarkdownCopyToPasteboard(_ text: String) {
     #if os(macOS)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
