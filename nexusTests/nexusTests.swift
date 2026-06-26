@@ -6378,6 +6378,10 @@ struct nexusTests {
             screen: SessionScreen(session: session, transcript: "Claude ready")
         )
         let model = NexusAppModel(client: client)
+        let refreshGate = SuspendedResultGate<WorkspaceOverview>()
+        client.setRefreshWorkspaceOverviewHandler { _ in
+            try await refreshGate.wait()
+        }
 
         await model.refresh()
         try await waitUntilAsync {
@@ -6389,6 +6393,7 @@ struct nexusTests {
 
         #expect(
             model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary == "Cached Claude health")
+        await refreshGate.resume(returning: freshOverview)
 
         let deadline = ContinuousClock.now.advanced(by: .seconds(5))
         while model.workspaceOverview(for: workspace.id)?.providerCards.first?.health.summary != "Fresh Claude health" {
@@ -7508,6 +7513,9 @@ struct nexusTests {
         let model = NexusAppModel(client: client)
 
         await model.refresh()
+        try await waitUntilAsync {
+            await MainActor.run { model.providerDetailPlaceholder(for: workspace.id, providerID: .claude) != nil }
+        }
 
         let initialPlaceholder = try #require(model.providerDetailPlaceholder(for: workspace.id, providerID: .claude))
         #expect(initialPlaceholder.workspace == workspace)
@@ -9682,6 +9690,7 @@ struct nexusTests {
             providerDetail: detail
         )
         let model = NexusAppModel(client: client)
+        model.workspaceOverviews[workspace.id] = overview
 
         try await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
         client.setRefreshWorkspaceOverviewHandler { _ in
@@ -10018,6 +10027,7 @@ struct nexusTests {
             providerDetail: detail
         )
         let model = NexusAppModel(client: client)
+        model.workspaceOverviews[workspace.id] = overview
 
         try await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
         try await model.focusSession(sessionID: stoppedSession.id)
@@ -10101,6 +10111,7 @@ struct nexusTests {
             providerDetail: providerDetail
         )
         let model = NexusAppModel(client: client)
+        model.workspaceOverviews[workspace.id] = workspaceOverview
 
         try await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
         let namedSession = try await model.createNamedSession(workspaceID: workspace.id, providerID: .claude)
@@ -10238,6 +10249,7 @@ struct nexusTests {
             providerDetail: providerDetail
         )
         let model = NexusAppModel(client: client)
+        model.workspaceOverviews[workspace.id] = workspaceOverview
 
         try await model.loadProviderDetail(workspaceID: workspace.id, providerID: .claude)
         let deleted = try await model.deleteSessionRecord(

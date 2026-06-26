@@ -138,8 +138,11 @@ struct RemotePairingNetworkTests {
         #expect(catalog.recentNavigation.map(\.target) == [.workspace(workspace.id)])
         #expect(catalog.workspaceOverviews.map(\.workspace.id) == [workspace.id])
         #expect(catalog.workspaceOverviews.first?.providerCards.isEmpty == false)
-        #expect(claudeCard.capabilities.launchDefaultSession.isEnabled == false)
-        #expect(claudeCard.capabilities.launchDefaultSession.disabledReason == claudeCard.health.summary)
+        // First browse of a local Workspace with no persisted Provider Health snapshot returns a
+        // pending placeholder card immediately and resolves the real health in the background.
+        #expect(claudeCard.health.summary == "Checking Claude…")
+        #expect(claudeCard.capabilities.launchDefaultSession.isEnabled == true)
+        #expect(claudeCard.capabilities.launchDefaultSession.disabledReason == nil)
     }
 
     @Test func fetchesCatalogWithPlaceholderOverviewsBeforeSlowHealthChecksTimeoutOverDedicatedNetworkAPI() async throws
@@ -478,7 +481,9 @@ struct RemotePairingNetworkTests {
             providerID: .codex
         )
 
-        #expect(codexCard.health.summary == "Codex 1.2.3 is available")
+        // First browse of a local Workspace with no persisted Provider Health snapshot returns a
+        // pending placeholder card immediately; the Provider Detail fetch below forces resolution.
+        #expect(codexCard.health.summary == "Checking Codex…")
         #expect(codexCard.capabilities.launchDefaultSession.isSupported)
         #expect(codexCard.capabilities.launchDefaultSession.isEnabled)
         #expect(codexCard.capabilities.launchDefaultSession.disabledReason == nil)
