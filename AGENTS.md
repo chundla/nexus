@@ -79,6 +79,7 @@ For Xcode/iOS/macOS tasks, prefer **XcodeBuildMCP** (`xcodebuildmcp`) over raw `
 - Prefer narrow `swift test --filter ...` over broad suite filters; if a filtered run times out, narrow the filter before assuming failure.
 - `xcodebuild test -scheme nexus` legitimately takes minutes (build + full suite, often 5-10 min). The 120s cap above does not apply — background it (`> /tmp/x.log 2>&1 &`) and poll the log rather than treating a long-running build as stuck.
 - `nexusTests/` runs hosted inside the real `nexus.app`, which boots the production `NexusAppModel.bootstrap()` against your **real** `~/Library/Application Support/Nexus` store (not a sandboxed test fixture). A large local store can starve the Swift concurrency thread pool and cause unrelated-looking timeouts in tests that poll `@MainActor` state. If a host-app-hosted test times out locally but not in CI, check for local data contention before assuming a logic bug.
+- **User reports a bad/broken Session:** don't just read runtime code — pull the actual persisted state for that Session ID first (`Nexus.sqlite` + `PiStructuredSessionHistory/<uuid>/`). See `docs/agents/inspecting-session-data.md`.
 
 ## Code style guidelines
 
