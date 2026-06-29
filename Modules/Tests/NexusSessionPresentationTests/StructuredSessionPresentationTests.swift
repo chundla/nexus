@@ -1796,6 +1796,62 @@ struct StructuredSessionPresentationTests {
         #expect(menu.commands.first?.summary == "CLI UX/spec: args, flags, help, output, errors, config, dry-run.")
     }
 
+    @Test func structuredSessionSlashCommandMenuHidesImmediatelyAfterNoArgumentCommandPlusSpace() {
+        let screen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            ),
+            transcript: "",
+            slashCommands: [
+                SessionSlashCommand(
+                    name: "skill:tdd",
+                    description: "Test-driven development with red-green-refactor loop.",
+                    source: .skill,
+                    location: .project,
+                    path: "/tmp/project/.pi/skills/tdd/SKILL.md"
+                )
+            ]
+        )
+
+        #expect(structuredSessionSlashCommandMenuPresentation(for: "/skill:tdd", screen: screen).isVisible)
+        #expect(structuredSessionSlashCommandMenuPresentation(for: "/skill:tdd ", screen: screen).isVisible == false)
+        #expect(
+            structuredSessionSlashCommandMenuPresentation(for: "/skill:tdd hey lets do xyz", screen: screen).isVisible
+                == false)
+    }
+
+    @Test func structuredSessionSlashCommandMenuKeepsShowingArgumentSuggestionsAfterEnumerableCommandPlusSpace() {
+        let screen = SessionScreen(
+            session: Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            ),
+            transcript: "",
+            slashCommands: [
+                SessionSlashCommand(
+                    name: "model anthropic/claude-sonnet-4-20250514",
+                    displayName: "model anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4",
+                    insertionText: "model anthropic/claude-sonnet-4-20250514",
+                    suggestionQueryPrefix: "model ",
+                    description: "Switch to anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4.",
+                    source: .builtIn
+                )
+            ]
+        )
+
+        let menu = structuredSessionSlashCommandMenuPresentation(for: "/model ", screen: screen)
+        #expect(menu.isVisible)
+        #expect(
+            menu.commands.map(\.displayText).contains("/model anthropic/claude-sonnet-4-20250514 — Claude Sonnet 4"))
+    }
+
     @Test func structuredSessionSlashCommandMenuUsesStaticPiModelCommandAndLiveModelSuggestions() {
         let screen = SessionScreen(
             session: Session(
