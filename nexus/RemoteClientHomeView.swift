@@ -2027,11 +2027,11 @@
                         .buttonStyle(.plain)
                         .background(
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .fill(NexusIOSTheme.overlay(0.04))
+                                .fill(NexusIOSTheme.overlay(0.05))
                         )
                         .overlay {
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .stroke(NexusIOSTheme.overlay(0.08), lineWidth: 1)
+                                .stroke(NexusIOSTheme.softLine, lineWidth: 1)
                         }
                     }
                 }
@@ -2041,12 +2041,13 @@
             .frame(maxHeight: 220)
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(NexusIOSTheme.terminalSurface)
+                    .fill(NexusIOSTheme.panelRaised)
             )
             .overlay {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(NexusIOSTheme.overlay(0.08), lineWidth: 1)
+                    .stroke(NexusIOSTheme.line, lineWidth: 1)
             }
+            .shadow(color: NexusIOSTheme.shadow(0.16), radius: 18, y: 8)
         }
 
         private var terminalComposerBar: some View {

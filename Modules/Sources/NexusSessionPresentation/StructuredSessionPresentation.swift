@@ -1817,13 +1817,30 @@ private func structuredSessionSlashCommandMenuPresentation(
     // (e.g. "model ") activate as soon as the prefix is typed, not after the next character.
     let suggestionQuery = context.query.lowercased()
 
-    let prefixMatches = commands.filter { command in
-        let normalizedCommand = command.matchText.lowercased()
-        if let requiredPrefix = command.suggestionQueryPrefix?.lowercased(),
-            suggestionQuery.hasPrefix(requiredPrefix) == false
-        {
+    func passesSuggestionQueryPrefixGate(_ command: StructuredSessionSlashCommand) -> Bool {
+        guard let requiredPrefix = command.suggestionQueryPrefix?.lowercased() else {
+            return true
+        }
+        return suggestionQuery.hasPrefix(requiredPrefix)
+    }
+
+    // A command with no further argument suggestions has nothing left to show once its full
+    // name is typed and a space follows it; hide it immediately rather than waiting for the
+    // next keystroke. Commands that opt into acceptsArguments keep matching so their row can
+    // stay visible while the user types free-form argument text.
+    func hasNoFurtherSuggestionsAfterTrailingSpace(_ command: StructuredSessionSlashCommand) -> Bool {
+        guard command.acceptsArguments == false, suggestionQuery.hasSuffix(" ") else {
             return false
         }
+        return command.matchText.lowercased() == normalizedQuery
+    }
+
+    let prefixMatches = commands.filter { command in
+        guard passesSuggestionQueryPrefixGate(command), hasNoFurtherSuggestionsAfterTrailingSpace(command) == false
+        else {
+            return false
+        }
+        let normalizedCommand = command.matchText.lowercased()
         if normalizedQuery.isEmpty || normalizedCommand.hasPrefix(normalizedQuery) {
             return true
         }
@@ -1833,12 +1850,12 @@ private func structuredSessionSlashCommandMenuPresentation(
     let fallbackMatches =
         prefixMatches.isEmpty
         ? commands.filter { command in
-            let normalizedCommand = command.matchText.lowercased()
-            if let requiredPrefix = command.suggestionQueryPrefix?.lowercased(),
-                suggestionQuery.hasPrefix(requiredPrefix) == false
-            {
+            guard passesSuggestionQueryPrefixGate(command),
+                hasNoFurtherSuggestionsAfterTrailingSpace(command) == false
+            else {
                 return false
             }
+            let normalizedCommand = command.matchText.lowercased()
             return normalizedQuery.isEmpty == false && normalizedCommand.contains(normalizedQuery)
         }
         : []
@@ -2100,7 +2117,6 @@ private func structuredSessionSlashCommand(from command: SessionSlashCommand) ->
         displayText: "/\(resolvedDisplayName)\(locationSuffix)",
         insertionText: "/\(resolvedInsertionText)",
         summary: summary,
-        acceptsArguments: true,
         suggestionQueryPrefix: command.suggestionQueryPrefix
     )
 }

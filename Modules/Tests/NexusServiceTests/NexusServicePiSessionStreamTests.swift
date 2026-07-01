@@ -2676,6 +2676,59 @@
                 ])
         }
 
+        /// Direct text answer with no tool calls: streamed via `text_delta` then closed straight by `agent_end`
+        /// with no `turn_end`/`message_end` in between. Reproduces a stuck "Thinking…" feed (#post-265-merge):
+        /// the activity item lands correctly, but a stale `liveAssistantDraftText` makes the presentation layer
+        /// believe the turn is still open.
+        @Test func localPiRuntimeClearsLiveDraftWhenAgentEndClosesStreamedAnswerWithoutTurnEnd() throws {
+            let finalText = "Yes, a Time Profiler trace works for CPU hotspots."
+            let transport = PromptEventPiRPCTransport(promptEvents: [
+                ["type": "agent_start", "agent": "pi"],
+                [
+                    "type": "message_update",
+                    "assistantMessageEvent": [
+                        "type": "text_delta",
+                        "delta": finalText,
+                    ],
+                ],
+                [
+                    "type": "agent_end",
+                    "messages": [
+                        [
+                            "role": "assistant",
+                            "content": [
+                                [
+                                    "type": "text",
+                                    "text": finalText,
+                                ]
+                            ],
+                        ]
+                    ],
+                ],
+            ])
+            let runtime = try PiRPCSessionRuntime(
+                executable: "/tmp/fake-pi",
+                workingDirectory: "/tmp",
+                terminationStatusMessageBuilder: { _ in "" },
+                transportFactory: { _, _, _ in transport }
+            )
+
+            let session = Session(
+                id: UUID(),
+                workspaceID: UUID(),
+                providerID: .pi,
+                isDefault: true,
+                state: .ready
+            )
+
+            try runtime.sendInput("Would a time profiler trace work?")
+            let screen = runtime.sessionScreen(for: session)
+
+            #expect(screen.isAgentTurnInProgress == false)
+            #expect(screen.providerFacts.liveAssistantDraftText == nil)
+            #expect(screen.activityItems.contains { $0.text == "Pi: \(finalText)" })
+        }
+
         @Test func localPiRuntimeRollsBackPromptTurnWhenPromptResponseRejected() throws {
             let transport = ConfigurablePromptPiRPCTransport(
                 promptEvents: [],
